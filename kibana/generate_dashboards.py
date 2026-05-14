@@ -279,69 +279,35 @@ def write_ndjson(filename, objects):
     print(f"  [OK] {path.name}  ({len(objects)} objects)")
 
 # ═════════════════════════════════════════════════════════════════════
-# DASHBOARD 1 — Executive Overview
+# DASHBOARD 1 — Realtime SOC Operations
 # ═════════════════════════════════════════════════════════════════════
-def dash_executive():
-    ev, or_ = DV["events"], DV["orders"]
-
-    p = [
-        # Row 0 — KPI row (y=0, h=6)
-        panel(1,  lens_metric("Total Events",       ev, "count",    "___records___", "Events"),              0,  0, 8,  6, "Total Events"),
-        panel(2,  lens_metric("Total Orders",        or_, "count",  "___records___", "Orders"),              8,  0, 8,  6, "Total Orders"),
-        panel(3,  lens_metric("Total Revenue",       or_, "sum",    "net_revenue",   "Revenue ($)"),         16, 0, 8,  6, "Total Revenue ($)"),
-        panel(4,  lens_metric("Avg Order Value",     or_, "average","net_revenue",   "AOV ($)"),             24, 0, 8,  6, "Avg Order Value ($)"),
-        panel(5,  lens_metric("Unique Users",        ev, "unique_count","user_id",   "Users"),               32, 0, 8,  6, "Unique Users"),
-        panel(6,  lens_metric("Unique Sessions",     ev, "unique_count","session_id","Sessions"),            40, 0, 8,  6, "Unique Sessions"),
-
-        # Row 1 — Revenue trend (y=6, h=15)
-        panel(7,  lens_area("Revenue Trend", or_, "sum","net_revenue","Revenue ($)"), 0, 6, 30, 15, "Revenue Over Time"),
-        panel(8,  lens_donut("Orders by Category",  or_, "category"),                 30, 6, 18, 15, "Revenue by Category"),
-
-        # Row 2 — Events breakdown (y=21, h=14)
-        panel(9,  lens_bar("Top 10 Products by Views", ev,"product_name.keyword","count","___records___","Views"),       0, 21, 24, 14, "Top Viewed Products"),
-        panel(10, lens_donut("Traffic by Device",   ev, "device_type"),                24, 21, 12, 14, "Device Type"),
-        panel(11, lens_donut("Traffic by Platform", ev, "platform"),                   36, 21, 12, 14, "Platform"),
-    ]
-
-    dash = dashboard_obj(
-        "dash-executive-overview",
-        "📊 Executive Overview — Ecommerce KPIs",
-        "High-level business KPIs: revenue, orders, sessions, top products, and traffic breakdown.",
-        p, [ev, or_],
-        tags=["ecommerce","overview"]
-    )
-    write_ndjson("01_executive_overview.ndjson", [
-        data_view_obj(ev,  "ecommerce-events*"),
-        data_view_obj(or_, "ecommerce-orders*"),
-        dash
-    ])
-
-# ═════════════════════════════════════════════════════════════════════
-# DASHBOARD 2 — Customer Behavior
-# ═════════════════════════════════════════════════════════════════════
-def dash_behavior():
+def dash_soc():
     ev = DV["events"]
 
     p = [
-        # Funnel-style: views, cart adds, purchases (area layers)
-        panel(1, lens_area("Page Views Over Time",       ev,"count","___records___","Events","#006BB4"), 0,  0, 48, 12, "Event Volume Over Time"),
-        panel(2, lens_bar("Top Categories by Views",     ev,"category","count","___records___","Views"),  0, 12, 24, 14, "Category Engagement"),
-        panel(3, lens_bar("Top Searched Keywords",       ev,"search_keyword.keyword","count","___records___","Searches",8), 24,12,24,14,"Search Keywords"),
-        panel(4, lens_donut("Event Type Distribution",   ev,"event_type"),                                0, 26, 16, 13, "Event Types"),
-        panel(5, lens_bar("Top 10 Products by Purchase",ev,"product_name.keyword","count","___records___","Purchases"), 16,26,32,13,"Most Purchased Products"),
-        panel(6, lens_area("New Users vs Sessions",      ev,"unique_count","user_id","Unique Users","#00BFB3"),          0, 39, 24, 12, "Unique Users Trend"),
-        panel(7, lens_donut("Traffic by Region",         ev,"region"),                                  24, 39, 24, 12, "Regional Distribution"),
+        panel(1, lens_metric("Live Events (Last 15m)",       ev, "count",    "___records___", "Events"),              0,  0, 16, 6, "Traffic Volume"),
+        panel(2, lens_metric("Active Users (Last 15m)",      ev, "unique_count", "user_id",   "Users"),               16, 0, 16, 6, "Active Users"),
+        panel(3, lens_metric("Live Sessions (Last 15m)",     ev, "unique_count", "session_id","Sessions"),            32, 0, 16, 6, "Active Sessions"),
+
+        panel(4, lens_area("Traffic Velocity", ev, "count","___records___","Events","#00BFB3"), 0, 6, 48, 14, "Real-time Traffic Volume"),
+
+        panel(5, lens_donut("Event Type Distribution", ev, "event_type"),                      0, 20, 16, 14, "Action Types"),
+        panel(6, lens_bar("Top Geographies", ev, "region", "count", "___records___", "Events"), 16, 20, 32, 14, "Geographic Activity"),
     ]
 
     dash = dashboard_obj(
-        "dash-customer-behavior",
-        "👤 Customer Behavior Analytics",
-        "Analyze customer preferences, event funnels, search keywords, and regional traffic.",
-        p, [ev]
+        "dash-soc-operations",
+        "📡 SOC Operations — Real-time Monitoring",
+        "Real-time event streams, active users, traffic velocity, and geographic distribution.",
+        p, [ev],
+        tags=["soc","realtime","monitoring"]
     )
-    write_ndjson("02_customer_behavior.ndjson", [
-        data_view_obj(ev, "ecommerce-events*"), dash
+    write_ndjson("01_soc_operations.ndjson", [
+        data_view_obj(ev,  "ecommerce-events*"),
+        dash
     ])
+
+
 
 # ═════════════════════════════════════════════════════════════════════
 # DASHBOARD 3 — Anomaly Detection
@@ -378,41 +344,7 @@ def dash_anomaly():
         data_view_obj(an, "ecommerce-anomalies*"), dash
     ])
 
-# ═════════════════════════════════════════════════════════════════════
-# DASHBOARD 4 — Price Forecasting
-# ═════════════════════════════════════════════════════════════════════
-def dash_price():
-    pr = DV["prices"]
 
-    p = [
-        # KPI row
-        panel(1, lens_metric("Avg Price Change %", pr,"average","price_change_pct","Change %"),      0,  0, 12, 6, "Avg Price Change (%)"),
-        panel(2, lens_metric("Avg Volatility Score",pr,"average","volatility_score","Volatility"),   12, 0, 12, 6, "Avg Volatility Score"),
-        panel(3, lens_metric("Avg Forecast 7d",     pr,"average","forecast_7d","Forecast $"),        24, 0, 12, 6, "Avg 7-Day Forecast ($)"),
-        panel(4, lens_metric("Total Price Events",  pr,"count","___records___","Events"),            36, 0, 12, 6, "Price Change Events"),
-
-        # Price trend
-        panel(5, lens_line("Avg Price Over Time",    pr,"average","new_price","Avg Price ($)","#006BB4"), 0,  6, 36, 15, "Avg Price Trend"),
-        panel(6, lens_donut("Price Direction",        pr,"price_direction"),                              36, 6, 12, 15, "Price Direction"),
-
-        # SMA vs EMA
-        panel(7, lens_area("SMA 7d Trend",           pr,"average","sma_7d","SMA 7d","#00BFB3"),          0, 21, 24, 13, "SMA 7-Day Moving Average"),
-        panel(8, lens_area("EMA 14d Trend",           pr,"average","ema_14d","EMA 14d","#F86200"),        24,21, 24, 13, "EMA 14-Day Moving Average"),
-
-        # Volatility & elasticity
-        panel(9, lens_bar("Volatility by Category",  pr,"category","average","volatility_score","Volatility"), 0,34,24,13,"Price Volatility by Category"),
-        panel(10,lens_bar("Elasticity by Category",  pr,"category","average","elasticity_index","Elasticity"), 24,34,24,13,"Price Elasticity by Category"),
-    ]
-
-    dash = dashboard_obj(
-        "dash-price-forecasting",
-        "📈 Price Forecasting — ML Price Intelligence",
-        "Historical prices, SMA/EMA trends, volatility, elasticity, and 7/30-day ML forecasts.",
-        p, [pr]
-    )
-    write_ndjson("04_price_forecasting.ndjson", [
-        data_view_obj(pr, "ecommerce-prices*"), dash
-    ])
 
 # ═════════════════════════════════════════════════════════════════════
 # DASHBOARD 5 — Fraud Detection
@@ -455,10 +387,8 @@ def dash_fraud():
 # ═════════════════════════════════════════════════════════════════════
 if __name__ == "__main__":
     print("Generating Kibana 8.18 NDJSON dashboards…")
-    dash_executive()
-    dash_behavior()
+    dash_soc()
     dash_anomaly()
-    dash_price()
     dash_fraud()
     print(f"\nDone! Files in: {OUT}")
     print("Import via: python kibana/setup_kibana.py")

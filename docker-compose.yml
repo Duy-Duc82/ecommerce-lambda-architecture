@@ -220,6 +220,42 @@ services:
     networks:
       - bigdata
 
+  # ── SERVING LAYER BI (Apache Superset) ─────────────────────
+  superset:
+    image: apache/superset:4.1.1
+    container_name: superset
+    environment:
+      - SUPERSET_CONFIG_PATH=/app/superset/superset_config.py
+    ports:
+      - "8088:8088"
+    volumes:
+      - ./superset:/app/superset
+      - superset_home:/app/superset_home
+    depends_on:
+      postgres-dw:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - bigdata
+
+  superset-init:
+    image: apache/superset:4.1.1
+    container_name: superset-init
+    user: root
+    environment:
+      - SUPERSET_CONFIG_PATH=/app/superset/superset_config.py
+    volumes:
+      - ./superset:/app/superset
+      - superset_home:/app/superset_home
+    depends_on:
+      postgres-dw:
+        condition: service_healthy
+    command: >
+      /bin/sh -c "chmod +x /app/superset/setup_superset.sh && /app/superset/setup_superset.sh"
+    networks:
+      - bigdata
+
 # ── NETWORKS & VOLUMES ──────────────────────────────────────
 networks:
   bigdata:
@@ -230,3 +266,4 @@ volumes:
   redis_data:
   pg_data:
   es_data:
+  superset_home:

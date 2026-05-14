@@ -2,12 +2,17 @@
 
 Nền tảng phân tích dữ liệu lớn cho hệ thống **Thương mại Điện tử (TMĐT)** sử dụng **Kiến trúc Lambda**.
 
-## 🏗️ Kiến trúc
+## 🏗️ Kiến trúc Hybrid Enterprise Analytics
 
-```
-Producers → Kafka → Speed Layer (Spark Streaming → Redis)
+Dự án áp dụng **Lambda Architecture** kết hợp phân tách vai trò Dashboard (SOC vs BI):
+
+```text
+Producers → Kafka → Speed Layer (Spark Streaming → Redis/Elasticsearch)
                   → MinIO (Data Lake) → Batch Layer (PySpark + ML) → Postgres DW
-                                                                    → Serving Layer → Dashboard
+                                                                   
+[ SPEED LAYER / SOC ]                       [ SERVING LAYER / BI ]
+Elasticsearch ──► Kibana                    PostgreSQL ──► Apache Superset
+(Real-time, Fraud, Anomalies)               (Business BI, Trends, Forecasts)
 ```
 
 ### Các thành phần chính
@@ -16,10 +21,11 @@ Producers → Kafka → Speed Layer (Spark Streaming → Redis)
 |-------|-----------|-------|
 | **Ingestion** | Kafka | Message broker, 3 topics (events, orders, prices) |
 | **Data Lake** | MinIO (S3) | Lưu trữ raw data dạng JSON/Parquet |
-| **Speed Layer** | Spark Streaming | Xử lý real-time, ghi kết quả vào Redis |
-| **Batch Layer** | PySpark | ETL + 4 ML models |
-| **Serving Layer** | Postgres + Redis | Data Warehouse + Real-time cache |
-| **Visualization** | Streamlit | Dashboard tương tác |
+| **Speed Layer** | Spark Streaming | Xử lý real-time, index vào Elasticsearch |
+| **Batch Layer** | PySpark | ETL + 4 ML models chạy định kỳ |
+| **Serving DW** | Postgres | Data Warehouse chứa aggregated data & ML views |
+| **SOC Dashboard** | Kibana | Giám sát Real-time, Security, Anomaly (Dark mode) |
+| **BI Dashboard** | Superset | Phân tích doanh thu, hành vi, báo cáo kinh doanh |
 
 ### 4 Bài toán ML
 
@@ -147,9 +153,9 @@ streamlit run dashboard/app.py
 | Spark Master UI | http://localhost:8080 |
 | Spark Worker UI | http://localhost:8081 |
 | MinIO Console | http://localhost:9001 |
-| Kibana | http://localhost:5601 |
+| Kibana (SOC) | http://localhost:5601 |
 | Elasticsearch | http://localhost:9200 |
-| Streamlit Dashboard | http://localhost:8501 |
+| Apache Superset (BI) | http://localhost:8088 |
 
 ## 📊 Nguồn dữ liệu (Kaggle Dataset)
 

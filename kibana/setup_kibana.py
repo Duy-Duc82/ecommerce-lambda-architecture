@@ -467,11 +467,11 @@ def configure_kibana_defaults() -> None:
     ok = r.status_code in (200, 201)
     print(f"  [{'✓' if ok else '~'}] Default route → /app/dashboards")
 
-    # Dark mode off (light theme for professional look)
-    body2 = {"changes": {"theme:darkMode": "false"}}
+    # Dark mode ON (SOC theme)
+    body2 = {"changes": {"theme:darkMode": "true"}}
     r2 = _kibana_post("/api/kibana/settings", body2)
     ok2 = r2.status_code in (200, 201)
-    print(f"  [{'✓' if ok2 else '~'}] Light theme enabled")
+    print(f"  [{'✓' if ok2 else '~'}] Dark theme enabled")
 
 
 # ─────────────────────────────────────────────────────────────────────
