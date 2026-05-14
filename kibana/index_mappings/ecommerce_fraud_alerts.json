@@ -1,0 +1,40 @@
+{
+  "mappings": {
+    "dynamic": "strict",
+    "properties": {
+      "@timestamp":              { "type": "date" },
+      "alert_id":                { "type": "keyword" },
+      "transaction_id":          { "type": "keyword" },
+      "user_id":                 { "type": "keyword" },
+      "session_id":              { "type": "keyword" },
+      "order_id":                { "type": "keyword" },
+      "risk_score":              { "type": "float" },
+      "risk_level":              { "type": "keyword" },
+      "fraud_type":              { "type": "keyword" },
+      "detection_model":         { "type": "keyword" },
+      "isolation_forest_score":  { "type": "float" },
+      "rule_based_flags":        { "type": "keyword" },
+      "total_amount":            { "type": "float" },
+      "purchase_count_1h":       { "type": "integer" },
+      "purchase_count_24h":      { "type": "integer" },
+      "spend_24h":               { "type": "float" },
+      "distinct_products_1h":    { "type": "integer" },
+      "ip_address":              { "type": "ip" },
+      "ip_reputation_score":     { "type": "float" },
+      "device_fingerprint":      { "type": "keyword" },
+      "payment_method":          { "type": "keyword" },
+      "region":                  { "type": "keyword" },
+      "geo_location":            { "type": "geo_point" },
+      "is_confirmed_fraud":      { "type": "boolean" },
+      "review_status":           { "type": "keyword" },
+      "reviewed_by":             { "type": "keyword" },
+      "reviewed_at":             { "type": "date" },
+      "ingest_timestamp":        { "type": "date" }
+    }
+  },
+  "settings": {
+    "number_of_shards": 1,
+    "number_of_replicas": 0,
+    "refresh_interval": "5s"
+  }
+}

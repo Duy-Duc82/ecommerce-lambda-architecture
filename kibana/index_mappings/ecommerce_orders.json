@@ -1,0 +1,35 @@
+{
+  "mappings": {
+    "dynamic": "strict",
+    "properties": {
+      "@timestamp":          { "type": "date" },
+      "order_id":            { "type": "keyword" },
+      "user_id":             { "type": "keyword" },
+      "session_id":          { "type": "keyword" },
+      "order_status":        { "type": "keyword" },
+      "payment_method":      { "type": "keyword" },
+      "total_amount":        { "type": "float" },
+      "discount_amount":     { "type": "float" },
+      "shipping_fee":        { "type": "float" },
+      "tax_amount":          { "type": "float" },
+      "net_revenue":         { "type": "float" },
+      "currency":            { "type": "keyword" },
+      "items_count":         { "type": "integer" },
+      "region":              { "type": "keyword" },
+      "city":                { "type": "keyword" },
+      "geo_location":        { "type": "geo_point" },
+      "device_type":         { "type": "keyword" },
+      "platform":            { "type": "keyword" },
+      "coupon_code":         { "type": "keyword" },
+      "is_first_order":      { "type": "boolean" },
+      "customer_segment":    { "type": "keyword" },
+      "processing_time_ms":  { "type": "integer" },
+      "ingest_timestamp":    { "type": "date" }
+    }
+  },
+  "settings": {
+    "number_of_shards": 2,
+    "number_of_replicas": 0,
+    "refresh_interval": "5s"
+  }
+}
