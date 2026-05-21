@@ -225,11 +225,11 @@ services:
     image: apache/superset:4.1.1
     container_name: superset
     environment:
-      - SUPERSET_CONFIG_PATH=/app/superset/superset_config.py
+      - SUPERSET_CONFIG_PATH=/app/custom_config/superset_config.py
     ports:
       - "8088:8088"
     volumes:
-      - ./superset:/app/superset
+      - ./superset:/app/custom_config
       - superset_home:/app/superset_home
     depends_on:
       postgres-dw:
@@ -244,15 +244,15 @@ services:
     container_name: superset-init
     user: root
     environment:
-      - SUPERSET_CONFIG_PATH=/app/superset/superset_config.py
+      - SUPERSET_CONFIG_PATH=/app/custom_config/superset_config.py
     volumes:
-      - ./superset:/app/superset
+      - ./superset:/app/custom_config
       - superset_home:/app/superset_home
     depends_on:
       postgres-dw:
         condition: service_healthy
     command: >
-      /bin/sh -c "chmod +x /app/superset/setup_superset.sh && /app/superset/setup_superset.sh"
+      /bin/sh -c "chmod +x /app/custom_config/setup_superset.sh && /app/custom_config/setup_superset.sh"
     networks:
       - bigdata
 

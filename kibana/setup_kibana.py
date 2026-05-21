@@ -23,6 +23,7 @@ import os
 import sys
 import time
 from pathlib import Path
+import subprocess
 
 import requests
 
@@ -38,6 +39,7 @@ if os.getenv("LOCAL", "false").lower() == "true":
 MAPPINGS_DIR   = Path(__file__).parent / "index_mappings"
 DASHBOARDS_DIR = Path(__file__).parent / "dashboards"
 ALERTING_DIR   = Path(__file__).parent / "alerting"
+GENERATOR_SCRIPT = Path(__file__).parent / "generate_dashboards.py"
 
 KIBANA_HEADERS = {
     "Content-Type":  "application/json",
@@ -287,6 +289,16 @@ def create_data_views() -> None:
 def import_dashboards() -> None:
     print("\n[Kibana] Importing Saved Objects (dashboards + visualizations)…")
 
+    if GENERATOR_SCRIPT.exists():
+        result = subprocess.run(
+            [sys.executable, str(GENERATOR_SCRIPT)],
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            print("  [!] Dashboard generator failed, using existing files.")
+            print(result.stderr.strip()[:500])
+
     if not DASHBOARDS_DIR.exists():
         print(f"  [!] Dashboards directory not found: {DASHBOARDS_DIR}")
         return
@@ -297,23 +309,28 @@ def import_dashboards() -> None:
         return
 
     for f in ndjson_files:
-        with open(f, encoding="utf-8") as fh:
-            content = fh.read()
-
-        r = _kibana_post(
-            "/api/saved_objects/_import?overwrite=true",
-            data=content,
-            content_type="application/ndjson",
-        )
-        status = "✓" if r.status_code in (200, 201) else f"✗ {r.status_code}"
-        result = r.json() if r.status_code in (200, 201) else {}
-        imported = result.get("successCount", "?")
-        errors   = result.get("errors", [])
-        print(f"  [{status}] {f.name}: {imported} objects imported", end="")
-        if errors:
-            print(f" | {len(errors)} errors: {[e.get('error',{}).get('type') for e in errors[:3]]}")
-        else:
-            print()
+        url = f"{KIBANA_HOST}/api/saved_objects/_import?overwrite=true&compatibilityMode=true"
+        headers = {
+            "kbn-xsrf": "true",
+            "kbn-version": KIBANA_HEADERS.get("kbn-version", "8.18.0"),
+        }
+        try:
+            with open(f, "rb") as fh:
+                files = {"file": (f.name, fh, "application/ndjson")}
+                r = requests.post(url, headers=headers, files=files, timeout=60)
+                status = "✓" if r.status_code in (200, 201) else f"✗ {r.status_code}"
+                result = r.json() if r.status_code in (200, 201) else {}
+                imported = result.get("successCount", "?")
+                errors   = result.get("errors", [])
+                print(f"  [{status}] {f.name}: {imported} objects imported", end="")
+                if errors:
+                    print(f" | {len(errors)} errors: {[e.get('error',{}).get('type') for e in errors[:3]]}")
+                else:
+                    print()
+                if r.status_code not in (200, 201):
+                    print(f"    -> {r.text[:500]}")
+        except Exception as e:
+            print(f"  [✗] {f.name}: {str(e)}")
 
 
 # ─────────────────────────────────────────────────────────────────────

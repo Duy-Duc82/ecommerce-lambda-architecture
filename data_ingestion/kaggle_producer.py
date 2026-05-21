@@ -97,11 +97,18 @@ def get_topic_for_kaggle_event(event: dict) -> str:
         return KAFKA_TOPIC_ORDERS
     return KAFKA_TOPIC_EVENTS
 
-def run_kaggle_producer(csv_file_path: str, events_per_second: float):
+def run_kaggle_producer(csv_file_path: str, events_per_second: float, export_json_path: str | None = None):
     file_path = Path(csv_file_path)
     if not file_path.exists():
         logger.error("Không tìm thấy file %s", file_path)
         sys.exit(1)
+
+    export_handle = None
+    if export_json_path:
+        export_path = Path(export_json_path)
+        export_path.parent.mkdir(parents=True, exist_ok=True)
+        export_handle = export_path.open("a", encoding="utf-8")
+        logger.info("Export JSONL raw events -> %s", export_path)
 
     producer = create_producer(KAFKA_BOOTSTRAP_SERVERS)
     interval = 1.0 / events_per_second if events_per_second > 0 else 0
@@ -121,6 +128,8 @@ def run_kaggle_producer(csv_file_path: str, events_per_second: float):
                 key = _get_key_for_event(event)
 
                 producer.send(topic, value=event, key=key)
+                if export_handle:
+                    export_handle.write(json.dumps(event, ensure_ascii=False) + "\n")
                 total_sent += 1
 
                 if total_sent % 1000 == 0:
@@ -135,6 +144,8 @@ def run_kaggle_producer(csv_file_path: str, events_per_second: float):
     finally:
         producer.flush()
         producer.close()
+        if export_handle:
+            export_handle.close()
         logger.info("Hoàn tất! Tổng events: %d", total_sent)
 
 
@@ -142,9 +153,10 @@ def main():
     parser = argparse.ArgumentParser(description="Kaggle E-commerce Data Importer")
     parser.add_argument("--csv", required=True, help="Đường dẫn đến file CSV ví dụ dataset Kaggle")
     parser.add_argument("--eps", type=int, default=100, help="Số events gửi mỗi giây (mặc định: 100)")
+    parser.add_argument("--export-json", default=None, help="Đường dẫn JSONL để phục vụ batch ETL")
     args = parser.parse_args()
 
-    run_kaggle_producer(args.csv, args.eps)
+    run_kaggle_producer(args.csv, args.eps, export_json_path=args.export_json)
 
 
 if __name__ == "__main__":

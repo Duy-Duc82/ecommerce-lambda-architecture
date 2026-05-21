@@ -190,7 +190,7 @@ def start_event_count_stream(events, spark: SparkSession) -> None:
         )
         .agg(
             F.count("*").alias("count"),
-            F.countDistinct("user_id").alias("unique_users"),
+            F.approx_count_distinct("user_id").alias("unique_users"),
         )
     )
 
@@ -215,7 +215,7 @@ def start_revenue_stream(events, spark: SparkSession) -> None:
         .agg(
             F.sum("total_amount").alias("total_revenue"),
             F.count("*").alias("order_count"),
-            F.countDistinct("user_id").alias("unique_buyers"),
+            F.approx_count_distinct("user_id").alias("unique_buyers"),
             F.avg("total_amount").alias("avg_order_value"),
         )
     )

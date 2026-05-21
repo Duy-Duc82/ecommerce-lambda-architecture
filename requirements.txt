@@ -14,7 +14,7 @@ kafka-python-ng>=2.2.3
 minio>=7.2.15
 psycopg2-binary>=2.9.10
 redis==7.4.0
-elasticsearch>=8.18.0
+elasticsearch==8.18.0
 
 # --- Machine Learning ---
 scikit-learn>=1.6.1

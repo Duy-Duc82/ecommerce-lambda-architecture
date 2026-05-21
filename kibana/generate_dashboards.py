@@ -9,6 +9,8 @@ from pathlib import Path
 OUT = Path(__file__).parent / "dashboards"
 OUT.mkdir(exist_ok=True)
 
+KIBANA_VERSION = "8.18.0"
+
 # ── Shared Data View IDs ──────────────────────────────────────────────
 DV = {
     "events":    "dv-ecommerce-events",
@@ -101,7 +103,8 @@ def lens_metric(title, dv_id, metric_op, metric_field, label, prefix="", postfix
                 "layerId": "layer1", "layerType": "data",
                 "metricAccessor": "col_metric",
                 "color": "#006BB4",
-                "titlePosition": "bottom"
+                "titlePosition": "bottom",
+                "layers": [{"layerId": "layer1", "layerType": "data"}],
             }
         }
     }
@@ -184,6 +187,7 @@ def lens_donut(title, dv_id, terms_field, limit=8):
                 "shape": "donut", "layerId": "layer1", "layerType": "data",
                 "metric": "col_count", "groups": ["col_terms"],
                 "legend": {"isVisible": True, "position": "right", "legendSize": "auto"},
+                "layers": [{"layerId": "layer1", "layerType": "data"}],
             }
         }
     }
@@ -212,7 +216,7 @@ def tsvb_markdown(content):
 def panel(idx, lens_attrs, x, y, w, h, title=""):
     pid = str(idx)
     return {
-        "version": "8.18.0", "type": "lens",
+        "version": KIBANA_VERSION, "type": "lens",
         "gridData": {"x": x, "y": y, "w": w, "h": h, "i": pid},
         "panelIndex": pid,
         "embeddableConfig": {"attributes": lens_attrs, "enhancements": {}},
@@ -243,7 +247,7 @@ def dashboard_obj(dash_id, title, description, panels_list, dv_ids, tags=None):
             "refreshInterval": {"pause": False, "value": 30000},
         },
         "references": refs, "managed": False,
-        "coreMigrationVersion": "8.8.0",
+        "coreMigrationVersion": KIBANA_VERSION,
         "created_at": TS, "updated_at": TS, "version": "WzEsMV0="
     }
 
@@ -257,7 +261,7 @@ def data_view_obj(dv_id, title, time_field="@timestamp"):
             "runtimeFieldMap": "{}", "sourceFilters": "[]", "typeMeta": "{}"
         },
         "references": [], "managed": False,
-        "coreMigrationVersion": "8.8.0",
+        "coreMigrationVersion": KIBANA_VERSION,
         "created_at": TS, "updated_at": TS, "version": "WzEsMV0="
     }
 
@@ -267,7 +271,7 @@ def vis_obj(vis_id, attrs):
         "attributes": attrs,
         "references": attrs.get("references", []),
         "managed": False,
-        "coreMigrationVersion": "8.8.0",
+        "coreMigrationVersion": KIBANA_VERSION,
         "created_at": TS, "updated_at": TS, "version": "WzEsMV0="
     }
 

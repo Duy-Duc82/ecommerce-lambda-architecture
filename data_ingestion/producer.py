@@ -1,29 +1,20 @@
 """
-Kafka Producer - Mo phong du lieu hanh vi nguoi dung TMDT.
-
-Cac loai event:
-  - page_view     (50%)  : Xem trang san pham
-  - add_to_cart   (20%)  : Them vao gio hang
-  - purchase      (15%)  : Mua hang
-  - review        (10%)  : Danh gia san pham
-  - price_change  (3%)   : Thay doi gia
-  - search_query  (2%)   : Tim kiem
+Kafka Producer - Su dung du lieu thuc tu Kaggle (E-commerce).
 
 Chay:
-  python -m data_ingestion.producer                  # Normal mode
-  python -m data_ingestion.producer --burst           # Black Friday simulation
+  python -m data_ingestion.producer                  # Gui du lieu thuc vao Kafka
   python -m data_ingestion.producer --test-mode -n 10 # Test 10 events
 """
 
 from __future__ import annotations
 
 import argparse
+import csv
 import json
 import logging
-import random
 import sys
 import time
-import uuid
+from datetime import datetime
 from pathlib import Path
 
 from kafka import KafkaProducer
@@ -37,18 +28,6 @@ from config.settings import (
     KAFKA_TOPIC_EVENTS,
     KAFKA_TOPIC_ORDERS,
     KAFKA_TOPIC_PRICES,
-    SAMPLE_DATA_DIR,
-    SIMULATOR_EVENTS_PER_SECOND,
-    SIMULATOR_PRODUCTS_COUNT,
-    SIMULATOR_USERS_COUNT,
-)
-from data_ingestion.schemas import (
-    AddToCartEvent,
-    PageViewEvent,
-    PriceChangeEvent,
-    PurchaseEvent,
-    ReviewEvent,
-    SearchQueryEvent,
 )
 
 logging.basicConfig(
@@ -57,157 +36,103 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# ── Tai du lieu san pham mau ─────────────────────────────────
-_PRODUCTS: list[dict] = []
-
-
-def _load_products() -> list[dict]:
-    """Doc danh sach san pham tu file JSON."""
-    global _PRODUCTS
-    if _PRODUCTS:
-        return _PRODUCTS
-    products_file = SAMPLE_DATA_DIR / "products.json"
-    with open(products_file, encoding="utf-8") as f:
-        _PRODUCTS = json.load(f)
-    logger.info("Da tai %d san pham tu %s", len(_PRODUCTS), products_file)
-    return _PRODUCTS
-
-
-# ── Du lieu gia lap bo sung ──────────────────────────────────
-PAYMENT_METHODS = ["credit_card", "debit_card", "momo", "zalopay", "vnpay", "cod"]
-SEARCH_QUERIES = [
-    "iphone 16", "laptop gaming", "tai nghe bluetooth", "may hut bui",
-    "nuoc hoa nam", "giay the thao", "ao khoac mua dong", "sua bot tre em",
-    "camera hanh trinh", "dong ho thong minh", "ban phim co", "man hinh 4k",
-    "tu lanh inverter", "may giat cua truoc", "robot hut bui", "loa bluetooth",
-    "sach hay", "do choi lego", "kem chong nang", "vot cau long",
-]
-REVIEW_COMMENTS = [
-    "San pham rat tot, giao hang nhanh!",
-    "Chat luong tuyet voi, dung nhu mo ta.",
-    "Gia hop ly, se mua lai lan sau.",
-    "Dong goi can than, san pham chinh hang.",
-    "Tam duoc, khong co gi dac biet.",
-    "Hoi that vong vi chat luong khong nhu ky vong.",
-    "Giao hang hoi cham nhung san pham ok.",
-    "Rat hai long, 5 sao!",
-    "San pham loi, da doi tra thanh cong.",
-    "Mau sac dep, chat lieu tot.",
+# ── Tai du lieu thuc tu file CSV ─────────────────────────────
+_DATA_FILES = [
+    Path("c:/code/data/data_kaggle/2019-Oct.csv"),
+    Path("c:/code/data/data_kaggle/2019-Nov.csv"),
 ]
 
-
-def _random_user_id() -> str:
-    """Tao user_id ngau nhien trong pham vi cau hinh."""
-    return f"U{random.randint(1, SIMULATOR_USERS_COUNT):04d}"
-
-
-def _now_ts() -> int:
-    """Timestamp hien tai (epoch seconds)."""
-    return int(time.time())
+_csv_reader = None
+_current_file_index = 0
+_current_file = None
 
 
-# ============================================================
-# TAO TUNG LOAI EVENT
-# ============================================================
-
-def generate_page_view() -> dict:
-    product = random.choice(_load_products())
-    return PageViewEvent(
-        user_id=_random_user_id(),
-        product_id=product["id"],
-        product_name=product["name"],
-        category=product["category"],
-        timestamp=_now_ts(),
-    ).to_dict()
-
-
-def generate_add_to_cart() -> dict:
-    product = random.choice(_load_products())
-    return AddToCartEvent(
-        user_id=_random_user_id(),
-        product_id=product["id"],
-        product_name=product["name"],
-        category=product["category"],
-        quantity=random.randint(1, 5),
-        price=product["price"],
-        timestamp=_now_ts(),
-    ).to_dict()
-
-
-def generate_purchase() -> dict:
-    n_items = random.randint(1, 5)
-    products = random.sample(_load_products(), min(n_items, len(_load_products())))
-    quantities = [random.randint(1, 3) for _ in products]
-    total = sum(p["price"] * q for p, q in zip(products, quantities))
-    return PurchaseEvent(
-        user_id=_random_user_id(),
-        order_id=f"ORD-{uuid.uuid4().hex[:12].upper()}",
-        product_ids=[p["id"] for p in products],
-        product_names=[p["name"] for p in products],
-        quantities=quantities,
-        total_amount=total,
-        payment_method=random.choice(PAYMENT_METHODS),
-        timestamp=_now_ts(),
-    ).to_dict()
-
-
-def generate_review() -> dict:
-    product = random.choice(_load_products())
-    return ReviewEvent(
-        user_id=_random_user_id(),
-        product_id=product["id"],
-        product_name=product["name"],
-        rating=random.choices([1, 2, 3, 4, 5], weights=[5, 5, 15, 35, 40])[0],
-        comment=random.choice(REVIEW_COMMENTS),
-        timestamp=_now_ts(),
-    ).to_dict()
-
-
-def generate_price_change() -> dict:
-    product = random.choice(_load_products())
-    old_price = product["price"]
-    change_pct = random.uniform(-0.20, 0.30)  # -20% to +30%
-    new_price = round(old_price * (1 + change_pct), -3)  # Lam tron den 1000 VND
-    return PriceChangeEvent(
-        product_id=product["id"],
-        product_name=product["name"],
-        category=product["category"],
-        old_price=old_price,
-        new_price=max(new_price, 10000),  # Gia toi thieu
-        timestamp=_now_ts(),
-    ).to_dict()
-
-
-def generate_search_query() -> dict:
-    return SearchQueryEvent(
-        user_id=_random_user_id(),
-        query_text=random.choice(SEARCH_QUERIES),
-        results_count=random.randint(0, 500),
-        timestamp=_now_ts(),
-    ).to_dict()
+def _get_csv_reader():
+    """Tao reader cho file CSV hien tai."""
+    global _csv_reader, _current_file_index, _current_file
+    
+    while _current_file_index < len(_DATA_FILES):
+        csv_file = _DATA_FILES[_current_file_index]
+        if not csv_file.exists():
+            logger.warning("File CSV khong tim thay: %s", csv_file)
+            _current_file_index += 1
+            continue
+        
+        if _current_file != csv_file:
+            logger.info("Dang mo file CSV: %s", csv_file)
+            _current_file = csv_file
+            f = open(csv_file, encoding="utf-8")
+            _csv_reader = csv.DictReader(f)
+        
+        return _csv_reader
+    
+    return None
 
 
 # ============================================================
-# WEIGHTED RANDOM EVENT GENERATOR
+# CHUYEN DOI DU LIEU THUC THANH EVENTS
 # ============================================================
 
-_EVENT_GENERATORS = [
-    (generate_page_view, 0.50),
-    (generate_add_to_cart, 0.20),
-    (generate_purchase, 0.15),
-    (generate_review, 0.10),
-    (generate_price_change, 0.03),
-    (generate_search_query, 0.02),
-]
+def _csv_row_to_event(row: dict) -> dict:
+    """Chuyen dong CSV thanh event format."""
+    event_type = row.get("event_type", "view").lower()
+    timestamp = int(datetime.fromisoformat(row.get("event_time", "").replace(" UTC", "")).timestamp())
+    
+    # Chuan hoa event_type (view -> page_view, purchase giữ nguyên)
+    if event_type == "view":
+        event_type = "page_view"
+    elif event_type == "cart":
+        event_type = "add_to_cart"
+    
+    base_event = {
+        "event_type": event_type,
+        "user_id": row.get("user_id", ""),
+        "product_id": row.get("product_id", ""),
+        "category_code": row.get("category_code", ""),
+        "brand": row.get("brand", ""),
+        "price": float(row.get("price", 0)),
+        "timestamp": timestamp,
+    }
+    
+    return base_event
 
-_GENERATORS = [g for g, _ in _EVENT_GENERATORS]
-_WEIGHTS = [w for _, w in _EVENT_GENERATORS]
+
+_data_iterator = None
+_data_count = 0
 
 
-def generate_random_event() -> dict:
-    """Tao mot event ngau nhien theo ty le phan bo da cau hinh."""
-    generator = random.choices(_GENERATORS, weights=_WEIGHTS, k=1)[0]
-    return generator()
+def _get_next_real_event() -> dict | None:
+    """Lay event tiep theo tu du lieu thuc (streaming)."""
+    global _data_iterator, _current_file_index, _data_count
+    
+    if _data_iterator is None:
+        _data_iterator = _get_csv_reader()
+    
+    if _data_iterator is None:
+        raise FileNotFoundError("Khong tim thay du lieu CSV trong data_kaggle/")
+    
+    try:
+        row = next(_data_iterator)
+        _data_count += 1
+        if _data_count % 100000 == 0:
+            logger.info("Da doc %d events tu CSV", _data_count)
+        return _csv_row_to_event(row)
+    except StopIteration:
+        # Chuyen sang file tiep theo
+        _current_file_index += 1
+        _data_iterator = _get_csv_reader()
+        if _data_iterator is None:
+            # Het file, quay lai file dau tien
+            _current_file_index = 0
+            logger.info("Het du lieu, quay lai tu dau")
+            _data_iterator = _get_csv_reader()
+        
+        try:
+            row = next(_data_iterator)
+            _data_count += 1
+            return _csv_row_to_event(row)
+        except StopIteration:
+            return None
 
 
 # ============================================================
@@ -255,33 +180,32 @@ def _get_key_for_event(event: dict) -> str | None:
 
 
 def run_producer(
-    events_per_second: int = SIMULATOR_EVENTS_PER_SECOND,
-    burst_mode: bool = False,
+    events_per_second: int = 10,
     max_events: int | None = None,
     test_mode: bool = False,
 ) -> None:
-    """Chay producer lien tuc, phat event vao Kafka."""
-    if burst_mode:
-        events_per_second *= 5
-        logger.info("BURST MODE (Black Friday): %d events/s", events_per_second)
-
+    """Chay producer voi du lieu thuc, phat event vao Kafka."""
     if test_mode:
         max_events = max_events or 10
         logger.info("TEST MODE: chi phat %d events (in ra console)", max_events)
         for i in range(max_events):
-            event = generate_random_event()
-            topic = _get_topic_for_event(event)
-            logger.info("[%d] topic=%s | %s", i + 1, topic, json.dumps(event, ensure_ascii=False))
+            event = _get_next_real_event()
+            if event:
+                topic = _get_topic_for_event(event)
+                logger.info("[%d] topic=%s | %s", i + 1, topic, json.dumps(event, ensure_ascii=False))
         return
 
     producer = create_producer(KAFKA_BOOTSTRAP_SERVERS)
     interval = 1.0 / events_per_second
     total_sent = 0
 
-    logger.info("Bat dau phat events (%d/s) vao Kafka...", events_per_second)
+    logger.info("Bat dau phat events (%d/s) tro Kafka (du lieu thuc)...", events_per_second)
     try:
         while True:
-            event = generate_random_event()
+            event = _get_next_real_event()
+            if not event:
+                break
+            
             topic = _get_topic_for_event(event)
             key = _get_key_for_event(event)
 
@@ -309,19 +233,17 @@ def run_producer(
 # ============================================================
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="E-commerce Data Simulator (Kafka Producer)")
+    parser = argparse.ArgumentParser(description="E-commerce Data Producer (Kaggle Real Data)")
     parser.add_argument(
-        "--eps", type=int, default=SIMULATOR_EVENTS_PER_SECOND,
+        "--eps", type=int, default=10,
         help="Events per second (default: %(default)s)",
     )
-    parser.add_argument("--burst", action="store_true", help="Black Friday burst mode (5x)")
     parser.add_argument("--test-mode", action="store_true", help="Print to console only")
     parser.add_argument("-n", "--count", type=int, default=None, help="Max events to send")
     args = parser.parse_args()
 
     run_producer(
         events_per_second=args.eps,
-        burst_mode=args.burst,
         max_events=args.count,
         test_mode=args.test_mode,
     )

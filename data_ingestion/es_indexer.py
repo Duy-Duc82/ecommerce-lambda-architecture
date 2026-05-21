@@ -68,6 +68,94 @@ TOPIC_INDEX_MAP: dict[str, str] = {
     TOPIC_PRICES: INDEX_PRICES,
 }
 
+# Only index fields present in strict mappings
+_ALLOWED_FIELDS = {
+    INDEX_EVENTS: {
+        "@timestamp",
+        "event_id",
+        "event_type",
+        "user_id",
+        "session_id",
+        "product_id",
+        "product_name",
+        "category",
+        "sub_category",
+        "brand",
+        "price",
+        "quantity",
+        "total_amount",
+        "currency",
+        "platform",
+        "device_type",
+        "region",
+        "city",
+        "geo_location",
+        "ip_address",
+        "user_agent",
+        "referrer",
+        "search_keyword",
+        "page_url",
+        "session_duration_s",
+        "page_views",
+        "is_new_user",
+        "ab_test_group",
+        "rating",
+        "review_text",
+        "kafka_partition",
+        "kafka_offset",
+        "ingest_timestamp",
+    },
+    INDEX_ORDERS: {
+        "@timestamp",
+        "order_id",
+        "user_id",
+        "session_id",
+        "order_status",
+        "payment_method",
+        "total_amount",
+        "discount_amount",
+        "shipping_fee",
+        "tax_amount",
+        "net_revenue",
+        "currency",
+        "items_count",
+        "region",
+        "city",
+        "geo_location",
+        "device_type",
+        "platform",
+        "coupon_code",
+        "is_first_order",
+        "customer_segment",
+        "processing_time_ms",
+        "ingest_timestamp",
+    },
+    INDEX_PRICES: {
+        "@timestamp",
+        "product_id",
+        "product_name",
+        "category",
+        "brand",
+        "old_price",
+        "new_price",
+        "price_change_pct",
+        "price_change_abs",
+        "price_direction",
+        "change_reason",
+        "demand_score",
+        "inventory_level",
+        "competitor_price",
+        "sma_7d",
+        "ema_14d",
+        "forecast_7d",
+        "forecast_30d",
+        "volatility_score",
+        "elasticity_index",
+        "season_factor",
+        "ingest_timestamp",
+    },
+}
+
 
 # ─────────────────────────────────────────────────────────────────────
 # Enrichment helpers
@@ -107,6 +195,14 @@ def _enrich_event(raw: dict[str, Any]) -> dict[str, Any]:
     # Device type from user_agent
     if "user_agent" in raw and "device_type" not in raw:
         raw["device_type"] = _infer_device(raw["user_agent"])
+
+    # Normalize fields to match mapping
+    if "comment" in raw and "review_text" not in raw:
+        raw["review_text"] = raw.pop("comment")
+    if "query_text" in raw and "search_keyword" not in raw:
+        raw["search_keyword"] = raw.pop("query_text")
+    if "results_count" in raw and "page_views" not in raw:
+        raw["page_views"] = raw.pop("results_count")
 
     # Geo point from lat/lon if present
     lat = raw.pop("lat", None)
@@ -163,6 +259,9 @@ _ENRICH_FN = {
 # ─────────────────────────────────────────────────────────────────────
 
 def _make_action(index: str, doc: dict[str, Any]) -> dict[str, Any]:
+    allowed = _ALLOWED_FIELDS.get(index)
+    if allowed is not None:
+        doc = {k: v for k, v in doc.items() if k in allowed and v is not None}
     return {
         "_index":  index,
         "_id":     doc.get("event_id") or doc.get("order_id") or doc.get("alert_id") or None,
