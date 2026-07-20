@@ -1,1 +1,1 @@
-# Speed Layer package
+"""Speed layer — Spark Structured Streaming to Elasticsearch + Redis."""

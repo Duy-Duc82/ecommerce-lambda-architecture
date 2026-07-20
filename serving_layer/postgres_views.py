@@ -1,8 +1,13 @@
-"""
-Serving Layer — Postgres Views.
+"""Serving layer — convenience SQL views over the PostgreSQL BI cache.
 
-Tao va cap nhat cac materialized views trong Data Warehouse
-phuc vu truy van nhanh cho dashboard va API.
+The cache tables (populated by the Spark warehouse job and the ML job) are
+already BI-ready. These lightweight views join/reshape them for common Superset
+charts. They read only from the `cache` schema; nothing here is a source of
+truth.
+
+Run:
+    python -m serving_layer.postgres_views create
+    python -m serving_layer.postgres_views drop
 """
 
 from __future__ import annotations
@@ -16,187 +21,71 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from config.settings import POSTGRES_DB, POSTGRES_HOST, POSTGRES_PASSWORD, POSTGRES_PORT, POSTGRES_USER
 
-
-def get_connection():
-    """Tao ket noi toi Postgres Data Warehouse."""
-    return psycopg2.connect(
-        host=POSTGRES_HOST,
-        port=POSTGRES_PORT,
-        user=POSTGRES_USER,
-        password=POSTGRES_PASSWORD,
-        dbname=POSTGRES_DB,
-    )
-
-
-# ============================================================
-# MATERIALIZED VIEWS
-# ============================================================
-
-MATERIALIZED_VIEWS = {
-    "mv_daily_sales": """
-        CREATE MATERIALIZED VIEW IF NOT EXISTS mv_daily_sales AS
-        SELECT
-            event_date,
-            COUNT(DISTINCT order_id) AS total_orders,
-            SUM(total_amount) AS total_revenue,
-            AVG(total_amount) AS avg_order_value,
-            COUNT(DISTINCT user_id) AS unique_buyers
-        FROM fact_events
-        WHERE event_type = 'purchase'
-        GROUP BY event_date
-        ORDER BY event_date DESC;
+VIEWS = {
+    # Daily revenue with its forecast(s) side by side for a "actual vs forecast" chart.
+    "cache.v_revenue_forecast": """
+        CREATE OR REPLACE VIEW cache.v_revenue_forecast AS
+        SELECT d.event_date AS date, d.revenue AS actual_revenue, NULL::text AS model,
+               NULL::double precision AS predicted_revenue
+        FROM cache.daily_revenue d
+        UNION ALL
+        SELECT p.forecast_date AS date, NULL::double precision AS actual_revenue,
+               p.model, p.predicted_revenue
+        FROM cache.predictions p;
     """,
-
-    "mv_product_ranking": """
-        CREATE MATERIALIZED VIEW IF NOT EXISTS mv_product_ranking AS
-        SELECT
-            product_id,
-            product_name,
-            category,
-            SUM(CASE WHEN event_type = 'page_view' THEN 1 ELSE 0 END) AS views,
-            SUM(CASE WHEN event_type = 'add_to_cart' THEN 1 ELSE 0 END) AS cart_adds,
-            SUM(CASE WHEN event_type = 'purchase' THEN 1 ELSE 0 END) AS purchases,
-            AVG(CASE WHEN event_type = 'review' THEN rating END) AS avg_rating,
-            COUNT(CASE WHEN event_type = 'review' THEN 1 END) AS num_reviews,
-            CASE WHEN SUM(CASE WHEN event_type = 'page_view' THEN 1 ELSE 0 END) > 0
-                THEN SUM(CASE WHEN event_type = 'purchase' THEN 1 ELSE 0 END)::FLOAT
-                     / SUM(CASE WHEN event_type = 'page_view' THEN 1 ELSE 0 END)
-                ELSE 0
-            END AS conversion_rate
-        FROM fact_events
-        WHERE product_id IS NOT NULL
-        GROUP BY product_id, product_name, category
-        ORDER BY purchases DESC;
+    # Anomalous days enriched with their revenue context.
+    "cache.v_anomaly_days": """
+        CREATE OR REPLACE VIEW cache.v_anomaly_days AS
+        SELECT a.event_date, a.anomaly_score, a.revenue, a.purchase_events, a.avg_purchase_value
+        FROM cache.anomalies a
+        WHERE a.anomaly_label = 1
+        ORDER BY a.event_date;
     """,
-
-    "mv_category_performance": """
-        CREATE MATERIALIZED VIEW IF NOT EXISTS mv_category_performance AS
-        SELECT
-            category,
-            SUM(CASE WHEN event_type = 'page_view' THEN 1 ELSE 0 END) AS total_views,
-            SUM(CASE WHEN event_type = 'purchase' THEN 1 ELSE 0 END) AS total_purchases,
-            SUM(CASE WHEN event_type = 'purchase' THEN total_amount ELSE 0 END) AS total_revenue,
-            COUNT(DISTINCT product_id) AS num_products,
-            COUNT(DISTINCT user_id) AS unique_users
-        FROM fact_events
-        WHERE category IS NOT NULL
-        GROUP BY category
-        ORDER BY total_revenue DESC;
-    """,
-
-    "mv_hourly_traffic": """
-        CREATE MATERIALIZED VIEW IF NOT EXISTS mv_hourly_traffic AS
-        SELECT
-            event_date,
-            event_hour,
-            event_type,
-            COUNT(*) AS event_count,
-            COUNT(DISTINCT user_id) AS unique_users
-        FROM fact_events
-        GROUP BY event_date, event_hour, event_type
-        ORDER BY event_date DESC, event_hour;
-    """,
-
-    "mv_user_segments": """
-        CREATE MATERIALIZED VIEW IF NOT EXISTS mv_user_segments AS
-        WITH rfm AS (
-            SELECT
-                user_id,
-                MAX(event_date) AS last_purchase_date,
-                COUNT(DISTINCT order_id) AS frequency,
-                COALESCE(SUM(total_amount), 0) AS monetary
-            FROM fact_events
-            WHERE event_type = 'purchase'
-            GROUP BY user_id
-        )
-        SELECT
-            user_id,
-            last_purchase_date,
-            frequency,
-            monetary,
-            CASE
-                WHEN frequency >= 5 AND monetary > 100000000 THEN 'VIP'
-                WHEN frequency >= 3 THEN 'Loyal'
-                WHEN frequency >= 1 THEN 'Active'
-                ELSE 'New'
-            END AS segment
-        FROM rfm;
+    # Top products by revenue across the whole window.
+    "cache.v_top_products": """
+        CREATE OR REPLACE VIEW cache.v_top_products AS
+        SELECT product_id, category_code, brand,
+               SUM(views) AS views, SUM(cart_adds) AS cart_adds,
+               SUM(purchase_events) AS purchase_events, SUM(revenue) AS revenue
+        FROM cache.product_daily
+        GROUP BY product_id, category_code, brand
+        ORDER BY revenue DESC;
     """,
 }
 
 
-def create_materialized_views() -> None:
-    """Tao tat ca materialized views."""
-    conn = get_connection()
-    cur = conn.cursor()
+def _connect():
+    return psycopg2.connect(
+        host=POSTGRES_HOST, port=POSTGRES_PORT, user=POSTGRES_USER,
+        password=POSTGRES_PASSWORD, dbname=POSTGRES_DB,
+    )
 
-    for name, sql in MATERIALIZED_VIEWS.items():
-        try:
+
+def create_views() -> None:
+    with _connect() as conn, conn.cursor() as cur:
+        for name, sql in VIEWS.items():
             cur.execute(sql)
-            conn.commit()
-            print(f"  ✓ Created: {name}")
-        except Exception as e:
-            conn.rollback()
-            print(f"  ✗ Failed {name}: {e}")
-
-    cur.close()
-    conn.close()
+            print(f"  [OK] created {name}")
 
 
-def refresh_materialized_views() -> None:
-    """Lam moi (refresh) tat ca materialized views."""
-    conn = get_connection()
-    cur = conn.cursor()
-
-    for name in MATERIALIZED_VIEWS:
-        try:
-            cur.execute(f"REFRESH MATERIALIZED VIEW {name};")
-            conn.commit()
-            print(f"  ✓ Refreshed: {name}")
-        except Exception as e:
-            conn.rollback()
-            print(f"  ✗ Failed refresh {name}: {e}")
-
-    cur.close()
-    conn.close()
+def drop_views() -> None:
+    with _connect() as conn, conn.cursor() as cur:
+        for name in VIEWS:
+            cur.execute(f"DROP VIEW IF EXISTS {name} CASCADE;")
+            print(f"  [OK] dropped {name}")
 
 
-def drop_materialized_views() -> None:
-    """Xoa tat ca materialized views."""
-    conn = get_connection()
-    cur = conn.cursor()
-
-    for name in MATERIALIZED_VIEWS:
-        try:
-            cur.execute(f"DROP MATERIALIZED VIEW IF EXISTS {name} CASCADE;")
-            conn.commit()
-            print(f"  ✓ Dropped: {name}")
-        except Exception as e:
-            conn.rollback()
-            print(f"  ✗ Failed drop {name}: {e}")
-
-    cur.close()
-    conn.close()
-
-
-# ============================================================
-# MAIN
-# ============================================================
-
-if __name__ == "__main__":
+def main() -> None:
     import argparse
 
-    parser = argparse.ArgumentParser(description="Postgres Materialized Views Manager")
-    parser.add_argument("action", choices=["create", "refresh", "drop"], help="Action to perform")
+    parser = argparse.ArgumentParser(description="Manage cache convenience views")
+    parser.add_argument("action", choices=["create", "drop"])
     args = parser.parse_args()
-
-    print(f"{'=' * 50}")
-    print(f"POSTGRES VIEWS - {args.action.upper()}")
-    print(f"{'=' * 50}")
-
     if args.action == "create":
-        create_materialized_views()
-    elif args.action == "refresh":
-        refresh_materialized_views()
-    elif args.action == "drop":
-        drop_materialized_views()
+        create_views()
+    else:
+        drop_views()
+
+
+if __name__ == "__main__":
+    main()

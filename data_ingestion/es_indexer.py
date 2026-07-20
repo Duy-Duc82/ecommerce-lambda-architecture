@@ -1,12 +1,12 @@
-"""
-ES Indexer — Real-time Kafka → Elasticsearch Pipeline.
+"""Real-time raw-event indexer: Kafka -> Elasticsearch.
 
-Consumes events from all 3 Kafka topics and bulk-indexes them into
-Elasticsearch, enriching with geo/device metadata and computed fields.
+Consumes the canonical behavioral-event topic and bulk-indexes each raw event
+into the `ecommerce-events` index so Kibana can do per-event drill-down. The
+speed layer (speed_layer/speed_layer.py) owns the aggregated `ecommerce-metrics`
+index; this process owns raw events. Both read the same canonical contract.
 
 Run:
     python -m data_ingestion.es_indexer
-    python -m data_ingestion.es_indexer --topics events orders prices
 """
 
 from __future__ import annotations
@@ -14,7 +14,6 @@ from __future__ import annotations
 import argparse
 import json
 import logging
-import os
 import sys
 import time
 import uuid
@@ -22,346 +21,102 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-# ── Try to import Kafka + ES ──────────────────────────────────────────
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from config.settings import ES_HOST, ES_INDEX_EVENTS, KAFKA_BOOTSTRAP_SERVERS, KAFKA_TOPIC_EVENTS
+
 try:
     from kafka import KafkaConsumer
     from kafka.errors import NoBrokersAvailable
-except ImportError:
-    sys.exit("kafka-python not installed. Run: pip install kafka-python")
+except ImportError:  # pragma: no cover
+    sys.exit("kafka-python-ng not installed. Run: pip install kafka-python-ng")
 
 try:
     from elasticsearch import Elasticsearch, helpers
     from elasticsearch.exceptions import ConnectionError as ESConnectionError
-except ImportError:
-    sys.exit("elasticsearch not installed. Run: pip install elasticsearch>=8.0.0")
+except ImportError:  # pragma: no cover
+    sys.exit("elasticsearch not installed. Run: pip install elasticsearch==8.18.0")
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-
-# ── Config ────────────────────────────────────────────────────────────
-KAFKA_BOOTSTRAP = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092")
-ES_HOST         = os.getenv("ES_HOST", "http://localhost:9200")
-
-TOPIC_EVENTS  = os.getenv("KAFKA_TOPIC_EVENTS",  "ecommerce_events")
-TOPIC_ORDERS  = os.getenv("KAFKA_TOPIC_ORDERS",  "ecommerce_orders")
-TOPIC_PRICES  = os.getenv("KAFKA_TOPIC_PRICES",  "ecommerce_prices")
-
-INDEX_EVENTS        = "ecommerce-events"
-INDEX_ORDERS        = "ecommerce-orders"
-INDEX_PRICES        = "ecommerce-prices"
-INDEX_REALTIME      = "ecommerce-realtime-metrics"
-
-BATCH_SIZE          = int(os.getenv("ES_BATCH_SIZE",     "200"))
-BATCH_TIMEOUT_MS    = int(os.getenv("ES_BATCH_TIMEOUT",  "3000"))   # ms
-CONSUMER_GROUP      = "es-indexer-group"
-
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s", datefmt="%H:%M:%S")
 log = logging.getLogger("es_indexer")
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s  [%(levelname)s]  %(message)s",
-    datefmt="%H:%M:%S",
-)
 
-# ── Topic → Index mapping ─────────────────────────────────────────────
-TOPIC_INDEX_MAP: dict[str, str] = {
-    TOPIC_EVENTS: INDEX_EVENTS,
-    TOPIC_ORDERS: INDEX_ORDERS,
-    TOPIC_PRICES: INDEX_PRICES,
-}
+BATCH_SIZE = 200
+CONSUMER_GROUP = "es-indexer-group"
 
-# Only index fields present in strict mappings
-_ALLOWED_FIELDS = {
-    INDEX_EVENTS: {
-        "@timestamp",
-        "event_id",
-        "event_type",
-        "user_id",
-        "session_id",
-        "product_id",
-        "product_name",
-        "category",
-        "sub_category",
-        "brand",
-        "price",
-        "quantity",
-        "total_amount",
-        "currency",
-        "platform",
-        "device_type",
-        "region",
-        "city",
-        "geo_location",
-        "ip_address",
-        "user_agent",
-        "referrer",
-        "search_keyword",
-        "page_url",
-        "session_duration_s",
-        "page_views",
-        "is_new_user",
-        "ab_test_group",
-        "rating",
-        "review_text",
-        "kafka_partition",
-        "kafka_offset",
-        "ingest_timestamp",
-    },
-    INDEX_ORDERS: {
-        "@timestamp",
-        "order_id",
-        "user_id",
-        "session_id",
-        "order_status",
-        "payment_method",
-        "total_amount",
-        "discount_amount",
-        "shipping_fee",
-        "tax_amount",
-        "net_revenue",
-        "currency",
-        "items_count",
-        "region",
-        "city",
-        "geo_location",
-        "device_type",
-        "platform",
-        "coupon_code",
-        "is_first_order",
-        "customer_segment",
-        "processing_time_ms",
-        "ingest_timestamp",
-    },
-    INDEX_PRICES: {
-        "@timestamp",
-        "product_id",
-        "product_name",
-        "category",
-        "brand",
-        "old_price",
-        "new_price",
-        "price_change_pct",
-        "price_change_abs",
-        "price_direction",
-        "change_reason",
-        "demand_score",
-        "inventory_level",
-        "competitor_price",
-        "sma_7d",
-        "ema_14d",
-        "forecast_7d",
-        "forecast_30d",
-        "volatility_score",
-        "elasticity_index",
-        "season_factor",
-        "ingest_timestamp",
-    },
+_EVENT_FIELDS = {
+    "@timestamp", "event_id", "event_time", "event_type", "user_id", "user_session",
+    "product_id", "category_id", "category_code", "brand", "price", "ingest_timestamp",
 }
 
 
-# ─────────────────────────────────────────────────────────────────────
-# Enrichment helpers
-# ─────────────────────────────────────────────────────────────────────
-
-_DEVICE_MAP = {
-    "mobile": ["android", "iphone", "ios", "mobile"],
-    "tablet": ["ipad", "tablet"],
-    "desktop": ["windows", "mac", "linux", "x11"],
-}
-
-def _infer_device(user_agent: str) -> str:
-    ua = (user_agent or "").lower()
-    for device, keywords in _DEVICE_MAP.items():
-        if any(k in ua for k in keywords):
-            return device
-    return "unknown"
-
-
-def _enrich_event(raw: dict[str, Any]) -> dict[str, Any]:
-    """Add @timestamp, ingest_timestamp, device_type inference."""
+def _enrich(raw: dict[str, Any]) -> dict[str, Any]:
     now_iso = datetime.now(timezone.utc).isoformat()
-
-    # Normalise timestamp
-    ts = raw.get("timestamp")
-    if isinstance(ts, (int, float)):
-        dt = datetime.fromtimestamp(ts, tz=timezone.utc)
-        raw["@timestamp"] = dt.isoformat()
-    elif isinstance(ts, str):
-        raw["@timestamp"] = ts
-    else:
-        raw["@timestamp"] = now_iso
-
+    raw["@timestamp"] = raw.get("event_time") or now_iso
     raw.setdefault("ingest_timestamp", now_iso)
     raw.setdefault("event_id", str(uuid.uuid4()))
-
-    # Device type from user_agent
-    if "user_agent" in raw and "device_type" not in raw:
-        raw["device_type"] = _infer_device(raw["user_agent"])
-
-    # Normalize fields to match mapping
-    if "comment" in raw and "review_text" not in raw:
-        raw["review_text"] = raw.pop("comment")
-    if "query_text" in raw and "search_keyword" not in raw:
-        raw["search_keyword"] = raw.pop("query_text")
-    if "results_count" in raw and "page_views" not in raw:
-        raw["page_views"] = raw.pop("results_count")
-
-    # Geo point from lat/lon if present
-    lat = raw.pop("lat", None)
-    lon = raw.pop("lon", None)
-    if lat is not None and lon is not None:
-        raw["geo_location"] = {"lat": lat, "lon": lon}
-
-    return raw
+    return {k: v for k, v in raw.items() if k in _EVENT_FIELDS and v is not None}
 
 
-def _enrich_order(raw: dict[str, Any]) -> dict[str, Any]:
-    now_iso = datetime.now(timezone.utc).isoformat()
-    ts = raw.get("timestamp")
-    if isinstance(ts, (int, float)):
-        raw["@timestamp"] = datetime.fromtimestamp(ts, tz=timezone.utc).isoformat()
-    else:
-        raw["@timestamp"] = now_iso
-    raw.setdefault("ingest_timestamp", now_iso)
-    raw.setdefault("order_id", str(uuid.uuid4()))
-
-    # Compute net_revenue
-    total   = float(raw.get("total_amount", 0))
-    discount= float(raw.get("discount_amount", 0))
-    raw.setdefault("net_revenue", round(total - discount, 2))
-
-    return raw
-
-
-def _enrich_price(raw: dict[str, Any]) -> dict[str, Any]:
-    now_iso = datetime.now(timezone.utc).isoformat()
-    raw["@timestamp"] = now_iso
-    raw.setdefault("ingest_timestamp", now_iso)
-
-    old = float(raw.get("old_price", 0) or 0)
-    new = float(raw.get("new_price", 0) or 0)
-    if old > 0:
-        pct = round((new - old) / old * 100, 4)
-        raw.setdefault("price_change_pct", pct)
-        raw.setdefault("price_change_abs", round(new - old, 4))
-        raw.setdefault("price_direction", "up" if pct > 0 else "down" if pct < 0 else "stable")
-
-    return raw
-
-
-_ENRICH_FN = {
-    TOPIC_EVENTS: _enrich_event,
-    TOPIC_ORDERS: _enrich_order,
-    TOPIC_PRICES: _enrich_price,
-}
-
-
-# ─────────────────────────────────────────────────────────────────────
-# Bulk indexer
-# ─────────────────────────────────────────────────────────────────────
-
-def _make_action(index: str, doc: dict[str, Any]) -> dict[str, Any]:
-    allowed = _ALLOWED_FIELDS.get(index)
-    if allowed is not None:
-        doc = {k: v for k, v in doc.items() if k in allowed and v is not None}
-    return {
-        "_index":  index,
-        "_id":     doc.get("event_id") or doc.get("order_id") or doc.get("alert_id") or None,
-        "_source": doc,
-    }
-
-
-def _flush_bulk(es: Elasticsearch, actions: list[dict], label: str) -> None:
-    if not actions:
-        return
-    ok, errors = helpers.bulk(es, actions, raise_on_error=False, stats_only=False)
-    if errors:
-        log.warning("%s: %d bulk errors (sample: %s)", label, len(errors), errors[:1])
-    log.info("%s: indexed %d docs", label, ok)
-    actions.clear()
-
-
-# ─────────────────────────────────────────────────────────────────────
-# Main consumer loop
-# ─────────────────────────────────────────────────────────────────────
-
-def run(topics: list[str]) -> None:
-    log.info("Connecting to Elasticsearch: %s", ES_HOST)
+def _connect_es() -> Elasticsearch:
     es = Elasticsearch(ES_HOST)
-    for attempt in range(10):
+    for attempt in range(1, 11):
         try:
             info = es.info()
-            log.info("ES connected — cluster: %s v%s", info["cluster_name"], info["version"]["number"])
-            break
+            log.info("ES connected — %s v%s", info["cluster_name"], info["version"]["number"])
+            return es
         except ESConnectionError:
-            log.warning("ES not ready (attempt %d/10), retrying in 5s…", attempt + 1)
+            log.warning("ES not ready (%d/10), retrying in 5s...", attempt)
             time.sleep(5)
-    else:
-        sys.exit("Cannot connect to Elasticsearch after 10 retries.")
+    sys.exit("Cannot connect to Elasticsearch.")
 
-    log.info("Connecting to Kafka: %s | topics: %s", KAFKA_BOOTSTRAP, topics)
-    for attempt in range(10):
+
+def _connect_kafka(topic: str) -> KafkaConsumer:
+    for attempt in range(1, 11):
         try:
             consumer = KafkaConsumer(
-                *topics,
-                bootstrap_servers=KAFKA_BOOTSTRAP,
+                topic,
+                bootstrap_servers=KAFKA_BOOTSTRAP_SERVERS,
                 group_id=CONSUMER_GROUP,
                 auto_offset_reset="latest",
                 enable_auto_commit=True,
                 value_deserializer=lambda v: json.loads(v.decode("utf-8")),
-                consumer_timeout_ms=-1,
                 max_poll_records=500,
             )
-            log.info("Kafka consumer ready.")
-            break
+            log.info("Kafka consumer ready on topic=%s", topic)
+            return consumer
         except NoBrokersAvailable:
-            log.warning("Kafka not ready (attempt %d/10), retrying in 5s…", attempt + 1)
+            log.warning("Kafka not ready (%d/10), retrying in 5s...", attempt)
             time.sleep(5)
-    else:
-        sys.exit("Cannot connect to Kafka after 10 retries.")
+    sys.exit("Cannot connect to Kafka.")
 
+
+def run(topic: str) -> None:
+    es = _connect_es()
+    consumer = _connect_kafka(topic)
     actions: list[dict] = []
-    last_flush = time.time()
-    total_indexed = 0
-
-    log.info("=== ES Indexer running — Ctrl+C to stop ===")
+    total = 0
+    log.info("=== ES indexer running (topic=%s -> index=%s). Ctrl+C to stop ===", topic, ES_INDEX_EVENTS)
     try:
         for msg in consumer:
-            topic = msg.topic
-            raw   = msg.value
-
-            enrich_fn = _ENRICH_FN.get(topic, _enrich_event)
-            doc = enrich_fn(raw)
-
-            index = TOPIC_INDEX_MAP.get(topic, INDEX_EVENTS)
-            actions.append(_make_action(index, doc))
-
-            elapsed_ms = (time.time() - last_flush) * 1000
-            if len(actions) >= BATCH_SIZE or elapsed_ms >= BATCH_TIMEOUT_MS:
-                _flush_bulk(es, actions, f"batch@{topic}")
-                total_indexed += len(actions)
+            doc = _enrich(msg.value)
+            actions.append({"_index": ES_INDEX_EVENTS, "_id": doc["event_id"], "_source": doc})
+            if len(actions) >= BATCH_SIZE:
+                ok, _ = helpers.bulk(es, actions, raise_on_error=False, stats_only=True)
+                total += ok
                 actions.clear()
-                last_flush = time.time()
-                log.info("Total indexed so far: %d", total_indexed)
-
+                log.info("Indexed %d events", total)
     except KeyboardInterrupt:
-        log.info("Shutting down…")
-        _flush_bulk(es, actions, "final-flush")
+        if actions:
+            helpers.bulk(es, actions, raise_on_error=False)
         consumer.close()
-        log.info("ES Indexer stopped. Total indexed: %d", total_indexed)
+        log.info("Stopped. Total indexed: %d", total)
 
-
-# ─────────────────────────────────────────────────────────────────────
-# CLI
-# ─────────────────────────────────────────────────────────────────────
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Real-time Kafka → Elasticsearch indexer")
-    parser.add_argument(
-        "--topics", nargs="+",
-        default=[TOPIC_EVENTS, TOPIC_ORDERS, TOPIC_PRICES],
-        help="Kafka topics to consume (default: all 3 topics)",
-    )
+    parser = argparse.ArgumentParser(description="Kafka -> Elasticsearch raw-event indexer")
+    parser.add_argument("--topic", default=KAFKA_TOPIC_EVENTS)
     args = parser.parse_args()
-    run(args.topics)
+    run(args.topic)
 
 
 if __name__ == "__main__":

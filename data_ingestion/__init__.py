@@ -1,1 +1,1 @@
-# Data Ingestion package
+"""Data ingestion — Kaggle CSV producer and Kafka→Elasticsearch indexer."""

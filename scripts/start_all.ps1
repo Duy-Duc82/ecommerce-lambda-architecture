@@ -1,22 +1,61 @@
 # ============================================================
-# start_all.ps1 — Khoi dong toan bo he thong Big Data
+# start_all.ps1 - One-command launcher for the full project
 # ============================================================
-# Chay: .\scripts\start_all.ps1
+# Examples:
+#   .\scripts\start_all.ps1
+#   .\scripts\start_all.ps1 -RunBatch -Source .\tests\fixtures\events.csv
+#   .\scripts\start_all.ps1 -RunRealtime -RunProducer -ProducerCount 500
+#   .\scripts\start_all.ps1 -RunEverything -Source .\data\data_kaggle\2019-Oct.csv
 # ============================================================
 
 param(
-    [switch]$Full,        # Bao gom Elasticsearch + Kibana
-    [switch]$SkipDocker,  # Bo qua docker compose
-    [switch]$ProducerOnly, # Chi chay producer
-    [switch]$RunAllLayers, # Tu dong chay day du layer de test
-    [switch]$UseKaggle,    # Doc du lieu that tu Kaggle CSV
-    [string]$KaggleCsv,    # Duong dan CSV (mac dinh: data_kaggle/2019-Oct.csv)
-    [int]$KaggleEps = 200  # Toc do gui events/giay
+    [switch]$RunEverything,
+    [switch]$RunRealtime,
+    [switch]$RunProducer,
+    [switch]$RunBatch,
+    [switch]$RefreshBI,
+    [switch]$SmokeCheck,
+    [switch]$SkipDocker,
+    [switch]$SkipSupersetInit,
+    [switch]$BuildWarehouseImage,
+    [switch]$SkipPostgresPublish,
+    [string]$Source = ".\tests\fixtures\events.csv",
+    [int]$ProducerCount = 300,
+    [int]$ProducerEps = 300,
+    [int]$WarmupSeconds = 20,
+
+    # Backward-compatible aliases from older scripts.
+    [switch]$Full,
+    [switch]$RunAllLayers,
+    [switch]$UseKaggle,
+    [string]$KaggleCsv,
+    [int]$KaggleEps = 200,
+    [switch]$ProducerOnly
 )
 
-$ErrorActionPreference = "Continue"
+$ErrorActionPreference = "Stop"
 $ProjectRoot = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 Set-Location $ProjectRoot
+
+if ($Full -or $RunAllLayers) { $RunEverything = $true }
+if ($ProducerOnly) {
+    $SkipDocker = $true
+    $RunProducer = $true
+    $RunRealtime = $false
+    $RunBatch = $false
+    $RefreshBI = $false
+}
+if ($UseKaggle) {
+    $Source = if ($KaggleCsv) { $KaggleCsv } else { ".\data\data_kaggle\2019-Oct.csv" }
+    $ProducerEps = $KaggleEps
+}
+if ($RunEverything) {
+    $RunRealtime = $true
+    $RunProducer = $true
+    $RunBatch = $true
+    $RefreshBI = $true
+    $SmokeCheck = $true
+}
 
 $Python = Join-Path $ProjectRoot ".venv\Scripts\python.exe"
 if (-not (Test-Path $Python)) { $Python = "python" }
@@ -24,141 +63,176 @@ if (-not (Test-Path $Python)) { $Python = "python" }
 $SparkSubmit = Join-Path $ProjectRoot ".venv\Scripts\spark-submit.cmd"
 if (-not (Test-Path $SparkSubmit)) { $SparkSubmit = "spark-submit" }
 
-$LogsDir = Join-Path $ProjectRoot "logs"
+$LogsDir = Join-Path $ProjectRoot "data\logs"
 New-Item -ItemType Directory -Force -Path $LogsDir | Out-Null
 
-Write-Host "`n========================================" -ForegroundColor Cyan
-Write-Host "  BIG DATA LAMBDA ARCHITECTURE" -ForegroundColor Cyan
-Write-Host "  E-Commerce Analytics Platform" -ForegroundColor Cyan
-Write-Host "========================================`n" -ForegroundColor Cyan
+function Invoke-Step {
+    param(
+        [Parameter(Mandatory = $true)][string]$Title,
+        [Parameter(Mandatory = $true)][scriptblock]$Script
+    )
+    Write-Host "`n==> $Title" -ForegroundColor Cyan
+    & $Script
+    if ($LASTEXITCODE -ne 0) {
+        throw "Step failed: $Title (exit=$LASTEXITCODE)"
+    }
+}
 
-# ── 1. DOCKER COMPOSE ────────────────────────────────────────
-if (-not $SkipDocker) {
-    Write-Host "[1/6] Khoi dong Docker services..." -ForegroundColor Yellow
+function Wait-Http {
+    param(
+        [Parameter(Mandatory = $true)][string]$Name,
+        [Parameter(Mandatory = $true)][string]$Url,
+        [int]$TimeoutSeconds = 90
+    )
+    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+    while ((Get-Date) -lt $deadline) {
+        try {
+            $resp = Invoke-WebRequest -UseBasicParsing -Uri $Url -TimeoutSec 10
+            if ($resp.StatusCode -ge 200 -and $resp.StatusCode -lt 500) {
+                Write-Host "  [OK] $Name ready: $Url" -ForegroundColor Green
+                return
+            }
+        } catch {
+            Start-Sleep -Seconds 3
+        }
+    }
+    throw "$Name is not ready: $Url"
+}
 
-    if ($Full) {
-        docker compose --profile full up -d
-    } else {
+function Start-DockerStack {
+    Invoke-Step -Title "Start Docker stack" -Script {
         docker compose up -d
     }
-
-    Write-Host "  Doi services san sang..." -ForegroundColor Gray
-    Start-Sleep -Seconds 15
-
-    # Kiem tra services
-    Write-Host "`n  Docker services status:" -ForegroundColor Gray
+    Start-Sleep -Seconds 10
     docker compose ps --format "table {{.Name}}\t{{.Status}}\t{{.Ports}}"
 }
 
-# ── 2. TAO KAFKA TOPICS ─────────────────────────────────────
-Write-Host "`n[2/6] Tao Kafka Topics..." -ForegroundColor Yellow
-
-$kafkaTopics = @("ecommerce_events", "ecommerce_orders", "ecommerce_prices")
-foreach ($topic in $kafkaTopics) {
-    docker exec kafka /opt/kafka/bin/kafka-topics.sh `
-        --create --bootstrap-server localhost:9092 `
-        --topic $topic --partitions 3 --replication-factor 1 `
-        --if-not-exists 2>$null
-    Write-Host "  + Topic: $topic" -ForegroundColor Green
+function Initialize-KafkaTopics {
+    Invoke-Step -Title "Create Kafka topic" -Script {
+        docker exec kafka /opt/kafka/bin/kafka-topics.sh `
+            --create --bootstrap-server localhost:9092 `
+            --topic ecommerce_events --partitions 3 `
+            --replication-factor 1 --if-not-exists | Out-Null
+        Write-Host "  [OK] ecommerce_events" -ForegroundColor Green
+    }
 }
 
-# Xac nhan topics
-Write-Host "`n  Danh sach topics:" -ForegroundColor Gray
-docker exec kafka /opt/kafka/bin/kafka-topics.sh --list --bootstrap-server localhost:9092
-
-# ── 3. KIEM TRA MINIO ────────────────────────────────────────
-Write-Host "`n[3/6] Kiem tra MinIO buckets..." -ForegroundColor Yellow
-try {
-    & .\.venv\Scripts\python.exe -c @"
-from minio import Minio
-c = Minio('localhost:9000', access_key='minioadmin', secret_key='minioadmin', secure=False)
-for b in c.list_buckets():
-    print(f'  + Bucket: {b.name}')
-"@ 2>$null
-} catch {
-    Write-Host "  MinIO chua san sang, buckets se duoc tao boi minio-init container" -ForegroundColor Gray
+function Initialize-PostgresCache {
+    Invoke-Step -Title "Initialize PostgreSQL cache schema" -Script {
+        Get-Content -LiteralPath (Join-Path $ProjectRoot "scripts\init_postgres.sql") |
+            docker exec -i postgres-dw psql -U admin -d data_warehouse
+    }
 }
 
-# ── 4. KIEM TRA POSTGRES ─────────────────────────────────────
-Write-Host "`n[4/6] Kiem tra Postgres Data Warehouse..." -ForegroundColor Yellow
-docker exec postgres-dw psql -U admin -d data_warehouse -c "\dt" 2>$null
-if ($LASTEXITCODE -eq 0) {
-    Write-Host "  Postgres DW san sang!" -ForegroundColor Green
-} else {
-    Write-Host "  Postgres dang khoi dong..." -ForegroundColor Gray
+function Start-RealtimeLayer {
+    Invoke-Step -Title "Start realtime layer" -Script {
+        Start-Process -FilePath $Python -ArgumentList "-m","data_ingestion.es_indexer" `
+            -WorkingDirectory $ProjectRoot `
+            -WindowStyle Hidden `
+            -RedirectStandardOutput (Join-Path $LogsDir "es_indexer.out.log") `
+            -RedirectStandardError (Join-Path $LogsDir "es_indexer.err.log")
+
+        Start-Process -FilePath $SparkSubmit `
+            -ArgumentList "--packages","org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.1","speed_layer/speed_layer.py" `
+            -WorkingDirectory $ProjectRoot `
+            -WindowStyle Hidden `
+            -RedirectStandardOutput (Join-Path $LogsDir "speed_layer.out.log") `
+            -RedirectStandardError (Join-Path $LogsDir "speed_layer.err.log")
+    }
+    Write-Host "  Waiting $WarmupSeconds seconds for realtime consumers..." -ForegroundColor DarkGray
+    Start-Sleep -Seconds $WarmupSeconds
 }
 
-# ── 5. KIEM TRA REDIS ────────────────────────────────────────
-Write-Host "`n[5/6] Kiem tra Redis..." -ForegroundColor Yellow
-$redisPing = docker exec redis redis-cli ping 2>$null
-if ($redisPing -eq "PONG") {
-    Write-Host "  Redis PONG - San sang!" -ForegroundColor Green
-} else {
-    Write-Host "  Redis dang khoi dong..." -ForegroundColor Gray
+function Start-Producer {
+    Invoke-Step -Title "Run Kafka producer" -Script {
+        $producerArgs = @("-m", "data_ingestion.producer", "--source", $Source, "--eps", "$ProducerEps")
+        if ($ProducerCount) { $producerArgs += @("-n", "$ProducerCount") }
+        & $Python @producerArgs
+    }
 }
 
-# ── 6. CHAY DAY DU LAYER (OPTIONAL) ─────────────────────────
-if ($RunAllLayers) {
-    Write-Host "`n[6/6] Khoi dong cac layer..." -ForegroundColor Yellow
-
-    if (-not $UseKaggle) { $UseKaggle = $true }
-
-    $datePath = Get-Date -Format "yyyy\\MM\\dd"
-    $exportPath = Join-Path $ProjectRoot "data_lake_raw\events\$datePath\events.jsonl"
-    $kaggleCsvPath = if ($KaggleCsv) { $KaggleCsv } else { Join-Path $ProjectRoot "data_kaggle\2019-Oct.csv" }
-
-    Write-Host "  + ES Indexer (Kafka -> Elasticsearch)" -ForegroundColor Green
-    Start-Process -FilePath $Python -ArgumentList "-m","data_ingestion.es_indexer" `
-        -WorkingDirectory $ProjectRoot `
-        -RedirectStandardOutput (Join-Path $LogsDir "es_indexer.out.log") `
-        -RedirectStandardError (Join-Path $LogsDir "es_indexer.err.log")
-
-    Write-Host "  + Speed Layer (Spark Streaming)" -ForegroundColor Green
-    Start-Process -FilePath $SparkSubmit -ArgumentList "--packages","org.apache.spark:spark-sql-kafka-0-10_2.13:4.1.1","speed_layer/speed_layer.py" `
-        -WorkingDirectory $ProjectRoot `
-        -RedirectStandardOutput (Join-Path $LogsDir "speed_layer.out.log") `
-        -RedirectStandardError (Join-Path $LogsDir "speed_layer.err.log")
-
-    if ($UseKaggle) {
-        Write-Host "  + Kaggle Producer (Kafka + JSONL)" -ForegroundColor Green
-        & $Python -m data_ingestion.kaggle_producer --csv $kaggleCsvPath --eps $KaggleEps --export-json $exportPath
+function Start-BatchWarehouse {
+    Invoke-Step -Title "Run batch warehouse EtLT (Spark on MinIO)" -Script {
+        $whArgs = @("-Source", $Source)
+        if ($BuildWarehouseImage) { $whArgs += "-Build" }
+        if ($SkipPostgresPublish) { $whArgs += "-SkipPostgres" }
+        & (Join-Path $ProjectRoot "scripts\run_warehouse.ps1") @whArgs
     }
 
-    Write-Host "  + Batch ETL" -ForegroundColor Green
-    & $Python -m batch_layer.etl_job --source $exportPath
-
-    Write-Host "  + Batch Views" -ForegroundColor Green
-    & $Python -m batch_layer.batch_views
-
-    Write-Host "  + Batch Models" -ForegroundColor Green
-    & $Python -m batch_layer.models.trend_analysis
-    & $Python -m batch_layer.models.anomaly_detection
-    & $Python -m batch_layer.models.price_forecast
-    & $Python -m batch_layer.models.fraud_detection
+    if (-not $SkipPostgresPublish) {
+        Invoke-Step -Title "Run batch ML (Darts N-BEATS/LSTM + PyOD AutoEncoder)" -Script {
+            & $Python -m batch_layer.ml_job
+        }
+        Invoke-Step -Title "Create/refresh cache convenience views" -Script {
+            & $Python -m serving_layer.postgres_views create
+        }
+    }
 }
 
-# ── 6. TONG KET ──────────────────────────────────────────────
+function Refresh-SupersetBI {
+    if (-not $SkipSupersetInit) {
+        Invoke-Step -Title "Import Superset datasets" -Script {
+            docker compose run --rm superset-init
+        }
+    }
+
+    Write-Host "`n==> Create/refresh batch ML BI dashboard" -ForegroundColor Cyan
+    try {
+        & $Python (Join-Path $ProjectRoot "display\superset\create_batch_ml_dashboard.py")
+        if ($LASTEXITCODE -ne 0) { throw "dashboard build exited $LASTEXITCODE" }
+    } catch {
+        Write-Host "  [WARN] Dashboard build skipped: $_" -ForegroundColor Yellow
+    }
+}
+
+function Invoke-SmokeCheck {
+    Invoke-Step -Title "Validate endpoints" -Script {
+        Wait-Http -Name "Elasticsearch" -Url "http://localhost:9200"
+        Wait-Http -Name "Kibana" -Url "http://localhost:5601/api/status"
+        Wait-Http -Name "Superset" -Url "http://localhost:8088/health"
+    }
+
+    Invoke-Step -Title "Show cache table counts" -Script {
+        docker exec postgres-dw psql -U admin -d data_warehouse -At -c @"
+select 'cache.funnel_daily', count(*) from cache.funnel_daily
+union all select 'cache.product_daily', count(*) from cache.product_daily
+union all select 'cache.category_daily', count(*) from cache.category_daily
+union all select 'cache.session_daily', count(*) from cache.session_daily
+union all select 'cache.daily_revenue', count(*) from cache.daily_revenue
+union all select 'cache.predictions', count(*) from cache.predictions
+union all select 'cache.anomalies', count(*) from cache.anomalies;
+"@
+    }
+}
+
 Write-Host "`n========================================" -ForegroundColor Cyan
-Write-Host "  HE THONG DA SAN SANG!" -ForegroundColor Green
+Write-Host "  E-Commerce Lambda Architecture Runner" -ForegroundColor Cyan
 Write-Host "========================================" -ForegroundColor Cyan
-Write-Host ""
-Write-Host "  Services:" -ForegroundColor White
-Write-Host "    Kafka:          localhost:9092"
-Write-Host "    Spark Master:   http://localhost:8080"
-Write-Host "    Spark Worker:   http://localhost:8081"
-Write-Host "    MinIO Console:  http://localhost:9001  (minioadmin/minioadmin)"
-Write-Host "    MinIO S3 API:   http://localhost:9000"
-Write-Host "    Redis:          localhost:6379"
-Write-Host "    Postgres DW:    localhost:5432  (admin/password)"
-if ($Full) {
-    Write-Host "    Elasticsearch:  http://localhost:9200"
-    Write-Host "    Kibana:         http://localhost:5601"
+Write-Host "Project: $ProjectRoot"
+Write-Host "Source:  $Source"
+
+if (-not $SkipDocker) {
+    Start-DockerStack
+    Initialize-KafkaTopics
+    Initialize-PostgresCache
 }
-Write-Host ""
-Write-Host "  Buoc tiep theo:" -ForegroundColor Yellow
-Write-Host "    1. Chay producer:    .\.venv\Scripts\python.exe -m data_ingestion.producer"
-Write-Host "    2. Chay speed layer: spark-submit speed_layer/speed_layer.py"
-Write-Host "    3. Chay batch ETL:   .\.venv\Scripts\python.exe -m batch_layer.etl_job"
-Write-Host "    4. Chay dashboard:   .\.venv\Scripts\streamlit run dashboard/app.py"
-Write-Host "    5. Tu dong chay day du: .\scripts\start_all.ps1 -Full -RunAllLayers"
+
+if ($RunRealtime) { Start-RealtimeLayer }
+if ($RunProducer) { Start-Producer }
+if ($RunBatch) { Start-BatchWarehouse }
+if ($RefreshBI) { Refresh-SupersetBI }
+if ($SmokeCheck) { Invoke-SmokeCheck }
+
+Write-Host "`n========================================" -ForegroundColor Cyan
+Write-Host "  PROJECT READY" -ForegroundColor Green
+Write-Host "========================================" -ForegroundColor Cyan
+Write-Host "Kafka:          localhost:9092"
+Write-Host "Spark Master:   http://localhost:8080"
+Write-Host "MinIO Console:  http://localhost:9001"
+Write-Host "Redis:          localhost:6379"
+Write-Host "Postgres:       localhost:5433"
+Write-Host "Elasticsearch:  http://localhost:9200"
+Write-Host "Kibana:         http://localhost:5601"
+Write-Host "Superset:       http://localhost:8088"
+Write-Host "Batch ML BI:    http://localhost:8088/superset/dashboard/batch-ml-forecast-anomalies/"
 Write-Host ""

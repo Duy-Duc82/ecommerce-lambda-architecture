@@ -1,0 +1,11 @@
+event_time,event_type,product_id,category_id,category_code,brand,price,user_id,user_session
+2019-10-01 09:00:00 UTC,view,1001,10,electronics.smartphone,samsung,500.00,501,s1
+2019-10-01 09:01:00 UTC,cart,1001,10,electronics.smartphone,samsung,500.00,501,s1
+2019-10-01 09:03:00 UTC,purchase,1001,10,electronics.smartphone,samsung,500.00,501,s1
+2019-10-01 10:00:00 UTC,view,1002,11,electronics.audio,sony,150.00,502,s2
+2019-10-01 10:02:00 UTC,cart,1002,11,electronics.audio,sony,150.00,502,s2
+2019-10-01 11:00:00 UTC,view,1003,12,appliances.kitchen,philips,90.00,503,s3
+2019-10-02 08:00:00 UTC,view,1001,10,electronics.smartphone,samsung,500.00,504,s4
+2019-10-02 08:05:00 UTC,purchase,1001,10,electronics.smartphone,samsung,500.00,504,s4
+2019-10-02 12:00:00 UTC,view,1002,11,electronics.audio,sony,150.00,505,s5
+2019-10-02 12:02:00 UTC,cart,1002,11,electronics.audio,sony,150.00,505,s5

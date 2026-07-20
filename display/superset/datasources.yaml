@@ -1,0 +1,26 @@
+databases:
+  - database_name: ecommerce_bi
+    sqlalchemy_uri: postgresql://admin:admin123@postgres-dw:5432/data_warehouse
+    expose_in_sqllab: true
+    allow_run_async: false
+    tables:
+      - table_name: funnel_daily
+        schema: cache
+      - table_name: product_daily
+        schema: cache
+      - table_name: category_daily
+        schema: cache
+      - table_name: session_daily
+        schema: cache
+      - table_name: daily_revenue
+        schema: cache
+      - table_name: predictions
+        schema: cache
+      - table_name: anomalies
+        schema: cache
+      - table_name: v_revenue_forecast
+        schema: cache
+      - table_name: v_anomaly_days
+        schema: cache
+      - table_name: v_top_products
+        schema: cache

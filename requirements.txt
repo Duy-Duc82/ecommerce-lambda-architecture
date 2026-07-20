@@ -3,27 +3,47 @@
 # ============================================================
 
 # --- Core Processing ---
-pyspark==4.1.1
-pandas>=2.2.3
-numpy>=2.2.5
+pyspark==3.5.1
+pandas>=2.2.3; python_version >= "3.9"
+pandas==2.0.3; python_version < "3.9"
+numpy>=2.2.5; python_version >= "3.9"
+numpy==1.24.4; python_version < "3.9"
 
 # --- Messaging ---
 kafka-python-ng>=2.2.3
 
 # --- Storage ---
-minio>=7.2.15
+minio>=7.2.15; python_version >= "3.9"
+minio==7.2.10; python_version < "3.9"
 psycopg2-binary>=2.9.10
-redis==7.4.0
+redis==7.4.0; python_version >= "3.9"
+redis==6.1.1; python_version < "3.9"
 elasticsearch==8.18.0
 
 # --- Machine Learning ---
-scikit-learn>=1.6.1
+# scikit-learn powers the anomaly fallback and is always required.
+scikit-learn>=1.6.1; python_version >= "3.9"
+scikit-learn==1.3.2; python_version < "3.9"
+# darts (N-BEATS/LSTM), pyod (AutoEncoder) and torch require Python 3.10-3.12.
+# On other interpreters the ML job falls back to naive/IsolationForest.
+# torch>=2.3 is required for NumPy 2.x ABI compatibility (torch<2.3 crashes on import
+# under numpy>=2.2.5 with "Failed to initialize NumPy: _ARRAY_API not found").
+darts>=0.27.0; python_version >= "3.10" and python_version < "3.13"
+pyod>=1.1.0; python_version >= "3.10" and python_version < "3.13"
+torch>=2.3.0,<2.6; python_version >= "3.10" and python_version < "3.13"
 
 # --- Dashboard & Visualization ---
-streamlit>=1.45.1
-plotly>=6.1.0
+streamlit>=1.45.1; python_version >= "3.9"
+streamlit==1.29.0; python_version < "3.9"
+plotly>=6.1.0; python_version >= "3.9"
+plotly==5.22.0; python_version < "3.9"
+
+# --- Testing ---
+pytest>=8.0.0
 
 # --- Utilities ---
-python-dotenv>=1.1.0
-faker>=37.3.0
+python-dotenv>=1.1.0; python_version >= "3.9"
+python-dotenv==1.0.1; python_version < "3.9"
+faker>=37.3.0; python_version >= "3.9"
+faker==19.13.0; python_version < "3.9"
 requests>=2.32.0
