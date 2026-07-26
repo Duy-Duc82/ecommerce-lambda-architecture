@@ -36,6 +36,12 @@ MINIO_BUCKET_BRONZE: str = os.getenv("MINIO_BUCKET_BRONZE", "ecommerce-bronze")
 MINIO_BUCKET_SILVER: str = os.getenv("MINIO_BUCKET_SILVER", "ecommerce-silver")
 MINIO_BUCKET_GOLD: str = os.getenv("MINIO_BUCKET_GOLD", "ecommerce-gold")
 
+MINIO_BUCKETS: dict[str, str] = {
+    "bronze": MINIO_BUCKET_BRONZE,
+    "silver": MINIO_BUCKET_SILVER,
+    "gold": MINIO_BUCKET_GOLD,
+}
+
 # "s3a" uses MinIO; "local" writes parquet under DATA_LAKE_LOCAL_ROOT (tests/dev).
 DATA_LAKE_MODE: str = os.getenv("DATA_LAKE_MODE", "local").lower()
 DATA_LAKE_LOCAL_ROOT: Path = Path(
@@ -45,16 +51,11 @@ DATA_LAKE_LOCAL_ROOT: Path = Path(
 
 def data_lake_uri(zone: str, dataset: str = "") -> str:
     """Return the URI for a medallion-zone dataset (S3A or local file)."""
-    buckets = {
-        "bronze": MINIO_BUCKET_BRONZE,
-        "silver": MINIO_BUCKET_SILVER,
-        "gold": MINIO_BUCKET_GOLD,
-    }
     zone_name = zone.lower()
-    if zone_name not in buckets:
+    if zone_name not in MINIO_BUCKETS:
         raise ValueError(f"Unknown data-lake zone: {zone}")
     if DATA_LAKE_MODE == "s3a":
-        base = f"s3a://{buckets[zone_name]}"
+        base = f"s3a://{MINIO_BUCKETS[zone_name]}"
     else:
         base = (DATA_LAKE_LOCAL_ROOT / zone_name).resolve().as_uri()
     suffix = dataset.strip("/")
@@ -91,6 +92,24 @@ REDIS_DB: int = int(os.getenv("REDIS_DB", "0"))
 ES_HOST: str = os.getenv("ES_HOST", "http://localhost:9200")
 ES_INDEX_EVENTS: str = os.getenv("ES_INDEX_EVENTS", "ecommerce-events")
 ES_INDEX_METRICS: str = os.getenv("ES_INDEX_METRICS", "ecommerce-metrics")
+
+# ============================================================
+# CRAWLER — multi-site product/price snapshots (separate from behavior events;
+# a crawler can only observe public catalog/price state, not real user
+# view/cart/purchase behavior — see config.schema price-snapshot contract)
+# ============================================================
+KAFKA_TOPIC_PRICE_SNAPSHOTS: str = os.getenv(
+    "KAFKA_TOPIC_PRICE_SNAPSHOTS", "ecommerce_price_snapshots"
+)
+CRAWL_REQUEST_DELAY_SECONDS: float = float(os.getenv("CRAWL_REQUEST_DELAY_SECONDS", "2.0"))
+CRAWL_JITTER_SECONDS: float = float(os.getenv("CRAWL_JITTER_SECONDS", "1.0"))
+CRAWL_USER_AGENT: str = os.getenv(
+    "CRAWL_USER_AGENT", "EcommercePriceResearchBot/0.1 (+thesis project; rate-limited)"
+)
+# Comma-separated Tiki category ids, e.g. "1846,1789".
+TIKI_CATEGORIES: list[str] = [
+    c.strip() for c in os.getenv("TIKI_CATEGORIES", "1846").split(",") if c.strip()
+]
 
 # ============================================================
 # PATHS

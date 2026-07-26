@@ -1,0 +1,42 @@
+{
+  "data": [
+    {
+      "id": 279212151,
+      "name": "MacBook Neo A18 Pro",
+      "price": 16990000,
+      "list_price": 0,
+      "original_price": 18990000,
+      "brand_name": "Apple",
+      "sku": "4718062207806",
+      "discount": 2000000,
+      "discount_rate": 11,
+      "rating_average": 5,
+      "review_count": 4,
+      "quantity_sold": {"text": "Đã bán 14", "value": 14},
+      "url_key": "macbook-neo-a18-pro",
+      "thumbnail_url": "https://salt.tikicdn.com/example.jpg",
+      "seller_id": 1,
+      "availability": 1,
+      "shippable": true,
+      "variant": false
+    },
+    {
+      "id": 279212999,
+      "name": "Tai nghe khong day",
+      "price": 199000,
+      "list_price": 299000,
+      "brand_name": "",
+      "rating_average": 4.2,
+      "review_count": 0,
+      "url_key": "tai-nghe-khong-day",
+      "seller_id": 42,
+      "availability": 1,
+      "shippable": true
+    },
+    {
+      "id": null,
+      "name": "Missing id, must be rejected",
+      "price": 10000
+    }
+  ]
+}
