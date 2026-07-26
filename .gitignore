@@ -5,4 +5,6 @@ data_kaggle/
 checkpoints/
 logs/
 data_lake_raw/
+lakehouse/
+data.zip
 .env

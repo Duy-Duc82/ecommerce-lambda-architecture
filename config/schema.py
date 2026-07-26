@@ -102,3 +102,74 @@ def to_wire(event: dict[str, Any]) -> dict[str, Any]:
     if isinstance(wire.get("event_time"), datetime):
         wire["event_time"] = wire["event_time"].isoformat()
     return wire
+
+
+# ---- Price-snapshot contract (crawler layer) --------------------------------
+#
+# A crawler cannot observe real user behavior (view/cart/purchase) — that data
+# only exists inside the platform being crawled. What a crawler *can* see is
+# the public catalog/price state at a point in time, so this is a deliberately
+# separate contract, not a bolt-on to CANONICAL_FIELDS/EVENT_TYPES above.
+
+PRICE_SNAPSHOT_FIELDS = [
+    "snapshot_time",
+    "site",
+    "product_id",       # site-scoped id; not comparable across sites without a
+                         # separate product-matching step (out of scope for now)
+    "product_name",
+    "category_path",
+    "brand",
+    "price",
+    "list_price",
+    "currency",
+    "rating",
+    "review_count",
+    "seller_name",
+    "in_stock",
+    "url",
+]
+
+
+def normalize_price_snapshot(raw: dict[str, Any]) -> dict[str, Any]:
+    """Return one canonical price snapshot from a site-adapter's parsed output."""
+    snapshot_time = _parse_event_time(raw.get("snapshot_time") or datetime.now(timezone.utc))
+
+    def _num(value: Any) -> float | None:
+        return float(value) if value not in (None, "") else None
+
+    snapshot = {
+        "snapshot_time": snapshot_time,
+        "site": str(raw.get("site") or "").strip().lower(),
+        "product_id": str(raw.get("product_id") or "").strip(),
+        "product_name": str(raw.get("product_name") or "").strip(),
+        "category_path": str(raw.get("category_path") or "").strip(),
+        "brand": str(raw.get("brand") or "").strip(),
+        "price": _num(raw.get("price")),
+        "list_price": _num(raw.get("list_price")),
+        "currency": str(raw.get("currency") or "VND").strip(),
+        "rating": _num(raw.get("rating")),
+        "review_count": int(raw["review_count"]) if raw.get("review_count") not in (None, "") else None,
+        "seller_name": str(raw.get("seller_name") or "").strip(),
+        "in_stock": bool(raw.get("in_stock", True)),
+        "url": str(raw.get("url") or "").strip(),
+    }
+    validate_price_snapshot(snapshot)
+    return snapshot
+
+
+def validate_price_snapshot(snapshot: dict[str, Any]) -> bool:
+    """Raise ValueError if the price snapshot violates the contract."""
+    if not isinstance(snapshot.get("snapshot_time"), datetime):
+        raise ValueError("snapshot_time must be a datetime")
+    for field in ("site", "product_id"):
+        if not snapshot.get(field):
+            raise ValueError(f"missing required field: {field}")
+    price = snapshot.get("price")
+    if price is None:
+        raise ValueError("price is required")
+    if price < 0:
+        raise ValueError("price must be non-negative")
+    list_price = snapshot.get("list_price")
+    if list_price is not None and list_price < 0:
+        raise ValueError("list_price must be non-negative")
+    return True

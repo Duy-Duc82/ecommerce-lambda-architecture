@@ -2,7 +2,15 @@ from datetime import datetime
 
 import pytest
 
-from config.schema import CANONICAL_FIELDS, normalize_event, to_wire, validate_event
+from config.schema import (
+    CANONICAL_FIELDS,
+    PRICE_SNAPSHOT_FIELDS,
+    normalize_event,
+    normalize_price_snapshot,
+    to_wire,
+    validate_event,
+    validate_price_snapshot,
+)
 
 
 def test_normalize_event_maps_kaggle_row_to_canonical():
@@ -47,3 +55,34 @@ def test_to_wire_serializes_event_time():
     wire = to_wire(event)
     assert isinstance(wire["event_time"], str)
     assert wire["event_time"].startswith("2019-10-01T08:30:00")
+
+
+def test_normalize_price_snapshot_maps_crawler_output_to_canonical():
+    snapshot = normalize_price_snapshot({
+        "site": "Tiki",
+        "product_id": "279212151",
+        "product_name": "MacBook Neo A18 Pro",
+        "category_path": "1846",
+        "brand": "Apple",
+        "price": 16990000,
+        "list_price": 18990000,
+        "rating": 5,
+        "review_count": 4,
+        "seller_name": "seller:1",
+        "in_stock": True,
+        "url": "https://tiki.vn/macbook-neo-a18-pro-p279212151.html",
+    })
+    assert set(snapshot.keys()) == set(PRICE_SNAPSHOT_FIELDS)
+    assert snapshot["site"] == "tiki"
+    assert snapshot["price"] == 16990000.0
+    assert snapshot["currency"] == "VND"
+
+
+def test_validate_price_snapshot_rejects_missing_id_and_negative_price():
+    with pytest.raises(ValueError):
+        validate_price_snapshot({
+            "snapshot_time": datetime.now(), "site": "tiki", "product_id": "",
+            "price": 10.0, "list_price": None,
+        })
+    with pytest.raises(ValueError):
+        normalize_price_snapshot({"site": "tiki", "product_id": "p1", "price": -5})
