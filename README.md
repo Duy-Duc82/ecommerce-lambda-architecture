@@ -5,30 +5,93 @@ event contract feeds a *speed path* (low-latency, approximate) and a *batch path
 (accurate, replayable, dimensionally modelled), each with its own serving store
 and its own BI surface.
 
-The platform is deliberately **scope-honest**. The primary source is the public
-Kaggle *Multi-Category Store* behavior dataset, which contains exactly three
+The platform is deliberately **scope-honest**. The source contains exactly three
 facts — product **views**, **cart** additions and **purchases** — plus users,
 products, categories and sessions. There are no orders, payments, reviews, fraud
-signals or geography in the source, and no layer of this system invents them.
-A second, independent source (a multi-site price crawler) was added later with
-its own contract, because a crawler can observe public catalog/price state but
-*cannot* observe real user behavior.
+signals or geography in the data, and no layer of this system invents them.
 
 ---
 
-## 1. Architecture at a glance
+## 1. Data source
+
+**Kaggle — [eCommerce behavior data from multi-category store](https://www.kaggle.com/datasets/mkechinov/ecommerce-behavior-data-from-multi-category-store)**
+(published by `mkechinov`) — real clickstream from a large multi-category online
+store, not synthetic data.
+
+### Volume and coverage
+
+Measured directly on the local copy of the files, not quoted from the dataset page:
+
+| File | Rows | Size | Period covered |
+|---|---:|---:|---|
+| `2019-Oct.csv` | **42,448,764** | 5.67 GB | 2019-10-01 00:00:00 → 2019-10-31 23:59:59 UTC |
+| `2019-Nov.csv` | **67,501,979** | 9.01 GB | 2019-11-01 00:00:00 → 2019-11-30 23:59:59 UTC |
+| **Total** | **109,950,743** | **≈ 14.7 GB** | 61 consecutive days |
+
+```bash
+# how the figures above were obtained
+awk -F, 'NR>1{n++; t[$2]++} END{printf "TOTAL=%d\n", n; for (k in t) printf "%s=%d\n", k, t[k]}' 2019-Oct.csv
+```
+
+### Schema (9 columns, exactly as shipped)
+
+```text
+event_time,event_type,product_id,category_id,category_code,brand,price,user_id,user_session
+2019-10-01 00:00:00 UTC,view,44600062,2103807459595387724,,shiseido,35.79,541312140,72d76fde-8bb3-4e00-8c23-a032dfed738c
+```
+
+Note the empty `category_code` in that very first row — missing category codes,
+missing brands and a dotted-hierarchy category format are all handled explicitly
+by the pipeline rather than assumed away.
+
+### Event distribution — the analytical challenge (`2019-Oct.csv`)
+
+| `event_type` | Rows | Share |
+|---|---:|---:|
+| `view` | 40,779,399 | 96.07 % |
+| `cart` | 926,516 | 2.18 % |
+| `purchase` | 742,849 | 1.75 % |
+
+This ~55 : 1 view-to-purchase imbalance is precisely what makes the funnel worth
+modelling, and it is why the batch layer computes conversion as **same-day
+population ratios** over distinct users rather than naive event ratios.
+
+### Why this dataset drives the design
+
+- **Scale forces real distributed processing.** 42 M rows in a single monthly
+  file rules out a pandas-in-memory approach; Spark and a partitioned lake are a
+  requirement, not decoration.
+- **Its grain is one behavioral event.** One `purchase` row is one purchase
+  **event/item** — *never* an order. Every metric in this repository respects
+  that: `revenue` is the sum of `price` over purchase events and is never
+  presented as an order metric.
+- **`user_session` is source-provided**, so sessionization is a fact of the data,
+  not a heuristic this project invented.
+
+### Getting the data
+
+The CSVs are far too large for Git and are excluded via `.gitignore`. Download
+from the link above, unzip, and place the files at:
+
+```text
+data/data_kaggle/2019-Oct.csv
+data/data_kaggle/2019-Nov.csv
+```
+
+A small fixture (`tests/fixtures/`) ships with the repo, so the test suite and a
+smoke run work without downloading anything.
+
+---
+
+## 2. Architecture at a glance
 
 ```mermaid
 flowchart TB
-    subgraph SRC["Sources"]
-        K[Kaggle CSV<br/>behavioral events]
-        C["Multi-site crawler<br/>(Tiki — live)"]
-    end
+    SRC["Kaggle CSV — 42.4M behavioral events"]
 
     subgraph ING["Ingestion"]
-        P["producer.py<br/>normalize → canonical contract"]
-        R["crawler/runner.py<br/>normalize → price-snapshot contract"]
-        KAFKA{{"Kafka (KRaft)<br/>ecommerce_events · ecommerce_price_snapshots · *.dlq"}}
+        P["producer.py<br/>normalize → canonical contract<br/>rate-limited replay"]
+        KAFKA{{"Kafka (KRaft)<br/>topic: ecommerce_events"}}
     end
 
     subgraph SPEED["Speed path — seconds"]
@@ -48,15 +111,13 @@ flowchart TB
         SUP["Superset"]
     end
 
-    K --> P --> KAFKA
-    C --> R --> KAFKA
-    R -.raw JSON.-> LAKE
+    SRC --> P --> KAFKA
     KAFKA --> SS --> ES & RD
     KAFKA --> ESI --> ES
     ES --> KB
-    K --> WJ --> LAKE
+    SRC --> WJ --> LAKE
     WJ --> QG -->|pass| PG
-    QG -->|fail| PG
+    QG -->|fail — publish blocked| PG
     PG --> ML --> PG --> SUP
 ```
 
@@ -71,7 +132,7 @@ flowchart TB
 
 ---
 
-## 2. Technology stack
+## 3. Technology stack
 
 | Concern | Choice | Version |
 |---|---|---|
@@ -88,39 +149,38 @@ flowchart TB
 
 ---
 
-## 3. What each layer actually does
+## 4. What each layer actually does
 
-### 3.0 Contract & configuration layer — `config/`
+### 4.1 Contract & configuration layer — `config/`
 
-The foundation the rest of the system is built on: **one contract per data
-domain, one place for runtime configuration.**
+The foundation the rest of the system is built on: **one contract, one place for
+runtime configuration.**
 
-- **`schema.py` — canonical behavioral-event contract.** Nine fields
+- **`schema.py` — the canonical event contract.** Nine fields
   (`event_time, event_type, user_id, user_session, product_id, category_id,
-  category_code, brand, price`). `normalize_event()` maps raw Kaggle columns *and*
+  category_code, brand, price`). `normalize_event()` maps raw source columns *and*
   already-canonical keys onto that shape, resolving event-type aliases
-  (`page_view → view`, `add_to_cart → cart`). `validate_event()` rejects
-  unsupported event types, missing identifiers and negative prices.
+  (`page_view → view`, `add_to_cart → cart`) and defaulting a missing
+  `category_code` to `unknown` rather than dropping the row.
+  `validate_event()` rejects unsupported event types, missing identifiers and
+  negative prices.
   The producer, the speed layer and the ES indexer all import this module, so
   **the layers cannot drift apart on event shape.** The Spark batch job
   implements the identical rules column-wise for scale, and a dedicated test
   pins the two implementations to the same behavior.
-- **`schema.py` — price-snapshot contract (crawler).** Fourteen fields
-  (`snapshot_time, site, product_id, price, list_price, rating, in_stock, …`),
-  kept **deliberately separate** from the behavioral contract rather than bolted
-  onto it — the two describe fundamentally different observations.
 - **`settings.py`.** All runtime configuration is env-driven with safe local
   defaults, so identical code runs on a laptop, inside Docker and in CI.
   `DATA_LAKE_MODE` switches every lake write between local Parquet (dev/tests)
   and MinIO S3A (Docker) through a single `data_lake_uri(zone, dataset)` helper.
 
-### 3.1 Ingestion layer — `data_ingestion/`
+### 4.2 Ingestion layer — `data_ingestion/`
 
-- **`producer.py`** streams the Kaggle CSV into Kafka at a configurable rate
-  (`--eps`), with bounded connection retries (5 attempts), `acks=all`, batching
-  and partition keying by `user_session` (falling back to `user_id`) so all events
-  of one session land on the same partition and stay ordered. Supports
-  `--loop` for continuous replay and `--test-mode` for a dry print.
+- **`producer.py`** streams the CSV into Kafka at a configurable rate (`--eps`),
+  with bounded connection retries (5 attempts), `acks=all`, batching and
+  partition keying by `user_session` (falling back to `user_id`) so all events of
+  one session land on the same partition and stay ordered. Rows the contract
+  rejects are dropped at the edge rather than being carried downstream.
+  Supports `--loop` for continuous replay and `--test-mode` for a dry print.
 - **`es_indexer.py`** is a separate consumer that bulk-indexes *raw* events into
   `ecommerce-events` (batch size 200, dedicated consumer group, deterministic
   `event_id`) so Kibana can drill down to individual events. This is intentionally
@@ -129,39 +189,7 @@ domain, one place for runtime configuration.**
 - **`schemas.py`** exposes the canonical contract as a Spark `StructType` used by
   the streaming reader.
 
-### 3.2 Acquisition layer (multi-site crawler) — `crawler/`, `common/`
-
-A second, live data source, engineered to the same standards as the rest of the
-platform rather than as a throwaway script.
-
-- **`crawler/base.py` — `SiteCrawler` (Template Method).** The base class owns
-  everything every site must get right *identically*: **robots.txt compliance**
-  (fail-closed — an unreadable robots.txt is treated as *disallowed*),
-  **rate limiting with jitter** (default 2 s ± 1 s), a configurable research
-  user-agent, and normalization/validation via the price-snapshot contract.
-  Site adapters implement only `fetch_listing()` and `parse_product()`.
-- **Error isolation at three levels.** A failed category fetch does not abort the
-  site; a single unparseable product does not abort the category; a failed site
-  does not abort the other sites. Every rejection is *yielded* as a quarantined
-  record rather than swallowed.
-- **`crawler/sites/tiki.py`** — Tiki adapter over the public listing JSON API.
-  Field mapping was **verified against a live response**; because Tiki publishes
-  no stable API contract, a shape change fails loudly through
-  `normalize_price_snapshot()` (missing `product_id`/`price`) instead of silently
-  corrupting data. Known gaps (e.g. seller display name requires an extra
-  per-product call that would blow the rate-limit budget) are documented in code.
-- **`crawler/runner.py`** — CLI (`python -m crawler.runner --site tiki [--dry-run]`)
-  that writes the untouched raw JSON to Bronze (`crawl_raw/{site}/{date}/…`) *and*
-  publishes the normalized snapshot to Kafka, so re-parsing history never requires
-  re-crawling.
-- **`common/dlq.py`** — every rejected record goes to `<topic>.dlq` with its error
-  type, message and original payload. The DLQ publisher **never raises**: a DLQ
-  outage must not take down the ingestion path it protects.
-- **`common/object_store.py`** — plain-Python Bronze writes that mirror the
-  local/S3A duality of `data_lake_uri()`, so a crawler does not need a Spark
-  session just to land a JSON blob.
-
-### 3.3 Speed layer — `speed_layer/`
+### 4.3 Speed layer — `speed_layer/`
 
 Spark Structured Streaming over the canonical topic:
 
@@ -178,7 +206,7 @@ Spark Structured Streaming over the canonical topic:
   `rt:kpi:revenue_series` list (last 240 points).
 - Checkpointing is configured for restart-safe offsets.
 
-### 3.4 Batch layer — `batch_layer/warehouse_job.py`
+### 4.4 Batch layer — `batch_layer/warehouse_job.py`
 
 The heart of the project: a Spark **EtLT** pipeline composed of small, pure,
 independently testable stages orchestrated by `run_warehouse()`.
@@ -219,7 +247,7 @@ view→cart, cart→purchase, conversion and abandonment rates), `product_daily`
 `converted` / `abandoned_cart` / `browsing`) and `daily_revenue` — the feature
 table consumed by the ML job.
 
-### 3.5 Batch ML layer — `batch_layer/analytics/`, `ml_job.py`
+### 4.5 Batch ML layer — `batch_layer/analytics/`, `ml_job.py`
 
 Two production concerns modelled as extensible strategies, not as notebook code.
 
@@ -236,9 +264,10 @@ Two production concerns modelled as extensible strategies, not as notebook code.
   **RevIN** for level/variance shift. Each strategy declares which covariate kind
   its Darts class actually supports (`past` vs `future`), resolved through a
   single helper so `fit()` and `predict()` cannot disagree.
-- **Feature engineering under data scarcity.** Cyclical day-of-week
-  (`sin`/`cos`) plus a weekend flag squeeze extra signal out of the ~30-day
-  window rather than demanding a longer history.
+- **Feature engineering under data scarcity.** The daily aggregation of a single
+  monthly file yields only ~31 points, so cyclical day-of-week (`sin`/`cos`) plus
+  a weekend flag squeeze extra signal out of the existing window rather than
+  demanding a longer history.
 - **Honest evaluation.** `backtest()` runs a **rolling-origin (walk-forward)**
   evaluation — expanding train window, origin moved forward per fold — and
   averages MAE / MSE / RMSE / MAPE per model across folds, degrading to a single
@@ -253,7 +282,7 @@ Two production concerns modelled as extensible strategies, not as notebook code.
   `IsolationForest`, and the active backend is reported. **The pipeline always
   completes and always says what it actually ran.**
 
-### 3.6 Serving layer — `serving_layer/`, `batch_layer/postgres_cache.py`
+### 4.6 Serving layer — `serving_layer/`, `batch_layer/postgres_cache.py`
 
 Storage access sits behind small, intention-revealing gateways rather than being
 scattered across jobs.
@@ -267,7 +296,7 @@ scattered across jobs.
 - `redis_cache.py` — typed read helpers over `rt:kpi:*` for a low-latency KPI/API
   surface.
 
-### 3.7 Presentation layer — `display/`
+### 4.7 Presentation layer — `display/`
 
 Dashboards are **provisioned as code**, not clicked together by hand.
 
@@ -280,7 +309,7 @@ Dashboards are **provisioned as code**, not clicked together by hand.
   over Lens **deliberately**: their saved-object schema is stable across Kibana
   versions, avoiding migration-sensitive internal state.
 
-### 3.8 Infrastructure & operations
+### 4.8 Infrastructure & operations
 
 - **`docker-compose.yml`** — the full stack with health checks and
   `depends_on: service_healthy` conditions so start-up ordering is real rather
@@ -296,7 +325,7 @@ Dashboards are **provisioned as code**, not clicked together by hand.
   `-BuildWarehouseImage`, …), plus `smoke_fullstack.ps1` and
   `validate_warehouse.sql` for post-run verification.
 
-### 3.9 Quality assurance — `tests/`
+### 4.9 Quality assurance — `tests/`
 
 **27 tests, all passing** (`pytest tests/ -q`), covering the parts most likely to
 break silently:
@@ -304,17 +333,16 @@ break silently:
 | Area | What is asserted |
 |---|---|
 | Canonical contract | Normalization, alias mapping, validation rules, wire serialization |
-| Ingestion contract | The Kaggle mapping preserves **only** facts the source actually contains |
+| Ingestion contract | The source mapping preserves **only** facts the data actually contains |
 | Spark warehouse transforms | Normalization preserves source grain · star schema has **no orphans** · funnel and session marts are correct |
 | Speed layer | Windowed aggregation by event type |
-| Crawler | robots.txt gating, throttling, per-record error isolation, adapter parsing against a captured fixture |
-| Object store | Local and S3A path resolution |
 | ML | Forecast shape per strategy, backtest metrics per model, anomaly labelling |
 | Cache gateway | Prediction/anomaly write contract |
+| Lake I/O | Local and S3A path resolution |
 
 ---
 
-## 4. Data model
+## 5. Data model
 
 Full detail — canonical contract, medallion zones, star-schema ERD, mart grains,
 ML output tables and audit tables — lives in
@@ -333,11 +361,12 @@ population ratios, **not** ordered-path attribution.
 
 ---
 
-## 5. Quick start
+## 6. Quick start
 
 Requires Docker Desktop (≥ 8 GB RAM) and the Kaggle CSV at
-`data/data_kaggle/2019-Oct.csv`. Runtime configuration is read from `.env` at the
-repository root; every value has a working local default in `config/settings.py`.
+`data/data_kaggle/2019-Oct.csv` (see §1). Runtime configuration is read from
+`.env` at the repository root; every value has a working local default in
+`config/settings.py`.
 
 ```powershell
 # Full stack: infra + realtime + producer + batch EtLT + ML + BI
@@ -346,8 +375,8 @@ repository root; every value has a working local default in `config/settings.py`
 # Batch + ML + BI only (warehouse image already built)
 .\scripts\start_all.ps1 -RunBatch -RefreshBI -Source .\data\data_kaggle\2019-Oct.csv
 
-# Crawler (live Tiki listing API; --dry-run performs no Kafka/MinIO writes)
-.\.venv\Scripts\python.exe -m crawler.runner --site tiki --dry-run
+# Smoke run on the bundled fixture — no dataset download required
+.\scripts\start_all.ps1 -RunBatch -Source .\tests\fixtures\events.csv
 
 # Test suite
 .\.venv\Scripts\python.exe -m pytest tests\ -q
@@ -364,23 +393,16 @@ repository root; every value has a working local default in `config/settings.py`
 
 ---
 
-## 6. Repository layout
+## 7. Repository layout
 
 ```text
 config/
-  schema.py                 Canonical event contract + price-snapshot contract
+  schema.py                 Canonical event contract (normalize · validate · wire)
   settings.py               Env-driven runtime configuration (local ⇄ S3A)
-common/
-  dlq.py                    Dead-letter publishing shared by all ingestion paths
-  object_store.py           Spark-free Bronze writes (local ⇄ MinIO)
 data_ingestion/
   producer.py               Kaggle CSV → Kafka (canonical events)
   schemas.py                Spark StructType for the contract
   es_indexer.py             Kafka → Elasticsearch raw events
-crawler/
-  base.py                   SiteCrawler: robots.txt, rate limit, error isolation
-  sites/tiki.py             Tiki listing-API adapter (live-verified)
-  runner.py                 CLI: crawl → Bronze raw + Kafka + DLQ
 speed_layer/
   speed_layer.py            Structured Streaming → Elasticsearch + Redis
 batch_layer/
@@ -396,55 +418,6 @@ display/
   kibana/                   Kibana data views + speed dashboard
 docker/spark-warehouse/     Pinned Spark 3.5.1 batch image (JDBC + S3A jars)
 scripts/                    init_postgres.sql · start_all.ps1 · smoke & validation
-docs/                       ARCHITECTURE.md · DATA_MODEL.md · PROGRESS.md
-tests/                      Contract, Spark transform, streaming, crawler, ML tests
+docs/                       ARCHITECTURE.md · DATA_MODEL.md
+tests/                      Contract, Spark transform, streaming, ML tests
 ```
-
----
-
-## 7. Status & roadmap
-
-| # | Milestone | Status |
-|---|---|---|
-| — | Lambda core: ingestion, speed, batch EtLT, star schema, marts, quality gate, audit | ✅ Delivered |
-| — | Batch ML: N-BEATS + LSTM forecasting, AutoEncoder anomaly detection, rolling-origin backtest | ✅ Delivered |
-| — | BI: Superset + Kibana provisioned as code | ✅ Delivered |
-| 1 | Multi-site price crawler | 🔶 Tiki live-verified; Shopee/Lazada (Playwright) pending |
-| 2 | Ingestion hardening — retrofit DLQ into `producer.py` / `es_indexer.py` | ⏳ Planned |
-| 3 | Speed-layer hardening | ⏳ Planned |
-| 4 | Delta Lake gold zone + incremental processing + price warehouse job | ⏳ Planned |
-| 5 | ML maturity — MLflow tracking, prediction history, price-anomaly models | ⏳ Planned |
-| 6 | Orchestration — Airflow (LocalExecutor, reusing `postgres-dw`) | ⏳ Planned |
-| 7 | Serving API — FastAPI over the cache + Redis | ⏳ Planned |
-
-Detailed working state, decisions already settled and the exact resume point are
-tracked in **[docs/PROGRESS.md](docs/PROGRESS.md)**.
-
----
-
-## 8. Known limits (stated deliberately)
-
-- **Delivery semantics are at-least-once, not exactly-once.** `kafka-python-ng`
-  does not implement a true idempotent producer; the system compensates with
-  content-derived keys (`event_key`, deterministic ES document ids) that make
-  re-delivery harmless, plus an observable DLQ. The stronger claim is not made.
-- **The crawler is a research crawler.** It respects `robots.txt`, rate-limits
-  itself and identifies itself honestly. It does **not** attempt to evade blocking,
-  and it is not intended for large-scale extraction.
-- **Crawled `product_id` is site-scoped** — cross-site price comparison requires a
-  separate product-matching step, which is out of scope for the current cut.
-- **The real ML models require Python 3.10–3.12** (`darts`, `pyod`, `torch`).
-  On any other interpreter the job runs its documented fallbacks rather than
-  failing, and reports which backend was actually used.
-- **Sessionization is source-provided.** `user_session` comes from the dataset;
-  no session-stitching heuristic is applied.
-
----
-
-## 9. Dataset
-
-Kaggle — *eCommerce behavior data from multi-category store*. Columns:
-`event_time, event_type, product_id, category_id, category_code, brand, price,
-user_id, user_session`.
-
-One purchase row represents one **purchase event/item** — never an order.
