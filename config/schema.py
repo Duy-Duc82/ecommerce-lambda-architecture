@@ -14,6 +14,8 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
+from common.serialization import serialize_for_wire
+
 # ---- Canonical contract ----------------------------------------------------
 
 EVENT_TYPES = ("view", "cart", "purchase")
@@ -97,10 +99,10 @@ def validate_event(event: dict[str, Any]) -> bool:
 
 
 def to_wire(event: dict[str, Any]) -> dict[str, Any]:
-    """Serialize a canonical event for JSON transport over Kafka."""
-    wire = dict(event)
-    if isinstance(wire.get("event_time"), datetime):
-        wire["event_time"] = wire["event_time"].isoformat()
+    """Serialize a supported event mapping for JSON transport."""
+    wire = serialize_for_wire(event)
+    if not isinstance(wire, dict):
+        raise TypeError("event must serialize to a dictionary")
     return wire
 
 
