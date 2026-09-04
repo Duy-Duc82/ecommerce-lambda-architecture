@@ -9,6 +9,8 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
+from config.storage import active_profile
+
 _BASE_DIR = Path(__file__).resolve().parent.parent
 load_dotenv(_BASE_DIR / ".env")
 
@@ -43,6 +45,9 @@ MINIO_BUCKETS: dict[str, str] = {
 }
 
 # "s3a" uses MinIO; "local" writes parquet under DATA_LAKE_LOCAL_ROOT (tests/dev).
+# Kept for backward compatibility with docker-compose and scripts/*.ps1; which
+# object store an "s3a" lake actually points at is now chosen by
+# DATA_LAKE_PROFILE — see config/storage.py.
 DATA_LAKE_MODE: str = os.getenv("DATA_LAKE_MODE", "local").lower()
 DATA_LAKE_LOCAL_ROOT: Path = Path(
     os.getenv("DATA_LAKE_LOCAL_ROOT", str(_BASE_DIR / "data" / "lakehouse"))
@@ -54,7 +59,7 @@ def data_lake_uri(zone: str, dataset: str = "") -> str:
     zone_name = zone.lower()
     if zone_name not in MINIO_BUCKETS:
         raise ValueError(f"Unknown data-lake zone: {zone}")
-    if DATA_LAKE_MODE == "s3a":
+    if not active_profile().is_local:
         base = f"s3a://{MINIO_BUCKETS[zone_name]}"
     else:
         base = (DATA_LAKE_LOCAL_ROOT / zone_name).resolve().as_uri()
@@ -103,12 +108,22 @@ KAFKA_TOPIC_PRICE_SNAPSHOTS: str = os.getenv(
 )
 CRAWL_REQUEST_DELAY_SECONDS: float = float(os.getenv("CRAWL_REQUEST_DELAY_SECONDS", "2.0"))
 CRAWL_JITTER_SECONDS: float = float(os.getenv("CRAWL_JITTER_SECONDS", "1.0"))
+CRAWL_HTTP_TIMEOUT_SECONDS: float = float(os.getenv("CRAWL_HTTP_TIMEOUT_SECONDS", "10"))
 CRAWL_USER_AGENT: str = os.getenv(
     "CRAWL_USER_AGENT", "EcommercePriceResearchBot/0.1 (+thesis project; rate-limited)"
 )
-# Comma-separated Tiki category ids, e.g. "1846,1789".
+# Pages requested per category before moving on. The adapter stops earlier when
+# the site reports its last page, so this is a safety ceiling, not a target.
+CRAWL_MAX_PAGES: int = int(os.getenv("CRAWL_MAX_PAGES", "50"))
+# Comma-separated Tiki category ids, e.g. "1846,1789". The default nine were
+# each probed live (2026-08-16): all return 200; seven cap at total=2000
+# (50 pages), 1789 has 116 products and 17166 has 307.
 TIKI_CATEGORIES: list[str] = [
-    c.strip() for c in os.getenv("TIKI_CATEGORIES", "1846").split(",") if c.strip()
+    c.strip()
+    for c in os.getenv(
+        "TIKI_CATEGORIES", "1846,8322,1882,1520,931,915,4384,1789,17166"
+    ).split(",")
+    if c.strip()
 ]
 
 # ============================================================

@@ -13,7 +13,8 @@
       "rating_average": 5,
       "review_count": 4,
       "quantity_sold": {"text": "Đã bán 14", "value": 14},
-      "url_key": "macbook-neo-a18-pro",
+      "url_key": "macbook-neo-a18-pro-p279212151",
+      "primary_category_path": "1/2/1846/8095/2458",
       "thumbnail_url": "https://salt.tikicdn.com/example.jpg",
       "seller_id": 1,
       "availability": 1,
@@ -28,7 +29,7 @@
       "brand_name": "",
       "rating_average": 4.2,
       "review_count": 0,
-      "url_key": "tai-nghe-khong-day",
+      "url_key": "tai-nghe-khong-day-p279212999",
       "seller_id": 42,
       "availability": 1,
       "shippable": true
