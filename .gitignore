@@ -8,3 +8,11 @@ data_lake_raw/
 lakehouse/
 data.zip
 .env
+
+# Large local artifacts that must never enter git history. archive.zip is the
+# 4.6 GB Kaggle dataset and the installer is 655 MB; `git add -A` in this repo
+# will try to compress them into loose objects and fill the disk.
+archive.zip
+*.zip
+Docker Desktop Installer.exe
+*.exe
