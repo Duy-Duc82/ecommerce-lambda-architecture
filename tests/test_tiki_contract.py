@@ -295,3 +295,79 @@ def test_reparsing_same_saved_bytes_is_equal():
                 (item.record_index, item.stage, item.platform_listing_id, item.error_message)
                 for item in second.rejections
             ]
+
+
+# --- constructor clock injection --------------------------------------------
+# The tests above build the adapter with TikiCrawler.__new__(), which skips
+# __init__ entirely. That left the real construction path — the one
+# crawler/runner.py uses — untested, and it silently dropped the injected
+# clock: `clock` was popped from kwargs before super().__init__() ran, so the
+# base constructor received clock=None and overwrote it.
+
+
+def _constructed_adapter(monkeypatch, *, clock):
+    """Build a TikiCrawler through its real __init__ with no network."""
+    import crawler.base as base
+
+    class _NoRobots:
+        status_code = 404
+        text = ""
+
+    monkeypatch.setattr(base.requests, "get", lambda *a, **k: _NoRobots())
+    return TikiCrawler(categories=["1846"], max_pages=1, clock=clock)
+
+
+def test_constructor_honours_the_injected_clock(monkeypatch):
+    adapter = _constructed_adapter(monkeypatch, clock=lambda: FETCHED)
+    assert adapter._clock is not None, "the injected clock must survive __init__"
+    assert adapter._now() == FETCHED
+
+
+def test_constructed_adapter_stamps_fetched_at_from_the_injected_clock(monkeypatch):
+    adapter = _constructed_adapter(monkeypatch, clock=lambda: FETCHED)
+    adapter._monotonic = lambda: 1.0
+    adapter._http_get = lambda *a, **k: SimpleNamespace(
+        content=FIXTURE.read_bytes(),
+        status_code=200,
+        headers={"Content-Type": "application/json"},
+        url=adapter.request_url("1846", 1),
+    )
+    result = adapter.fetch_listing_page(
+        ListingPageRequest(
+            marketplace_code="tiki",
+            marketplace_id="marketplace-tiki",
+            target="1846",
+            page=1,
+        )
+    )
+    assert result.fetched_at == FETCHED
+
+
+def test_constructor_still_accepts_http_get_and_monotonic(monkeypatch):
+    sentinel = object()
+    adapter = _constructed_adapter(monkeypatch, clock=lambda: FETCHED)
+    assert adapter._http_get is None and callable(adapter._monotonic)
+    import crawler.base as base
+
+    class _NoRobots:
+        status_code = 404
+        text = ""
+
+    monkeypatch.setattr(base.requests, "get", lambda *a, **k: _NoRobots())
+    injected = TikiCrawler(
+        categories=["1846"],
+        max_pages=1,
+        clock=lambda: FETCHED,
+        http_get=sentinel,
+        monotonic=lambda: 9.0,
+    )
+    assert injected._http_get is sentinel
+    assert injected._monotonic() == 9.0
+    assert injected._now() == FETCHED
+
+
+def test_no_clock_falls_back_to_wall_time(monkeypatch):
+    adapter = _constructed_adapter(monkeypatch, clock=None)
+    assert adapter._clock is None
+    first = adapter._now()
+    assert first.tzinfo is not None, "wall-clock fallback must stay timezone-aware"
