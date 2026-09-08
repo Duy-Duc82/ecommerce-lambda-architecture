@@ -123,3 +123,36 @@ CREATE TABLE IF NOT EXISTS audit.data_quality_result (
     checked_at              TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (run_id, check_name)
 );
+
+-- ============================================================
+-- PHASE 5 — speed-layer micro-batch audit
+-- ============================================================
+-- Primary key is (rule_version, batch_id): a re-run under a new rule version
+-- emits different change identities, so it must not collide with the history
+-- written under the old rules.
+CREATE TABLE IF NOT EXISTS audit.speed_micro_batch (
+    batch_id                BIGINT       NOT NULL,
+    rule_version            TEXT         NOT NULL,
+    started_at              TIMESTAMPTZ  NOT NULL,
+    completed_at            TIMESTAMPTZ  NOT NULL,
+    observations_in         INTEGER      NOT NULL,
+    detected                INTEGER      NOT NULL,
+    duplicates              INTEGER      NOT NULL,
+    out_of_order            INTEGER      NOT NULL,
+    conflicts               INTEGER      NOT NULL,
+    decode_failures         INTEGER      NOT NULL,
+    changes_published       INTEGER      NOT NULL,
+    changes_by_type         JSONB        NOT NULL DEFAULT '{}'::jsonb,
+    status                  TEXT         NOT NULL,
+    failure_stage           TEXT,
+    failure_message         TEXT,
+    PRIMARY KEY (rule_version, batch_id),
+    -- The only honest explanation of a gap between observations consumed and
+    -- changes emitted is that every record is accounted for.
+    CONSTRAINT speed_micro_batch_counts_reconcile CHECK (
+        observations_in = detected + duplicates + out_of_order + conflicts + decode_failures
+    )
+);
+
+CREATE INDEX IF NOT EXISTS idx_speed_micro_batch_started
+    ON audit.speed_micro_batch (started_at DESC);
