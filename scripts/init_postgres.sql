@@ -156,3 +156,318 @@ CREATE TABLE IF NOT EXISTS audit.speed_micro_batch (
 
 CREATE INDEX IF NOT EXISTS idx_speed_micro_batch_started
     ON audit.speed_micro_batch (started_at DESC);
+
+-- ============================================================
+-- PHASE 6 - marketplace Gold BI cache
+-- Superset reads <schema>; Spark lands in <staging_schema> and the
+-- publish step swaps every mart in one transaction.
+-- Money is NUMERIC, never DOUBLE PRECISION: a float here would make
+-- the published number disagree with the Decimal it came from.
+-- ============================================================
+CREATE SCHEMA IF NOT EXISTS marketplace_gold;
+CREATE SCHEMA IF NOT EXISTS marketplace_gold_staging;
+
+CREATE TABLE IF NOT EXISTS marketplace_gold.gold_run (
+    gold_run_id       TEXT         PRIMARY KEY,
+    as_of             TIMESTAMPTZ  NOT NULL,
+    window_days       INTEGER      NOT NULL,
+    rule_version      TEXT         NOT NULL,
+    started_at        TIMESTAMPTZ  NOT NULL,
+    completed_at      TIMESTAMPTZ,
+    observations_read BIGINT       NOT NULL DEFAULT 0,
+    quarantined_rows  BIGINT       NOT NULL DEFAULT 0,
+    status            TEXT         NOT NULL,
+    failure_stage     TEXT,
+    skipped_marts     JSONB        NOT NULL DEFAULT '{}'::jsonb
+);
+
+CREATE TABLE IF NOT EXISTS marketplace_gold.gold_assertion (
+    gold_run_id     TEXT        NOT NULL REFERENCES marketplace_gold.gold_run(gold_run_id),
+    assertion_name  TEXT        NOT NULL,
+    observed_value  TEXT        NOT NULL,
+    expectation     TEXT        NOT NULL,
+    status          TEXT        NOT NULL,
+    rule_version    TEXT        NOT NULL,
+    PRIMARY KEY (gold_run_id, assertion_name)
+);
+
+CREATE TABLE IF NOT EXISTS marketplace_gold.offer_current (
+    offer_id                             TEXT NOT NULL,
+    marketplace                          TEXT NOT NULL,
+    platform_listing_id                  TEXT NOT NULL,
+    seller_id                            TEXT,
+    product_title                        TEXT,
+    brand                                TEXT,
+    category_path                        TEXT,
+    source_url                           TEXT,
+    currency                             TEXT,
+    observation_id                       TEXT NOT NULL,
+    observed_at                          TIMESTAMPTZ NOT NULL,
+    current_price                        NUMERIC(38, 6),
+    list_price                           NUMERIC(38, 6),
+    rating_value                         NUMERIC(38, 6),
+    review_count                         BIGINT,
+    sold_count                           BIGINT,
+    availability                         TEXT,
+    freshness_status                     TEXT NOT NULL,
+    age_minutes                          BIGINT NOT NULL,
+    raw_uri                              TEXT,
+    gold_run_id                          TEXT NOT NULL,
+    as_of                                TIMESTAMPTZ NOT NULL,
+    rule_version                         TEXT NOT NULL,
+    PRIMARY KEY (gold_run_id, offer_id)
+);
+
+CREATE TABLE IF NOT EXISTS marketplace_gold.offer_price_history_daily (
+    offer_id                             TEXT NOT NULL,
+    observed_date                        DATE NOT NULL,
+    marketplace                          TEXT NOT NULL,
+    price_open                           NUMERIC(38, 6),
+    price_close                          NUMERIC(38, 6),
+    price_min                            NUMERIC(38, 6),
+    price_max                            NUMERIC(38, 6),
+    observation_count                    BIGINT NOT NULL,
+    gold_run_id                          TEXT NOT NULL,
+    as_of                                TIMESTAMPTZ NOT NULL,
+    rule_version                         TEXT NOT NULL,
+    PRIMARY KEY (gold_run_id, offer_id, observed_date)
+);
+
+CREATE TABLE IF NOT EXISTS marketplace_gold.offer_change_daily (
+    offer_id                             TEXT NOT NULL,
+    observed_date                        DATE NOT NULL,
+    marketplace                          TEXT NOT NULL,
+    price_changes                        BIGINT NOT NULL,
+    large_price_drops                    BIGINT NOT NULL,
+    availability_changes                 BIGINT NOT NULL,
+    availability_transitions_excluded    BIGINT NOT NULL,
+    counter_changes                      BIGINT NOT NULL,
+    max_abs_price_delta                  NUMERIC(38, 6),
+    avg_abs_price_delta                  NUMERIC(38, 6),
+    max_drop_percent                     NUMERIC(38, 6),
+    gold_run_id                          TEXT NOT NULL,
+    as_of                                TIMESTAMPTZ NOT NULL,
+    rule_version                         TEXT NOT NULL,
+    PRIMARY KEY (gold_run_id, offer_id, observed_date)
+);
+
+CREATE TABLE IF NOT EXISTS marketplace_gold.offer_freshness (
+    offer_id                             TEXT NOT NULL,
+    marketplace                          TEXT NOT NULL,
+    last_observation_at                  TIMESTAMPTZ NOT NULL,
+    last_observation_id                  TEXT NOT NULL,
+    age_minutes                          BIGINT NOT NULL,
+    freshness_status                     TEXT NOT NULL,
+    fresh_threshold_minutes              BIGINT NOT NULL,
+    stale_threshold_minutes              BIGINT NOT NULL,
+    gold_run_id                          TEXT NOT NULL,
+    as_of                                TIMESTAMPTZ NOT NULL,
+    rule_version                         TEXT NOT NULL,
+    PRIMARY KEY (gold_run_id, offer_id)
+);
+
+CREATE TABLE IF NOT EXISTS marketplace_gold.category_price_daily (
+    marketplace                          TEXT NOT NULL,
+    category_path                        TEXT NOT NULL,
+    observed_date                        DATE NOT NULL,
+    offer_count                          BIGINT NOT NULL,
+    observation_count                    BIGINT NOT NULL,
+    price_min                            NUMERIC(38, 6),
+    price_max                            NUMERIC(38, 6),
+    price_p25                            NUMERIC(38, 6),
+    price_median                         NUMERIC(38, 6),
+    price_p75                            NUMERIC(38, 6),
+    quantile_method                      TEXT NOT NULL,
+    quantile_accuracy                    BIGINT NOT NULL,
+    gold_run_id                          TEXT NOT NULL,
+    as_of                                TIMESTAMPTZ NOT NULL,
+    rule_version                         TEXT NOT NULL,
+    PRIMARY KEY (gold_run_id, marketplace, category_path, observed_date)
+);
+
+CREATE TABLE IF NOT EXISTS marketplace_gold.source_coverage_daily (
+    marketplace                          TEXT NOT NULL,
+    observed_date                        DATE NOT NULL,
+    offers_observed                      BIGINT NOT NULL,
+    observations                         BIGINT NOT NULL,
+    offers_missing                       BIGINT NOT NULL,
+    offers_stale                         BIGINT NOT NULL,
+    offers_without_seller                BIGINT NOT NULL,
+    rows_rejected                        BIGINT NOT NULL,
+    gold_run_id                          TEXT NOT NULL,
+    as_of                                TIMESTAMPTZ NOT NULL,
+    rule_version                         TEXT NOT NULL,
+    PRIMARY KEY (gold_run_id, marketplace, observed_date)
+);
+
+CREATE TABLE IF NOT EXISTS marketplace_gold.crawl_reliability_daily (
+    marketplace                          TEXT NOT NULL,
+    observed_date                        DATE NOT NULL,
+    requests                             BIGINT NOT NULL,
+    succeeded                            BIGINT NOT NULL,
+    failed                               BIGINT NOT NULL,
+    success_rate                         NUMERIC(38, 6),
+    p50_latency_ms                       BIGINT,
+    p95_latency_ms                       BIGINT,
+    errors_json                          TEXT,
+    skipped_reason                       TEXT,
+    gold_run_id                          TEXT NOT NULL,
+    as_of                                TIMESTAMPTZ NOT NULL,
+    rule_version                         TEXT NOT NULL,
+    PRIMARY KEY (gold_run_id, marketplace, observed_date)
+);
+
+CREATE TABLE IF NOT EXISTS marketplace_gold.counter_delta_daily (
+    offer_id                             TEXT NOT NULL,
+    observed_date                        DATE NOT NULL,
+    marketplace                          TEXT NOT NULL,
+    total_valid_delta                    BIGINT NOT NULL,
+    valid_rows                           BIGINT NOT NULL,
+    invalid_rows                         BIGINT NOT NULL,
+    no_previous_rows                     BIGINT NOT NULL,
+    negative_delta_rows                  BIGINT NOT NULL,
+    gap_too_long_rows                    BIGINT NOT NULL,
+    non_positive_elapsed_rows            BIGINT NOT NULL,
+    max_velocity_per_hour                NUMERIC(38, 6),
+    gold_run_id                          TEXT NOT NULL,
+    as_of                                TIMESTAMPTZ NOT NULL,
+    rule_version                         TEXT NOT NULL,
+    PRIMARY KEY (gold_run_id, offer_id, observed_date)
+);
+
+-- staging mirror: same columns, no keys, truncated per run
+CREATE TABLE IF NOT EXISTS marketplace_gold_staging.offer_current (
+    offer_id                             TEXT NOT NULL,
+    marketplace                          TEXT NOT NULL,
+    platform_listing_id                  TEXT NOT NULL,
+    seller_id                            TEXT,
+    product_title                        TEXT,
+    brand                                TEXT,
+    category_path                        TEXT,
+    source_url                           TEXT,
+    currency                             TEXT,
+    observation_id                       TEXT NOT NULL,
+    observed_at                          TIMESTAMPTZ NOT NULL,
+    current_price                        NUMERIC(38, 6),
+    list_price                           NUMERIC(38, 6),
+    rating_value                         NUMERIC(38, 6),
+    review_count                         BIGINT,
+    sold_count                           BIGINT,
+    availability                         TEXT,
+    freshness_status                     TEXT NOT NULL,
+    age_minutes                          BIGINT NOT NULL,
+    raw_uri                              TEXT,
+    gold_run_id                          TEXT NOT NULL,
+    as_of                                TIMESTAMPTZ NOT NULL,
+    rule_version                         TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS marketplace_gold_staging.offer_price_history_daily (
+    offer_id                             TEXT NOT NULL,
+    observed_date                        DATE NOT NULL,
+    marketplace                          TEXT NOT NULL,
+    price_open                           NUMERIC(38, 6),
+    price_close                          NUMERIC(38, 6),
+    price_min                            NUMERIC(38, 6),
+    price_max                            NUMERIC(38, 6),
+    observation_count                    BIGINT NOT NULL,
+    gold_run_id                          TEXT NOT NULL,
+    as_of                                TIMESTAMPTZ NOT NULL,
+    rule_version                         TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS marketplace_gold_staging.offer_change_daily (
+    offer_id                             TEXT NOT NULL,
+    observed_date                        DATE NOT NULL,
+    marketplace                          TEXT NOT NULL,
+    price_changes                        BIGINT NOT NULL,
+    large_price_drops                    BIGINT NOT NULL,
+    availability_changes                 BIGINT NOT NULL,
+    availability_transitions_excluded    BIGINT NOT NULL,
+    counter_changes                      BIGINT NOT NULL,
+    max_abs_price_delta                  NUMERIC(38, 6),
+    avg_abs_price_delta                  NUMERIC(38, 6),
+    max_drop_percent                     NUMERIC(38, 6),
+    gold_run_id                          TEXT NOT NULL,
+    as_of                                TIMESTAMPTZ NOT NULL,
+    rule_version                         TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS marketplace_gold_staging.offer_freshness (
+    offer_id                             TEXT NOT NULL,
+    marketplace                          TEXT NOT NULL,
+    last_observation_at                  TIMESTAMPTZ NOT NULL,
+    last_observation_id                  TEXT NOT NULL,
+    age_minutes                          BIGINT NOT NULL,
+    freshness_status                     TEXT NOT NULL,
+    fresh_threshold_minutes              BIGINT NOT NULL,
+    stale_threshold_minutes              BIGINT NOT NULL,
+    gold_run_id                          TEXT NOT NULL,
+    as_of                                TIMESTAMPTZ NOT NULL,
+    rule_version                         TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS marketplace_gold_staging.category_price_daily (
+    marketplace                          TEXT NOT NULL,
+    category_path                        TEXT NOT NULL,
+    observed_date                        DATE NOT NULL,
+    offer_count                          BIGINT NOT NULL,
+    observation_count                    BIGINT NOT NULL,
+    price_min                            NUMERIC(38, 6),
+    price_max                            NUMERIC(38, 6),
+    price_p25                            NUMERIC(38, 6),
+    price_median                         NUMERIC(38, 6),
+    price_p75                            NUMERIC(38, 6),
+    quantile_method                      TEXT NOT NULL,
+    quantile_accuracy                    BIGINT NOT NULL,
+    gold_run_id                          TEXT NOT NULL,
+    as_of                                TIMESTAMPTZ NOT NULL,
+    rule_version                         TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS marketplace_gold_staging.source_coverage_daily (
+    marketplace                          TEXT NOT NULL,
+    observed_date                        DATE NOT NULL,
+    offers_observed                      BIGINT NOT NULL,
+    observations                         BIGINT NOT NULL,
+    offers_missing                       BIGINT NOT NULL,
+    offers_stale                         BIGINT NOT NULL,
+    offers_without_seller                BIGINT NOT NULL,
+    rows_rejected                        BIGINT NOT NULL,
+    gold_run_id                          TEXT NOT NULL,
+    as_of                                TIMESTAMPTZ NOT NULL,
+    rule_version                         TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS marketplace_gold_staging.crawl_reliability_daily (
+    marketplace                          TEXT NOT NULL,
+    observed_date                        DATE NOT NULL,
+    requests                             BIGINT NOT NULL,
+    succeeded                            BIGINT NOT NULL,
+    failed                               BIGINT NOT NULL,
+    success_rate                         NUMERIC(38, 6),
+    p50_latency_ms                       BIGINT,
+    p95_latency_ms                       BIGINT,
+    errors_json                          TEXT,
+    skipped_reason                       TEXT,
+    gold_run_id                          TEXT NOT NULL,
+    as_of                                TIMESTAMPTZ NOT NULL,
+    rule_version                         TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS marketplace_gold_staging.counter_delta_daily (
+    offer_id                             TEXT NOT NULL,
+    observed_date                        DATE NOT NULL,
+    marketplace                          TEXT NOT NULL,
+    total_valid_delta                    BIGINT NOT NULL,
+    valid_rows                           BIGINT NOT NULL,
+    invalid_rows                         BIGINT NOT NULL,
+    no_previous_rows                     BIGINT NOT NULL,
+    negative_delta_rows                  BIGINT NOT NULL,
+    gap_too_long_rows                    BIGINT NOT NULL,
+    non_positive_elapsed_rows            BIGINT NOT NULL,
+    max_velocity_per_hour                NUMERIC(38, 6),
+    gold_run_id                          TEXT NOT NULL,
+    as_of                                TIMESTAMPTZ NOT NULL,
+    rule_version                         TEXT NOT NULL
+);
