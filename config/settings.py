@@ -5,6 +5,7 @@ the same code runs on a laptop, in Docker and in CI without edits.
 """
 
 import os
+from decimal import Decimal
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -125,6 +126,65 @@ TIKI_CATEGORIES: list[str] = [
     ).split(",")
     if c.strip()
 ]
+
+# ============================================================
+# SPEED LAYER — marketplace change detection (Phase 5)
+# A rule-version bump changes emitted change identity, so it must come with a
+# new checkpoint directory: reusing the old one would silently mix two rule
+# versions inside one stream.
+# ============================================================
+CHANGE_RULE_VERSION: str = os.getenv("CHANGE_RULE_VERSION", "marketplace-change-rules.v1")
+
+KAFKA_MARKETPLACE_SPEED_CONSUMER_GROUP: str = os.getenv(
+    "KAFKA_MARKETPLACE_SPEED_CONSUMER_GROUP", "marketplace-speed-v1"
+)
+SPEED_CHECKPOINT_DIR: Path = Path(
+    os.getenv("SPEED_CHECKPOINT_DIR", str(_BASE_DIR / "data" / "checkpoints" / "marketplace_speed_v1"))
+)
+SPEED_MAX_OFFSETS_PER_TRIGGER: int = int(os.getenv("SPEED_MAX_OFFSETS_PER_TRIGGER", "5000"))
+SPEED_TRIGGER_INTERVAL_SECONDS: int = int(os.getenv("SPEED_TRIGGER_INTERVAL_SECONDS", "30"))
+
+# Decimal, never float: these thresholds decide whether a change event exists.
+SPEED_LARGE_DROP_ABSOLUTE: Decimal = Decimal(os.getenv("SPEED_LARGE_DROP_ABSOLUTE", "500000"))
+SPEED_LARGE_DROP_PERCENT: Decimal = Decimal(os.getenv("SPEED_LARGE_DROP_PERCENT", "15"))
+# Softer threshold, used for the freshness/health document only.
+SPEED_FRESHNESS_THRESHOLD_MINUTES: int = int(os.getenv("SPEED_FRESHNESS_THRESHOLD_MINUTES", "360"))
+# Harder threshold: crossing it emits an OFFER_STALE change.
+SPEED_STALE_THRESHOLD_MINUTES: int = int(os.getenv("SPEED_STALE_THRESHOLD_MINUTES", "1440"))
+
+REDIS_MARKETPLACE_NAMESPACE: str = os.getenv("REDIS_MARKETPLACE_NAMESPACE", "rt")
+SPEED_RECENT_CHANGES_MAX: int = int(os.getenv("SPEED_RECENT_CHANGES_MAX", "1000"))
+SPEED_CHANGE_DOC_TTL_SECONDS: int = int(os.getenv("SPEED_CHANGE_DOC_TTL_SECONDS", "604800"))
+SPEED_STALE_SWEEP_LIMIT: int = int(os.getenv("SPEED_STALE_SWEEP_LIMIT", "5000"))
+
+ES_INDEX_MARKETPLACE_OBSERVATIONS: str = os.getenv(
+    "ES_INDEX_MARKETPLACE_OBSERVATIONS", "marketplace-observations-v1"
+)
+ES_INDEX_MARKETPLACE_CHANGES: str = os.getenv(
+    "ES_INDEX_MARKETPLACE_CHANGES", "marketplace-changes-v1"
+)
+
+# ============================================================
+# BATCH TEMPORAL WAREHOUSE — marketplace Gold marts (Phase 6)
+# ============================================================
+GOLD_RULE_VERSION: str = os.getenv("GOLD_RULE_VERSION", "marketplace-gold-rules.v1")
+MARKETPLACE_FRESHNESS_THRESHOLD_MINUTES: int = int(
+    os.getenv("MARKETPLACE_FRESHNESS_THRESHOLD_MINUTES", "360")
+)
+MARKETPLACE_STALE_THRESHOLD_MINUTES: int = int(
+    os.getenv("MARKETPLACE_STALE_THRESHOLD_MINUTES", "1440")
+)
+COUNTER_DELTA_MAX_GAP_MINUTES: int = int(os.getenv("COUNTER_DELTA_MAX_GAP_MINUTES", "2880"))
+GOLD_MIN_OBSERVATIONS_PER_DAY: int = int(os.getenv("GOLD_MIN_OBSERVATIONS_PER_DAY", "1"))
+GOLD_DEFAULT_WINDOW_DAYS: int = int(os.getenv("GOLD_DEFAULT_WINDOW_DAYS", "30"))
+# percentile_approx accuracy; quantile marts must declare this alongside values.
+GOLD_QUANTILE_ACCURACY: int = int(os.getenv("GOLD_QUANTILE_ACCURACY", "10000"))
+POSTGRES_MARKETPLACE_SCHEMA: str = os.getenv("POSTGRES_MARKETPLACE_SCHEMA", "marketplace_gold")
+POSTGRES_MARKETPLACE_STAGING_SCHEMA: str = os.getenv(
+    "POSTGRES_MARKETPLACE_STAGING_SCHEMA", "marketplace_gold_staging"
+)
+MARKETPLACE_DECIMAL_PRECISION: int = int(os.getenv("MARKETPLACE_DECIMAL_PRECISION", "38"))
+MARKETPLACE_DECIMAL_SCALE: int = int(os.getenv("MARKETPLACE_DECIMAL_SCALE", "6"))
 
 # ============================================================
 # PATHS

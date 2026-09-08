@@ -11,6 +11,7 @@ from typing import Any, TypeVar
 from urllib.parse import urlparse
 
 from common.identity import (
+    make_change_id,
     make_observation_id,
     make_offer_id,
     make_raw_artifact_id,
@@ -617,4 +618,77 @@ def create_observation_event(
         crawl_run_id=observation.crawl_run_id,
         raw_uri=observation.raw_uri,
         payload=ObservationPayload(offer=offer, observation=observation),
+    )
+
+
+# Phase 5 fixes the value domain of MarketplaceChangeV1.previous_value and
+# .current_value, which the frozen contract types as Any.  Floats are rejected
+# outright: a change event is the record of a price movement, and a float would
+# make the recorded movement disagree with the Decimal it was derived from.
+def _require_change_value(value: Any, field_name: str) -> Any:
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        raise ValueError(f"{field_name} must not be a bool")
+    if isinstance(value, float):
+        raise ValueError(f"{field_name} must not be a float; use Decimal")
+    if isinstance(value, Decimal):
+        if not value.is_finite():
+            raise ValueError(f"{field_name} must be a finite Decimal")
+        return value
+    if isinstance(value, int):
+        return value
+    if isinstance(value, datetime):
+        return _require_aware_datetime(value, field_name)
+    if isinstance(value, Enum):
+        return value.value
+    if isinstance(value, str):
+        return _require_text(value, field_name)
+    raise ValueError(f"{field_name} has an unsupported type: {type(value).__name__}")
+
+
+def create_change_event(
+    *,
+    marketplace_code: str,
+    offer_id: str,
+    change_type: MarketplaceChangeType,
+    current_observation_id: str,
+    detected_at: datetime,
+    rule_version: str,
+    previous_observation_id: str | None = None,
+    field_name: str | None = None,
+    previous_value: Any = None,
+    current_value: Any = None,
+) -> MarketplaceChangeV1:
+    """Build one derived change event with a deterministic identity.
+
+    The identity deliberately excludes ``field_name``, so at most one change of
+    a given type can exist per observation.  Callers that detect two moved
+    fields of the same type must pick one for the event and carry the other in
+    a sink-side document — see the Phase 5 plan, section 6.5.
+    """
+    marketplace_code = _require_text(marketplace_code, "marketplace_code").lower()
+    offer_id = _require_text(offer_id, "offer_id")
+    current_observation_id = _require_text(current_observation_id, "current_observation_id")
+    rule_version = _require_text(rule_version, "rule_version")
+    change_type = _require_enum(change_type, MarketplaceChangeType, "change_type")
+    detected_at = _require_aware_datetime(detected_at, "detected_at")
+    return MarketplaceChangeV1(
+        event_id=make_change_id(
+            offer_id,
+            current_observation_id,
+            change_type.value,
+            rule_version,
+        ),
+        schema_version=CHANGE_SCHEMA_VERSION,
+        change_type=change_type,
+        detected_at=detected_at,
+        marketplace=marketplace_code,
+        offer_id=offer_id,
+        previous_observation_id=previous_observation_id,
+        current_observation_id=current_observation_id,
+        field_name=field_name,
+        previous_value=_require_change_value(previous_value, "previous_value"),
+        current_value=_require_change_value(current_value, "current_value"),
+        rule_version=rule_version,
     )
