@@ -133,6 +133,19 @@ TIKI_CATEGORIES: list[str] = [
 # new checkpoint directory: reusing the old one would silently mix two rule
 # versions inside one stream.
 # ============================================================
+# Topic names and the ack timeout are Phase 4's to own (see its plan section
+# 5.1). They are declared here with Phase 4's exact names and defaults so the
+# speed layer can run before Phase 4 lands; on merge, keep one definition.
+KAFKA_TOPIC_MARKETPLACE_OBSERVATIONS: str = os.getenv(
+    "KAFKA_TOPIC_MARKETPLACE_OBSERVATIONS", "marketplace.observations.v1"
+)
+KAFKA_TOPIC_MARKETPLACE_CHANGES: str = os.getenv(
+    "KAFKA_TOPIC_MARKETPLACE_CHANGES", "marketplace.changes.v1"
+)
+KAFKA_PRODUCER_ACK_TIMEOUT_SECONDS: float = float(
+    os.getenv("KAFKA_PRODUCER_ACK_TIMEOUT_SECONDS", "30")
+)
+
 CHANGE_RULE_VERSION: str = os.getenv("CHANGE_RULE_VERSION", "marketplace-change-rules.v1")
 
 KAFKA_MARKETPLACE_SPEED_CONSUMER_GROUP: str = os.getenv(
