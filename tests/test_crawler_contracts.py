@@ -16,6 +16,7 @@ from crawler.contracts import (
     AcquisitionStage,
     AcquisitionStatus,
     FetchResult,
+    HttpResponseError,
     ListingPageRequest,
     ParsedListingPage,
     Phase2AcquisitionReport,
@@ -236,3 +237,69 @@ def test_report_rejects_lineage_mismatch():
 def test_fetch_result_rejects_naive_timestamp():
     with pytest.raises(ValueError, match="timezone-aware"):
         FetchResult("https://example.test", datetime(2026, 9, 4, 8, 30), 200, None, b"")
+
+
+# --- fetch instant must sit inside the acquisition window -------------------
+# This is the invariant that would have caught an adapter reading a different
+# clock from the orchestrator: the report's own timestamps came from the
+# injected clock while fetched_at came from wall time, so the report claimed a
+# fetch that happened after the transaction had already completed.
+
+
+def _report_with_artifact_fetched_at(fetched_at, *, started_at=STARTED, completed_at=FETCHED):
+    artifact = create_raw_artifact(
+        marketplace_code="tiki",
+        crawl_run_id="run-1",
+        marketplace_id="marketplace-tiki",
+        request_url="https://tiki.vn/api/listings?category=1846&page=1&limit=40",
+        resource_type=ResourceType.LISTING_PAGE,
+        fetched_at=fetched_at,
+        http_status=200,
+        content_type="application/json",
+        body_sha256=RAW_SHA,
+        raw_uri="file:///tmp/raw/body.bin",
+        adapter_version="tiki-listing-v1",
+        raw_bytes=10,
+    )
+    return Phase2AcquisitionReport(
+        status=AcquisitionStatus.FAILED,
+        marketplace_code="tiki",
+        marketplace_id="marketplace-tiki",
+        target="1846",
+        page=1,
+        resource_type=ResourceType.LISTING_PAGE,
+        crawl_run_id="run-1",
+        request_url="https://tiki.vn/api/listings",
+        started_at=started_at,
+        completed_at=completed_at,
+        http_status=500,
+        retry_after=None,
+        raw_artifact=artifact,
+        raw_metadata_uri="file:///tmp/raw/metadata.json",
+        observations=(),
+        rejections=(),
+        source_record_count=0,
+        duplicate_count=0,
+        last_page=None,
+        failure=AcquisitionFailure(AcquisitionStage.HTTP, HttpResponseError(500, None)),
+    )
+
+
+def test_report_accepts_a_fetch_inside_its_own_window():
+    report = _report_with_artifact_fetched_at(STARTED + timedelta(milliseconds=500))
+    assert report.raw_artifact is not None
+
+
+def test_report_accepts_a_fetch_on_either_boundary():
+    assert _report_with_artifact_fetched_at(STARTED) is not None
+    assert _report_with_artifact_fetched_at(FETCHED) is not None
+
+
+def test_report_rejects_a_fetch_after_completion():
+    with pytest.raises(ValueError, match="fetched_at must lie between"):
+        _report_with_artifact_fetched_at(FETCHED + timedelta(seconds=1))
+
+
+def test_report_rejects_a_fetch_before_the_acquisition_started():
+    with pytest.raises(ValueError, match="fetched_at must lie between"):
+        _report_with_artifact_fetched_at(STARTED - timedelta(seconds=1))

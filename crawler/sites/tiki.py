@@ -63,7 +63,12 @@ class TikiCrawler(SiteCrawler):
     rating_scale = Decimal("5")
 
     def __init__(self, *args: Any, **kwargs: Any):
-        self._clock = kwargs.pop("clock", None)
+        # `clock` is deliberately NOT popped: SiteCrawler.__init__ accepts it
+        # and assigns self._clock itself. Popping it here would leave the base
+        # constructor with clock=None, which then overwrites the injected clock
+        # and silently falls back to wall time — so fetched_at would ignore the
+        # caller's clock and the Bronze hour= partition would follow whatever
+        # clock the machine happened to have.
         self._http_get = kwargs.pop("http_get", None)
         self._monotonic = kwargs.pop("monotonic", time.monotonic)
         super().__init__(*args, **kwargs)
@@ -80,6 +85,7 @@ class TikiCrawler(SiteCrawler):
         return f"{LISTING_URL}?{urlencode({'category': category, 'page': page, 'limit': PAGE_SIZE})}"
 
     def _now(self) -> datetime:
+        """The observation instant. Callers inject a clock to make runs replayable."""
         clock = getattr(self, "_clock", None) or (lambda: datetime.now(timezone.utc))
         return clock()
 
