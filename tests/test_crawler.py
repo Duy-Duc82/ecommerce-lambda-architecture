@@ -409,9 +409,14 @@ class _Phase2RunnerAdapter:
         pass
 
     def fetch_listing_page(self, request):
+        # Under the frozen clock these tests inject, a real adapter's
+        # fetched_at *is* PHASE2_START: it reads the same clock the
+        # orchestrator does. Fabricating a later instant would put the fetch
+        # outside the acquisition window the report claims, which the
+        # Phase2AcquisitionReport contract now rejects.
         return FetchResult(
             self.request_url(request.target, request.page),
-            PHASE2_START + timedelta(seconds=1),
+            PHASE2_START,
             200,
             "application/json",
             b"page",
