@@ -154,6 +154,24 @@ MARKETPLACE_STALE_AFTER_SECONDS = int(os.getenv("MARKETPLACE_STALE_AFTER_SECONDS
 MARKETPLACE_STREAM_WATERMARK = os.getenv("MARKETPLACE_STREAM_WATERMARK", "2 hours")
 MARKETPLACE_STREAM_TRIGGER = os.getenv("MARKETPLACE_STREAM_TRIGGER", "30 seconds")
 MARKETPLACE_STREAM_CHECKPOINT_VERSION = os.getenv("MARKETPLACE_STREAM_CHECKPOINT_VERSION", "v1")
+# ============================================================
+# CRAWL SCHEDULER - frontier cadence, retry and circuit (Phase 3)
+# Values are read here and validated inside the policy dataclasses, so a test
+# can monkeypatch a setting without tripping an import-time check.
+# ============================================================
+CRAWL_ACTIVE_CADENCE_MINUTES = int(os.getenv("CRAWL_ACTIVE_CADENCE_MINUTES", "60"))
+CRAWL_NORMAL_CADENCE_MINUTES = int(os.getenv("CRAWL_NORMAL_CADENCE_MINUTES", "240"))
+CRAWL_COLD_CADENCE_MINUTES = int(os.getenv("CRAWL_COLD_CADENCE_MINUTES", "720"))
+CRAWL_LEASE_SECONDS = int(os.getenv("CRAWL_LEASE_SECONDS", "300"))
+CRAWL_MAX_ATTEMPTS = int(os.getenv("CRAWL_MAX_ATTEMPTS", "5"))
+CRAWL_RETRY_BASE_SECONDS = int(os.getenv("CRAWL_RETRY_BASE_SECONDS", "30"))
+CRAWL_RETRY_MAX_SECONDS = int(os.getenv("CRAWL_RETRY_MAX_SECONDS", "1800"))
+CRAWL_RETRY_JITTER_RATIO = Decimal(os.getenv("CRAWL_RETRY_JITTER_RATIO", "0.20"))
+CRAWL_CIRCUIT_FAILURE_THRESHOLD = int(os.getenv("CRAWL_CIRCUIT_FAILURE_THRESHOLD", "5"))
+CRAWL_CIRCUIT_OPEN_SECONDS = int(os.getenv("CRAWL_CIRCUIT_OPEN_SECONDS", "900"))
+CRAWL_WORKER_POLL_SECONDS = int(os.getenv("CRAWL_WORKER_POLL_SECONDS", "5"))
+CRAWL_WORKER_BATCH_SIZE = int(os.getenv("CRAWL_WORKER_BATCH_SIZE", "10"))
+
 KAFKA_CHANGE_ACK_TIMEOUT_SECONDS = int(os.getenv("KAFKA_CHANGE_ACK_TIMEOUT_SECONDS", "30"))
 ES_INDEX_MARKETPLACE_CHANGES = os.getenv("ES_INDEX_MARKETPLACE_CHANGES", "marketplace-changes-v1")
 ES_INDEX_MARKETPLACE_OFFERS = os.getenv("ES_INDEX_MARKETPLACE_OFFERS", "marketplace-offers-current-v1")
