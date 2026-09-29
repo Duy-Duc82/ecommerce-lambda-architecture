@@ -1,8 +1,11 @@
 """Lightweight object writes into the medallion data lake, outside Spark.
 
-Mirrors the local-vs-s3a duality of ``config.settings.data_lake_uri`` so any
-plain-Python writer (the crawler, for now) can drop raw snapshots into Bronze
-without spinning up a Spark session.
+Mirrors the local-vs-object-store duality of ``config.settings.data_lake_uri``
+so any plain-Python writer (the crawler, for now) can drop raw snapshots into
+Bronze without spinning up a Spark session.
+
+Which object store that is — laptop MinIO, S3, R2, B2 — comes from the active
+storage profile, so this module never hardcodes an endpoint or TLS setting.
 """
 
 from __future__ import annotations
@@ -10,22 +13,21 @@ from __future__ import annotations
 import io
 from functools import lru_cache
 
-from config.settings import (
-    DATA_LAKE_LOCAL_ROOT,
-    DATA_LAKE_MODE,
-    MINIO_ACCESS_KEY,
-    MINIO_BUCKETS,
-    MINIO_ENDPOINT,
-    MINIO_SECRET_KEY,
-)
+from config.settings import DATA_LAKE_LOCAL_ROOT, MINIO_BUCKETS
+from config.storage import StorageProfile, active_profile
 
 
-@lru_cache(maxsize=1)
-def _minio_client():
+@lru_cache(maxsize=4)
+def _client(profile: StorageProfile):
     from minio import Minio
 
-    endpoint = MINIO_ENDPOINT.replace("http://", "").replace("https://", "")
-    return Minio(endpoint, access_key=MINIO_ACCESS_KEY, secret_key=MINIO_SECRET_KEY, secure=False)
+    return Minio(
+        profile.endpoint_host(),
+        access_key=profile.access_key,
+        secret_key=profile.secret_key,
+        secure=profile.use_ssl,
+        region=profile.region,
+    )
 
 
 def put_bytes(zone: str, relative_path: str, data: bytes) -> str:
@@ -34,10 +36,11 @@ def put_bytes(zone: str, relative_path: str, data: bytes) -> str:
     if zone_name not in MINIO_BUCKETS:
         raise ValueError(f"Unknown data-lake zone: {zone}")
     key = relative_path.strip("/")
+    profile = active_profile()
 
-    if DATA_LAKE_MODE == "s3a":
+    if not profile.is_local:
         bucket = MINIO_BUCKETS[zone_name]
-        client = _minio_client()
+        client = _client(profile)
         if not client.bucket_exists(bucket):
             client.make_bucket(bucket)
         client.put_object(bucket, key, io.BytesIO(data), length=len(data))

@@ -5,9 +5,12 @@ the same code runs on a laptop, in Docker and in CI without edits.
 """
 
 import os
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
 from dotenv import load_dotenv
+
+from config.storage import active_profile
 
 _BASE_DIR = Path(__file__).resolve().parent.parent
 load_dotenv(_BASE_DIR / ".env")
@@ -43,6 +46,9 @@ MINIO_BUCKETS: dict[str, str] = {
 }
 
 # "s3a" uses MinIO; "local" writes parquet under DATA_LAKE_LOCAL_ROOT (tests/dev).
+# Kept for backward compatibility with docker-compose and scripts/*.ps1; which
+# object store an "s3a" lake actually points at is now chosen by
+# DATA_LAKE_PROFILE — see config/storage.py.
 DATA_LAKE_MODE: str = os.getenv("DATA_LAKE_MODE", "local").lower()
 DATA_LAKE_LOCAL_ROOT: Path = Path(
     os.getenv("DATA_LAKE_LOCAL_ROOT", str(_BASE_DIR / "data" / "lakehouse"))
@@ -54,7 +60,7 @@ def data_lake_uri(zone: str, dataset: str = "") -> str:
     zone_name = zone.lower()
     if zone_name not in MINIO_BUCKETS:
         raise ValueError(f"Unknown data-lake zone: {zone}")
-    if DATA_LAKE_MODE == "s3a":
+    if not active_profile().is_local:
         base = f"s3a://{MINIO_BUCKETS[zone_name]}"
     else:
         base = (DATA_LAKE_LOCAL_ROOT / zone_name).resolve().as_uri()
@@ -103,12 +109,22 @@ KAFKA_TOPIC_PRICE_SNAPSHOTS: str = os.getenv(
 )
 CRAWL_REQUEST_DELAY_SECONDS: float = float(os.getenv("CRAWL_REQUEST_DELAY_SECONDS", "2.0"))
 CRAWL_JITTER_SECONDS: float = float(os.getenv("CRAWL_JITTER_SECONDS", "1.0"))
+CRAWL_HTTP_TIMEOUT_SECONDS: float = float(os.getenv("CRAWL_HTTP_TIMEOUT_SECONDS", "10"))
 CRAWL_USER_AGENT: str = os.getenv(
     "CRAWL_USER_AGENT", "EcommercePriceResearchBot/0.1 (+thesis project; rate-limited)"
 )
-# Comma-separated Tiki category ids, e.g. "1846,1789".
+# Pages requested per category before moving on. The adapter stops earlier when
+# the site reports its last page, so this is a safety ceiling, not a target.
+CRAWL_MAX_PAGES: int = int(os.getenv("CRAWL_MAX_PAGES", "50"))
+# Comma-separated Tiki category ids, e.g. "1846,1789". The default nine were
+# each probed live (2026-08-16): all return 200; seven cap at total=2000
+# (50 pages), 1789 has 116 products and 17166 has 307.
 TIKI_CATEGORIES: list[str] = [
-    c.strip() for c in os.getenv("TIKI_CATEGORIES", "1846").split(",") if c.strip()
+    c.strip()
+    for c in os.getenv(
+        "TIKI_CATEGORIES", "1846,8322,1882,1520,931,915,4384,1789,17166"
+    ).split(",")
+    if c.strip()
 ]
 
 # ============================================================
@@ -116,3 +132,82 @@ TIKI_CATEGORIES: list[str] = [
 # ============================================================
 BASE_DIR: Path = _BASE_DIR
 CHECKPOINTS_DIR: Path = _BASE_DIR / "data" / "checkpoints"
+
+# ============================================================
+# MARKETPLACE SPEED / TEMPORAL WAREHOUSE
+# ============================================================
+def _env_decimal(name: str, default: str) -> Decimal:
+    raw = os.getenv(name, default)
+    try:
+        value = Decimal(raw)
+    except (InvalidOperation, ValueError) as exc:
+        raise ValueError(f"{name} must be a decimal") from exc
+    if not value.is_finite():
+        raise ValueError(f"{name} must be finite")
+    return value
+
+
+MARKETPLACE_CHANGE_RULE_VERSION = os.getenv("MARKETPLACE_CHANGE_RULE_VERSION", "speed-rules.v1")
+MARKETPLACE_LARGE_DROP_ABSOLUTE = _env_decimal("MARKETPLACE_LARGE_DROP_ABSOLUTE", "100000")
+MARKETPLACE_LARGE_DROP_RELATIVE = _env_decimal("MARKETPLACE_LARGE_DROP_RELATIVE", "0.20")
+MARKETPLACE_STALE_AFTER_SECONDS = int(os.getenv("MARKETPLACE_STALE_AFTER_SECONDS", "21600"))
+MARKETPLACE_STREAM_WATERMARK = os.getenv("MARKETPLACE_STREAM_WATERMARK", "2 hours")
+MARKETPLACE_STREAM_TRIGGER = os.getenv("MARKETPLACE_STREAM_TRIGGER", "30 seconds")
+MARKETPLACE_STREAM_CHECKPOINT_VERSION = os.getenv("MARKETPLACE_STREAM_CHECKPOINT_VERSION", "v1")
+KAFKA_CHANGE_ACK_TIMEOUT_SECONDS = int(os.getenv("KAFKA_CHANGE_ACK_TIMEOUT_SECONDS", "30"))
+ES_INDEX_MARKETPLACE_CHANGES = os.getenv("ES_INDEX_MARKETPLACE_CHANGES", "marketplace-changes-v1")
+ES_INDEX_MARKETPLACE_OFFERS = os.getenv("ES_INDEX_MARKETPLACE_OFFERS", "marketplace-offers-current-v1")
+REDIS_MARKETPLACE_OFFER_TTL_SECONDS = int(os.getenv("REDIS_MARKETPLACE_OFFER_TTL_SECONDS", "86400"))
+REDIS_MARKETPLACE_RECENT_CHANGES_MAX = int(os.getenv("REDIS_MARKETPLACE_RECENT_CHANGES_MAX", "5000"))
+MARKETPLACE_SPEED_QUERY_NAME = os.getenv("MARKETPLACE_SPEED_QUERY_NAME", "marketplace-speed-v1")
+
+MARKETPLACE_SILVER_DATASET = os.getenv("MARKETPLACE_SILVER_DATASET", "marketplace/offer_observations")
+MARKETPLACE_GOLD_DATASET = os.getenv("MARKETPLACE_GOLD_DATASET", "marketplace")
+MARKETPLACE_FRESHNESS_SECONDS = int(os.getenv("MARKETPLACE_FRESHNESS_SECONDS", "21600"))
+MARKETPLACE_FRESHNESS_RULE_VERSION = os.getenv("MARKETPLACE_FRESHNESS_RULE_VERSION", "freshness-rules.v1")
+MARKETPLACE_COUNTER_RULE_VERSION = os.getenv("MARKETPLACE_COUNTER_RULE_VERSION", "counter-rules.v1")
+MARKETPLACE_COUNTER_MAX_GAP_SECONDS = int(os.getenv("MARKETPLACE_COUNTER_MAX_GAP_SECONDS", "86400"))
+MARKETPLACE_PERCENTILE_ACCURACY = int(os.getenv("MARKETPLACE_PERCENTILE_ACCURACY", "10000"))
+MARKETPLACE_BATCH_SHUFFLE_PARTITIONS = int(os.getenv("MARKETPLACE_BATCH_SHUFFLE_PARTITIONS", "8"))
+MARKETPLACE_BATCH_APP_NAME = os.getenv("MARKETPLACE_BATCH_APP_NAME", "MarketplaceTemporalWarehouse")
+
+# Phase 4 topic settings are kept separate from the legacy behavioral topic.
+KAFKA_TOPIC_MARKETPLACE_OBSERVATIONS = os.getenv("KAFKA_TOPIC_MARKETPLACE_OBSERVATIONS", "marketplace.observations.v1")
+KAFKA_TOPIC_MARKETPLACE_OBSERVATIONS_DLQ = os.getenv("KAFKA_TOPIC_MARKETPLACE_OBSERVATIONS_DLQ", "marketplace.observations.v1.dlq")
+KAFKA_TOPIC_MARKETPLACE_CHANGES = os.getenv("KAFKA_TOPIC_MARKETPLACE_CHANGES", "marketplace.changes.v1")
+KAFKA_MARKETPLACE_PARTITIONS = int(os.getenv("KAFKA_MARKETPLACE_PARTITIONS", "3"))
+KAFKA_PRODUCER_ACK_TIMEOUT_SECONDS = int(os.getenv("KAFKA_PRODUCER_ACK_TIMEOUT_SECONDS", "30"))
+KAFKA_SILVER_CONSUMER_GROUP = os.getenv("KAFKA_SILVER_CONSUMER_GROUP", "marketplace-silver-v1")
+
+
+def validate_marketplace_settings() -> None:
+    if MARKETPLACE_LARGE_DROP_ABSOLUTE < 0:
+        raise ValueError("MARKETPLACE_LARGE_DROP_ABSOLUTE must be non-negative")
+    if not Decimal("0") <= MARKETPLACE_LARGE_DROP_RELATIVE <= Decimal("1"):
+        raise ValueError("MARKETPLACE_LARGE_DROP_RELATIVE must be between 0 and 1")
+    positive = {
+        "MARKETPLACE_STALE_AFTER_SECONDS": MARKETPLACE_STALE_AFTER_SECONDS,
+        "KAFKA_CHANGE_ACK_TIMEOUT_SECONDS": KAFKA_CHANGE_ACK_TIMEOUT_SECONDS,
+        "REDIS_MARKETPLACE_OFFER_TTL_SECONDS": REDIS_MARKETPLACE_OFFER_TTL_SECONDS,
+        "REDIS_MARKETPLACE_RECENT_CHANGES_MAX": REDIS_MARKETPLACE_RECENT_CHANGES_MAX,
+        "MARKETPLACE_FRESHNESS_SECONDS": MARKETPLACE_FRESHNESS_SECONDS,
+        "MARKETPLACE_COUNTER_MAX_GAP_SECONDS": MARKETPLACE_COUNTER_MAX_GAP_SECONDS,
+        "MARKETPLACE_PERCENTILE_ACCURACY": MARKETPLACE_PERCENTILE_ACCURACY,
+        "MARKETPLACE_BATCH_SHUFFLE_PARTITIONS": MARKETPLACE_BATCH_SHUFFLE_PARTITIONS,
+        "KAFKA_MARKETPLACE_PARTITIONS": KAFKA_MARKETPLACE_PARTITIONS,
+        "KAFKA_PRODUCER_ACK_TIMEOUT_SECONDS": KAFKA_PRODUCER_ACK_TIMEOUT_SECONDS,
+    }
+    if any(value <= 0 for value in positive.values()):
+        bad = next(name for name, value in positive.items() if value <= 0)
+        raise ValueError(f"{bad} must be positive")
+    for name in (
+        "MARKETPLACE_CHANGE_RULE_VERSION", "MARKETPLACE_STREAM_CHECKPOINT_VERSION",
+        "MARKETPLACE_SPEED_QUERY_NAME", "MARKETPLACE_FRESHNESS_RULE_VERSION",
+        "MARKETPLACE_COUNTER_RULE_VERSION", "MARKETPLACE_SILVER_DATASET",
+        "MARKETPLACE_GOLD_DATASET", "MARKETPLACE_BATCH_APP_NAME",
+    ):
+        if not globals()[name].strip():
+            raise ValueError(f"{name} must be non-empty")
+
+
+validate_marketplace_settings()
