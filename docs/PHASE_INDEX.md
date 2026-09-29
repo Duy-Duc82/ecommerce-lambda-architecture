@@ -102,20 +102,28 @@ Phase 5/6 chỉ nằm ở ngọn một nhánh feature, không có ở commit g�
 
 ## 5. Trạng thái hiện tại (2026-09-29)
 
-| Phase | Trạng thái | Nhánh |
-|---|---|---|
-| 1 | có code | `phase-1-marketplace-foundation` |
-| 2 | có code | `phase-3-4-scheduler-kafka-silver` (commit `1d5b252`) |
-| 3 | **chưa có code** | — |
-| 4 | một phần (topics, DLQ, Silver sink) | `phase-3-4-scheduler-kafka-silver` |
-| 5 | code + test đủ (38/38) | `phase-5-6-tests` |
-| 6 | code + test (43/47) | `phase-5-6-tests` |
+| Phase | Tuần | Trạng thái | Test |
+|---|---|---|---|
+| 1 | 1 | ✅ trong `develop` | |
+| 2 | 2 | ✅ trong `develop` | |
+| 3 | 3 | ✅ trong `develop` | 113 (đủ 30/30 item) |
+| 4 | 4 | ✅ trong `develop` | |
+| 5 | 5 | ✅ trong `develop` | đủ 38/38 item |
+| 6 | 6 | ✅ trong `develop` | 43/47 item |
+| 7 | 7 | ⏳ chưa bắt đầu | P1-08, P1-09 |
+| 8 | 8 | ⏳ chưa bắt đầu | P1-12 |
+| 9 | 9 | ⏳ chưa bắt đầu | P2-* |
 
-Phase 5/6 đã chốt lấy bản `phase-3-4-scheduler-kafka-silver` làm nền vì scope
-khớp Brief §22. Nhánh `phase-5-6-speed-gold` giữ lại làm tham chiếu, không phát
-triển tiếp. Test bổ sung nằm ở nhánh `phase-5-6-tests`: 10 test -> 186, toàn bộ
-suite 393 pass. Bốn item Phase 6 chưa phủ là 33-35 và 43, cần chạy thật
-`run_marketplace_warehouse` end-to-end.
+**Nửa đầu lộ trình 12 tuần (Phase 1–6) đã xong** và nằm trong `develop`.
+Suite: 511 pass, 0 fail, 0 skip.
+
+Bốn item Phase 6 chưa phủ là 33–35 và 43: cần chạy thật
+`run_marketplace_warehouse` end-to-end (ghi Parquet + publish Postgres),
+không phải unit test.
+
+Các nhánh cũ `phase-1-marketplace-foundation`, `phase-3-4-scheduler-kafka-silver`,
+`phase-5-6-speed-gold` có trước mô hình `develop`; giữ làm lịch sử, công việc
+của chúng đã nằm trong `develop`.
 
 ## 6. Ràng buộc môi trường
 
