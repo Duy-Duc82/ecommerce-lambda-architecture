@@ -84,7 +84,10 @@ Phase 5/6 chỉ nằm ở ngọn một nhánh feature, không có ở commit g�
 | 2 | có code | `phase-3-4-scheduler-kafka-silver` (commit `4de5ac1`) |
 | 3 | **chưa có code** | — |
 | 4 | một phần (topics, DLQ, Silver sink) | `phase-3-4-scheduler-kafka-silver` |
-| 5 | **hai bản xung đột** | `phase-3-4-…` vs `phase-5-6-speed-gold` |
-| 6 | **hai bản xung đột** | `phase-3-4-…` vs `phase-5-6-speed-gold` |
+| 5 | code có, **test thiếu** (10/38) | `phase-3-4-scheduler-kafka-silver` |
+| 6 | code có, **test thiếu** (10/47) | `phase-3-4-scheduler-kafka-silver` |
 
-Phase 5/6 cần chốt một bản trước khi làm tiếp. Xem mục 1 để đối chiếu scope.
+Phase 5/6 đã chốt lấy bản `phase-3-4-scheduler-kafka-silver` làm nền vì scope
+khớp Brief §22. Nhánh `phase-5-6-speed-gold` giữ lại làm tham chiếu test, không
+phát triển tiếp. Việc còn lại là bổ sung test theo mục 13 (Phase 5) và mục 15
+(Phase 6) của hai plan tương ứng.
