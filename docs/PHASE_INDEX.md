@@ -74,9 +74,15 @@ phase-<n>-<tên>  --PR-->  develop  --PR (chỉ khi thầy hướng dẫn duyệ
   Không commit thẳng vào đây nữa, kể cả docs.
 - **`develop`**: nhánh tích hợp. Mọi nhánh phase PR vào đây. Đây là nơi chạy
   full suite trước khi trình duyệt.
-- **`phase-<n>-*`**: mỗi phase một nhánh, rẽ từ `develop`, commit nhỏ và revert
-  được riêng lẻ. Giữ nguyên nguyên tắc cũ: production fix nằm ở commit riêng,
-  tách khỏi test đã phát hiện ra nó.
+- **`phase-<n>-*`**: mỗi phase một nhánh, **luôn rẽ từ `develop` mới nhất**,
+  commit nhỏ và revert được riêng lẻ. Giữ nguyên nguyên tắc cũ: production fix
+  nằm ở commit riêng, tách khỏi test đã phát hiện ra nó.
+
+**Không xếp chồng nhánh.** Một nhánh phase không được rẽ từ nhánh phase khác.
+Nếu phase sau cần code của phase trước, chờ PR của phase trước merge vào
+`develop` rồi mới cắt nhánh mới từ `develop`. Xếp chồng làm PR thứ hai hiện
+luôn diff của PR thứ nhất, không review được, và buộc phải merge theo đúng thứ
+tự.
 
 Các nhánh cũ (`phase-1-marketplace-foundation`, `phase-3-4-scheduler-kafka-silver`,
 `phase-5-6-speed-gold`) có trước mô hình này; giữ làm lịch sử, không phát triển
