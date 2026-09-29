@@ -454,3 +454,28 @@ def test_the_worker_validates_its_collaborators():
         CrawlWorker(**{**base, "policy": object()})
     with pytest.raises(ValueError, match="worker_id"):
         CrawlWorker(**{**base, "worker_id": "  "})
+
+
+def test_the_runner_adapter_binds_phase_two_without_the_worker_knowing_the_site():
+    from crawler.contracts import encode_listing_page_task_target
+    from crawler.runner import listing_page_executor
+
+    seen = {}
+
+    def fake_execute(*, site, task_target, crawl_run_id, writer, clock):
+        seen.update(site=site, task_target=task_target, crawl_run_id=crawl_run_id)
+        return FakeReport()
+
+    import crawler.runner as runner
+
+    original = runner.execute_listing_page
+    runner.execute_listing_page = fake_execute
+    try:
+        target = encode_listing_page_task_target("1846", 2)
+        executor = listing_page_executor(site="tiki", clock=lambda: NOW)
+        report = executor(task=_task(target=target), crawl_run_id="run-1")
+    finally:
+        runner.execute_listing_page = original
+
+    assert report.status is AcquisitionStatus.SUCCEEDED
+    assert seen == {"site": "tiki", "task_target": target, "crawl_run_id": "run-1"}
