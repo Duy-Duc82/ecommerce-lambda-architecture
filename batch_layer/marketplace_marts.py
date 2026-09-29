@@ -23,13 +23,20 @@ def _ordered(df: DataFrame, partition: list[str] | str) -> Window:
 
 
 def _latest(df: DataFrame, partition: list[str] | str) -> DataFrame:
-    return df.withColumn("_rn", F.row_number().over(_ordered(df, partition))).filter("_rn = 1").drop("_rn")
+    # row_number() = 1 takes the first row of the window, so the ordering must
+    # be descending here. _ordered() stays ascending because lag() and the
+    # _first markers depend on it.
+    newest = Window.partitionBy(partition).orderBy(F.col("observed_at").desc(), F.col("fetched_at").desc(), F.col("observation_id").desc())
+    return df.withColumn("_rn", F.row_number().over(newest)).filter("_rn = 1").drop("_rn")
 
 
 def build_offer_current(observations: DataFrame) -> DataFrame:
     latest = _latest(observations, "offer_id")
     first = observations.groupBy("offer_id").agg(F.min("observed_at").alias("first_seen_at"))
-    return latest.join(first, "offer_id").select("offer_id", "marketplace", "marketplace_id", "platform_listing_id", "seller_id", "product_title", "brand", "category_path", "source_url", "currency", "active_status", "first_seen_at", F.col("observed_at").alias("last_seen_at"), F.col("observation_id").alias("current_observation_id"), "observed_at", "fetched_at", "current_price", "list_price", "shipping_price", "rating_value", "rating_scale", "rating_count", "review_count", "sold_count", "availability", "ranking_position", "raw_uri", "raw_sha256", "adapter_version", "crawl_run_id")
+    # The envelope carries its own first_seen_at; the mart's is the earliest
+    # observed_at we actually hold, so drop the envelope column before the
+    # join rather than leaving two columns of that name to resolve.
+    return latest.drop("first_seen_at").join(first, "offer_id").select("offer_id", "marketplace", "marketplace_id", "platform_listing_id", "seller_id", "product_title", "brand", "category_path", "source_url", "currency", "active_status", "first_seen_at", F.col("observed_at").alias("last_seen_at"), F.col("observation_id").alias("current_observation_id"), "observed_at", "fetched_at", "current_price", "list_price", "shipping_price", "rating_value", "rating_scale", "rating_count", "review_count", "sold_count", "availability", "ranking_position", "raw_uri", "raw_sha256", "adapter_version", "crawl_run_id")
 
 
 def build_seller_current(observations: DataFrame) -> DataFrame:
@@ -103,13 +110,18 @@ def build_source_coverage_daily(observations: DataFrame, attempts: DataFrame, ru
     end_date = min(max_date, as_of.astimezone(timezone.utc).date()) if max_date else as_of.date()
     first = observations.groupBy("marketplace", "offer_id").agg(F.min(F.to_date("observed_at")).alias("first_date"))
     calendar = first.withColumn("observed_date", F.explode(F.sequence("first_date", F.lit(end_date)))).withColumn("eligible", F.lit(1))
-    observed_days = observations.select("marketplace", "offer_id", F.to_date("observed_at").alias("observation_date")).distinct().withColumn("observed", F.lit(1))
-    dates = calendar.join(observed_days, (calendar.marketplace == observed_days.marketplace) & (calendar.offer_id == observed_days.offer_id) & (calendar.observed_date == observed_days.observation_date), "left")
+    # Distinct key names: this frame is joined onto a chain that already
+    # carries marketplace/offer_id twice, and an unqualified name there cannot
+    # be resolved.
+    observed_days = observations.select(F.col("marketplace").alias("_obs_marketplace"), F.col("offer_id").alias("_obs_offer_id"), F.to_date("observed_at").alias("_obs_date")).distinct().withColumn("observed", F.lit(1))
     # Evaluate freshness at day end, except for the current partial UTC day.
     eval_time = F.least(F.to_timestamp(F.date_add(calendar.observed_date, 1)), F.lit(as_of.astimezone(timezone.utc)).cast("timestamp"))
     snapshots = calendar.join(observations, (calendar.marketplace == observations.marketplace) & (calendar.offer_id == observations.offer_id) & (F.col("observed_at") <= eval_time), "left").withColumn("_rn", F.row_number().over(Window.partitionBy(calendar.marketplace, calendar.offer_id, calendar.observed_date).orderBy(F.col("observed_at").desc(), F.col("fetched_at").desc(), F.col("observation_id").desc()))).filter("_rn = 1")
     snapshots = snapshots.withColumn("_age", eval_time.cast("long") - F.col("observed_at").cast("long"))
-    eligible_snapshots = snapshots.filter(F.col("active_status").isNull() | (F.col("active_status") != "INACTIVE"))
+    # observed_days has to reach the same frame the counts are taken from, or
+    # the "observed" flag is not in scope where observed_offer_count reads it.
+    eligible_snapshots = (snapshots.filter(F.col("active_status").isNull() | (F.col("active_status") != "INACTIVE"))
+                          .join(observed_days, (calendar.marketplace == F.col("_obs_marketplace")) & (calendar.offer_id == F.col("_obs_offer_id")) & (calendar.observed_date == F.col("_obs_date")), "left"))
     daily = eligible_snapshots.groupBy(calendar.marketplace.alias("marketplace"), calendar.observed_date.alias("observed_date")).agg(F.countDistinct(calendar.offer_id).alias("eligible_offer_count"), F.countDistinct(F.when(F.col("observed") == 1, calendar.offer_id)).alias("observed_offer_count"))
     freshness = eligible_snapshots.groupBy(calendar.marketplace.alias("marketplace"), calendar.observed_date.alias("observed_date")).agg(F.sum(F.when(F.col("_age").between(0, stale_after_seconds), 1).otherwise(0)).alias("fresh_offer_count"), F.sum(F.when(F.col("_age") > stale_after_seconds, 1).otherwise(0)).alias("stale_offer_count"))
     obs_counts = observations.withColumn("observed_date", F.to_date("observed_at")).groupBy("marketplace", "observed_date").agg(F.count("observation_id").alias("observation_count"))
