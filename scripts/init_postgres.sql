@@ -213,3 +213,89 @@ CREATE TABLE IF NOT EXISTS audit.marketplace_batch_run (
 CREATE TABLE IF NOT EXISTS audit.marketplace_cache_version (
     singleton BOOLEAN PRIMARY KEY DEFAULT TRUE CHECK (singleton), run_id VARCHAR(64) NOT NULL, published_at TIMESTAMPTZ NOT NULL, dataset_counts JSONB NOT NULL
 );
+
+-- ============================================================
+-- PHASE 3 — crawl frontier, run/attempt audit, source circuit
+-- Operational metadata only. Analytical truth stays in Bronze/Silver/Gold;
+-- nothing here stores a raw body, cookie, authorization header or traceback.
+-- ============================================================
+CREATE TABLE IF NOT EXISTS audit.crawl_frontier (
+    task_id VARCHAR(80) PRIMARY KEY,
+    marketplace_code VARCHAR(32) NOT NULL CHECK (marketplace_code = lower(marketplace_code)),
+    marketplace_id VARCHAR(128) NOT NULL,
+    target TEXT NOT NULL CHECK (length(btrim(target)) > 0),
+    resource_type VARCHAR(32) NOT NULL CHECK (resource_type IN ('LISTING_PAGE', 'PRODUCT_DETAIL')),
+    tier VARCHAR(16) NOT NULL CHECK (tier IN ('ACTIVE', 'NORMAL', 'COLD')),
+    priority INTEGER NOT NULL DEFAULT 0 CHECK (priority >= 0),
+    scheduled_for TIMESTAMPTZ NOT NULL,
+    status VARCHAR(16) NOT NULL CHECK (status IN ('READY', 'LEASED', 'RETRY_WAIT', 'SUCCEEDED', 'FAILED', 'DISABLED')),
+    attempts INTEGER NOT NULL DEFAULT 0 CHECK (attempts >= 0),
+    max_attempts INTEGER NOT NULL CHECK (max_attempts >= 1),
+    lease_owner VARCHAR(128),
+    lease_expires_at TIMESTAMPTZ,
+    last_http_status INTEGER CHECK (last_http_status IS NULL OR last_http_status BETWEEN 100 AND 599),
+    last_error_kind VARCHAR(32) CHECK (last_error_kind IS NULL OR last_error_kind IN (
+        'RATE_LIMITED', 'TRANSIENT_NETWORK', 'SERVER_ERROR', 'CLIENT_ERROR',
+        'ROBOTS_DENIED', 'STORAGE_ERROR', 'PARSE_ERROR', 'VALIDATION_ERROR', 'UNKNOWN')),
+    last_error TEXT CHECK (last_error IS NULL OR length(last_error) <= 2000),
+    last_success_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CHECK (attempts <= max_attempts),
+    -- Only a LEASED row may carry lease fields, and it must carry both.
+    CHECK ((status = 'LEASED') = (lease_owner IS NOT NULL AND lease_expires_at IS NOT NULL))
+);
+CREATE INDEX IF NOT EXISTS idx_crawl_frontier_due
+ON audit.crawl_frontier (status, scheduled_for, priority DESC);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_crawl_frontier_schedule
+ON audit.crawl_frontier (marketplace_code, resource_type, target, scheduled_for);
+
+CREATE TABLE IF NOT EXISTS audit.crawl_run (
+    crawl_run_id VARCHAR(128) PRIMARY KEY,
+    marketplace_id VARCHAR(128) NOT NULL,
+    started_at TIMESTAMPTZ NOT NULL,
+    completed_at TIMESTAMPTZ,
+    status VARCHAR(16) NOT NULL CHECK (status IN ('RUNNING', 'COMPLETED', 'PARTIAL', 'FAILED')),
+    requested BIGINT NOT NULL DEFAULT 0 CHECK (requested >= 0),
+    succeeded BIGINT NOT NULL DEFAULT 0 CHECK (succeeded >= 0),
+    failed BIGINT NOT NULL DEFAULT 0 CHECK (failed >= 0),
+    adapter_version VARCHAR(64) NOT NULL,
+    error_summary JSONB,
+    CHECK (completed_at IS NULL OR completed_at >= started_at),
+    CHECK ((status = 'RUNNING') = (completed_at IS NULL)),
+    CHECK (succeeded + failed <= requested)
+);
+
+CREATE TABLE IF NOT EXISTS audit.crawl_request_attempt (
+    attempt_id BIGSERIAL PRIMARY KEY,
+    crawl_run_id VARCHAR(128) NOT NULL REFERENCES audit.crawl_run(crawl_run_id),
+    task_id VARCHAR(80) NOT NULL REFERENCES audit.crawl_frontier(task_id),
+    attempt_number INTEGER NOT NULL CHECK (attempt_number >= 1),
+    started_at TIMESTAMPTZ NOT NULL,
+    completed_at TIMESTAMPTZ NOT NULL,
+    status VARCHAR(16) NOT NULL CHECK (status IN ('SUCCEEDED', 'PARTIAL', 'FAILED')),
+    http_status INTEGER CHECK (http_status IS NULL OR http_status BETWEEN 100 AND 599),
+    latency_ms BIGINT CHECK (latency_ms IS NULL OR latency_ms >= 0),
+    raw_artifact_id VARCHAR(80),
+    raw_uri TEXT,
+    raw_bytes BIGINT NOT NULL DEFAULT 0 CHECK (raw_bytes >= 0),
+    parsed_count BIGINT NOT NULL DEFAULT 0 CHECK (parsed_count >= 0),
+    rejected_count BIGINT NOT NULL DEFAULT 0 CHECK (rejected_count >= 0),
+    error_kind VARCHAR(32) CHECK (error_kind IS NULL OR error_kind IN (
+        'RATE_LIMITED', 'TRANSIENT_NETWORK', 'SERVER_ERROR', 'CLIENT_ERROR',
+        'ROBOTS_DENIED', 'STORAGE_ERROR', 'PARSE_ERROR', 'VALIDATION_ERROR', 'UNKNOWN')),
+    error_message TEXT CHECK (error_message IS NULL OR length(error_message) <= 2000),
+    CHECK (completed_at >= started_at)
+);
+CREATE INDEX IF NOT EXISTS idx_crawl_attempt_run ON audit.crawl_request_attempt (crawl_run_id, started_at);
+CREATE INDEX IF NOT EXISTS idx_crawl_attempt_task ON audit.crawl_request_attempt (task_id, started_at);
+
+CREATE TABLE IF NOT EXISTS audit.crawl_source_state (
+    marketplace_code VARCHAR(32) PRIMARY KEY CHECK (marketplace_code = lower(marketplace_code)),
+    consecutive_failures INTEGER NOT NULL DEFAULT 0 CHECK (consecutive_failures >= 0),
+    -- The circuit is open only while opened_until > now(); there is no boolean.
+    opened_until TIMESTAMPTZ,
+    last_failure_at TIMESTAMPTZ,
+    last_success_at TIMESTAMPTZ,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
