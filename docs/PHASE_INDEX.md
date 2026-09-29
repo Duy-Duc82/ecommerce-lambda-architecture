@@ -64,6 +64,24 @@ Các mục dưới đây do Brief sở hữu. Plan phase chỉ được *tham ch
 - **Counter delta** (Brief §15): không clamp âm về zero; gắn
   `counter_reset_or_invalid`.
 
+## 3b. Mô hình nhánh (chốt 2026-09-29)
+
+```text
+phase-<n>-<tên>  --PR-->  develop  --PR (chỉ khi thầy hướng dẫn duyệt)-->  master
+```
+
+- **`master`**: chỉ nhận PR từ `develop`, và chỉ sau khi thầy hướng dẫn duyệt.
+  Không commit thẳng vào đây nữa, kể cả docs.
+- **`develop`**: nhánh tích hợp. Mọi nhánh phase PR vào đây. Đây là nơi chạy
+  full suite trước khi trình duyệt.
+- **`phase-<n>-*`**: mỗi phase một nhánh, rẽ từ `develop`, commit nhỏ và revert
+  được riêng lẻ. Giữ nguyên nguyên tắc cũ: production fix nằm ở commit riêng,
+  tách khỏi test đã phát hiện ra nó.
+
+Các nhánh cũ (`phase-1-marketplace-foundation`, `phase-3-4-scheduler-kafka-silver`,
+`phase-5-6-speed-gold`) có trước mô hình này; giữ làm lịch sử, không phát triển
+tiếp. Công việc của chúng đã nằm trong `develop`.
+
 ## 4. Quy tắc tránh tái diễn việc chia hai đường
 
 Sự cố 2026-09: hai bản triển khai Phase 5/6 độc lập cùng tồn tại vì plan
