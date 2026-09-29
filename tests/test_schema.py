@@ -1,3 +1,4 @@
+import json
 from datetime import datetime
 
 import pytest
@@ -55,6 +56,16 @@ def test_to_wire_serializes_event_time():
     wire = to_wire(event)
     assert isinstance(wire["event_time"], str)
     assert wire["event_time"].startswith("2019-10-01T08:30:00")
+
+
+def test_to_wire_serializes_price_snapshot_time_to_json():
+    snapshot = normalize_price_snapshot({
+        "site": "tiki",
+        "product_id": "p1",
+        "price": 100,
+    })
+    payload = json.dumps(to_wire(snapshot))
+    assert "snapshot_time" in payload
 
 
 def test_normalize_price_snapshot_maps_crawler_output_to_canonical():

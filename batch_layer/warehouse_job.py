@@ -30,10 +30,6 @@ from pyspark.sql.types import DecimalType, TimestampType
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from config.settings import (  # noqa: E402
-    DATA_LAKE_MODE,
-    MINIO_ACCESS_KEY,
-    MINIO_ENDPOINT,
-    MINIO_SECRET_KEY,
     POSTGRES_DB,
     POSTGRES_HOST,
     POSTGRES_PASSWORD,
@@ -41,6 +37,7 @@ from config.settings import (  # noqa: E402
     POSTGRES_USER,
     data_lake_uri,
 )
+from config.storage import spark_hadoop_options  # noqa: E402
 
 SUPPORTED_EVENT_TYPES = ("view", "cart", "purchase")
 EVENT_TYPE_KEYS = {"view": 1, "cart": 2, "purchase": 3}
@@ -68,16 +65,22 @@ def build_spark() -> SparkSession:
         .config("spark.sql.sources.partitionOverwriteMode", "dynamic")
         .config("spark.sql.session.timeZone", "UTC")
         .config("spark.sql.shuffle.partitions", os.getenv("SPARK_SQL_SHUFFLE_PARTITIONS", "16"))
+        # Raising SPARK_WORKER_MEMORY alone changes nothing: the worker only
+        # advertises capacity, the executor has to be told to claim it.
+        .config("spark.executor.memory", os.getenv("SPARK_EXECUTOR_MEMORY", "6g"))
+        .config("spark.driver.memory", os.getenv("SPARK_DRIVER_MEMORY", "4g"))
+        # Default 128MB splits turn an 8.6 GB CSV into ~67 tasks, each holding a
+        # wide row set in memory. Smaller splits trade scheduling for headroom.
+        .config("spark.sql.files.maxPartitionBytes", os.getenv("SPARK_MAX_PARTITION_BYTES", "67108864"))
+        .config("spark.sql.adaptive.enabled", "true")
     )
     spark = builder.getOrCreate()
-    if DATA_LAKE_MODE == "s3a":
-        hadoop = spark.sparkContext._jsc.hadoopConfiguration()
-        endpoint = MINIO_ENDPOINT if MINIO_ENDPOINT.startswith("http") else f"http://{MINIO_ENDPOINT}"
-        hadoop.set("fs.s3a.endpoint", endpoint)
-        hadoop.set("fs.s3a.access.key", MINIO_ACCESS_KEY)
-        hadoop.set("fs.s3a.secret.key", MINIO_SECRET_KEY)
-        hadoop.set("fs.s3a.path.style.access", "true")
-        hadoop.set("fs.s3a.connection.ssl.enabled", "false")
+    # Endpoint, TLS and path-style addressing differ per object store; taking
+    # them from the profile is what lets this identical job run against laptop
+    # MinIO or a cloud bucket without an edit.
+    hadoop = spark.sparkContext._jsc.hadoopConfiguration()
+    for key, value in spark_hadoop_options().items():
+        hadoop.set(key, value)
     spark.sparkContext.setLogLevel("WARN")
     return spark
 

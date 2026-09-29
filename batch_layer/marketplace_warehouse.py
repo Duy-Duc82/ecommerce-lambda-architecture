@@ -1,0 +1,184 @@
+"""Independent batch entrypoint for the marketplace temporal warehouse."""
+from __future__ import annotations
+import argparse
+import json
+import os
+import re
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Mapping
+from urllib.parse import quote
+
+from pyspark.sql import DataFrame, SparkSession
+from pyspark.sql import functions as F
+
+from config.settings import (
+    MARKETPLACE_BATCH_APP_NAME, MARKETPLACE_BATCH_SHUFFLE_PARTITIONS,
+    MARKETPLACE_COUNTER_MAX_GAP_SECONDS, MARKETPLACE_COUNTER_RULE_VERSION,
+    MARKETPLACE_FRESHNESS_RULE_VERSION, MARKETPLACE_FRESHNESS_SECONDS,
+    MARKETPLACE_GOLD_DATASET, MARKETPLACE_PERCENTILE_ACCURACY,
+    MARKETPLACE_SILVER_DATASET, data_lake_uri,
+)
+from data_ingestion.schemas import MARKETPLACE_OBSERVATION_WIRE_SCHEMA
+
+
+RUN_ID_RE = re.compile(r"[a-zA-Z0-9_-]{1,64}\Z")
+
+
+@dataclass(frozen=True)
+class MarketplaceBatchContext:
+    run_id: str
+    as_of: datetime
+    silver_uri: str
+    gold_root_uri: str
+    freshness_seconds: int = MARKETPLACE_FRESHNESS_SECONDS
+    freshness_rule_version: str = MARKETPLACE_FRESHNESS_RULE_VERSION
+    counter_rule_version: str = MARKETPLACE_COUNTER_RULE_VERSION
+    counter_max_gap_seconds: int = MARKETPLACE_COUNTER_MAX_GAP_SECONDS
+
+    def __post_init__(self) -> None:
+        if not RUN_ID_RE.fullmatch(self.run_id): raise ValueError("run_id must match [a-zA-Z0-9_-]{1,64}")
+        if self.as_of.tzinfo is None or self.as_of.utcoffset() is None: raise ValueError("as_of must be timezone-aware")
+        object.__setattr__(self, "as_of", self.as_of.astimezone(timezone.utc))
+        for name in ("silver_uri", "gold_root_uri", "freshness_rule_version", "counter_rule_version"):
+            if not getattr(self, name).strip(): raise ValueError(f"{name} must be non-empty")
+        for name in ("freshness_seconds", "counter_max_gap_seconds"):
+            if getattr(self, name) <= 0: raise ValueError(f"{name} must be positive")
+
+
+class ConflictingObservationError(ValueError): pass
+
+
+@dataclass(frozen=True)
+class GoldWriteResult:
+    dataset_name: str
+    uri: str
+    row_count: int
+
+
+@dataclass(frozen=True)
+class MarketplaceBatchResult:
+    run_id: str
+    status: str
+    silver_rows: int
+    dataset_counts: Mapping[str, int]
+
+
+def build_spark() -> SparkSession:
+    return (SparkSession.builder.appName(MARKETPLACE_BATCH_APP_NAME)
+            .config("spark.sql.session.timeZone", "UTC")
+            .config("spark.sql.shuffle.partitions", str(MARKETPLACE_BATCH_SHUFFLE_PARTITIONS))
+            .config("spark.sql.sources.partitionOverwriteMode", "dynamic").getOrCreate())
+
+
+def read_marketplace_silver(spark: SparkSession, silver_uri: str) -> DataFrame:
+    return spark.read.schema(MARKETPLACE_OBSERVATION_WIRE_SCHEMA).option("recursiveFileLookup", "true").json(silver_uri)
+
+
+def _decimal(col): return F.col(col).cast("decimal(38,6)")
+
+
+def flatten_marketplace_observations(wire: DataFrame) -> DataFrame:
+    p, o = F.col("payload.offer"), F.col("payload.observation")
+    result = wire.select(
+        "event_id", "schema_version", "event_type", F.to_timestamp("occurred_at").alias("occurred_at"), F.to_timestamp("produced_at").alias("produced_at"), "marketplace", "partition_key", "crawl_run_id", "raw_uri",
+        p.offer_id.alias("offer_id"), p.marketplace_id.alias("marketplace_id"), p.platform_listing_id.alias("platform_listing_id"), p.seller_id.alias("seller_id"), p.product_title.alias("product_title"), p.brand.alias("brand"), p.category_path.alias("category_path"), p.source_url.alias("source_url"), p.currency.alias("currency"), F.to_timestamp(p.first_seen_at).alias("first_seen_at"), F.to_timestamp(p.last_seen_at).alias("last_seen_at"), p.active_status.alias("active_status"),
+        o.observation_id.alias("observation_id"), o.offer_id.alias("observation_offer_id"), o.raw_uri.alias("observation_raw_uri"), o.crawl_run_id.alias("observation_crawl_run_id"), F.to_timestamp(o.observed_at).alias("observed_at"), F.to_timestamp(o.fetched_at).alias("fetched_at"), _decimal("payload.observation.current_price").alias("current_price"), _decimal("payload.observation.list_price").alias("list_price"), _decimal("payload.observation.shipping_price").alias("shipping_price"), _decimal("payload.observation.discount_amount").alias("discount_amount"), _decimal("payload.observation.discount_percent").alias("discount_percent"), _decimal("payload.observation.rating_value").alias("rating_value"), _decimal("payload.observation.rating_scale").alias("rating_scale"), o.rating_count.alias("rating_count"), o.review_count.alias("review_count"), o.sold_count.alias("sold_count"), o.availability.alias("availability"), F.to_json(o.promotion).alias("promotion_json"), o.ranking_position.alias("ranking_position"), o.raw_sha256.alias("raw_sha256"), o.adapter_version.alias("adapter_version"), F.to_date(F.to_timestamp(o.observed_at)).alias("observed_date"),
+    )
+    # The nested offer/observation equality is checked explicitly because
+    # malformed rows must fail the batch rather than disappear in a filter.
+    bad = result.filter(F.col("event_id").isNull() | F.col("observation_id").isNull() | (F.col("event_id") != F.col("observation_id")) | (F.col("offer_id") != F.col("observation_offer_id")) | (F.col("raw_uri") != F.col("observation_raw_uri")) | (F.col("crawl_run_id") != F.col("observation_crawl_run_id")) | F.col("current_price").isNull() | (F.col("current_price") < 0) | F.col("observed_at").isNull() | F.col("fetched_at").isNull() | F.col("raw_sha256").isNull() | F.col("raw_uri").isNull() | F.col("crawl_run_id").isNull())
+    if bad.limit(1).count(): raise ValueError("invalid marketplace Silver row: missing lineage or non-negative numeric field")
+    return result.drop("observation_offer_id", "observation_raw_uri", "observation_crawl_run_id")
+
+
+def deduplicate_marketplace_observations(flat: DataFrame) -> DataFrame:
+    semantic_cols = [name for name in flat.columns if name != "_content_hash"]
+    marked = flat.withColumn("_content_hash", F.sha2(F.to_json(F.struct(*[F.col(x) for x in semantic_cols])), 256))
+    conflicts = marked.groupBy("observation_id").agg(F.countDistinct("_content_hash").alias("hashes")).filter("hashes > 1")
+    conflict_ids = [row.observation_id for row in conflicts.collect()]
+    if conflict_ids: raise ConflictingObservationError(f"conflicting canonical content for observation IDs: {sorted(conflict_ids)[:10]}")
+    return marked.drop("_content_hash").dropDuplicates(["observation_id"])
+
+
+def read_crawl_audit(spark: SparkSession) -> tuple[DataFrame, DataFrame]:
+    from config.settings import POSTGRES_DB, POSTGRES_HOST, POSTGRES_PASSWORD, POSTGRES_PORT, POSTGRES_USER
+    jdbc = f"jdbc:postgresql://{POSTGRES_HOST}:{POSTGRES_PORT}/{POSTGRES_DB}"
+    props = {"user": POSTGRES_USER, "password": POSTGRES_PASSWORD, "driver": "org.postgresql.Driver"}
+    attempts = spark.read.jdbc(jdbc, "audit.crawl_request_attempt", properties=props)
+    runs = spark.read.jdbc(jdbc, "audit.crawl_run", properties=props)
+    return attempts, runs
+
+
+def _join_uri(root: str, *parts: str) -> str:
+    return root.rstrip("/") + "/" + "/".join(parts)
+
+
+def write_run_scoped_gold(marts: Mapping[str, DataFrame], context: MarketplaceBatchContext) -> dict[str, GoldWriteResult]:
+    if set(marts) != {"offer_current", "seller_current", "offer_price_history_daily", "offer_change_daily", "offer_freshness", "category_price_daily", "source_coverage_daily", "crawl_reliability_daily", "counter_delta_daily"}:
+        raise ValueError("marts must contain exactly the nine marketplace datasets")
+    run_root = _join_uri(context.gold_root_uri, "runs", f"run_id={quote(context.run_id, safe='')}")
+    results = {}
+    daily = {"offer_price_history_daily", "offer_change_daily", "category_price_daily", "source_coverage_daily", "crawl_reliability_daily", "counter_delta_daily"}
+    for name, frame in marts.items():
+        uri = _join_uri(run_root, name)
+        writer = frame.write.mode("overwrite")
+        if name in daily:
+            date_col = "observed_date" if "observed_date" in frame.columns else "request_date"
+            writer = writer.partitionBy("marketplace", date_col)
+        writer.parquet(uri)
+        results[name] = GoldWriteResult(name, uri, frame.count())
+    return results
+
+
+def run_marketplace_warehouse(context: MarketplaceBatchContext, *, publish_cache: bool = True, resume: bool = False, spark: SparkSession | None = None) -> MarketplaceBatchResult:
+    from batch_layer.marketplace_marts import build_marketplace_marts
+    own_spark = spark is None
+    spark = spark or build_spark()
+    observations = None
+    audit = None
+    try:
+        if publish_cache:
+            from batch_layer.marketplace_postgres import MarketplaceBatchAudit
+            audit = MarketplaceBatchAudit.from_settings()
+            audit.start_run(context, datetime.now(timezone.utc), resume=resume)
+        wire = read_marketplace_silver(spark, context.silver_uri)
+        observations = deduplicate_marketplace_observations(flatten_marketplace_observations(wire)).cache()
+        attempts, runs = read_crawl_audit(spark)
+        marts = build_marketplace_marts(observations, attempts, runs, context)
+        writes = write_run_scoped_gold(marts, context)
+        if audit:
+            audit.mark_gold_written(run_id=context.run_id, gold_run_uri=_join_uri(context.gold_root_uri, "runs", f"run_id={quote(context.run_id, safe='')}"), silver_rows=observations.count(), dataset_counts={name: result.row_count for name, result in writes.items()}, completed_at=None if publish_cache else context.as_of)
+        if publish_cache:
+            from batch_layer.marketplace_postgres import MarketplaceCachePublisher
+            publisher = MarketplaceCachePublisher.from_settings()
+            staged = publisher.stage(marts, run_id=context.run_id)
+            publisher.publish(staged, run_id=context.run_id, published_at=context.as_of)
+            publisher.cleanup(staged)
+        counts = {name: result.row_count for name, result in writes.items()}
+        return MarketplaceBatchResult(context.run_id, "SUCCEEDED" if publish_cache else "GOLD_WRITTEN", observations.count(), counts)
+    except Exception as error:
+        if audit:
+            try: audit.mark_failed(run_id=context.run_id, completed_at=datetime.now(timezone.utc), error=error)
+            except Exception: pass
+        raise
+    finally:
+        if observations is not None: observations.unpersist()
+        if own_spark: spark.stop()
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Marketplace temporal warehouse")
+    parser.add_argument("--run-id", required=True)
+    parser.add_argument("--as-of", required=True)
+    parser.add_argument("--silver-uri", default=data_lake_uri("silver", MARKETPLACE_SILVER_DATASET))
+    parser.add_argument("--gold-root-uri", default=data_lake_uri("gold", MARKETPLACE_GOLD_DATASET))
+    parser.add_argument("--skip-postgres", action="store_true")
+    parser.add_argument("--resume", action="store_true", help="resume an existing non-SUCCEEDED run with the same context")
+    args = parser.parse_args()
+    result = run_marketplace_warehouse(MarketplaceBatchContext(args.run_id, datetime.fromisoformat(args.as_of.replace("Z", "+00:00")), args.silver_uri, args.gold_root_uri), publish_cache=not args.skip_postgres, resume=args.resume)
+    print(json.dumps({"run_id": result.run_id, "status": result.status, "silver_rows": result.silver_rows, "dataset_counts": result.dataset_counts}, sort_keys=True))
+
+
+if __name__ == "__main__": main()

@@ -69,8 +69,12 @@ services:
       - spark://spark:7077
     environment:
       SPARK_PUBLIC_DNS: localhost
-      SPARK_WORKER_CORES: 2
-      SPARK_WORKER_MEMORY: 2g
+      # The Kaggle months are 5-9 GB of CSV each. A 2g worker cannot hold even
+      # one shuffle stage of that and dies with OOM/heartbeat timeouts, which
+      # reads like an infrastructure failure but is purely this number.
+      # Override per machine via .env; 8g/4 cores fits a 16 GB laptop.
+      SPARK_WORKER_CORES: ${SPARK_WORKER_CORES:-4}
+      SPARK_WORKER_MEMORY: ${SPARK_WORKER_MEMORY:-8g}
     ports:
       - "8081:8081"   # Spark Worker Web UI
     depends_on:

@@ -38,3 +38,13 @@ def publish_to_dlq(producer: Any, topic: str, raw_payload: Any, error: Exception
             "Failed to publish to DLQ for topic=%s source=%s; record dropped: %r",
             topic, source, raw_payload,
         )
+def publish_marketplace_dlq(producer, record, *, ack_timeout_seconds: int):
+    """Publish a marketplace DLQ record and wait for broker acknowledgement."""
+    import json
+    from common.serialization import serialize_for_wire
+    from config.topics import MARKETPLACE_OBSERVATIONS_DLQ
+    if ack_timeout_seconds <= 0:
+        raise ValueError("ack_timeout_seconds must be positive")
+    value = serialize_for_wire(record)
+    future = producer.send(MARKETPLACE_OBSERVATIONS_DLQ.name, key=record.dlq_id, value=value)
+    return future.get(timeout=ack_timeout_seconds)

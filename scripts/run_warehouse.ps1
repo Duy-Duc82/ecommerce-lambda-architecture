@@ -1,7 +1,11 @@
 param(
-    [Parameter(Mandatory = $true)][string]$Source,
+    [string]$Source = ".\\tests\\fixtures\\events.csv",
     [switch]$SkipPostgres,
-    [switch]$Build
+    [switch]$Build,
+    [switch]$Marketplace,
+    [string]$RunId,
+    [string]$AsOf,
+    [string]$SilverUri
 )
 
 $ErrorActionPreference = "Stop"
@@ -22,7 +26,16 @@ if ($Build) {
 }
 
 $arguments = @("--source", $containerSource)
+if ($Marketplace) {
+    if (-not $RunId -or -not $AsOf) { throw "Marketplace mode requires -RunId and -AsOf" }
+    $arguments = @("-m", "batch_layer.marketplace_warehouse", "--run-id", $RunId, "--as-of", $AsOf)
+    if ($SilverUri) { $arguments += @("--silver-uri", $SilverUri) }
+}
 if ($SkipPostgres) { $arguments += "--skip-postgres" }
 
-docker compose --profile jobs run --rm warehouse-job @arguments
+if ($Marketplace) {
+    docker compose --profile jobs run --rm warehouse-job python @arguments
+} else {
+    docker compose --profile jobs run --rm warehouse-job @arguments
+}
 if ($LASTEXITCODE -ne 0) { throw "Warehouse job failed" }
