@@ -370,6 +370,15 @@ class Phase2AcquisitionReport:
                 raise ValueError("raw artifact crawl_run_id does not match report")
             if self.raw_artifact.resource_type is not self.resource_type:
                 raise ValueError("raw artifact resource_type does not match report")
+            # The fetch happened inside this acquisition, so its instant must
+            # lie inside the transaction's own window. A fetched_at outside it
+            # means the adapter and the orchestrator read different clocks, and
+            # every downstream partition keyed on fetched_at would then be
+            # stamped by whichever clock the machine happened to have.
+            if not started_at <= self.raw_artifact.fetched_at <= completed_at:
+                raise ValueError(
+                    "raw artifact fetched_at must lie between started_at and completed_at"
+                )
             if self.raw_metadata_uri is None and not (
                 self.failure is not None
                 and self.failure.stage is AcquisitionStage.STORAGE
