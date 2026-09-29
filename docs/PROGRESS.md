@@ -606,6 +606,12 @@ Bổ sung 2026-08-16:
 
 ## 6b. Cách tiếp tục ngay (resume ở đây)
 
+> ⚠️ **LỖI THỜI (2026-08-17).** Kỳ vọng "44 passed" và đường dẫn
+> `.venv/Scripts/python.exe` đều không còn đúng: suite hiện có **519 test** và
+> chạy bằng `python` toàn cục (không có venv trong repo). Xem **§8** để biết
+> trạng thái thật và việc tiếp theo.
+
+
 ```bash
 # 1. Xác nhận vẫn xanh (kỳ vọng: 44 passed)
 .venv/Scripts/python.exe -m pytest tests/ -q
@@ -675,9 +681,9 @@ Trạng thái test: **44 passed**.
 
 ---
 
-## 7. Session 2026-09-29 — nguồn chân lý, Phase 3–6, mô hình `develop`
+## 8. Session 2026-09-29 — nguồn chân lý, Phase 3–6, mô hình `develop`
 
-### 7.1 Vì sao có session này
+### 8.1 Vì sao có session này
 
 Phát hiện Phase 5/6 bị triển khai **hai lần độc lập** trên hai nhánh. Nguyên
 nhân: plan Phase 5/6 chỉ nằm ở ngọn nhánh `phase-5-6-speed-gold`, không có ở
@@ -687,7 +693,7 @@ và tự viết plan mới. Hai bộ tên biến, hai bộ tên module cho cùng
 Bài học: **plan là hợp đồng, phải nằm ở nhánh chung.** Một hợp đồng chỉ một
 nhánh nhìn thấy thì không phải hợp đồng.
 
-### 7.2 Mô hình nhánh mới (chốt trong session này)
+### 8.2 Mô hình nhánh mới (chốt trong session này)
 
 ```text
 phase-<n>-<tên>  --PR-->  develop  --PR (chỉ khi thầy hướng dẫn duyệt)-->  master
@@ -703,7 +709,7 @@ phase-<n>-<tên>  --PR-->  develop  --PR (chỉ khi thầy hướng dẫn duyệ
 Chi tiết ở `docs/PHASE_INDEX.md` §3b. Ba PR đã chạy qua quy trình này:
 **#1** (test phase 4/5/6), **#2** (Phase 3), **#3** (bug clock tiki).
 
-### 7.3 Nguồn chân lý
+### 8.3 Nguồn chân lý
 
 `docs/PHASE_INDEX.md` là nguồn chân lý về chia phase: bảng Tuần ↔ Phase ↔
 Backlog ID suy thẳng từ Brief §21/§22, các hợp đồng đóng băng (3 Kafka topic,
@@ -714,7 +720,7 @@ Bảng phase ở §3 của chính file này đã **lỗi thời** (đánh số t
 Phase 3 = "Speed layer hardening" thay vì "Scheduler/retry/audit"). Giữ làm
 lịch sử, đừng dùng để lập kế hoạch.
 
-### 7.4 Phase 1–6 đã xong, nằm trong `develop`
+### 8.4 Phase 1–6 đã xong, nằm trong `develop`
 
 | Phase | Tuần | Nội dung | Test |
 |---|---|---|---|
@@ -739,7 +745,7 @@ Hai quyết định đáng nhớ:
 - **Circuit mở thì trả task về nguyên trạng**, không tính là thất bại của task,
   nên `attempts` lẫn streak của nguồn đều không nhúc nhích.
 
-### 7.5 Năm bug production, đều do test mới phát hiện
+### 8.5 Năm bug production, đều do test mới phát hiện
 
 | Bug | Vị trí | Hệ quả |
 |---|---|---|
@@ -752,7 +758,7 @@ Hai quyết định đáng nhớ:
 Hai bug giữa nghĩa là **2 trong 9 mart chưa từng chạy được lần nào**. Bug cuối
 mắc kẹt trên một nhánh lẻ suốt 3 tuần, phát hiện khi dọn nhánh.
 
-### 7.6 Môi trường
+### 8.6 Môi trường
 
 - `pyspark` 3.5.1 → **4.0.4**. 3.5.x chỉ hỗ trợ Python 3.8–3.11 + Java 8/11/17;
   trên Python 3.12 + Java 21 thì JVM chạy nhưng python worker chết ngay, triệu
@@ -763,12 +769,12 @@ mắc kẹt trên một nhánh lẻ suốt 3 tuần, phát hiện khi dọn nhá
   không theo session zone.
 - Cài thêm `psycopg2-binary`, `scikit-learn`.
 
-### 7.7 Trạng thái test
+### 8.7 Trạng thái test
 
 **519 passed, 0 failed, 0 skipped** — toàn bộ suite, không loại file nào.
 Đầu session: 141 test, trong đó 7 file không collect được.
 
-### 7.8 Trạng thái nhánh
+### 8.8 Trạng thái nhánh
 
 ```text
 master              3828eb5   bản gốc, chờ thầy duyệt
@@ -782,7 +788,7 @@ phase-5-6-speed-gold          GIỮ làm tham chiếu — 15 commit riêng,
 `phase-3-4-scheduler-kafka-silver`, `phase-5-6-tests`, `phase-3-scheduler`,
 `fix-tiki-clock-injection`, `fix-tiki-clock`.
 
-### 7.9 Việc tiếp theo
+### 8.9 Việc tiếp theo
 
 **Phase 7 (Tuần 7)** — chưa bắt đầu. Theo Brief §21 và §22:
 - P1-08 mandatory quality gates
