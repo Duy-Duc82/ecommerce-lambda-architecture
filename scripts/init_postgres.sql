@@ -123,3 +123,93 @@ CREATE TABLE IF NOT EXISTS audit.data_quality_result (
     checked_at              TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (run_id, check_name)
 );
+
+-- ---------- Marketplace speed-layer audit (Phase 5) ----------
+CREATE TABLE IF NOT EXISTS audit.marketplace_speed_batch (
+    query_name VARCHAR(128) NOT NULL, batch_id BIGINT NOT NULL,
+    status VARCHAR(16) NOT NULL CHECK (status IN ('RUNNING','SUCCEEDED','FAILED')),
+    started_at TIMESTAMPTZ NOT NULL, completed_at TIMESTAMPTZ,
+    input_rows BIGINT NOT NULL DEFAULT 0 CHECK (input_rows >= 0),
+    invalid_rows BIGINT NOT NULL DEFAULT 0 CHECK (invalid_rows >= 0),
+    applied_rows BIGINT NOT NULL DEFAULT 0 CHECK (applied_rows >= 0),
+    duplicate_rows BIGINT NOT NULL DEFAULT 0 CHECK (duplicate_rows >= 0),
+    late_rows BIGINT NOT NULL DEFAULT 0 CHECK (late_rows >= 0),
+    change_rows BIGINT NOT NULL DEFAULT 0 CHECK (change_rows >= 0),
+    kafka_rows BIGINT NOT NULL DEFAULT 0 CHECK (kafka_rows >= 0),
+    es_rows BIGINT NOT NULL DEFAULT 0 CHECK (es_rows >= 0),
+    redis_rows BIGINT NOT NULL DEFAULT 0 CHECK (redis_rows >= 0),
+    error_message TEXT CHECK (length(error_message) <= 2000),
+    PRIMARY KEY (query_name, batch_id),
+    CHECK (completed_at IS NULL OR status IN ('SUCCEEDED','FAILED')),
+    CHECK (status = 'RUNNING' OR completed_at IS NOT NULL),
+    CHECK (input_rows = 0 OR input_rows = invalid_rows + applied_rows + duplicate_rows + late_rows)
+);
+
+-- ---------- Marketplace temporal warehouse cache (Phase 6) ----------
+CREATE TABLE IF NOT EXISTS cache.marketplace_offer_current (
+    offer_id VARCHAR(128) PRIMARY KEY, marketplace VARCHAR(64) NOT NULL, marketplace_id VARCHAR(128) NOT NULL,
+    platform_listing_id VARCHAR(128) NOT NULL, seller_id VARCHAR(128), product_title TEXT NOT NULL, brand TEXT,
+    category_path TEXT, source_url TEXT NOT NULL, currency CHAR(3) NOT NULL, active_status VARCHAR(16) NOT NULL,
+    first_seen_at TIMESTAMPTZ NOT NULL, last_seen_at TIMESTAMPTZ NOT NULL, current_observation_id VARCHAR(128) NOT NULL,
+    observed_at TIMESTAMPTZ NOT NULL, fetched_at TIMESTAMPTZ NOT NULL, current_price NUMERIC(38,6) NOT NULL,
+    list_price NUMERIC(38,6), shipping_price NUMERIC(38,6), rating_value NUMERIC(38,6), rating_scale NUMERIC(38,6),
+    rating_count BIGINT, review_count BIGINT, sold_count BIGINT, availability VARCHAR(16) NOT NULL, ranking_position BIGINT,
+    raw_uri TEXT NOT NULL, raw_sha256 VARCHAR(64) NOT NULL, adapter_version VARCHAR(128) NOT NULL, crawl_run_id VARCHAR(128) NOT NULL
+);
+CREATE TABLE IF NOT EXISTS cache.marketplace_seller_current (
+    seller_id VARCHAR(128) NOT NULL, marketplace VARCHAR(64) NOT NULL, marketplace_id VARCHAR(128) NOT NULL,
+    first_seen_at TIMESTAMPTZ NOT NULL, last_seen_at TIMESTAMPTZ NOT NULL, observed_offer_count BIGINT NOT NULL,
+    PRIMARY KEY (seller_id, marketplace)
+);
+CREATE TABLE IF NOT EXISTS cache.marketplace_offer_price_history_daily (
+    marketplace VARCHAR(64) NOT NULL, offer_id VARCHAR(128) NOT NULL, observed_date DATE NOT NULL, currency CHAR(3) NOT NULL,
+    first_observed_at TIMESTAMPTZ NOT NULL, last_observed_at TIMESTAMPTZ NOT NULL, first_price NUMERIC(38,6) NOT NULL,
+    last_price NUMERIC(38,6) NOT NULL, min_price NUMERIC(38,6) NOT NULL, max_price NUMERIC(38,6) NOT NULL, avg_price NUMERIC(38,6) NOT NULL,
+    first_list_price NUMERIC(38,6), last_list_price NUMERIC(38,6), observation_count BIGINT NOT NULL, distinct_price_count BIGINT NOT NULL,
+    last_availability VARCHAR(16) NOT NULL, last_observation_id VARCHAR(128) NOT NULL, PRIMARY KEY (marketplace,offer_id,observed_date,currency)
+);
+CREATE TABLE IF NOT EXISTS cache.marketplace_offer_change_daily (
+    marketplace VARCHAR(64) NOT NULL, offer_id VARCHAR(128) NOT NULL, observed_date DATE NOT NULL, currency CHAR(3) NOT NULL,
+    transition_count BIGINT NOT NULL, price_change_count BIGINT NOT NULL, price_drop_count BIGINT NOT NULL, price_increase_count BIGINT NOT NULL,
+    absolute_price_change_sum NUMERIC(38,6) NOT NULL, signed_price_change_sum NUMERIC(38,6) NOT NULL, max_price_drop NUMERIC(38,6), max_price_increase NUMERIC(38,6),
+    rating_change_count BIGINT NOT NULL, counter_change_count BIGINT NOT NULL, availability_change_count BIGINT NOT NULL, PRIMARY KEY (marketplace,offer_id,observed_date,currency)
+);
+CREATE TABLE IF NOT EXISTS cache.marketplace_offer_freshness (
+    as_of TIMESTAMPTZ NOT NULL, marketplace VARCHAR(64) NOT NULL, offer_id VARCHAR(128) NOT NULL, last_observation_id VARCHAR(128) NOT NULL,
+    last_observed_at TIMESTAMPTZ NOT NULL, age_seconds BIGINT NOT NULL, freshness_status VARCHAR(8) NOT NULL CHECK (freshness_status IN ('FRESH','STALE','FUTURE')),
+    stale_after_seconds BIGINT NOT NULL, freshness_rule_version VARCHAR(128) NOT NULL, PRIMARY KEY (offer_id)
+);
+CREATE TABLE IF NOT EXISTS cache.marketplace_category_price_daily (
+    marketplace VARCHAR(64) NOT NULL, category_path TEXT NOT NULL, observed_date DATE NOT NULL, currency CHAR(3) NOT NULL,
+    observed_offer_count BIGINT NOT NULL, observation_count BIGINT NOT NULL, min_price NUMERIC(38,6) NOT NULL, p25_price NUMERIC(38,6) NOT NULL,
+    median_price NUMERIC(38,6) NOT NULL, p75_price NUMERIC(38,6) NOT NULL, max_price NUMERIC(38,6) NOT NULL, avg_price NUMERIC(38,6) NOT NULL,
+    PRIMARY KEY (marketplace,category_path,observed_date,currency)
+);
+CREATE TABLE IF NOT EXISTS cache.marketplace_source_coverage_daily (
+    marketplace VARCHAR(64) NOT NULL, observed_date DATE NOT NULL, eligible_offer_count BIGINT NOT NULL, observed_offer_count BIGINT NOT NULL,
+    missing_offer_count BIGINT NOT NULL, fresh_offer_count BIGINT, stale_offer_count BIGINT, observation_count BIGINT NOT NULL, parsed_count BIGINT NOT NULL,
+    rejected_count BIGINT NOT NULL, coverage_rate DOUBLE PRECISION, rejection_rate DOUBLE PRECISION, freshness_rule_version VARCHAR(128) NOT NULL,
+    PRIMARY KEY (marketplace,observed_date)
+);
+CREATE TABLE IF NOT EXISTS cache.marketplace_crawl_reliability_daily (
+    marketplace VARCHAR(64) NOT NULL, request_date DATE NOT NULL, request_count BIGINT NOT NULL, succeeded_count BIGINT NOT NULL, failed_count BIGINT NOT NULL,
+    success_rate DOUBLE PRECISION, avg_latency_ms DOUBLE PRECISION, p95_latency_ms DOUBLE PRECISION, raw_bytes BIGINT NOT NULL, parsed_count BIGINT NOT NULL,
+    rejected_count BIGINT NOT NULL, rate_limited_count BIGINT NOT NULL, transport_error_count BIGINT NOT NULL, server_error_count BIGINT NOT NULL,
+    parse_error_count BIGINT NOT NULL, validation_error_count BIGINT NOT NULL, PRIMARY KEY (marketplace,request_date)
+);
+CREATE TABLE IF NOT EXISTS cache.marketplace_counter_delta_daily (
+    marketplace VARCHAR(64) NOT NULL, offer_id VARCHAR(128) NOT NULL, observed_date DATE NOT NULL, counter_name VARCHAR(32) NOT NULL,
+    first_value BIGINT, last_value BIGINT, raw_delta_sum BIGINT, valid_delta_sum BIGINT, valid_transition_count BIGINT NOT NULL,
+    invalid_transition_count BIGINT NOT NULL, elapsed_seconds_valid BIGINT NOT NULL, velocity_proxy_per_hour DOUBLE PRECISION,
+    counter_reset_or_invalid BOOLEAN NOT NULL, invalid_reasons_json TEXT NOT NULL, counter_rule_version VARCHAR(128) NOT NULL,
+    PRIMARY KEY (marketplace,offer_id,observed_date,counter_name)
+);
+CREATE TABLE IF NOT EXISTS audit.marketplace_batch_run (
+    run_id VARCHAR(64) PRIMARY KEY, as_of TIMESTAMPTZ NOT NULL, silver_uri TEXT NOT NULL, gold_run_uri TEXT,
+    started_at TIMESTAMPTZ NOT NULL, completed_at TIMESTAMPTZ, status VARCHAR(16) NOT NULL CHECK (status IN ('RUNNING','GOLD_WRITTEN','SUCCEEDED','FAILED')),
+    silver_rows BIGINT CHECK (silver_rows IS NULL OR silver_rows >= 0), gold_rows BIGINT CHECK (gold_rows IS NULL OR gold_rows >= 0),
+    cache_published BOOLEAN NOT NULL DEFAULT FALSE, dataset_counts JSONB, error_message TEXT CHECK (length(error_message) <= 2000)
+);
+CREATE TABLE IF NOT EXISTS audit.marketplace_cache_version (
+    singleton BOOLEAN PRIMARY KEY DEFAULT TRUE CHECK (singleton), run_id VARCHAR(64) NOT NULL, published_at TIMESTAMPTZ NOT NULL, dataset_counts JSONB NOT NULL
+);

@@ -24,3 +24,21 @@ databases:
         schema: cache
       - table_name: v_top_products
         schema: cache
+      - table_name: marketplace_offer_current
+        schema: cache
+      - table_name: marketplace_seller_current
+        schema: cache
+      - table_name: marketplace_offer_price_history_daily
+        schema: cache
+      - table_name: marketplace_offer_change_daily
+        schema: cache
+      - table_name: marketplace_offer_freshness
+        schema: cache
+      - table_name: marketplace_category_price_daily
+        schema: cache
+      - table_name: marketplace_source_coverage_daily
+        schema: cache
+      - table_name: marketplace_crawl_reliability_daily
+        schema: cache
+      - table_name: marketplace_counter_delta_daily
+        schema: cache
