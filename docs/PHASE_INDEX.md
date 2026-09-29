@@ -84,10 +84,22 @@ Phase 5/6 chỉ nằm ở ngọn một nhánh feature, không có ở commit g�
 | 2 | có code | `phase-3-4-scheduler-kafka-silver` (commit `4de5ac1`) |
 | 3 | **chưa có code** | — |
 | 4 | một phần (topics, DLQ, Silver sink) | `phase-3-4-scheduler-kafka-silver` |
-| 5 | code có, **test thiếu** (10/38) | `phase-3-4-scheduler-kafka-silver` |
-| 6 | code có, **test thiếu** (10/47) | `phase-3-4-scheduler-kafka-silver` |
+| 5 | code + test đủ (38/38) | `phase-5-6-tests` |
+| 6 | code + test (43/47) | `phase-5-6-tests` |
 
 Phase 5/6 đã chốt lấy bản `phase-3-4-scheduler-kafka-silver` làm nền vì scope
-khớp Brief §22. Nhánh `phase-5-6-speed-gold` giữ lại làm tham chiếu test, không
-phát triển tiếp. Việc còn lại là bổ sung test theo mục 13 (Phase 5) và mục 15
-(Phase 6) của hai plan tương ứng.
+khớp Brief §22. Nhánh `phase-5-6-speed-gold` giữ lại làm tham chiếu, không phát
+triển tiếp. Test bổ sung nằm ở nhánh `phase-5-6-tests`: 10 test -> 186, toàn bộ
+suite 393 pass. Bốn item Phase 6 chưa phủ là 33-35 và 43, cần chạy thật
+`run_marketplace_warehouse` end-to-end.
+
+## 6. Ràng buộc môi trường
+
+`pyspark` phải là **4.x**. pyspark 3.5.x chỉ hỗ trợ Python 3.8-3.11 và Java
+8/11/17; trên Python 3.12 + Java 21 thì JVM chạy nhưng python worker chết ngay,
+nên mọi thao tác trả dữ liệu về Python đều hỏng và không test được DataFrame.
+Spark 4 bật ANSI mode mặc định — đã kiểm tra, không làm lệch mart nào.
+
+Test dùng Spark phải set `spark.sql.session.timeZone=UTC` cho khớp
+`build_spark()`, và nhớ rằng `collect()` trả timestamp naive theo local zone
+của driver.
