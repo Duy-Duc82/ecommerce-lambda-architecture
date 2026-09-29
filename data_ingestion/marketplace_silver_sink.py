@@ -22,7 +22,8 @@ def process_record(record: SourceRecord, *, writer, dlq_producer, clock):
     try:
         text = record.value.decode("utf-8")
         raw = json.loads(text)
-        event = marketplace_observation_from_wire(raw); stage = DlqStage.CONTRACT_VALIDATION
+        stage = DlqStage.CONTRACT_VALIDATION
+        event = marketplace_observation_from_wire(raw)
         key = record.key.decode("utf-8") if record.key is not None else None
         if key != event.partition_key: raise ValueError("Kafka key does not equal event partition_key")
         path = f"marketplace/offer_observations/marketplace={quote(event.marketplace, safe='')}/observed_date={event.payload.observation.observed_at.date().isoformat()}/observation_id={quote(event.payload.observation.observation_id, safe='')}.json"
