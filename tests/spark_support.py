@@ -79,6 +79,9 @@ def spark():
         .appName("marketplace-tests")
         .config("spark.ui.enabled", "false")
         .config("spark.sql.shuffle.partitions", "1")
+        # build_spark() pins the session to UTC; a test session on local time
+        # would bucket observed_date differently from production.
+        .config("spark.sql.session.timeZone", "UTC")
         .getOrCreate()
     )
     session.sparkContext.setLogLevel("ERROR")

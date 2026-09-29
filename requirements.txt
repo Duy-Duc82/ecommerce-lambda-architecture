@@ -3,7 +3,9 @@
 # ============================================================
 
 # --- Core Processing ---
-pyspark==3.5.1
+# Spark 4 is required here: pyspark 3.5.x supports Python 3.8-3.11 and
+# Java 8/11/17, and its python worker dies on a newer interpreter or JVM.
+pyspark==4.0.4
 pyarrow==24.0.0
 pandas>=2.2.3; python_version >= "3.9"
 pandas==2.0.3; python_version < "3.9"
