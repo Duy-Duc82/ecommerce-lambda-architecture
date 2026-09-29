@@ -108,12 +108,14 @@ function Start-DockerStack {
 }
 
 function Initialize-KafkaTopics {
-    Invoke-Step -Title "Create Kafka topic" -Script {
-        docker exec kafka /opt/kafka/bin/kafka-topics.sh `
-            --create --bootstrap-server localhost:9092 `
-            --topic ecommerce_events --partitions 3 `
-            --replication-factor 1 --if-not-exists | Out-Null
-        Write-Host "  [OK] ecommerce_events" -ForegroundColor Green
+    Invoke-Step -Title "Create Kafka topics" -Script {
+        $topics = @("ecommerce_events", "marketplace.observations.v1", "marketplace.observations.v1.dlq", "marketplace.changes.v1")
+        foreach ($topic in $topics) {
+            docker exec kafka /opt/kafka/bin/kafka-topics.sh `
+                --create --bootstrap-server localhost:9092 `
+                --topic $topic --partitions 3 --replication-factor 1 --if-not-exists | Out-Null
+            Write-Host "  [OK] $topic" -ForegroundColor Green
+        }
     }
 }
 
