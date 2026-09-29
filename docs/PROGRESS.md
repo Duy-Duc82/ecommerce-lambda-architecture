@@ -673,81 +673,127 @@ Trạng thái test: **44 passed**.
 
 ---
 
-## 7. Session 2026-09-29 — nguồn chân lý, test phase 4/5/6, khởi động Phase 3
+---
+
+## 7. Session 2026-09-29 — nguồn chân lý, Phase 3–6, mô hình `develop`
 
 ### 7.1 Vì sao có session này
 
 Phát hiện Phase 5/6 bị triển khai **hai lần độc lập** trên hai nhánh. Nguyên
 nhân: plan Phase 5/6 chỉ nằm ở ngọn nhánh `phase-5-6-speed-gold`, không có ở
 commit gốc chung (`1d5b252`), nên phiên làm việc sau rẽ từ đó không nhìn thấy
-và tự viết plan mới.
+và tự viết plan mới. Hai bộ tên biến, hai bộ tên module cho cùng một việc.
 
-### 7.2 Nguồn chân lý (nhánh `master`, 3 commit, CHƯA push)
+Bài học: **plan là hợp đồng, phải nằm ở nhánh chung.** Một hợp đồng chỉ một
+nhánh nhìn thấy thì không phải hợp đồng.
 
-- Đưa `docs/PHASE_1..6_*_IMPLEMENTATION_PLAN.md` lên `master`. Plan là hợp
-  đồng, không phải sản phẩm của phase — phải nằm ở gốc mọi nhánh rẽ ra.
-- Thêm `docs/PHASE_INDEX.md`: bảng Tuần ↔ Phase ↔ Backlog ID suy thẳng từ
-  Brief §21/§22, các hợp đồng đóng băng (topic, 7 change type, Kafka key,
-  `observation_id`, cột mart, counter delta), và ràng buộc môi trường.
-- Chốt bản plan Phase 5/6 của nhánh `phase-3-4-scheduler-kafka-silver` vì
-  scope khớp Brief §22 (P1-05/06 cho Phase 5, P1-07/10 cho Phase 6). Bản kia
-  kéo P1-08/P1-09 (tuần 7) và P1-12 (tuần 8) lên sớm.
+### 7.2 Mô hình nhánh mới (chốt trong session này)
 
-### 7.3 Test phase 4/5/6 (nhánh `phase-5-6-tests`, 7 commit, CHƯA push)
+```text
+phase-<n>-<tên>  --PR-->  develop  --PR (chỉ khi thầy hướng dẫn duyệt)-->  master
+```
 
-Từ **10 test → 183** cho phase 4/5/6 (+3307 dòng, 17 file).
+- `master`: **không nhận commit trực tiếp nữa**, kể cả docs. Chỉ nhận PR từ
+  `develop` sau khi thầy duyệt. Hiện đang ở `3828eb5`, đúng bản gốc.
+- `develop`: nhánh tích hợp, chạy full suite trước khi trình duyệt.
+- Nhánh phase: **luôn rẽ từ `develop` mới nhất, không xếp chồng lên nhau.**
+  Đã thử xếp chồng một lần và PR thứ hai hiện luôn diff của PR thứ nhất,
+  không review được.
 
-### 7.4 Bốn bug production do test mới phát hiện
+Chi tiết ở `docs/PHASE_INDEX.md` §3b. Ba PR đã chạy qua quy trình này:
+**#1** (test phase 4/5/6), **#2** (Phase 3), **#3** (bug clock tiki).
+
+### 7.3 Nguồn chân lý
+
+`docs/PHASE_INDEX.md` là nguồn chân lý về chia phase: bảng Tuần ↔ Phase ↔
+Backlog ID suy thẳng từ Brief §21/§22, các hợp đồng đóng băng (3 Kafka topic,
+7 change type, Kafka key, `observation_id`, cột mart, counter delta), ràng buộc
+môi trường và mô hình nhánh.
+
+Bảng phase ở §3 của chính file này đã **lỗi thời** (đánh số từ trước Brief,
+Phase 3 = "Speed layer hardening" thay vì "Scheduler/retry/audit"). Giữ làm
+lịch sử, đừng dùng để lập kế hoạch.
+
+### 7.4 Phase 1–6 đã xong, nằm trong `develop`
+
+| Phase | Tuần | Nội dung | Test |
+|---|---|---|---|
+| 1 | 1 | Marketplace foundation | |
+| 2 | 2 | Raw-first acquisition | |
+| 3 | 3 | **Scheduler, retry, crawl audit** | 113 (đủ 30/30 item) |
+| 4 | 4 | Canonical Kafka + Silver | |
+| 5 | 5 | Speed layer | đủ 38/38 item |
+| 6 | 6 | Batch temporal warehouse | 43/47 item |
+
+**Nửa đầu lộ trình 12 tuần hoàn tất.**
+
+Phase 3 (mới làm trong session này) gồm `crawler/scheduling.py` (quy tắc thuần),
+`crawler/frontier.py` (lease `FOR UPDATE SKIP LOCKED`, thu hồi lease hết hạn),
+`crawler/audit.py` (run/attempt + circuit breaker), `crawler/worker.py` (vòng
+lặp inject clock/executor), 4 bảng DDL trong schema `audit`, và một adapter mỏng
+ở `runner.py`. Đủ 14/14 mục Definition of Done, không đụng dòng nào của Phase 2.
+
+Hai quyết định đáng nhớ:
+- **Lỗi parser/validation là terminal và KHÔNG mở circuit** — nó nói response
+  này hỏng, không phải nguồn đang chết.
+- **Circuit mở thì trả task về nguyên trạng**, không tính là thất bại của task,
+  nên `attempts` lẫn streak của nguồn đều không nhúc nhích.
+
+### 7.5 Năm bug production, đều do test mới phát hiện
 
 | Bug | Vị trí | Hệ quả |
 |---|---|---|
 | `_latest()` lấy bản ghi **cũ nhất** (`row_number()==1` trên window tăng dần) | `batch_layer/marketplace_marts.py` | `offer_current` báo giá đầu tiên là giá hiện tại; `offer_freshness` tính tuổi từ observation đầu → **không offer nào FRESH được** |
-| Join trùng cột `first_seen_at` | `build_offer_current` | `AMBIGUOUS_REFERENCE` — hàm **ném exception ở mọi input** |
+| Join trùng cột `first_seen_at` | `build_offer_current` | `AMBIGUOUS_REFERENCE` — **ném exception ở mọi input** |
 | Đọc cờ `observed` từ frame không chứa nó | `build_source_coverage_daily` | `UNRESOLVED_COLUMN` — **ném exception ở mọi input** |
 | `stage` gán sau khi decode thành công | `data_ingestion/marketplace_silver_sink.py` | Vi phạm hợp đồng bị dán nhãn `DECODE` thay vì `CONTRACT_VALIDATION`; hai loại lỗi đụng chung `dlq_id` |
+| `kwargs.pop("clock")` không truyền xuống `super()` | `crawler/sites/tiki.py` | Clock inject bị ghi đè bằng giờ hệ thống → sai partition Bronze (`hour=`), sai `raw_artifact_id`, `fetched_at` nằm ngoài `[started_at, completed_at]` |
 
-Hai bug giữa nghĩa là **2 trong 9 mart chưa từng chạy được lần nào**.
+Hai bug giữa nghĩa là **2 trong 9 mart chưa từng chạy được lần nào**. Bug cuối
+mắc kẹt trên một nhánh lẻ suốt 3 tuần, phát hiện khi dọn nhánh.
 
-### 7.5 Môi trường
+### 7.6 Môi trường
 
 - `pyspark` 3.5.1 → **4.0.4**. 3.5.x chỉ hỗ trợ Python 3.8–3.11 + Java 8/11/17;
-  trên Python 3.12 + Java 21 thì JVM chạy nhưng python worker chết ngay.
-  Spark 4 bật ANSI mode mặc định — đã kiểm tra, không làm lệch mart nào.
+  trên Python 3.12 + Java 21 thì JVM chạy nhưng python worker chết ngay, triệu
+  chứng (`EOFException`) không hề gợi ý nguyên nhân. Spark 4 bật ANSI mode mặc
+  định — đã kiểm tra, không làm lệch mart nào.
 - Test dùng Spark phải set `spark.sql.session.timeZone=UTC` cho khớp
-  `build_spark()`; lưu ý `collect()` trả timestamp naive theo local zone driver.
-- Cài `psycopg2-binary`, `scikit-learn`.
-
-### 7.6 Phase 3 — đã khởi động (nhánh `phase-3-scheduler`, 1 commit)
-
-Dependency gate của plan §2 **pass**: Phase 2 có `acquire_listing_page`,
-taxonomy exception và `Phase2AcquisitionReport` đủ dùng.
-
-Xong **work package A** — `crawler/scheduling.py` (phần thuần, không chạm
-PostgreSQL/network) + 65 test, phủ item 1–11 của plan §12: enum, `CrawlTask`/
-`RetryPolicy`/`RetryDecision`, `make_crawl_task_id`, `cadence_minutes`,
-`classify_failure`, `parse_retry_after`, `decide_retry` (backoff mũ có trần,
-jitter tất định, Retry-After ghi đè nhưng vẫn bị chặn trần). Thêm 12 biến
-`CRAWL_*` vào `config/settings.py`.
-
-**Còn lại của Phase 3** (work package B, C, D):
-- `crawler/frontier.py` + DDL `audit.crawl_frontier` — lease `FOR UPDATE SKIP
-  LOCKED`, thu hồi lease hết hạn, enqueue idempotent (item 12–21)
-- `crawler/audit.py` + DDL `audit.crawl_run`, `audit.crawl_request_attempt`,
-  `audit.crawl_source_state` (item 22–23)
-- `crawler/worker.py` — vòng lặp inject clock/executor, circuit breaker
-  (item 24–30)
+  `build_spark()`; `collect()` trả timestamp naive theo **local zone của driver**,
+  không theo session zone.
+- Cài thêm `psycopg2-binary`, `scikit-learn`.
 
 ### 7.7 Trạng thái test
 
-**462 passed, 0 failed, 0 skipped** — toàn bộ suite, không loại file nào.
-(Trước session: 141 test, trong đó 7 file không collect được.)
+**519 passed, 0 failed, 0 skipped** — toàn bộ suite, không loại file nào.
+Đầu session: 141 test, trong đó 7 file không collect được.
 
-### 7.8 Việc còn treo
+### 7.8 Trạng thái nhánh
 
-- **4 commit `master` + 7 commit `phase-5-6-tests` + 1 commit
-  `phase-3-scheduler` đều CHƯA push.**
-- Phase 3 còn 3 work package (xem 7.6).
-- 4/47 item Phase 6 chưa phủ (33–35, 43) — cần chạy thật
-  `run_marketplace_warehouse` end-to-end, không phải unit test.
-- Nhánh `phase-5-6-speed-gold` giữ làm tham chiếu, không phát triển tiếp; nó
-  có ~3000 dòng test cho một thiết kế khác, có thể moi ý tưởng.
+```text
+master              3828eb5   bản gốc, chờ thầy duyệt
+develop             ✅ phase 1-6, 519 test xanh
+phase-5-6-speed-gold          GIỮ làm tham chiếu — 15 commit riêng,
+                              bản Phase 5/6 thay thế đã bị loại, có ~3000
+                              dòng test cho một thiết kế khác
+```
+
+Đã xoá (đều nằm trọn trong `develop`): `phase-1-marketplace-foundation`,
+`phase-3-4-scheduler-kafka-silver`, `phase-5-6-tests`, `phase-3-scheduler`,
+`fix-tiki-clock-injection`, `fix-tiki-clock`.
+
+### 7.9 Việc tiếp theo
+
+**Phase 7 (Tuần 7)** — chưa bắt đầu. Theo Brief §21 và §22:
+- P1-08 mandatory quality gates
+- P1-09 gold publish manifest
+- robust price anomaly: rolling median, MAD, IQR fallback, minimum sample size
+  (Brief §15 nói rõ: MVP dùng robust statistics, không ML phức tạp; không gọi
+  anomaly là scam hay incorrect price)
+- raw reparse workflow
+- batch replay/idempotency tests
+- data-quality/audit dashboards
+
+**Còn nợ:** 4/47 item Phase 6 (33–35, 43) cần chạy thật
+`run_marketplace_warehouse` end-to-end với MinIO + PostgreSQL, không phải unit
+test — cần Docker.
