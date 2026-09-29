@@ -91,6 +91,30 @@ def execute_listing_page(
     )
 
 
+def listing_page_executor(
+    *,
+    site: str,
+    writer: Callable[[str, str, bytes], str] = put_bytes,
+    clock: Callable[[], datetime],
+):
+    """Bind Phase 2 acquisition into the executor the Phase 3 worker calls.
+
+    This is the whole adapter: the worker holds no site name, no writer and
+    no parsing, and Phase 2 keeps its raw-first ordering untouched.
+    """
+
+    def execute(*, task, crawl_run_id: str) -> Phase2AcquisitionReport:
+        return execute_listing_page(
+            site=site,
+            task_target=task.target,
+            crawl_run_id=crawl_run_id,
+            writer=writer,
+            clock=clock,
+        )
+
+    return execute
+
+
 def _write_events(reports: list[Phase2AcquisitionReport], output: TextIO | None) -> None:
     if output is None:
         return
