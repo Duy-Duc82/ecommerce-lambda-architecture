@@ -199,6 +199,17 @@ MARKETPLACE_ANOMALY_MIN_SAMPLES = int(os.getenv("MARKETPLACE_ANOMALY_MIN_SAMPLES
 MARKETPLACE_ANOMALY_MAD_THRESHOLD = _env_decimal("MARKETPLACE_ANOMALY_MAD_THRESHOLD", "3.5")
 MARKETPLACE_ANOMALY_IQR_MULTIPLIER = _env_decimal("MARKETPLACE_ANOMALY_IQR_MULTIPLIER", "1.5")
 
+# Phase 7 quality gate. The tolerance absorbs clock skew between a source and
+# this pipeline; anything beyond it is a real ordering defect, not jitter.
+MARKETPLACE_QUALITY_RULE_VERSION = os.getenv("MARKETPLACE_QUALITY_RULE_VERSION", "quality-rules.v1")
+MARKETPLACE_QUALITY_FUTURE_TOLERANCE_SECONDS = int(os.getenv("MARKETPLACE_QUALITY_FUTURE_TOLERANCE_SECONDS", "300"))
+# A failure sample exists to point a human at the first few offending rows, so
+# it stays small and carries identifiers only.
+MARKETPLACE_QUALITY_SAMPLE_LIMIT = int(os.getenv("MARKETPLACE_QUALITY_SAMPLE_LIMIT", "10"))
+MARKETPLACE_ALLOWED_CURRENCIES = tuple(
+    sorted({c.strip().upper() for c in os.getenv("MARKETPLACE_ALLOWED_CURRENCIES", "VND,USD").split(",") if c.strip()})
+)
+
 # Phase 4 topic settings are kept separate from the legacy behavioral topic.
 KAFKA_TOPIC_MARKETPLACE_OBSERVATIONS = os.getenv("KAFKA_TOPIC_MARKETPLACE_OBSERVATIONS", "marketplace.observations.v1")
 KAFKA_TOPIC_MARKETPLACE_OBSERVATIONS_DLQ = os.getenv("KAFKA_TOPIC_MARKETPLACE_OBSERVATIONS_DLQ", "marketplace.observations.v1.dlq")
@@ -226,6 +237,8 @@ def validate_marketplace_settings() -> None:
         "KAFKA_PRODUCER_ACK_TIMEOUT_SECONDS": KAFKA_PRODUCER_ACK_TIMEOUT_SECONDS,
         "MARKETPLACE_ANOMALY_WINDOW_DAYS": MARKETPLACE_ANOMALY_WINDOW_DAYS,
         "MARKETPLACE_ANOMALY_MIN_SAMPLES": MARKETPLACE_ANOMALY_MIN_SAMPLES,
+        "MARKETPLACE_QUALITY_FUTURE_TOLERANCE_SECONDS": MARKETPLACE_QUALITY_FUTURE_TOLERANCE_SECONDS,
+        "MARKETPLACE_QUALITY_SAMPLE_LIMIT": MARKETPLACE_QUALITY_SAMPLE_LIMIT,
     }
     if any(value <= 0 for value in positive.values()):
         bad = next(name for name, value in positive.items() if value <= 0)
@@ -243,10 +256,15 @@ def validate_marketplace_settings() -> None:
         "MARKETPLACE_SPEED_QUERY_NAME", "MARKETPLACE_FRESHNESS_RULE_VERSION",
         "MARKETPLACE_COUNTER_RULE_VERSION", "MARKETPLACE_SILVER_DATASET",
         "MARKETPLACE_GOLD_DATASET", "MARKETPLACE_BATCH_APP_NAME",
-        "MARKETPLACE_ANOMALY_RULE_VERSION",
+        "MARKETPLACE_ANOMALY_RULE_VERSION", "MARKETPLACE_QUALITY_RULE_VERSION",
     ):
         if not globals()[name].strip():
             raise ValueError(f"{name} must be non-empty")
+    if not MARKETPLACE_ALLOWED_CURRENCIES:
+        raise ValueError("MARKETPLACE_ALLOWED_CURRENCIES must list at least one code")
+    for code in MARKETPLACE_ALLOWED_CURRENCIES:
+        if len(code) != 3 or not code.isalpha():
+            raise ValueError(f"MARKETPLACE_ALLOWED_CURRENCIES holds a non ISO-4217 code: {code}")
 
 
 validate_marketplace_settings()
