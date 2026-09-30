@@ -201,3 +201,229 @@ def test_importing_the_batch_modules_opens_no_client_or_session():
     )
 
     assert "CLEAN" in result.stdout, result.stderr
+
+
+# ----------------------------------------------------------------------------
+# Orchestration, Phase 7 plan section 14. Every collaborator is a fake; the
+# assertions are about order, because order is the contract here.
+# ----------------------------------------------------------------------------
+from batch_layer import marketplace_manifest, marketplace_marts, marketplace_postgres, marketplace_quality
+from batch_layer import marketplace_warehouse as warehouse
+from batch_layer.marketplace_manifest import PROMOTED, PromotionResult
+from batch_layer.marketplace_quality import QualityDecision, QualityGateFailure, QualityResult
+from batch_layer.marketplace_warehouse import GoldWriteResult, run_marketplace_warehouse
+
+MANIFEST_URI = "s3a://gold/marketplace/manifests/run_id=run-1/manifest.json"
+
+
+class FakeObservations:
+    def cache(self):
+        return self
+
+    def count(self):
+        return 7
+
+    def unpersist(self):
+        return None
+
+
+class FakeSpark:
+    def stop(self):
+        return None
+
+
+class FakeAudit:
+    def __init__(self, log):
+        self.log = log
+        self.quality_failed = None
+
+    def start_run(self, context, started_at, *, resume=False):
+        self.log.append("audit.start_run")
+
+    def mark_gold_written(self, **kwargs):
+        self.log.append("audit.mark_gold_written")
+
+    def mark_quality_failed(self, **kwargs):
+        self.log.append("audit.mark_quality_failed")
+        self.quality_failed = kwargs
+
+    def mark_failed(self, **kwargs):
+        self.log.append("audit.mark_failed")
+
+
+class FakeRepository:
+    def __init__(self, log):
+        self.log = log
+        self.recorded = ()
+
+    def record(self, results, *, run_id):
+        self.log.append("quality.record")
+        self.recorded = tuple(results)
+
+
+class FakePublisher:
+    def __init__(self, log):
+        self.log = log
+        self.published = None
+
+    def stage(self, marts, *, run_id):
+        self.log.append("publisher.stage")
+        return ("staged",)
+
+    def publish(self, staged, *, run_id, published_at, quality, manifest_uri):
+        self.log.append("publisher.publish")
+        self.published = {"quality": quality, "manifest_uri": manifest_uri}
+
+    def cleanup(self, staged):
+        self.log.append("publisher.cleanup")
+
+
+def decision(*, passed=True, failures=0):
+    return QualityDecision(
+        run_id="run-1", passed=passed, rule_version="quality-rules.v1", evaluated_at=AS_OF,
+        mandatory_total=13, mandatory_failures=failures, advisory_failures=0, skipped=0,
+    )
+
+
+def wire_orchestration(monkeypatch, *, passed=True):
+    log = []
+    parts = {"log": log}
+
+    monkeypatch.setattr(warehouse, "build_spark", lambda: FakeSpark())
+    monkeypatch.setattr(warehouse, "read_marketplace_silver", lambda spark, uri: "wire")
+    monkeypatch.setattr(warehouse, "flatten_marketplace_observations", lambda wire: FakeObservations())
+    monkeypatch.setattr(warehouse, "deduplicate_marketplace_observations", lambda flat: flat)
+    monkeypatch.setattr(warehouse, "read_crawl_audit", lambda spark: ("attempts", "runs"))
+    monkeypatch.setattr(
+        marketplace_marts, "build_marketplace_marts", lambda *a, **k: {name: name for name in DATASETS}
+    )
+    monkeypatch.setattr(
+        warehouse, "write_run_scoped_gold",
+        lambda marts, context: {name: GoldWriteResult(name, "file:///gold/" + name, 1) for name in DATASETS},
+    )
+
+    verdict = decision(passed=passed, failures=0 if passed else 2)
+    evidence = (
+        QualityResult(
+            run_id="run-1", check_name="observation_id_unique", severity="MANDATORY",
+            dataset_name="silver", status="PASS" if passed else "FAIL",
+            observed_value=0.0 if passed else 2.0, expectation="an expectation",
+            rule_version="quality-rules.v1", failure_sample_json=None, checked_at=AS_OF,
+        ),
+    )
+    parts["results"] = evidence
+    monkeypatch.setattr(marketplace_quality, "evaluate_quality_gates", lambda *a, **k: evidence)
+    monkeypatch.setattr(marketplace_quality, "decide", lambda *a, **k: verdict)
+    parts["decision"] = verdict
+
+    monkeypatch.setattr(marketplace_manifest, "read_current_manifest", lambda **k: None)
+    monkeypatch.setattr(marketplace_manifest, "build_gold_manifest", lambda *a, **k: "manifest")
+
+    def fake_write_run_manifest(manifest, *, writer):
+        log.append("manifest.write_run")
+        return MANIFEST_URI
+
+    def fake_promote(manifest, *, writer, reader, allow_backfill=False):
+        log.append("manifest.promote")
+        parts["allow_backfill"] = allow_backfill
+        return PromotionResult(True, PROMOTED, MANIFEST_URI, None)
+
+    monkeypatch.setattr(marketplace_manifest, "write_run_manifest", fake_write_run_manifest)
+    monkeypatch.setattr(marketplace_manifest, "promote_manifest", fake_promote)
+
+    audit, repository, publisher = FakeAudit(log), FakeRepository(log), FakePublisher(log)
+    monkeypatch.setattr(marketplace_postgres.MarketplaceBatchAudit, "from_settings", classmethod(lambda cls: audit))
+    monkeypatch.setattr(
+        marketplace_postgres.MarketplaceQualityRepository, "from_settings", classmethod(lambda cls: repository)
+    )
+    monkeypatch.setattr(
+        marketplace_postgres.MarketplaceCachePublisher, "from_settings", classmethod(lambda cls: publisher)
+    )
+    parts.update(audit=audit, repository=repository, publisher=publisher)
+    return parts
+
+
+def batch_context():
+    return MarketplaceBatchContext("run-1", AS_OF, "file:///silver", "file:///gold")
+
+
+def noop_writer(*args):
+    return "uri"
+
+
+def empty_reader(*args):
+    return None
+
+
+def test_a_passing_run_promotes_before_it_publishes(monkeypatch):
+    parts = wire_orchestration(monkeypatch)
+
+    result = run_marketplace_warehouse(batch_context(), writer=noop_writer, reader=empty_reader)
+
+    assert parts["log"] == [
+        "audit.start_run", "audit.mark_gold_written", "quality.record",
+        "manifest.promote", "publisher.stage", "publisher.publish", "publisher.cleanup",
+    ]
+    assert result.status == "SUCCEEDED"
+    assert result.manifest_promoted is True
+    assert result.manifest_uri == MANIFEST_URI
+    assert parts["publisher"].published["quality"] is parts["decision"]
+    assert parts["publisher"].published["manifest_uri"] == MANIFEST_URI
+
+
+# 53, 54, 55
+def test_a_refused_run_records_evidence_and_never_reaches_the_cache(monkeypatch):
+    parts = wire_orchestration(monkeypatch, passed=False)
+
+    with pytest.raises(QualityGateFailure):
+        run_marketplace_warehouse(batch_context(), writer=noop_writer, reader=empty_reader)
+
+    # Results persisted and the manifest written before the refusal propagates.
+    assert parts["log"] == [
+        "audit.start_run", "audit.mark_gold_written", "quality.record",
+        "manifest.write_run", "audit.mark_quality_failed",
+    ]
+    assert parts["audit"].quality_failed["manifest_uri"] == MANIFEST_URI
+    assert parts["audit"].quality_failed["decision"].passed is False
+
+
+def test_a_refused_run_is_not_also_recorded_as_a_crash(monkeypatch):
+    parts = wire_orchestration(monkeypatch, passed=False)
+
+    with pytest.raises(QualityGateFailure):
+        run_marketplace_warehouse(batch_context(), writer=noop_writer, reader=empty_reader)
+
+    assert "audit.mark_failed" not in parts["log"]
+
+
+# 59
+def test_quality_only_writes_the_manifest_and_stops(monkeypatch):
+    parts = wire_orchestration(monkeypatch)
+
+    result = run_marketplace_warehouse(
+        batch_context(), quality_only=True, writer=noop_writer, reader=empty_reader
+    )
+
+    assert parts["log"] == ["audit.start_run", "audit.mark_gold_written", "quality.record", "manifest.write_run"]
+    assert result.status == "GOLD_WRITTEN"
+    assert result.manifest_promoted is False
+
+
+def test_allow_backfill_reaches_the_promotion(monkeypatch):
+    parts = wire_orchestration(monkeypatch)
+
+    run_marketplace_warehouse(batch_context(), allow_backfill=True, writer=noop_writer, reader=empty_reader)
+
+    assert parts["allow_backfill"] is True
+
+
+def test_skipping_postgres_still_evaluates_and_promotes(monkeypatch):
+    parts = wire_orchestration(monkeypatch)
+
+    result = run_marketplace_warehouse(
+        batch_context(), publish_cache=False, writer=noop_writer, reader=empty_reader
+    )
+
+    assert parts["log"] == ["manifest.promote"]
+    assert result.status == "GOLD_WRITTEN"
+    assert result.manifest_promoted is True
