@@ -231,6 +231,40 @@ CREATE TABLE IF NOT EXISTS audit.marketplace_cache_version (
     singleton BOOLEAN PRIMARY KEY DEFAULT TRUE CHECK (singleton), run_id VARCHAR(64) NOT NULL, published_at TIMESTAMPTZ NOT NULL, dataset_counts JSONB NOT NULL
 );
 
+-- ---------- Marketplace quality gate (Phase 7) ----------
+-- Separate from audit.data_quality_result on purpose: that table belongs to the
+-- legacy behavioural pipeline, its checked_at is a naive TIMESTAMP, and its key
+-- has no room for severity or dataset. Sharing it would couple two unrelated
+-- pipelines through one migration.
+-- A row is written for every rule on every run, including runs that were
+-- refused. A blocked publication with no stored evidence cannot be told apart
+-- from a crash.
+CREATE TABLE IF NOT EXISTS audit.marketplace_quality_result (
+    run_id VARCHAR(64) NOT NULL, check_name VARCHAR(64) NOT NULL,
+    severity VARCHAR(16) NOT NULL CHECK (severity IN ('MANDATORY','ADVISORY')),
+    dataset_name VARCHAR(64) NOT NULL,
+    status VARCHAR(8) NOT NULL CHECK (status IN ('PASS','FAIL','SKIPPED')),
+    observed_value DOUBLE PRECISION, expectation TEXT NOT NULL, rule_version VARCHAR(64) NOT NULL,
+    -- Identifiers only. Never a raw body, product title, URL query or traceback.
+    failure_sample_json TEXT CHECK (failure_sample_json IS NULL OR length(failure_sample_json) <= 4000),
+    checked_at TIMESTAMPTZ NOT NULL,
+    PRIMARY KEY (run_id, check_name)
+);
+CREATE INDEX IF NOT EXISTS ix_marketplace_quality_result_checked_at ON audit.marketplace_quality_result (checked_at DESC);
+
+-- QUALITY_FAILED is deliberately distinct from FAILED: the run produced
+-- complete, inspectable Gold and was refused, which is a different operational
+-- situation from a crash. The two statements below are idempotent together and
+-- migrate a database created before Phase 7.
+ALTER TABLE audit.marketplace_batch_run
+    ADD COLUMN IF NOT EXISTS quality_status VARCHAR(16),
+    ADD COLUMN IF NOT EXISTS mandatory_failure_count BIGINT,
+    ADD COLUMN IF NOT EXISTS manifest_uri TEXT,
+    ADD COLUMN IF NOT EXISTS manifest_promoted BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE audit.marketplace_batch_run DROP CONSTRAINT IF EXISTS marketplace_batch_run_status_check;
+ALTER TABLE audit.marketplace_batch_run ADD CONSTRAINT marketplace_batch_run_status_check
+    CHECK (status IN ('RUNNING','GOLD_WRITTEN','QUALITY_FAILED','SUCCEEDED','FAILED'));
+
 -- ============================================================
 -- PHASE 3 — crawl frontier, run/attempt audit, source circuit
 -- Operational metadata only. Analytical truth stays in Bronze/Silver/Gold;

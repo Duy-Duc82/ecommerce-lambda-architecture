@@ -12,8 +12,10 @@ from batch_layer.marketplace_postgres import (
     DATASETS,
     MarketplaceBatchAudit,
     MarketplaceCachePublisher,
+    MarketplaceQualityRepository,
     StagedDataset,
 )
+from batch_layer.marketplace_quality import QualityDecision, QualityResult
 from batch_layer.marketplace_warehouse import MarketplaceBatchContext
 
 AS_OF = datetime(2026, 9, 29, tzinfo=timezone.utc)
@@ -391,3 +393,129 @@ def test_gold_written_records_dataset_counts_deterministically():
     params = cursor.executed[0][1]
     assert params[2] == 5
     assert params[3] == '{"offer_current": 3, "seller_current": 2}'
+
+
+# ----------------------------------------------------------------------------
+# Quality result persistence, Phase 7 plan section 9.
+# ----------------------------------------------------------------------------
+def quality_result(check_name="observation_id_unique", *, run_id="run-1", severity="MANDATORY",
+                   status="PASS", observed=0.0, sample=None):
+    return QualityResult(
+        run_id=run_id, check_name=check_name, severity=severity, dataset_name="silver",
+        status=status, observed_value=observed, expectation="an expectation",
+        rule_version="quality-rules.v1", failure_sample_json=sample, checked_at=AS_OF,
+    )
+
+
+def quality_decision(*, run_id="run-1", passed=False, failures=2):
+    return QualityDecision(
+        run_id=run_id, passed=passed, rule_version="quality-rules.v1", evaluated_at=AS_OF,
+        mandatory_total=13, mandatory_failures=failures, advisory_failures=0, skipped=1,
+    )
+
+
+def test_quality_results_upsert_one_row_per_check():
+    cursor = FakeCursor()
+    repository = MarketplaceQualityRepository(_factory(cursor))
+
+    repository.record([quality_result("first_check"), quality_result("second_check")], run_id="run-1")
+
+    assert len(cursor.executed) == 2
+    sql, params = cursor.executed[1]
+    assert "ON CONFLICT (run_id,check_name) DO UPDATE" in sql
+    assert params[1] == "second_check"
+
+
+# 54
+def test_failing_results_are_persisted_with_their_evidence():
+    cursor = FakeCursor()
+    repository = MarketplaceQualityRepository(_factory(cursor))
+
+    repository.record(
+        [quality_result("currency_valid", status="FAIL", observed=3.0, sample='{"keys":["obs-1"]}')],
+        run_id="run-1",
+    )
+
+    params = cursor.executed[0][1]
+    assert params[4] == "FAIL"
+    assert params[5] == 3.0
+    assert params[8] == '{"keys":["obs-1"]}'
+
+
+def test_results_from_another_run_are_refused():
+    repository = MarketplaceQualityRepository(_factory(FakeCursor()))
+
+    with pytest.raises(ValueError, match="belong to another run"):
+        repository.record([quality_result(run_id="run-2")], run_id="run-1")
+
+
+def test_an_empty_result_set_is_refused():
+    repository = MarketplaceQualityRepository(_factory(FakeCursor()))
+
+    with pytest.raises(ValueError, match="empty quality result set"):
+        repository.record([], run_id="run-1")
+
+
+def test_latest_decision_rebuilds_the_stored_verdict():
+    cursor = FakeCursor(rows=(13, 0, 1, 0, "quality-rules.v1", AS_OF))
+
+    decision = MarketplaceQualityRepository(_factory(cursor)).latest_decision(run_id="run-1")
+
+    assert decision.passed is True
+    assert decision.mandatory_failures == 0
+    assert decision.advisory_failures == 1
+
+
+def test_a_partially_recorded_run_does_not_reload_as_passing():
+    # Twelve of thirteen mandatory rows stored. The missing one was never
+    # evaluated, which decide() counts as a failure; a reload must agree.
+    cursor = FakeCursor(rows=(12, 0, 0, 0, "quality-rules.v1", AS_OF))
+
+    decision = MarketplaceQualityRepository(_factory(cursor)).latest_decision(run_id="run-1")
+
+    assert decision.passed is False
+    assert decision.mandatory_failures == 1
+
+
+def test_a_run_with_no_stored_results_has_no_decision():
+    cursor = FakeCursor(rows=(0, 0, 0, 0, None, None))
+
+    assert MarketplaceQualityRepository(_factory(cursor)).latest_decision(run_id="run-1") is None
+
+
+# 55
+def test_a_refused_run_is_recorded_as_quality_failed_not_failed():
+    cursor = FakeCursor()
+    audit = MarketplaceBatchAudit(_factory(cursor))
+
+    audit.mark_quality_failed(
+        run_id="run-1", completed_at=AS_OF,
+        decision=quality_decision(), manifest_uri="s3a://gold/marketplace/manifests/run_id=run-1/manifest.json",
+    )
+
+    sql, params = cursor.executed[0]
+    assert "status='QUALITY_FAILED'" in sql
+    assert "manifest_promoted=FALSE" in sql
+    assert "cache_published=FALSE" in sql
+    assert params[0] == AS_OF
+    assert params[1] == 2
+
+
+def test_a_passing_decision_cannot_be_filed_as_a_quality_failure():
+    audit = MarketplaceBatchAudit(_factory(FakeCursor()))
+
+    with pytest.raises(ValueError, match="passing decision"):
+        audit.mark_quality_failed(
+            run_id="run-1", completed_at=AS_OF,
+            decision=quality_decision(passed=True, failures=0), manifest_uri=None,
+        )
+
+
+def test_a_decision_belonging_to_another_run_cannot_be_filed():
+    audit = MarketplaceBatchAudit(_factory(FakeCursor()))
+
+    with pytest.raises(ValueError, match="another run"):
+        audit.mark_quality_failed(
+            run_id="run-1", completed_at=AS_OF,
+            decision=quality_decision(run_id="run-2"), manifest_uri=None,
+        )

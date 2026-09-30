@@ -5,12 +5,15 @@ from datetime import datetime
 import hashlib
 import json
 import re
-from typing import Any, Callable, Mapping, Sequence
+from typing import TYPE_CHECKING, Any, Callable, Mapping, Sequence
 
 import psycopg2
 
 from config.settings import POSTGRES_DB, POSTGRES_HOST, POSTGRES_PASSWORD, POSTGRES_PORT, POSTGRES_USER
 from batch_layer.marketplace_warehouse import MarketplaceBatchContext
+
+if TYPE_CHECKING:
+    from batch_layer.marketplace_quality import QualityDecision, QualityResult
 
 DATASET_COLUMNS = {
     "offer_current": ["offer_id", "marketplace", "marketplace_id", "platform_listing_id", "seller_id", "product_title", "brand", "category_path", "source_url", "currency", "active_status", "first_seen_at", "last_seen_at", "current_observation_id", "observed_at", "fetched_at", "current_price", "list_price", "shipping_price", "rating_value", "rating_scale", "rating_count", "review_count", "sold_count", "availability", "ranking_position", "raw_uri", "raw_sha256", "adapter_version", "crawl_run_id"],
@@ -60,6 +63,76 @@ class MarketplaceBatchAudit:
     def mark_failed(self, *, run_id: str, completed_at: datetime, error: Exception) -> None:
         with self.connection_factory() as conn, conn.cursor() as cur:
             cur.execute("UPDATE audit.marketplace_batch_run SET status='FAILED',completed_at=%s,error_message=%s WHERE run_id=%s", (completed_at, str(error)[:2000], run_id))
+
+    def mark_quality_failed(self, *, run_id: str, completed_at: datetime, decision: "QualityDecision", manifest_uri: str | None) -> None:
+        # QUALITY_FAILED, not FAILED. The run produced complete, inspectable
+        # Gold and was refused; losing that distinction would make a refusal
+        # look like a crash in every operational view.
+        if decision.run_id != run_id: raise ValueError("decision belongs to another run")
+        if decision.passed: raise ValueError("a passing decision cannot be recorded as a quality failure")
+        with self.connection_factory() as conn, conn.cursor() as cur:
+            cur.execute("""UPDATE audit.marketplace_batch_run SET status='QUALITY_FAILED',completed_at=%s,
+                quality_status='FAIL',mandatory_failure_count=%s,manifest_uri=%s,manifest_promoted=FALSE,cache_published=FALSE
+                WHERE run_id=%s""", (completed_at, decision.mandatory_failures, manifest_uri, run_id))
+
+
+class MarketplaceQualityRepository:
+    """Persists one row per rule per run, for refused runs as much as passing ones.
+
+    This runs in its own transaction before any publication decision is acted
+    on. A blocked publication that left no stored evidence cannot be told apart
+    from a crash.
+    """
+
+    _UPSERT = """INSERT INTO audit.marketplace_quality_result
+        (run_id,check_name,severity,dataset_name,status,observed_value,expectation,rule_version,failure_sample_json,checked_at)
+        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+        ON CONFLICT (run_id,check_name) DO UPDATE SET
+            severity=EXCLUDED.severity,dataset_name=EXCLUDED.dataset_name,status=EXCLUDED.status,
+            observed_value=EXCLUDED.observed_value,expectation=EXCLUDED.expectation,
+            rule_version=EXCLUDED.rule_version,failure_sample_json=EXCLUDED.failure_sample_json,
+            checked_at=EXCLUDED.checked_at"""
+
+    _SUMMARY = """SELECT
+            COUNT(*) FILTER (WHERE severity='MANDATORY'),
+            COUNT(*) FILTER (WHERE severity='MANDATORY' AND status <> 'PASS'),
+            COUNT(*) FILTER (WHERE severity='ADVISORY' AND status='FAIL'),
+            COUNT(*) FILTER (WHERE status='SKIPPED'),
+            MIN(rule_version), MAX(checked_at)
+        FROM audit.marketplace_quality_result WHERE run_id=%s"""
+
+    def __init__(self, connection_factory: Callable[[], Any]): self.connection_factory = connection_factory
+
+    @classmethod
+    def from_settings(cls):
+        return cls(lambda: psycopg2.connect(host=POSTGRES_HOST, port=POSTGRES_PORT, user=POSTGRES_USER, password=POSTGRES_PASSWORD, dbname=POSTGRES_DB))
+
+    def record(self, results: Sequence["QualityResult"], *, run_id: str) -> None:
+        if not results: raise ValueError("refusing to record an empty quality result set")
+        foreign = sorted({item.run_id for item in results} - {run_id})
+        if foreign: raise ValueError(f"quality results belong to another run: {foreign}")
+        with self.connection_factory() as conn, conn.cursor() as cur:
+            for item in results:
+                cur.execute(self._UPSERT, (item.run_id, item.check_name, item.severity, item.dataset_name, item.status,
+                                           item.observed_value, item.expectation, item.rule_version,
+                                           item.failure_sample_json, item.checked_at))
+
+    def latest_decision(self, *, run_id: str) -> "QualityDecision | None":
+        from batch_layer.marketplace_quality import QualityDecision
+        from config.quality_rules import mandatory_rule_names
+        with self.connection_factory() as conn, conn.cursor() as cur:
+            cur.execute(self._SUMMARY, (run_id,))
+            row = cur.fetchone() if hasattr(cur, "fetchone") else None
+        if not row or not row[0]: return None
+        mandatory_total, mandatory_failures, advisory_failures, skipped, rule_version, evaluated_at = row
+        # A rule with no stored row was never evaluated, which decide() counts
+        # as a failure. Reloading must not turn that into a pass.
+        expected = len(mandatory_rule_names())
+        missing = max(expected - int(mandatory_total), 0)
+        failures = int(mandatory_failures) + missing
+        return QualityDecision(run_id=run_id, passed=failures == 0, rule_version=rule_version, evaluated_at=evaluated_at,
+                               mandatory_total=expected, mandatory_failures=failures,
+                               advisory_failures=int(advisory_failures), skipped=int(skipped))
 
 
 class MarketplaceCachePublisher:
