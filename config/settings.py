@@ -206,6 +206,7 @@ MARKETPLACE_QUALITY_FUTURE_TOLERANCE_SECONDS = int(os.getenv("MARKETPLACE_QUALIT
 # A failure sample exists to point a human at the first few offending rows, so
 # it stays small and carries identifiers only.
 MARKETPLACE_QUALITY_SAMPLE_LIMIT = int(os.getenv("MARKETPLACE_QUALITY_SAMPLE_LIMIT", "10"))
+MARKETPLACE_MANIFEST_SCHEMA_VERSION = os.getenv("MARKETPLACE_MANIFEST_SCHEMA_VERSION", "marketplace-gold-manifest.v1")
 MARKETPLACE_ALLOWED_CURRENCIES = tuple(
     sorted({c.strip().upper() for c in os.getenv("MARKETPLACE_ALLOWED_CURRENCIES", "VND,USD").split(",") if c.strip()})
 )
@@ -257,6 +258,7 @@ def validate_marketplace_settings() -> None:
         "MARKETPLACE_COUNTER_RULE_VERSION", "MARKETPLACE_SILVER_DATASET",
         "MARKETPLACE_GOLD_DATASET", "MARKETPLACE_BATCH_APP_NAME",
         "MARKETPLACE_ANOMALY_RULE_VERSION", "MARKETPLACE_QUALITY_RULE_VERSION",
+        "MARKETPLACE_MANIFEST_SCHEMA_VERSION",
     ):
         if not globals()[name].strip():
             raise ValueError(f"{name} must be non-empty")
