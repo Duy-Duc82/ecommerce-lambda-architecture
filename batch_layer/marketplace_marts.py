@@ -1,4 +1,4 @@
-"""Pure Spark transformations for the nine marketplace temporal marts."""
+"""Pure Spark transformations for the ten marketplace temporal marts."""
 from __future__ import annotations
 import json
 from datetime import datetime, timezone
@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 from pyspark.sql import DataFrame, Window
 from pyspark.sql import functions as F
 
+from batch_layer.marketplace_anomaly import build_price_anomaly_daily
 from config.counter_semantics import counter_semantic
 from config.settings import MARKETPLACE_PERCENTILE_ACCURACY
 
@@ -188,4 +189,7 @@ def build_counter_delta_daily(transitions: DataFrame) -> DataFrame:
 
 
 def build_marketplace_marts(observations: DataFrame, attempts: DataFrame, runs: DataFrame, context: "MarketplaceBatchContext") -> dict[str, DataFrame]:
-    return {"offer_current": build_offer_current(observations), "seller_current": build_seller_current(observations), "offer_price_history_daily": build_offer_price_history_daily(observations), "offer_change_daily": build_offer_change_daily(observations), "offer_freshness": build_offer_freshness(observations, as_of=context.as_of, stale_after_seconds=context.freshness_seconds, rule_version=context.freshness_rule_version), "category_price_daily": build_category_price_daily(observations), "source_coverage_daily": build_source_coverage_daily(observations, attempts, runs, as_of=context.as_of, stale_after_seconds=context.freshness_seconds, rule_version=context.freshness_rule_version), "crawl_reliability_daily": build_crawl_reliability_daily(attempts, runs), "counter_delta_daily": build_counter_delta_daily(build_counter_transitions(observations, max_gap_seconds=context.counter_max_gap_seconds, rule_version=context.counter_rule_version))}
+    # The anomaly mart reads the price mart rather than the observations, so
+    # the two can never disagree about what a price was on a given day.
+    price_history = build_offer_price_history_daily(observations)
+    return {"offer_current": build_offer_current(observations), "seller_current": build_seller_current(observations), "offer_price_history_daily": price_history, "offer_change_daily": build_offer_change_daily(observations), "offer_freshness": build_offer_freshness(observations, as_of=context.as_of, stale_after_seconds=context.freshness_seconds, rule_version=context.freshness_rule_version), "category_price_daily": build_category_price_daily(observations), "source_coverage_daily": build_source_coverage_daily(observations, attempts, runs, as_of=context.as_of, stale_after_seconds=context.freshness_seconds, rule_version=context.freshness_rule_version), "crawl_reliability_daily": build_crawl_reliability_daily(attempts, runs), "counter_delta_daily": build_counter_delta_daily(build_counter_transitions(observations, max_gap_seconds=context.counter_max_gap_seconds, rule_version=context.counter_rule_version)), "price_anomaly_daily": build_price_anomaly_daily(price_history, window_days=context.anomaly_window_days, min_samples=context.anomaly_min_samples, mad_threshold=context.anomaly_mad_threshold, iqr_multiplier=context.anomaly_iqr_multiplier, rule_version=context.anomaly_rule_version)}

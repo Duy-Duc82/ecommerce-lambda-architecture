@@ -22,6 +22,7 @@ DATASET_COLUMNS = {
     "source_coverage_daily": ["marketplace", "observed_date", "eligible_offer_count", "observed_offer_count", "missing_offer_count", "fresh_offer_count", "stale_offer_count", "observation_count", "parsed_count", "rejected_count", "coverage_rate", "rejection_rate", "freshness_rule_version"],
     "crawl_reliability_daily": ["marketplace", "request_date", "request_count", "succeeded_count", "failed_count", "success_rate", "avg_latency_ms", "p95_latency_ms", "raw_bytes", "parsed_count", "rejected_count", "rate_limited_count", "transport_error_count", "server_error_count", "parse_error_count", "validation_error_count"],
     "counter_delta_daily": ["marketplace", "offer_id", "observed_date", "counter_name", "first_value", "last_value", "raw_delta_sum", "valid_delta_sum", "valid_transition_count", "invalid_transition_count", "elapsed_seconds_valid", "velocity_proxy_per_hour", "counter_reset_or_invalid", "invalid_reasons_json", "counter_rule_version"],
+    "price_anomaly_daily": ["marketplace", "offer_id", "observed_date", "currency", "evaluated_price", "baseline_sample_size", "baseline_median", "baseline_mad", "baseline_p25", "baseline_p75", "baseline_iqr", "deviation_amount", "deviation_percent", "robust_score", "lower_fence", "upper_fence", "anomaly_method", "anomaly_status", "anomaly_reason", "window_days", "min_samples", "mad_threshold", "iqr_multiplier", "anomaly_rule_version"],
 }
 DATASETS = tuple(DATASET_COLUMNS)
 _IDENT = re.compile(r"^[a-z][a-z0-9_]{0,62}$")
@@ -78,7 +79,7 @@ class MarketplaceCachePublisher:
         return f"staging.mp_{dataset_name}_{token}"
 
     def stage(self, marts: Mapping[str, Any], *, run_id: str) -> tuple[StagedDataset, ...]:
-        if set(marts) != set(DATASETS): raise ValueError("all nine datasets are required before staging")
+        if set(marts) != set(DATASETS): raise ValueError("all ten datasets are required before staging")
         staged = []
         for name in DATASETS:
             frame = marts[name]
@@ -91,7 +92,7 @@ class MarketplaceCachePublisher:
         return tuple(staged)
 
     def publish(self, staged: Sequence[StagedDataset], *, run_id: str, published_at: datetime) -> None:
-        if len(staged) != len(DATASETS) or {x.dataset_name for x in staged} != set(DATASETS): raise ValueError("all nine staged datasets are required")
+        if len(staged) != len(DATASETS) or {x.dataset_name for x in staged} != set(DATASETS): raise ValueError("all ten staged datasets are required")
         for item in staged:
             if item.staging_table != self.staging_table(item.dataset_name, run_id): raise ValueError("staging table does not match run-scoped identity")
         with self.connection_factory() as conn, conn.cursor() as cur:
