@@ -15,10 +15,12 @@ from pyspark.sql import DataFrame, SparkSession
 from pyspark.sql import functions as F
 
 from config.settings import (
+    MARKETPLACE_ALLOWED_CURRENCIES,
     MARKETPLACE_ANOMALY_IQR_MULTIPLIER, MARKETPLACE_ANOMALY_MAD_THRESHOLD,
     MARKETPLACE_ANOMALY_MIN_SAMPLES, MARKETPLACE_ANOMALY_RULE_VERSION,
     MARKETPLACE_ANOMALY_WINDOW_DAYS, MARKETPLACE_BATCH_APP_NAME,
     MARKETPLACE_BATCH_SHUFFLE_PARTITIONS,
+    MARKETPLACE_QUALITY_FUTURE_TOLERANCE_SECONDS, MARKETPLACE_QUALITY_RULE_VERSION,
     MARKETPLACE_COUNTER_MAX_GAP_SECONDS, MARKETPLACE_COUNTER_RULE_VERSION,
     MARKETPLACE_FRESHNESS_RULE_VERSION, MARKETPLACE_FRESHNESS_SECONDS,
     MARKETPLACE_GOLD_DATASET, MARKETPLACE_PERCENTILE_ACCURACY,
@@ -45,18 +47,27 @@ class MarketplaceBatchContext:
     anomaly_mad_threshold: Decimal = MARKETPLACE_ANOMALY_MAD_THRESHOLD
     anomaly_iqr_multiplier: Decimal = MARKETPLACE_ANOMALY_IQR_MULTIPLIER
     anomaly_rule_version: str = MARKETPLACE_ANOMALY_RULE_VERSION
+    quality_rule_version: str = MARKETPLACE_QUALITY_RULE_VERSION
+    future_tolerance_seconds: int = MARKETPLACE_QUALITY_FUTURE_TOLERANCE_SECONDS
+    allowed_currencies: tuple[str, ...] = MARKETPLACE_ALLOWED_CURRENCIES
 
     def __post_init__(self) -> None:
         if not RUN_ID_RE.fullmatch(self.run_id): raise ValueError("run_id must match [a-zA-Z0-9_-]{1,64}")
         if self.as_of.tzinfo is None or self.as_of.utcoffset() is None: raise ValueError("as_of must be timezone-aware")
         object.__setattr__(self, "as_of", self.as_of.astimezone(timezone.utc))
-        for name in ("silver_uri", "gold_root_uri", "freshness_rule_version", "counter_rule_version", "anomaly_rule_version"):
+        for name in ("silver_uri", "gold_root_uri", "freshness_rule_version", "counter_rule_version", "anomaly_rule_version", "quality_rule_version"):
             if not getattr(self, name).strip(): raise ValueError(f"{name} must be non-empty")
-        for name in ("freshness_seconds", "counter_max_gap_seconds", "anomaly_window_days", "anomaly_min_samples", "anomaly_mad_threshold", "anomaly_iqr_multiplier"):
+        for name in ("freshness_seconds", "counter_max_gap_seconds", "anomaly_window_days", "anomaly_min_samples", "anomaly_mad_threshold", "anomaly_iqr_multiplier", "future_tolerance_seconds"):
             if getattr(self, name) <= 0: raise ValueError(f"{name} must be positive")
         # A minimum above the frame size would make every row report
         # INSUFFICIENT_HISTORY while nothing looked broken.
         if self.anomaly_min_samples > self.anomaly_window_days: raise ValueError("anomaly_min_samples cannot exceed anomaly_window_days")
+        # Normalised and sorted so a manifest built from this context is
+        # byte-stable regardless of how the environment spelled the list.
+        codes = tuple(sorted({str(code).strip().upper() for code in self.allowed_currencies if str(code).strip()}))
+        if not codes: raise ValueError("allowed_currencies must list at least one code")
+        if any(len(code) != 3 or not code.isalpha() for code in codes): raise ValueError("allowed_currencies must hold ISO-4217 style codes")
+        object.__setattr__(self, "allowed_currencies", codes)
 
 
 class ConflictingObservationError(ValueError): pass
