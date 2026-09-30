@@ -189,6 +189,16 @@ MARKETPLACE_PERCENTILE_ACCURACY = int(os.getenv("MARKETPLACE_PERCENTILE_ACCURACY
 MARKETPLACE_BATCH_SHUFFLE_PARTITIONS = int(os.getenv("MARKETPLACE_BATCH_SHUFFLE_PARTITIONS", "8"))
 MARKETPLACE_BATCH_APP_NAME = os.getenv("MARKETPLACE_BATCH_APP_NAME", "MarketplaceTemporalWarehouse")
 
+# Phase 7 robust price anomaly. The baseline is one offer's own recent observed
+# price history, so these tune a per-offer comparison and nothing wider.
+# 0.6745 inside the score is the normal consistency constant that puts a MAD
+# score on a z-score scale; 3.5 is its conventional companion threshold.
+MARKETPLACE_ANOMALY_RULE_VERSION = os.getenv("MARKETPLACE_ANOMALY_RULE_VERSION", "anomaly-rules.v1")
+MARKETPLACE_ANOMALY_WINDOW_DAYS = int(os.getenv("MARKETPLACE_ANOMALY_WINDOW_DAYS", "14"))
+MARKETPLACE_ANOMALY_MIN_SAMPLES = int(os.getenv("MARKETPLACE_ANOMALY_MIN_SAMPLES", "7"))
+MARKETPLACE_ANOMALY_MAD_THRESHOLD = _env_decimal("MARKETPLACE_ANOMALY_MAD_THRESHOLD", "3.5")
+MARKETPLACE_ANOMALY_IQR_MULTIPLIER = _env_decimal("MARKETPLACE_ANOMALY_IQR_MULTIPLIER", "1.5")
+
 # Phase 4 topic settings are kept separate from the legacy behavioral topic.
 KAFKA_TOPIC_MARKETPLACE_OBSERVATIONS = os.getenv("KAFKA_TOPIC_MARKETPLACE_OBSERVATIONS", "marketplace.observations.v1")
 KAFKA_TOPIC_MARKETPLACE_OBSERVATIONS_DLQ = os.getenv("KAFKA_TOPIC_MARKETPLACE_OBSERVATIONS_DLQ", "marketplace.observations.v1.dlq")
@@ -214,15 +224,26 @@ def validate_marketplace_settings() -> None:
         "MARKETPLACE_BATCH_SHUFFLE_PARTITIONS": MARKETPLACE_BATCH_SHUFFLE_PARTITIONS,
         "KAFKA_MARKETPLACE_PARTITIONS": KAFKA_MARKETPLACE_PARTITIONS,
         "KAFKA_PRODUCER_ACK_TIMEOUT_SECONDS": KAFKA_PRODUCER_ACK_TIMEOUT_SECONDS,
+        "MARKETPLACE_ANOMALY_WINDOW_DAYS": MARKETPLACE_ANOMALY_WINDOW_DAYS,
+        "MARKETPLACE_ANOMALY_MIN_SAMPLES": MARKETPLACE_ANOMALY_MIN_SAMPLES,
     }
     if any(value <= 0 for value in positive.values()):
         bad = next(name for name, value in positive.items() if value <= 0)
         raise ValueError(f"{bad} must be positive")
+    if MARKETPLACE_ANOMALY_MIN_SAMPLES > MARKETPLACE_ANOMALY_WINDOW_DAYS:
+        # Otherwise no row could ever reach the minimum and the whole mart would
+        # read INSUFFICIENT_HISTORY without anything looking broken.
+        raise ValueError("MARKETPLACE_ANOMALY_MIN_SAMPLES cannot exceed MARKETPLACE_ANOMALY_WINDOW_DAYS")
+    if MARKETPLACE_ANOMALY_MAD_THRESHOLD <= 0:
+        raise ValueError("MARKETPLACE_ANOMALY_MAD_THRESHOLD must be positive")
+    if MARKETPLACE_ANOMALY_IQR_MULTIPLIER <= 0:
+        raise ValueError("MARKETPLACE_ANOMALY_IQR_MULTIPLIER must be positive")
     for name in (
         "MARKETPLACE_CHANGE_RULE_VERSION", "MARKETPLACE_STREAM_CHECKPOINT_VERSION",
         "MARKETPLACE_SPEED_QUERY_NAME", "MARKETPLACE_FRESHNESS_RULE_VERSION",
         "MARKETPLACE_COUNTER_RULE_VERSION", "MARKETPLACE_SILVER_DATASET",
         "MARKETPLACE_GOLD_DATASET", "MARKETPLACE_BATCH_APP_NAME",
+        "MARKETPLACE_ANOMALY_RULE_VERSION",
     ):
         if not globals()[name].strip():
             raise ValueError(f"{name} must be non-empty")
