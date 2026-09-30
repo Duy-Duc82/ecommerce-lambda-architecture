@@ -80,7 +80,7 @@ class QualityDecision:
 class QualityGateFailure(RuntimeError):
     """Raised when publication is refused. Carries the evidence with it."""
 
-    def __init__(self, decision: QualityDecision, results: Sequence[QualityResult]):
+    def __init__(self, decision: QualityDecision, results: Sequence[QualityResult], *, reason: str | None = None):
         self.decision = decision
         self.results = tuple(results)
         self.failing = tuple(
@@ -89,8 +89,11 @@ class QualityGateFailure(RuntimeError):
             if result.severity == MANDATORY and result.status != PASS
         )
         super().__init__(
-            f"run {decision.run_id} failed {decision.mandatory_failures} mandatory "
-            f"quality check(s): {', '.join(self.failing) or 'none reported'}"
+            reason
+            or (
+                f"run {decision.run_id} failed {decision.mandatory_failures} mandatory "
+                f"quality check(s): {', '.join(self.failing) or 'none reported'}"
+            )
         )
 
 

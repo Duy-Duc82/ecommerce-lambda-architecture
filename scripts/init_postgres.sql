@@ -265,6 +265,12 @@ ALTER TABLE audit.marketplace_batch_run DROP CONSTRAINT IF EXISTS marketplace_ba
 ALTER TABLE audit.marketplace_batch_run ADD CONSTRAINT marketplace_batch_run_status_check
     CHECK (status IN ('RUNNING','GOLD_WRITTEN','QUALITY_FAILED','SUCCEEDED','FAILED'));
 
+-- The serving cache names the manifest and the rule version that admitted it,
+-- so "which Gold version is live, under which rules" needs no object listing.
+ALTER TABLE audit.marketplace_cache_version
+    ADD COLUMN IF NOT EXISTS quality_rule_version VARCHAR(64),
+    ADD COLUMN IF NOT EXISTS manifest_uri TEXT;
+
 -- ============================================================
 -- PHASE 3 — crawl frontier, run/attempt audit, source circuit
 -- Operational metadata only. Analytical truth stays in Bronze/Silver/Gold;

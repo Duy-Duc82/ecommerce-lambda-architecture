@@ -15,10 +15,18 @@ from batch_layer.marketplace_postgres import (
     MarketplaceQualityRepository,
     StagedDataset,
 )
-from batch_layer.marketplace_quality import QualityDecision, QualityResult
+from batch_layer.marketplace_quality import QualityDecision, QualityGateFailure, QualityResult
 from batch_layer.marketplace_warehouse import MarketplaceBatchContext
 
 AS_OF = datetime(2026, 9, 29, tzinfo=timezone.utc)
+MANIFEST_URI = "s3a://gold/marketplace/manifests/run_id=run-1/manifest.json"
+
+
+def passing(run_id="run-1"):
+    return QualityDecision(
+        run_id=run_id, passed=True, rule_version="quality-rules.v1", evaluated_at=AS_OF,
+        mandatory_total=13, mandatory_failures=0, advisory_failures=0, skipped=0,
+    )
 
 
 class FakeCursor:
@@ -192,7 +200,7 @@ def test_all_staging_counts_are_checked_before_any_cache_mutation():
     publisher = MarketplaceCachePublisher(_factory(cursor))
 
     with pytest.raises(ValueError, match="staging count mismatch"):
-        publisher.publish(staged, run_id="run-1", published_at=AS_OF)
+        publisher.publish(staged, run_id="run-1", published_at=AS_OF, quality=passing(), manifest_uri=MANIFEST_URI)
 
     assert not any(sql.startswith("TRUNCATE") for sql, _ in cursor.executed)
 
@@ -205,7 +213,7 @@ def test_staged_count_mismatch_blocks_publish():
     publisher = MarketplaceCachePublisher(_factory(cursor))
 
     with pytest.raises(ValueError, match="staging count mismatch for offer_current"):
-        publisher.publish(staged, run_id="run-1", published_at=AS_OF)
+        publisher.publish(staged, run_id="run-1", published_at=AS_OF, quality=passing(), manifest_uri=MANIFEST_URI)
 
 
 def test_publish_rejects_staging_tables_from_another_run():
@@ -213,7 +221,7 @@ def test_publish_rejects_staging_tables_from_another_run():
     staged = _staged(publisher, run_id="run-2")
 
     with pytest.raises(ValueError, match="run-scoped identity"):
-        publisher.publish(staged, run_id="run-1", published_at=AS_OF)
+        publisher.publish(staged, run_id="run-1", published_at=AS_OF, quality=passing(), manifest_uri=MANIFEST_URI)
 
 
 def test_publish_requires_all_ten_staged_datasets():
@@ -221,7 +229,7 @@ def test_publish_requires_all_ten_staged_datasets():
     staged = _staged(publisher)[:-1]
 
     with pytest.raises(ValueError, match="all ten staged datasets"):
-        publisher.publish(staged, run_id="run-1", published_at=AS_OF)
+        publisher.publish(staged, run_id="run-1", published_at=AS_OF, quality=passing(), manifest_uri=MANIFEST_URI)
 
 
 # 39
@@ -234,7 +242,7 @@ def test_duplicate_cache_primary_key_blocks_publish():
     publisher = MarketplaceCachePublisher(_factory(cursor))
 
     with pytest.raises(RuntimeError, match="duplicate key"):
-        publisher.publish(staged, run_id="run-1", published_at=AS_OF)
+        publisher.publish(staged, run_id="run-1", published_at=AS_OF, quality=passing(), manifest_uri=MANIFEST_URI)
 
     assert not any(
         "marketplace_cache_version" in sql for sql, _ in cursor.executed
@@ -249,7 +257,7 @@ def test_publish_uses_one_transaction_with_explicit_columns():
     factory = _factory(cursor)
     publisher = MarketplaceCachePublisher(factory)
 
-    publisher.publish(staged, run_id="run-1", published_at=AS_OF)
+    publisher.publish(staged, run_id="run-1", published_at=AS_OF, quality=passing(), manifest_uri=MANIFEST_URI)
 
     statements = [sql for sql, _ in cursor.executed]
     # One connection means one transaction around the whole publication.
@@ -277,7 +285,7 @@ def test_publish_truncates_every_cache_table_once():
     cursor = FakeCursor(counts=_counts(staged))
     publisher = MarketplaceCachePublisher(_factory(cursor))
 
-    publisher.publish(staged, run_id="run-1", published_at=AS_OF)
+    publisher.publish(staged, run_id="run-1", published_at=AS_OF, quality=passing(), manifest_uri=MANIFEST_URI)
 
     truncates = [sql for sql, _ in cursor.executed if sql.startswith("TRUNCATE")]
     assert len(truncates) == 1
@@ -293,7 +301,7 @@ def test_a_failure_on_any_table_leaves_no_cache_version_row():
     publisher = MarketplaceCachePublisher(_factory(cursor))
 
     with pytest.raises(RuntimeError):
-        publisher.publish(staged, run_id="run-1", published_at=AS_OF)
+        publisher.publish(staged, run_id="run-1", published_at=AS_OF, quality=passing(), manifest_uri=MANIFEST_URI)
 
     assert not any("marketplace_cache_version" in sql for sql, _ in cursor.executed)
     assert not any("status='SUCCEEDED'" in sql for sql, _ in cursor.executed)
@@ -519,3 +527,63 @@ def test_a_decision_belonging_to_another_run_cannot_be_filed():
             run_id="run-1", completed_at=AS_OF,
             decision=quality_decision(run_id="run-2"), manifest_uri=None,
         )
+
+
+# ----------------------------------------------------------------------------
+# The gate on publication, Phase 7 plan section 10.
+# ----------------------------------------------------------------------------
+# 51
+def test_a_failed_decision_blocks_publication_before_any_lock_or_truncate():
+    cursor = FakeCursor()
+    publisher = MarketplaceCachePublisher(_factory(cursor))
+    staged = _staged(publisher)
+
+    with pytest.raises(QualityGateFailure):
+        publisher.publish(staged, run_id="run-1", published_at=AS_OF, quality=quality_decision(), manifest_uri=MANIFEST_URI)
+
+    # Nothing reached the database at all: no advisory lock, no TRUNCATE.
+    assert cursor.executed == []
+
+
+# 52
+def test_a_decision_from_another_run_blocks_publication():
+    cursor = FakeCursor()
+    publisher = MarketplaceCachePublisher(_factory(cursor))
+    staged = _staged(publisher)
+
+    with pytest.raises(QualityGateFailure, match="belongs to run run-2"):
+        publisher.publish(staged, run_id="run-1", published_at=AS_OF, quality=passing("run-2"), manifest_uri=MANIFEST_URI)
+
+    assert cursor.executed == []
+
+
+def test_a_published_cache_must_name_its_manifest():
+    cursor = FakeCursor()
+    publisher = MarketplaceCachePublisher(_factory(cursor))
+    staged = _staged(publisher)
+
+    with pytest.raises(ValueError, match="name the manifest"):
+        publisher.publish(staged, run_id="run-1", published_at=AS_OF, quality=passing(), manifest_uri="  ")
+
+    assert cursor.executed == []
+
+
+def test_publication_records_the_manifest_and_rule_version_it_published_under():
+    staged = _staged(MarketplaceCachePublisher(_factory(FakeCursor())))
+    cursor = FakeCursor(counts=_counts(staged))
+    publisher = MarketplaceCachePublisher(_factory(cursor))
+
+    publisher.publish(staged, run_id="run-1", published_at=AS_OF, quality=passing(), manifest_uri=MANIFEST_URI)
+
+    version_sql, version_params = next(
+        (sql, params) for sql, params in cursor.executed if "marketplace_cache_version" in sql
+    )
+    run_sql, run_params = next(
+        (sql, params) for sql, params in cursor.executed if "marketplace_batch_run" in sql
+    )
+
+    assert version_params[3] == "quality-rules.v1"
+    assert version_params[4] == MANIFEST_URI
+    assert "quality_status='PASS'" in run_sql
+    assert "manifest_promoted=TRUE" in run_sql
+    assert run_params[1] == MANIFEST_URI

@@ -164,7 +164,15 @@ class MarketplaceCachePublisher:
             staged.append(StagedDataset(name, table, count))
         return tuple(staged)
 
-    def publish(self, staged: Sequence[StagedDataset], *, run_id: str, published_at: datetime) -> None:
+    def publish(self, staged: Sequence[StagedDataset], *, run_id: str, published_at: datetime, quality: "QualityDecision", manifest_uri: str) -> None:
+        # The gate, before the advisory lock and before anything is truncated.
+        # Orchestration refuses a failed decision earlier; this is the guard
+        # that makes an ungated publish impossible rather than merely unlikely,
+        # which is why neither argument has a permissive default.
+        from batch_layer.marketplace_quality import QualityGateFailure
+        if quality.run_id != run_id: raise QualityGateFailure(quality, (), reason=f"quality decision belongs to run {quality.run_id}, not {run_id}")
+        if not quality.passed: raise QualityGateFailure(quality, ())
+        if not manifest_uri.strip(): raise ValueError("a published cache must name the manifest that admitted it")
         if len(staged) != len(DATASETS) or {x.dataset_name for x in staged} != set(DATASETS): raise ValueError("all ten staged datasets are required")
         for item in staged:
             if item.staging_table != self.staging_table(item.dataset_name, run_id): raise ValueError("staging table does not match run-scoped identity")
@@ -182,9 +190,17 @@ class MarketplaceCachePublisher:
             for item in staged:
                 columns = ",".join(DATASET_COLUMNS[item.dataset_name])
                 cur.execute(f"INSERT INTO cache.marketplace_{item.dataset_name} ({columns}) SELECT {columns} FROM {item.staging_table}")
-            cur.execute("""INSERT INTO audit.marketplace_cache_version(singleton,run_id,published_at,dataset_counts) VALUES(TRUE,%s,%s,%s)
-                ON CONFLICT(singleton) DO UPDATE SET run_id=EXCLUDED.run_id,published_at=EXCLUDED.published_at,dataset_counts=EXCLUDED.dataset_counts""", (run_id, published_at, json.dumps(counts, sort_keys=True)))
-            cur.execute("UPDATE audit.marketplace_batch_run SET status='SUCCEEDED',completed_at=%s,cache_published=TRUE WHERE run_id=%s", (published_at, run_id))
+            # The published cache names the manifest and the rule version that
+            # admitted it, so "which Gold version is being served, and under
+            # which rules" is answerable from the database alone.
+            cur.execute("""INSERT INTO audit.marketplace_cache_version(singleton,run_id,published_at,dataset_counts,quality_rule_version,manifest_uri)
+                VALUES(TRUE,%s,%s,%s,%s,%s)
+                ON CONFLICT(singleton) DO UPDATE SET run_id=EXCLUDED.run_id,published_at=EXCLUDED.published_at,dataset_counts=EXCLUDED.dataset_counts,
+                    quality_rule_version=EXCLUDED.quality_rule_version,manifest_uri=EXCLUDED.manifest_uri""",
+                (run_id, published_at, json.dumps(counts, sort_keys=True), quality.rule_version, manifest_uri))
+            cur.execute("""UPDATE audit.marketplace_batch_run SET status='SUCCEEDED',completed_at=%s,cache_published=TRUE,
+                quality_status='PASS',mandatory_failure_count=0,manifest_uri=%s,manifest_promoted=TRUE WHERE run_id=%s""",
+                (published_at, manifest_uri, run_id))
 
     def cleanup(self, staged: Sequence[StagedDataset]) -> None:
         try:
