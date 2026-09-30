@@ -100,7 +100,7 @@ Phase 5/6 chỉ nằm ở ngọn một nhánh feature, không có ở commit g�
    thiếu plan, dừng lại và hỏi — không tự viết plan mới.
 4. Đổi ranh giới phase phải sửa file này trước, theo Brief §27 change-control.
 
-## 5. Trạng thái hiện tại (2026-09-29)
+## 5. Trạng thái hiện tại (2026-09-30)
 
 | Phase | Tuần | Trạng thái | Test |
 |---|---|---|---|
@@ -110,16 +110,32 @@ Phase 5/6 chỉ nằm ở ngọn một nhánh feature, không có ở commit g�
 | 4 | 4 | ✅ trong `develop` | |
 | 5 | 5 | ✅ trong `develop` | đủ 38/38 item |
 | 6 | 6 | ✅ trong `develop` | 43/47 item |
-| 7 | 7 | ⏳ chưa bắt đầu | P1-08, P1-09 |
-| 8 | 8 | ⏳ chưa bắt đầu | P1-12 |
+| 7 | 7 | 🔵 xong trên `phase-7-quality-anomaly-replay`, chờ PR vào `develop` | 59/61 item |
+| 8 | 8 | ⏳ chưa bắt đầu | P1-12, Kibana (P1-11) |
 | 9 | 9 | ⏳ chưa bắt đầu | P2-* |
 
-**Nửa đầu lộ trình 12 tuần (Phase 1–6) đã xong** và nằm trong `develop`.
-Suite: 511 pass, 0 fail, 0 skip.
+**Phase 1–6 đã xong** và nằm trong `develop`. Phase 7 (P1-08 quality gates,
+P1-09 gold publish manifest) xong trên nhánh của nó, 9 commit.
+Suite: **619 pass, 0 fail, 0 skip** (trước Phase 7 là 519).
 
 Bốn item Phase 6 chưa phủ là 33–35 và 43: cần chạy thật
 `run_marketplace_warehouse` end-to-end (ghi Parquet + publish Postgres),
 không phải unit test.
+
+Hai item Phase 7 chưa phủ là 56 và 58, cùng lý do: cần PostgreSQL thật để
+chứng minh publish fail giữ nguyên **cả** cache cũ **lẫn** con trỏ manifest cũ,
+và để rerun cùng context ra manifest giống nhau từng byte end-to-end. Phần
+byte-stability của manifest đã có unit test (`test_marketplace_manifest.py`
+item 33); phần còn thiếu là lần chạy thật.
+
+**Lỗi đặc tả cần sửa ở Phase 8:** cả plan Phase 6 §16 lẫn plan Phase 7 §18 đều
+mô tả một "offline smoke với `--skip-postgres`". Smoke đó không chạy được:
+`run_marketplace_warehouse` gọi `read_crawl_audit()` vô điều kiện và hàm này
+đọc `audit.crawl_request_attempt`/`audit.crawl_run` qua JDBC, vì hai mart
+`source_coverage_daily` và `crawl_reliability_daily` bắt buộc cần bằng chứng
+audit. `--skip-postgres` chỉ bỏ qua publish. Phase 8 sở hữu Compose profile và
+one-command smoke, nên đường chạy offline (hoặc một profile tối thiểu có
+Postgres) thuộc về phase đó — không sửa lén trong Phase 7.
 
 Các nhánh cũ `phase-1-marketplace-foundation`, `phase-3-4-scheduler-kafka-silver`,
 `phase-5-6-speed-gold` có trước mô hình `develop`; giữ làm lịch sử, công việc
