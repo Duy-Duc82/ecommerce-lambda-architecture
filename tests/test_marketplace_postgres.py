@@ -119,8 +119,8 @@ def _counts(staged, **overrides):
 
 
 # 33
-def test_exactly_nine_datasets_with_explicit_columns_are_declared():
-    assert len(DATASETS) == 9
+def test_exactly_ten_datasets_with_explicit_columns_are_declared():
+    assert len(DATASETS) == 10
     assert set(DATASETS) == set(DATASET_COLUMNS)
     for name in DATASETS:
         assert DATASET_COLUMNS[name], name
@@ -132,7 +132,7 @@ def test_staging_requires_every_dataset():
     incomplete = _marts()
     del incomplete["counter_delta_daily"]
 
-    with pytest.raises(ValueError, match="all nine datasets"):
+    with pytest.raises(ValueError, match="all ten datasets"):
         publisher.stage(incomplete, run_id="run-1")
 
 
@@ -214,11 +214,11 @@ def test_publish_rejects_staging_tables_from_another_run():
         publisher.publish(staged, run_id="run-1", published_at=AS_OF)
 
 
-def test_publish_requires_all_nine_staged_datasets():
+def test_publish_requires_all_ten_staged_datasets():
     publisher = MarketplaceCachePublisher(_factory(FakeCursor()))
     staged = _staged(publisher)[:-1]
 
-    with pytest.raises(ValueError, match="all nine staged datasets"):
+    with pytest.raises(ValueError, match="all ten staged datasets"):
         publisher.publish(staged, run_id="run-1", published_at=AS_OF)
 
 

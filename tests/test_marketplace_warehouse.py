@@ -164,13 +164,13 @@ def test_daily_marts_are_partitioned_by_marketplace_and_their_date_column():
     assert {mode for _, _, mode, _ in log} == {"overwrite"}
 
 
-def test_gold_write_requires_exactly_the_nine_datasets():
+def test_gold_write_requires_exactly_the_ten_datasets():
     log = []
     context = MarketplaceBatchContext("run-1", AS_OF, "file:///silver", "file:///gold")
     incomplete = _marts(log)
     del incomplete["offer_freshness"]
 
-    with pytest.raises(ValueError, match="exactly the nine"):
+    with pytest.raises(ValueError, match="exactly the ten"):
         write_run_scoped_gold(incomplete, context)
 
 
@@ -192,7 +192,7 @@ def test_importing_the_batch_modules_opens_no_client_or_session():
         "assert 'minio' not in sys.modules;"
         "assert 'redis' not in sys.modules;"
         "assert 'elasticsearch' not in sys.modules;"
-        "assert len(publisher.DATASETS) == 9;"
+        "assert len(publisher.DATASETS) == 10;"
         "print('CLEAN')"
     )
 

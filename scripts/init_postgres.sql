@@ -204,6 +204,23 @@ CREATE TABLE IF NOT EXISTS cache.marketplace_counter_delta_daily (
     counter_reset_or_invalid BOOLEAN NOT NULL, invalid_reasons_json TEXT NOT NULL, counter_rule_version VARCHAR(128) NOT NULL,
     PRIMARY KEY (marketplace,offer_id,observed_date,counter_name)
 );
+-- Phase 7. A row is a statistical price outlier relative to this offer's own
+-- recent observed price history. It is not a claim that a price is wrong,
+-- dishonest or a bargain, and it never compares one offer against another.
+-- The rule parameters travel with the row so a stored verdict stays checkable
+-- after the configuration moves on.
+CREATE TABLE IF NOT EXISTS cache.marketplace_price_anomaly_daily (
+    marketplace VARCHAR(64) NOT NULL, offer_id VARCHAR(128) NOT NULL, observed_date DATE NOT NULL, currency VARCHAR(8) NOT NULL,
+    evaluated_price NUMERIC(38,6) NOT NULL, baseline_sample_size BIGINT NOT NULL CHECK (baseline_sample_size >= 0),
+    baseline_median NUMERIC(38,6), baseline_mad NUMERIC(38,6), baseline_p25 NUMERIC(38,6), baseline_p75 NUMERIC(38,6), baseline_iqr NUMERIC(38,6),
+    deviation_amount NUMERIC(38,6), deviation_percent DOUBLE PRECISION, robust_score DOUBLE PRECISION,
+    lower_fence NUMERIC(38,6), upper_fence NUMERIC(38,6),
+    anomaly_method VARCHAR(16) NOT NULL CHECK (anomaly_method IN ('ROLLING_MAD','IQR_FALLBACK','NONE')),
+    anomaly_status VARCHAR(24) NOT NULL CHECK (anomaly_status IN ('NORMAL','ANOMALOUS_HIGH','ANOMALOUS_LOW','INSUFFICIENT_HISTORY','INSUFFICIENT_DISPERSION')),
+    anomaly_reason VARCHAR(32) NOT NULL, window_days BIGINT NOT NULL, min_samples BIGINT NOT NULL,
+    mad_threshold NUMERIC(38,6) NOT NULL, iqr_multiplier NUMERIC(38,6) NOT NULL, anomaly_rule_version VARCHAR(64) NOT NULL,
+    PRIMARY KEY (marketplace,offer_id,observed_date)
+);
 CREATE TABLE IF NOT EXISTS audit.marketplace_batch_run (
     run_id VARCHAR(64) PRIMARY KEY, as_of TIMESTAMPTZ NOT NULL, silver_uri TEXT NOT NULL, gold_run_uri TEXT,
     started_at TIMESTAMPTZ NOT NULL, completed_at TIMESTAMPTZ, status VARCHAR(16) NOT NULL CHECK (status IN ('RUNNING','GOLD_WRITTEN','SUCCEEDED','FAILED')),
