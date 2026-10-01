@@ -175,7 +175,7 @@ def run_marketplace_warehouse(context: MarketplaceBatchContext, *, publish_cache
     propagates, so a blocked run is fully documented in both PostgreSQL and
     object storage rather than leaving a log line and nothing else.
     """
-    from batch_layer.marketplace_manifest import BACKFILL_REFUSED, build_gold_manifest, promote_manifest, promotion_refusal, read_current_manifest, write_run_manifest
+    from batch_layer.marketplace_manifest import ALREADY_CURRENT, BACKFILL_REFUSED, build_gold_manifest, promote_manifest, promotion_refusal, read_current_manifest, write_run_manifest
     from batch_layer.marketplace_marts import build_marketplace_marts
     from batch_layer.marketplace_quality import QualityGateFailure, decide, evaluate_quality_gates
     if writer is None or reader is None:
@@ -245,6 +245,8 @@ def run_marketplace_warehouse(context: MarketplaceBatchContext, *, publish_cache
         # manifest naming a Gold run whose cache was never written, which is a
         # worse state than either the cache or the pointer failing alone.
         promotion = promote_manifest(manifest, writer=writer, reader=reader, allow_backfill=allow_backfill)
+        if audit:
+            audit.mark_promotion(run_id=context.run_id, promoted=promotion.promoted or promotion.reason == ALREADY_CURRENT)
         return MarketplaceBatchResult(context.run_id, "SUCCEEDED" if publish_cache else "GOLD_WRITTEN", silver_rows, counts, "PASS", 0, promotion.manifest_uri, promotion.promoted, promotion.reason)
     except QualityGateFailure:
         raise

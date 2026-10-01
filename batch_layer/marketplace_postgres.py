@@ -75,6 +75,12 @@ class MarketplaceBatchAudit:
                 quality_status='FAIL',mandatory_failure_count=%s,manifest_uri=%s,manifest_promoted=FALSE,cache_published=FALSE
                 WHERE run_id=%s""", (completed_at, decision.mandatory_failures, manifest_uri, run_id))
 
+    def mark_promotion(self, *, run_id: str, promoted: bool) -> None:
+        # Separate from publication, and after the pointer write: the cache
+        # commits first, so only the promotion outcome can say whether it moved.
+        with self.connection_factory() as conn, conn.cursor() as cur:
+            cur.execute("UPDATE audit.marketplace_batch_run SET manifest_promoted=%s WHERE run_id=%s", (promoted, run_id))
+
     def mark_promotion_refused(self, *, run_id: str, completed_at: datetime, reason: str, manifest_uri: str) -> None:
         # GOLD_WRITTEN, not SUCCEEDED: the run passed its gate but was held back
         # from serving, so it stays resumable once an operator opts in.
@@ -207,7 +213,7 @@ class MarketplaceCachePublisher:
                     quality_rule_version=EXCLUDED.quality_rule_version,manifest_uri=EXCLUDED.manifest_uri""",
                 (run_id, published_at, json.dumps(counts, sort_keys=True), quality.rule_version, manifest_uri))
             cur.execute("""UPDATE audit.marketplace_batch_run SET status='SUCCEEDED',completed_at=%s,cache_published=TRUE,
-                quality_status='PASS',mandatory_failure_count=0,manifest_uri=%s,manifest_promoted=TRUE WHERE run_id=%s""",
+                quality_status='PASS',mandatory_failure_count=0,manifest_uri=%s,manifest_promoted=FALSE WHERE run_id=%s""",
                 (published_at, manifest_uri, run_id))
 
     def cleanup(self, staged: Sequence[StagedDataset]) -> None:
