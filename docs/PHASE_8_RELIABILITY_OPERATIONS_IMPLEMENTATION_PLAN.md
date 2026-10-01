@@ -1,7 +1,7 @@
 # Phase 8 implementation plan — Reliability and operations
 
-> Status: draft for review (2026-10-01). Implementation starts only after this
-> plan is committed to `develop` and PR #5 (`phase-7-asof-cutoff`) is merged.
+> Status: accepted (PR #6, merged 2026-10-01 after PR #5). WP1 in progress on
+> `phase-8-wp1-crawl-service`; Section 6.1 carries the amendments WP1 made.
 >
 > Intended implementer: a low-capability coding model working one work package
 > at a time. It must follow the fixed contracts and stop between packages.
@@ -205,6 +205,8 @@ Modify only:
 ```text
 crawler/worker.py
 crawler/scheduling.py
+crawler/contracts.py      (ObservationPublishError, beside the other boundary errors)
+crawler/base.py           (robots.txt URL as an overridable property)
 crawler/sites/tiki.py
 data_ingestion/marketplace_silver_sink.py
 batch_layer/marketplace_warehouse.py
@@ -241,7 +243,8 @@ string in its non-empty list, as Phases 6 and 7 did.
 CRAWL_SERVICE_WORKER_ID = os.getenv("CRAWL_SERVICE_WORKER_ID", "")   # default: hostname
 CRAWL_SERVICE_IDLE_SECONDS = int(os.getenv("CRAWL_SERVICE_IDLE_SECONDS", "30"))
 TIKI_LISTING_URL = os.getenv("TIKI_LISTING_URL", "https://tiki.vn/api/personalish/v1/blocks/listings")
-TIKI_ROBOTS_URL = os.getenv("TIKI_ROBOTS_URL", "https://tiki.vn/robots.txt")
+# No TIKI_ROBOTS_URL (amended in WP1): robots.txt is read from the host of
+# TIKI_LISTING_URL, because RFC 9309 scopes it to the host actually fetched.
 
 # Silver sink service
 MARKETPLACE_SILVER_POLL_TIMEOUT_MS = int(os.getenv("MARKETPLACE_SILVER_POLL_TIMEOUT_MS", "1000"))
@@ -312,8 +315,11 @@ Every service:
 - runs a loop with an injected clock and an injected `sleep`, so a unit test
   drives N iterations without waiting;
 - stops gracefully on SIGTERM and SIGINT: it finishes the unit of work in
-  hand (a task, a record, a micro-batch, a batch run), takes no new one, closes
-  its clients and exits 0;
+  hand (a crawl cycle, a record, a micro-batch, a batch run), takes no new one,
+  closes its clients and exits 0. For the crawler the unit is the whole cycle,
+  not one task: the cycle leased its tasks up front, and a task leased but
+  never started would sit `LEASED` until its lease expired. Compose's
+  `stop_grace_period` for the crawler must therefore cover one cycle (WP4);
 - logs one structured JSON line per unit of work, with no secrets;
 - never reads a wall clock inside business semantics. The loop clock decides
   *when* to work, never *what* a result contains.
@@ -329,12 +335,17 @@ python -m crawler.service [--worker-id ID] [--max-cycles N]
    from `crawler.runner.listing_page_executor`, wrapped by
    `publishing_executor` (below).
 2. Loop: `result = worker.run_once(crawl_run_id_for=...)`. If
-   `result.leased == 0`, sleep `CRAWL_SERVICE_IDLE_SECONDS`; otherwise sleep
-   `CRAWL_WORKER_POLL_SECONDS`.
+   `result.leased == 0`, wait `CRAWL_SERVICE_IDLE_SECONDS`; otherwise wait
+   `CRAWL_WORKER_POLL_SECONDS`. The wait is on the stop signal, so SIGTERM
+   ends it at once. No wait follows the last cycle of a bounded run.
 3. `--max-cycles` exists for tests and the smoke only.
+4. One JSON log line per cycle (`"event": "crawl_cycle"` plus the
+   `CycleResult` fields).
 
 `crawl_run_id_for` derives one ID per attempt from the task ID, the attempt
-number and the lease start, so a retried task never reuses a crawl run ID.
+number and the lease expiry, so neither a retry nor a re-lease after a crash
+reuses a crawl run ID. The default worker ID is `<hostname>:<pid>`, so two
+processes on one host never share a lease owner.
 
 **`publishing_executor(inner, producer)`** returns an executor with the same
 signature. It calls `inner(...)`, which persists raw Bronze **before** parsing
@@ -376,9 +387,20 @@ serves its own `robots.txt`.
 python -m crawler.seed_frontier --marketplace tiki --category 1846 [--category ...] [--tier NORMAL] [--max-pages N]
 ```
 
-It calls `enqueue()` once per listing page target. It is idempotent:
-re-seeding an existing `task_id` is a no-op, which `enqueue()` already reports
-by returning `False`. It prints how many tasks were new.
+It calls `enqueue()` once per listing page target and prints how many tasks
+were new.
+
+Idempotency needs care, because each frontier row is **one scheduled
+occurrence**: `mark_succeeded` closes it and inserts the next occurrence under
+a new `task_id`. Seeding with `scheduled_for = now` would therefore start a
+second chain for a target already being crawled. Instead, the first occurrence
+of every seeded target is anchored at a fixed instant,
+`SEED_SCHEDULED_FOR = 1970-01-01T00:00:00Z`, so its `task_id` depends only on
+the target. A re-seed hits `ON CONFLICT DO NOTHING` and `enqueue()` returns
+`False`. That anchored row stays in the table whatever its status, so a re-seed
+can never revive or duplicate a chain; reviving a target that ended `FAILED`
+is a deliberate operator action and needs `--scheduled-for`. An anchored task
+is due at once, which is what a first seed wants.
 
 ### 6.2 Silver sink service — `data_ingestion/marketplace_silver_service.py`
 
@@ -563,8 +585,8 @@ serves:
   `CRAWL_HTTP_TIMEOUT_SECONDS`) and `drift` (a payload whose shape the adapter
   must reject).
 
-The smoke and every drill set `TIKI_LISTING_URL` / `TIKI_ROBOTS_URL` to the
-stub. **Nothing in Phase 8 automation contacts the live marketplace.** This
+The smoke and every drill set `TIKI_LISTING_URL` to the stub, and robots.txt
+then follows from its host. **Nothing in Phase 8 automation contacts the live marketplace.** This
 answers Brief §24 "Demo phụ thuộc internet" for operations, and keeps drills
 from loading the real source (Brief §24 "Crawler ảnh hưởng source").
 
