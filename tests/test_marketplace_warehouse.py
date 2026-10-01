@@ -271,6 +271,10 @@ class FakeAudit:
     def mark_failed(self, **kwargs):
         self.log.append("audit.mark_failed")
 
+    def mark_promotion(self, **kwargs):
+        self.log.append("audit.mark_promotion")
+        self.promotion = kwargs
+
     def mark_promotion_refused(self, **kwargs):
         self.log.append("audit.mark_promotion_refused")
         self.promotion_refused = kwargs
@@ -391,8 +395,9 @@ def test_a_passing_run_publishes_before_it_promotes(monkeypatch):
 
     assert parts["log"] == [
         "audit.start_run", "audit.mark_gold_written", "quality.record", "manifest.write_run",
-        "publisher.stage", "publisher.publish", "publisher.cleanup", "manifest.promote",
+        "publisher.stage", "publisher.publish", "publisher.cleanup", "manifest.promote", "audit.mark_promotion",
     ]
+    assert parts["audit"].promotion == {"run_id": "run-1", "promoted": True}
     assert result.status == "SUCCEEDED"
     assert result.manifest_promoted is True
     assert result.manifest_uri == MANIFEST_URI
@@ -618,3 +623,28 @@ def test_rerunning_the_current_run_keeps_its_real_predecessor(monkeypatch):
     assert run_manifest == pointer_before
     assert store.read("gold", marketplace_manifest.CURRENT_POINTER_PATH) == pointer_before
     assert result.promotion_reason == marketplace_manifest.ALREADY_CURRENT
+
+
+def test_a_pointer_write_failure_never_records_a_promotion(monkeypatch):
+    parts = wire_orchestration(monkeypatch)
+
+    def broken_promote(manifest, *, writer, reader, allow_backfill=False):
+        parts["log"].append("manifest.promote")
+        raise ConnectionError("object store unreachable")
+
+    monkeypatch.setattr(marketplace_manifest, "promote_manifest", broken_promote)
+
+    with pytest.raises(ConnectionError):
+        run_marketplace_warehouse(batch_context(), writer=noop_writer, reader=empty_reader)
+
+    assert "audit.mark_promotion" not in parts["log"]
+    assert parts["log"][-1] == "audit.mark_failed"
+
+
+def test_a_pointer_that_already_names_the_run_counts_as_promoted(monkeypatch):
+    parts = wire_orchestration(monkeypatch)
+    store = serving_this_run(monkeypatch, previous_run_id="run-0")
+
+    run_marketplace_warehouse(batch_context(), resume=True, writer=store.write, reader=store.read)
+
+    assert parts["audit"].promotion == {"run_id": "run-1", "promoted": True}

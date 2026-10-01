@@ -527,6 +527,18 @@ def test_a_refused_backfill_is_recorded_as_gold_written_with_nothing_published()
     assert "BACKFILL_REFUSED" in params[1]
 
 
+@pytest.mark.parametrize("promoted", [True, False])
+def test_the_pointer_outcome_is_recorded_after_it_happens(promoted):
+    cursor = FakeCursor()
+    audit = MarketplaceBatchAudit(_factory(cursor))
+
+    audit.mark_promotion(run_id="run-1", promoted=promoted)
+
+    sql, params = cursor.executed[0]
+    assert "SET manifest_promoted=%s" in sql
+    assert params == (promoted, "run-1")
+
+
 def test_a_passing_decision_cannot_be_filed_as_a_quality_failure():
     audit = MarketplaceBatchAudit(_factory(FakeCursor()))
 
@@ -603,5 +615,9 @@ def test_publication_records_the_manifest_and_rule_version_it_published_under():
     assert version_params[3] == "quality-rules.v1"
     assert version_params[4] == MANIFEST_URI
     assert "quality_status='PASS'" in run_sql
-    assert "manifest_promoted=TRUE" in run_sql
+    # The pointer has not moved yet when the cache commits. Claiming it had
+    # left the audit row asserting a promotion that a failed or refused
+    # pointer write never made.
+    assert "manifest_promoted=FALSE" in run_sql
+    assert "manifest_promoted=TRUE" not in run_sql
     assert run_params[1] == MANIFEST_URI
