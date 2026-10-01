@@ -155,7 +155,10 @@ def write_run_scoped_gold(marts: Mapping[str, DataFrame], context: MarketplaceBa
     daily = {"offer_price_history_daily", "offer_change_daily", "category_price_daily", "source_coverage_daily", "crawl_reliability_daily", "counter_delta_daily", "price_anomaly_daily"}
     for name, frame in marts.items():
         uri = _join_uri(run_root, name)
-        writer = frame.write.mode("overwrite")
+        # Static, whatever the session says: a run directory belongs wholly to
+        # this run, so a rerun must replace it, not only the partitions it
+        # still has rows for.
+        writer = frame.write.mode("overwrite").option("partitionOverwriteMode", "static")
         if name in daily:
             date_col = "observed_date" if "observed_date" in frame.columns else "request_date"
             writer = writer.partitionBy("marketplace", date_col)
