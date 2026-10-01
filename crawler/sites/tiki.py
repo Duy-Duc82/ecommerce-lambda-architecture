@@ -21,7 +21,7 @@ import time
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 from typing import Any
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlparse
 
 import requests
 
@@ -35,7 +35,7 @@ from config.marketplace_schema import (
     create_observation_event,
     create_offer_observation,
 )
-from config.settings import CRAWL_HTTP_TIMEOUT_SECONDS
+from config.settings import CRAWL_HTTP_TIMEOUT_SECONDS, TIKI_LISTING_URL
 from crawler.base import SiteCrawler
 from crawler.contracts import (
     AcquisitionStage,
@@ -49,7 +49,8 @@ from crawler.contracts import (
 
 logger = logging.getLogger(__name__)
 
-LISTING_URL = "https://tiki.vn/api/personalish/v1/blocks/listings"
+# The default endpoint, from settings. An instance may be given another one.
+LISTING_URL = TIKI_LISTING_URL
 # 40 is the page size the site itself uses; asking for more is not honoured.
 PAGE_SIZE = 40
 
@@ -59,6 +60,9 @@ class TikiCrawler(SiteCrawler):
     marketplace_id = "marketplace-tiki"
     adapter_version = "tiki-listing-v1"
     base_url = "https://tiki.vn"
+    # Requests go here; base_url stays the canonical site for product links,
+    # so a stub endpoint never changes an offer's source_url.
+    listing_url = LISTING_URL
     default_currency = "VND"
     rating_scale = Decimal("5")
 
@@ -71,6 +75,10 @@ class TikiCrawler(SiteCrawler):
         # clock the machine happened to have.
         self._http_get = kwargs.pop("http_get", None)
         self._monotonic = kwargs.pop("monotonic", time.monotonic)
+        # Set before the base constructor, which reads robots_url.
+        listing_url = kwargs.pop("listing_url", None)
+        if listing_url is not None:
+            self.listing_url = listing_url
         super().__init__(*args, **kwargs)
         # category id -> last page the endpoint reported, learned from page 1.
         self._last_page: dict[str, int] = {}
@@ -82,7 +90,12 @@ class TikiCrawler(SiteCrawler):
         paths like /api/v2/me/ and /v1/private/), but the check has to be made
         against this URL for that to mean anything.
         """
-        return f"{LISTING_URL}?{urlencode({'category': category, 'page': page, 'limit': PAGE_SIZE})}"
+        return f"{self.listing_url}?{urlencode({'category': category, 'page': page, 'limit': PAGE_SIZE})}"
+
+    @property
+    def robots_url(self) -> str:
+        parsed = urlparse(self.listing_url)
+        return f"{parsed.scheme}://{parsed.netloc}/robots.txt"
 
     def _now(self) -> datetime:
         """The observation instant. Callers inject a clock to make runs replayable."""
@@ -360,7 +373,7 @@ class TikiCrawler(SiteCrawler):
             return []
 
         response = requests.get(
-            LISTING_URL,
+            self.listing_url,
             params={"category": category, "page": page, "limit": PAGE_SIZE},
             headers={"User-Agent": self.user_agent},
             timeout=10,

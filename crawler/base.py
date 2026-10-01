@@ -66,6 +66,16 @@ class SiteCrawler(ABC):
         self._clock = clock
         self._robots = self._load_robots() if fetch_robots else self._refuse_everything()
 
+    @property
+    def robots_url(self) -> str:
+        """Where this adapter's robots.txt lives: the host it fetches from.
+
+        An adapter whose requests go to another host than ``base_url``
+        overrides this, because RFC 9309 scopes robots.txt to one host.
+        """
+        parsed = urlparse(self.base_url)
+        return f"{parsed.scheme}://{parsed.netloc}/robots.txt"
+
     @staticmethod
     def _refuse_everything() -> robotparser.RobotFileParser:
         # A parse-only adapter (raw reparse) has no business fetching, so it
@@ -88,8 +98,7 @@ class SiteCrawler(ABC):
         ``User-agent`` line that follows rules.
         """
         parser = robotparser.RobotFileParser()
-        parsed = urlparse(self.base_url)
-        robots_url = f"{parsed.scheme}://{parsed.netloc}/robots.txt"
+        robots_url = self.robots_url
         parser.set_url(robots_url)
         try:
             response = requests.get(

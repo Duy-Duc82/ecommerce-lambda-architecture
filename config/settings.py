@@ -116,6 +116,10 @@ CRAWL_USER_AGENT: str = os.getenv(
 # Pages requested per category before moving on. The adapter stops earlier when
 # the site reports its last page, so this is a safety ceiling, not a target.
 CRAWL_MAX_PAGES: int = int(os.getenv("CRAWL_MAX_PAGES", "50"))
+# The listing API endpoint. Overridable so the offline stub source can stand in
+# for the live site; robots.txt is then read from this URL's host (RFC 9309
+# scopes it to the host actually fetched), so there is no separate setting.
+TIKI_LISTING_URL: str = os.getenv("TIKI_LISTING_URL", "https://tiki.vn/api/personalish/v1/blocks/listings")
 # Comma-separated Tiki category ids, e.g. "1846,1789". The default nine were
 # each probed live (2026-08-16): all return 200; seven cap at total=2000
 # (50 pages), 1789 has 116 products and 17166 has 307.
