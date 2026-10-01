@@ -214,6 +214,22 @@ def test_lease_selects_ready_retry_wait_and_expired_leases():
     assert "status = 'LEASED' AND lease_expires_at <= %s" in sql
 
 
+def test_the_lease_returns_columns_qualified_by_the_frontier_table():
+    # The UPDATE joins the "due" CTE, which also has task_id. An unqualified
+    # RETURNING task_id is ambiguous, and PostgreSQL refuses the statement:
+    # no task had ever been leased on a real database until Phase 8 started
+    # the worker for the first time (2026-10-01).
+    cursor = FakeCursor(rows=[])
+    frontier = PostgresCrawlFrontier(_factory(cursor))
+
+    frontier.lease_due(worker_id="worker-1", now=NOW, lease_seconds=300, limit=10)
+
+    returning = _sql(cursor).split("RETURNING", 1)[1]
+    columns = [column.strip() for column in returning.split(",")]
+    assert len(columns) == 17
+    assert [column for column in columns if not column.startswith("f.")] == []
+
+
 # 15, 16
 def test_only_an_expired_lease_is_eligible_to_be_taken_again():
     cursor = FakeCursor(rows=[])
