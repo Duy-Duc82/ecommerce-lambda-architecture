@@ -272,3 +272,37 @@ def test_the_module_makes_no_claim_about_dishonesty_or_correctness(spark):
 
     for forbidden in ("scam", "fraud", "fake price", "incorrect price", "wrong price", "mispric"):
         assert forbidden not in source, forbidden
+
+
+# The anomaly grain includes currency: the window is partitioned by it, and the
+# price history it reads from is keyed by it. A cache key without it turned a
+# same-day currency switch into a unique violation at publish time, after the
+# gate had already passed.
+def test_a_same_day_currency_switch_yields_one_row_per_currency(spark):
+    rows = series(["100"]) + series(["4"], currency="USD")
+
+    frame = build(history(spark, rows))
+
+    keys = sorted((row.offer_id, row.observed_date, row.currency) for row in frame.collect())
+    assert keys == [("offer-1", DAY_ONE, "USD"), ("offer-1", DAY_ONE, "VND")]
+
+
+def _primary_keys(sql, table):
+    import re
+
+    create = re.search(rf"CREATE TABLE IF NOT EXISTS {re.escape(table)} \((.*?)\n\);", sql, re.S)
+    alter = re.findall(rf"ALTER TABLE {re.escape(table)}\s+ADD CONSTRAINT \w+ PRIMARY KEY \(([^)]*)\)", sql)
+    keys = [re.search(r"PRIMARY KEY \(([^)]*)\)", create.group(1)).group(1)] + alter
+    return [tuple(column.strip() for column in key.split(",")) for key in keys]
+
+
+def test_the_cache_key_matches_the_price_history_grain():
+    sql = (Path(__file__).parent.parent / "scripts" / "init_postgres.sql").read_text(encoding="utf-8")
+    grain = ("marketplace", "offer_id", "observed_date", "currency")
+
+    assert _primary_keys(sql, "cache.marketplace_offer_price_history_daily")[0] == grain
+    keys = _primary_keys(sql, "cache.marketplace_price_anomaly_daily")
+    # The CREATE for new databases, and an idempotent re-key for databases
+    # created with the old key.
+    assert keys == [grain, grain]
+    assert "ALTER TABLE cache.marketplace_price_anomaly_daily DROP CONSTRAINT IF EXISTS marketplace_price_anomaly_daily_pkey" in sql
