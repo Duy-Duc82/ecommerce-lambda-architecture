@@ -110,13 +110,16 @@ Phase 5/6 chỉ nằm ở ngọn một nhánh feature, không có ở commit g�
 | 4 | 4 | ✅ trong `develop` | |
 | 5 | 5 | ✅ trong `develop` | đủ 38/38 item |
 | 6 | 6 | ✅ trong `develop` | **47/47 item** |
-| 7 | 7 | 🔵 xong trên `phase-7-quality-anomaly-replay`, chờ PR vào `develop` | **61/61 item** |
+| 7 | 7 | ✅ trong `develop` (PR #4); bản sửa cắt `as_of` trên `phase-7-asof-cutoff` | **61/61 item** |
 | 8 | 8 | ⏳ chưa bắt đầu | P1-12, Kibana (P1-11) |
 | 9 | 9 | ⏳ chưa bắt đầu | P2-* |
 
-**Phase 1–6 đã xong** và nằm trong `develop`. Phase 7 (P1-08 quality gates,
-P1-09 gold publish manifest) xong trên nhánh của nó.
-Suite: **624 pass, 0 fail, 0 skip** (trước Phase 7 là 519).
+**Phase 1–7 đã xong** và nằm trong `develop`. Phase 7 (P1-08 quality gates,
+P1-09 gold publish manifest) merge qua PR #4 ngày 2026-09-30. Bản sửa sau
+merge — run đọc Silver và audit *tại* `as_of`, gate 8 có cửa sổ đối soát — nằm
+trên `phase-7-asof-cutoff`, chi tiết ở `PROGRESS.md` §11.
+Suite: **674 pass, 0 fail, 0 skip** (trước Phase 7 là 519).
+`master` vẫn chưa nhận phase nào: chờ thầy hướng dẫn duyệt `develop`.
 
 **Nợ cũ đã đóng bằng chạy thật (2026-10-01).** Bốn item Phase 6 (33–35, 43) và
 hai item Phase 7 (56, 58) đều được kiểm bằng `run_marketplace_warehouse` chạy
