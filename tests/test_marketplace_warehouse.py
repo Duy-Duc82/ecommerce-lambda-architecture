@@ -262,9 +262,10 @@ class FakeRepository:
 
 
 class FakePublisher:
-    def __init__(self, log):
+    def __init__(self, log, *, fails=False):
         self.log = log
         self.published = None
+        self.fails = fails
 
     def stage(self, marts, *, run_id):
         self.log.append("publisher.stage")
@@ -272,6 +273,8 @@ class FakePublisher:
 
     def publish(self, staged, *, run_id, published_at, quality, manifest_uri):
         self.log.append("publisher.publish")
+        if self.fails:
+            raise RuntimeError("duplicate key value violates unique constraint")
         self.published = {"quality": quality, "manifest_uri": manifest_uri}
 
     def cleanup(self, staged):
@@ -285,7 +288,7 @@ def decision(*, passed=True, failures=0):
     )
 
 
-def wire_orchestration(monkeypatch, *, passed=True):
+def wire_orchestration(monkeypatch, *, passed=True, publish_fails=False):
     log = []
     parts = {"log": log}
 
@@ -331,7 +334,7 @@ def wire_orchestration(monkeypatch, *, passed=True):
     monkeypatch.setattr(marketplace_manifest, "write_run_manifest", fake_write_run_manifest)
     monkeypatch.setattr(marketplace_manifest, "promote_manifest", fake_promote)
 
-    audit, repository, publisher = FakeAudit(log), FakeRepository(log), FakePublisher(log)
+    audit, repository, publisher = FakeAudit(log), FakeRepository(log), FakePublisher(log, fails=publish_fails)
     monkeypatch.setattr(marketplace_postgres.MarketplaceBatchAudit, "from_settings", classmethod(lambda cls: audit))
     monkeypatch.setattr(
         marketplace_postgres.MarketplaceQualityRepository, "from_settings", classmethod(lambda cls: repository)
@@ -427,3 +430,30 @@ def test_skipping_postgres_still_evaluates_and_promotes(monkeypatch):
     assert parts["log"] == ["manifest.promote"]
     assert result.status == "GOLD_WRITTEN"
     assert result.manifest_promoted is True
+
+
+# 56
+def test_a_publication_failure_leaves_the_manifest_pointer_alone(monkeypatch):
+    # Found by a live run against PostgreSQL: the cache transaction rolled back
+    # correctly, but the pointer had already advanced, so the serving version
+    # named a Gold run whose cache was never published. That is worse than
+    # either failure alone, which is why the pointer must move last.
+    parts = wire_orchestration(monkeypatch, publish_fails=True)
+
+    with pytest.raises(RuntimeError, match="duplicate key"):
+        run_marketplace_warehouse(batch_context(), writer=noop_writer, reader=empty_reader)
+
+    assert "publisher.publish" in parts["log"]
+    assert "manifest.promote" not in parts["log"]
+    # The run manifest is still written: a failed run stays inspectable.
+    assert "manifest.write_run" in parts["log"]
+
+
+# 56
+def test_the_pointer_moves_only_after_the_cache_is_published(monkeypatch):
+    parts = wire_orchestration(monkeypatch)
+
+    run_marketplace_warehouse(batch_context(), writer=noop_writer, reader=empty_reader)
+
+    log = parts["log"]
+    assert log.index("publisher.publish") < log.index("manifest.promote")
