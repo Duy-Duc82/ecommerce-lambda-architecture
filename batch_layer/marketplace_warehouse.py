@@ -82,6 +82,9 @@ class GoldWriteResult:
 
 # A passing run deliberately kept off the serving version for inspection.
 QUALITY_ONLY = "QUALITY_ONLY"
+# A run into a Gold root other than the serving one. Manifests and the pointer
+# live at one fixed place, so such a run must not write either.
+SCRATCH_GOLD_ROOT = "SCRATCH_GOLD_ROOT"
 
 
 @dataclass(frozen=True)
@@ -171,13 +174,18 @@ def write_run_scoped_gold(marts: Mapping[str, DataFrame], context: MarketplaceBa
     return results
 
 
-def run_marketplace_warehouse(context: MarketplaceBatchContext, *, publish_cache: bool = True, resume: bool = False, spark: SparkSession | None = None, allow_backfill: bool = False, quality_only: bool = False, writer=None, reader=None) -> MarketplaceBatchResult:
+def run_marketplace_warehouse(context: MarketplaceBatchContext, *, publish_cache: bool = True, resume: bool = False, spark: SparkSession | None = None, allow_backfill: bool = False, quality_only: bool = False, writer=None, reader=None, serving_gold_root_uri: str | None = None) -> MarketplaceBatchResult:
     """Read Silver, build Gold, judge it, and publish only if it earns it.
 
     The order below is the contract, not an implementation detail. Quality
     results are persisted and the run manifest is written *before* a refusal
     propagates, so a blocked run is fully documented in both PostgreSQL and
     object storage rather than leaving a log line and nothing else.
+
+    ``serving_gold_root_uri`` names the root the manifests and the pointer
+    describe. A run into any other root is a scratch run: it is judged and its
+    quality results recorded, but it writes no manifest, publishes nothing and
+    promotes nothing.
     """
     from batch_layer.marketplace_manifest import ALREADY_CURRENT, BACKFILL_REFUSED, build_gold_manifest, promote_manifest, promotion_refusal, read_current_manifest, write_run_manifest
     from batch_layer.marketplace_marts import build_marketplace_marts
@@ -218,12 +226,20 @@ def run_marketplace_warehouse(context: MarketplaceBatchContext, *, publish_cache
         # reply was lost) is not its own predecessor: keep the one it recorded.
         previous_run_id = None if previous is None else previous.previous_run_id if previous.run_id == context.run_id else previous.run_id
         manifest = build_gold_manifest(writes, decision, context, previous_run_id=previous_run_id)
+        scratch = serving_gold_root_uri is not None and context.gold_root_uri.rstrip("/") != serving_gold_root_uri.rstrip("/")
 
         if not decision.passed:
-            manifest_uri = write_run_manifest(manifest, writer=writer)
+            manifest_uri = None if scratch else write_run_manifest(manifest, writer=writer)
             if audit:
                 audit.mark_quality_failed(run_id=context.run_id, completed_at=datetime.now(timezone.utc), decision=decision, manifest_uri=manifest_uri)
             raise QualityGateFailure(decision, results)
+
+        if scratch:
+            # Its manifest would land beside production's, under a run_id that
+            # may be production's too, naming datasets nobody serves.
+            if audit:
+                audit.mark_held(run_id=context.run_id, completed_at=datetime.now(timezone.utc), reason=SCRATCH_GOLD_ROOT, manifest_uri=None)
+            return MarketplaceBatchResult(context.run_id, "GOLD_WRITTEN", silver_rows, counts, "PASS", 0, None, False, SCRATCH_GOLD_ROOT)
 
         manifest_uri = write_run_manifest(manifest, writer=writer)
         if quality_only:
@@ -271,7 +287,8 @@ def main() -> None:
     parser.add_argument("--run-id", required=True)
     parser.add_argument("--as-of", required=True)
     parser.add_argument("--silver-uri", default=data_lake_uri("silver", MARKETPLACE_SILVER_DATASET))
-    parser.add_argument("--gold-root-uri", default=data_lake_uri("gold", MARKETPLACE_GOLD_DATASET))
+    serving_gold_root_uri = data_lake_uri("gold", MARKETPLACE_GOLD_DATASET)
+    parser.add_argument("--gold-root-uri", default=serving_gold_root_uri, help="a root other than the default is a scratch run that never publishes")
     parser.add_argument("--skip-postgres", action="store_true")
     parser.add_argument("--resume", action="store_true", help="resume an existing non-SUCCEEDED run with the same context")
     parser.add_argument("--allow-backfill", action="store_true", help="let an older as-of become the published version")
@@ -280,7 +297,7 @@ def main() -> None:
     from batch_layer.marketplace_quality import QualityGateFailure
     context = MarketplaceBatchContext(args.run_id, datetime.fromisoformat(args.as_of.replace("Z", "+00:00")), args.silver_uri, args.gold_root_uri)
     try:
-        result = run_marketplace_warehouse(context, publish_cache=not args.skip_postgres, resume=args.resume, allow_backfill=args.allow_backfill, quality_only=args.quality_only)
+        result = run_marketplace_warehouse(context, publish_cache=not args.skip_postgres, resume=args.resume, allow_backfill=args.allow_backfill, quality_only=args.quality_only, serving_gold_root_uri=serving_gold_root_uri)
     except QualityGateFailure as refusal:
         # A CI log alone should be enough to see why publication was refused.
         print(json.dumps({"run_id": context.run_id, "status": "QUALITY_FAILED", "quality_status": "FAIL",
