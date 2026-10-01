@@ -586,7 +586,7 @@ CREATE TABLE IF NOT EXISTS cache.marketplace_price_anomaly_daily (
     window_days BIGINT NOT NULL, min_samples BIGINT NOT NULL,
     mad_threshold NUMERIC(38,6) NOT NULL, iqr_multiplier NUMERIC(38,6) NOT NULL,
     anomaly_rule_version VARCHAR(64) NOT NULL,
-    PRIMARY KEY (marketplace, offer_id, observed_date)
+    PRIMARY KEY (marketplace, offer_id, observed_date, currency)
 );
 ```
 

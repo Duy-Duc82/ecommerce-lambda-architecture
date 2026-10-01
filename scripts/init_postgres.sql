@@ -219,8 +219,13 @@ CREATE TABLE IF NOT EXISTS cache.marketplace_price_anomaly_daily (
     anomaly_status VARCHAR(24) NOT NULL CHECK (anomaly_status IN ('NORMAL','ANOMALOUS_HIGH','ANOMALOUS_LOW','INSUFFICIENT_HISTORY','INSUFFICIENT_DISPERSION')),
     anomaly_reason VARCHAR(32) NOT NULL, window_days BIGINT NOT NULL, min_samples BIGINT NOT NULL,
     mad_threshold NUMERIC(38,6) NOT NULL, iqr_multiplier NUMERIC(38,6) NOT NULL, anomaly_rule_version VARCHAR(64) NOT NULL,
-    PRIMARY KEY (marketplace,offer_id,observed_date)
+    PRIMARY KEY (marketplace,offer_id,observed_date,currency)
 );
+-- Re-key a table created before currency joined the key. The grain is the price
+-- history's, and a same-day currency switch yields one row per currency.
+ALTER TABLE cache.marketplace_price_anomaly_daily DROP CONSTRAINT IF EXISTS marketplace_price_anomaly_daily_pkey;
+ALTER TABLE cache.marketplace_price_anomaly_daily
+    ADD CONSTRAINT marketplace_price_anomaly_daily_pkey PRIMARY KEY (marketplace,offer_id,observed_date,currency);
 CREATE TABLE IF NOT EXISTS audit.marketplace_batch_run (
     run_id VARCHAR(64) PRIMARY KEY, as_of TIMESTAMPTZ NOT NULL, silver_uri TEXT NOT NULL, gold_run_uri TEXT,
     started_at TIMESTAMPTZ NOT NULL, completed_at TIMESTAMPTZ, status VARCHAR(16) NOT NULL CHECK (status IN ('RUNNING','GOLD_WRITTEN','SUCCEEDED','FAILED')),
