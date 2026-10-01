@@ -567,3 +567,33 @@ def test_a_refused_backfill_without_postgres_leaves_the_pointer_alone(monkeypatc
     assert result.status == "GOLD_WRITTEN"
     assert result.manifest_promoted is False
     assert result.promotion_reason == marketplace_manifest.BACKFILL_REFUSED
+
+
+def serving_this_run(monkeypatch, *, previous_run_id):
+    """The pointer already names run-1, as after a promotion whose reply was lost."""
+    for name, function in REAL_MANIFEST.items():
+        monkeypatch.setattr(marketplace_manifest, name, function)
+    store = DictStore()
+    served = marketplace_manifest.build_gold_manifest(
+        {name: GoldWriteResult(name, "file:///gold/" + name, 1) for name in DATASETS},
+        decision(), batch_context(), previous_run_id=previous_run_id,
+    )
+    marketplace_manifest.promote_manifest(served, writer=store.write, reader=store.read)
+    return store
+
+
+def test_rerunning_the_current_run_keeps_its_real_predecessor(monkeypatch):
+    # The pointer naming this very run used to become its own predecessor, so
+    # the run manifest stopped matching current.json byte for byte and the
+    # manifest chain lost every run before it.
+    wire_orchestration(monkeypatch)
+    store = serving_this_run(monkeypatch, previous_run_id="run-0")
+    pointer_before = store.read("gold", marketplace_manifest.CURRENT_POINTER_PATH)
+
+    result = run_marketplace_warehouse(batch_context(), publish_cache=False, writer=store.write, reader=store.read)
+
+    run_manifest = store.read("gold", marketplace_manifest.run_manifest_path("run-1"))
+    assert marketplace_manifest.parse_manifest(run_manifest).previous_run_id == "run-0"
+    assert run_manifest == pointer_before
+    assert store.read("gold", marketplace_manifest.CURRENT_POINTER_PATH) == pointer_before
+    assert result.promotion_reason == marketplace_manifest.ALREADY_CURRENT
