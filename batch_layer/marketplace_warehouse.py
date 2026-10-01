@@ -214,18 +214,22 @@ def run_marketplace_warehouse(context: MarketplaceBatchContext, *, publish_cache
                 audit.mark_quality_failed(run_id=context.run_id, completed_at=datetime.now(timezone.utc), decision=decision, manifest_uri=manifest_uri)
             raise QualityGateFailure(decision, results)
 
+        manifest_uri = write_run_manifest(manifest, writer=writer)
         if quality_only:
             # Inspect a suspect window without touching the serving version.
-            manifest_uri = write_run_manifest(manifest, writer=writer)
             return MarketplaceBatchResult(context.run_id, "GOLD_WRITTEN", silver_rows, counts, "PASS", 0, manifest_uri, False)
 
-        promotion = promote_manifest(manifest, writer=writer, reader=reader, allow_backfill=allow_backfill)
         if publish_cache:
             from batch_layer.marketplace_postgres import MarketplaceCachePublisher
             publisher = MarketplaceCachePublisher.from_settings()
             staged = publisher.stage(marts, run_id=context.run_id)
-            publisher.publish(staged, run_id=context.run_id, published_at=context.as_of, quality=decision, manifest_uri=promotion.manifest_uri)
+            publisher.publish(staged, run_id=context.run_id, published_at=context.as_of, quality=decision, manifest_uri=manifest_uri)
             publisher.cleanup(staged)
+        # The pointer moves last, and only once everything it would advertise
+        # actually exists. Promoting before publication leaves a serving
+        # manifest naming a Gold run whose cache was never written, which is a
+        # worse state than either the cache or the pointer failing alone.
+        promotion = promote_manifest(manifest, writer=writer, reader=reader, allow_backfill=allow_backfill)
         return MarketplaceBatchResult(context.run_id, "SUCCEEDED" if publish_cache else "GOLD_WRITTEN", silver_rows, counts, "PASS", 0, promotion.manifest_uri, promotion.promoted)
     except QualityGateFailure:
         raise
