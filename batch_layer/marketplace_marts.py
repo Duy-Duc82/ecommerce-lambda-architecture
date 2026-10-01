@@ -1,4 +1,4 @@
-"""Pure Spark transformations for the nine marketplace temporal marts."""
+"""Pure Spark transformations for the ten marketplace temporal marts."""
 from __future__ import annotations
 import json
 from datetime import datetime, timezone
@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 from pyspark.sql import DataFrame, Window
 from pyspark.sql import functions as F
 
+from batch_layer.marketplace_anomaly import build_price_anomaly_daily
 from config.counter_semantics import counter_semantic
 from config.settings import MARKETPLACE_PERCENTILE_ACCURACY
 
@@ -94,13 +95,45 @@ def _audit_col(df: DataFrame, name: str, default=None):
     return default if isinstance(default, F.Column) else F.lit(default)
 
 
+def attach_marketplace_code(attempts: DataFrame, frontier: DataFrame) -> DataFrame:
+    """Give crawl attempts the marketplace code, taken from the frontier.
+
+    ``audit.crawl_request_attempt`` carries no marketplace at all and
+    ``audit.crawl_run`` carries only a ``marketplace_id``. The frontier is the
+    one audit table holding both, so the code is resolved through
+    ``task_id``.
+
+    The id is not a usable substitute: it reads ``marketplace-tiki`` while an
+    observation reads ``tiki``, so joining on it would match nothing and report
+    every parsed count as zero instead of failing.
+    """
+    for name, frame in (("attempts", attempts), ("frontier", frontier)):
+        if "task_id" not in frame.columns:
+            raise ValueError(f"{name} must expose task_id to resolve a marketplace code")
+    if "marketplace_code" not in frontier.columns:
+        raise ValueError("frontier must expose marketplace_code")
+    codes = frontier.select("task_id", F.col("marketplace_code").alias("_frontier_marketplace")).distinct()
+    return (attempts.join(codes, "task_id", "left")
+            .withColumn("marketplace_code", F.coalesce(_audit_col(attempts, "marketplace_code"), F.col("_frontier_marketplace")))
+            .drop("_frontier_marketplace"))
+
+
 def _with_marketplace(attempts: DataFrame, runs: DataFrame) -> DataFrame:
     if "marketplace" in attempts.columns or "marketplace_code" in attempts.columns:
         return attempts.withColumn("_marketplace", F.coalesce(_audit_col(attempts, "marketplace"), _audit_col(attempts, "marketplace_code")))
     if "crawl_run_id" in attempts.columns and "crawl_run_id" in runs.columns:
-        run_marketplace = "marketplace" if "marketplace" in runs.columns else "marketplace_code"
+        # Only a column the frame actually has. Naming one it does not turns a
+        # missing-evidence problem into an unresolved-column stack trace that
+        # says nothing about the audit schema.
+        run_marketplace = next((name for name in ("marketplace", "marketplace_code") if name in runs.columns), None)
+        if run_marketplace is None:
+            raise ValueError(
+                "cannot resolve a marketplace for crawl attempts: neither the attempts nor the runs "
+                "frame carries marketplace or marketplace_code. Join the frontier with "
+                "attach_marketplace_code() before building coverage or reliability marts."
+            )
         return attempts.join(runs.select("crawl_run_id", F.col(run_marketplace).alias("_marketplace")), "crawl_run_id", "left")
-    return attempts.withColumn("_marketplace", F.lit("unknown"))
+    raise ValueError("cannot resolve a marketplace for crawl attempts: no marketplace column and no crawl_run_id to join on")
 
 
 def build_source_coverage_daily(observations: DataFrame, attempts: DataFrame, runs: DataFrame, *, as_of: datetime, stale_after_seconds: int, rule_version: str) -> DataFrame:
@@ -188,4 +221,7 @@ def build_counter_delta_daily(transitions: DataFrame) -> DataFrame:
 
 
 def build_marketplace_marts(observations: DataFrame, attempts: DataFrame, runs: DataFrame, context: "MarketplaceBatchContext") -> dict[str, DataFrame]:
-    return {"offer_current": build_offer_current(observations), "seller_current": build_seller_current(observations), "offer_price_history_daily": build_offer_price_history_daily(observations), "offer_change_daily": build_offer_change_daily(observations), "offer_freshness": build_offer_freshness(observations, as_of=context.as_of, stale_after_seconds=context.freshness_seconds, rule_version=context.freshness_rule_version), "category_price_daily": build_category_price_daily(observations), "source_coverage_daily": build_source_coverage_daily(observations, attempts, runs, as_of=context.as_of, stale_after_seconds=context.freshness_seconds, rule_version=context.freshness_rule_version), "crawl_reliability_daily": build_crawl_reliability_daily(attempts, runs), "counter_delta_daily": build_counter_delta_daily(build_counter_transitions(observations, max_gap_seconds=context.counter_max_gap_seconds, rule_version=context.counter_rule_version))}
+    # The anomaly mart reads the price mart rather than the observations, so
+    # the two can never disagree about what a price was on a given day.
+    price_history = build_offer_price_history_daily(observations)
+    return {"offer_current": build_offer_current(observations), "seller_current": build_seller_current(observations), "offer_price_history_daily": price_history, "offer_change_daily": build_offer_change_daily(observations), "offer_freshness": build_offer_freshness(observations, as_of=context.as_of, stale_after_seconds=context.freshness_seconds, rule_version=context.freshness_rule_version), "category_price_daily": build_category_price_daily(observations), "source_coverage_daily": build_source_coverage_daily(observations, attempts, runs, as_of=context.as_of, stale_after_seconds=context.freshness_seconds, rule_version=context.freshness_rule_version), "crawl_reliability_daily": build_crawl_reliability_daily(attempts, runs), "counter_delta_daily": build_counter_delta_daily(build_counter_transitions(observations, max_gap_seconds=context.counter_max_gap_seconds, rule_version=context.counter_rule_version)), "price_anomaly_daily": build_price_anomaly_daily(price_history, window_days=context.anomaly_window_days, min_samples=context.anomaly_min_samples, mad_threshold=context.anomaly_mad_threshold, iqr_multiplier=context.anomaly_iqr_multiplier, rule_version=context.anomaly_rule_version)}

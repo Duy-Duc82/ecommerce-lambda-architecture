@@ -9,3 +9,7 @@ lakehouse/
 data/crawl/
 data.zip
 .env
+docker-compose.override.yml
+
+# Local JDBC driver used for container runs; not part of the project.
+.localjars/

@@ -54,6 +54,7 @@ class SiteCrawler(ABC):
         sleeper: Any | None = None,
         jitter_source: Any | None = None,
         clock: Any | None = None,
+        fetch_robots: bool = True,
     ):
         self.categories = categories
         self.request_delay_seconds = request_delay_seconds
@@ -63,7 +64,15 @@ class SiteCrawler(ABC):
         self._sleeper = sleeper or time.sleep
         self._jitter_source = jitter_source or random.uniform
         self._clock = clock
-        self._robots = self._load_robots()
+        self._robots = self._load_robots() if fetch_robots else self._refuse_everything()
+
+    @staticmethod
+    def _refuse_everything() -> robotparser.RobotFileParser:
+        # A parse-only adapter (raw reparse) has no business fetching, so it
+        # fails closed rather than guessing at a site's rules offline.
+        parser = robotparser.RobotFileParser()
+        parser.disallow_all = True
+        return parser
 
     def _load_robots(self) -> robotparser.RobotFileParser:
         """Fetch and parse robots.txt, ignoring blank lines inside the file.
