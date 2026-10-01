@@ -823,7 +823,7 @@ Sau khi user duyệt: viết plan trước, commit vào `develop`, rồi mới c
 
 ```text
 develop                            6f746f0  docs: adopt the phase 7 plan
-phase-7-quality-anomaly-replay     f8a13d5  10 commit, PR #4 -> develop (OPEN)
+phase-7-quality-anomaly-replay     f8a13d5  10 commit, PR #4 -> develop (MERGED 2026-09-30)
 ```
 
 Plan nằm ở `docs/PHASE_7_QUALITY_ANOMALY_REPLAY_IMPLEMENTATION_PLAN.md`
@@ -831,7 +831,7 @@ Plan nằm ở `docs/PHASE_7_QUALITY_ANOMALY_REPLAY_IMPLEMENTATION_PLAN.md`
 §4.2, quy tắc thêm sau sự cố 2026-09.
 
 PR #4: https://github.com/Duy-Duc82/ecommerce-lambda-architecture/pull/4
-20 file, +3601/−43. Chờ review, chưa merge.
+20 file, +3601/−43. Đã merge vào `develop` (`4d14354`) ngày 2026-09-30.
 
 ### 9.3 Phase 7 làm gì
 
@@ -1169,3 +1169,68 @@ Suite: **655 passed, 0 failed, 0 skipped**.
 Nợ còn lại, thuộc Phase 8: chưa có khóa giữa các batch run chạy đồng thời. Con
 trỏ được đọc trước publish, nên một run khác có thể promote chen vào giữa.
 Cần lock hoặc compare-and-swap con trỏ.
+
+---
+
+## 11. Session 2026-10-01 (chiều) — run đọc dữ liệu *tại* `as_of`
+
+### 11.1 Vấn đề, phát hiện khi review lại toàn bộ Phase 7 sau merge
+
+Plan §7.1 nói gate 8 "bỏ qua crawl run nằm ngoài **read window**", nhưng không
+có code nào dựng read window cả. `run_marketplace_warehouse` đọc **toàn bộ**
+Silver và toàn bộ audit crawl. Hệ quả:
+
+1. **Backfill không bao giờ qua gate khi Silver vẫn đang lớn lên.** Gate 6
+   (`observed_at <= as_of + 300s`, MANDATORY) thấy mọi dòng mới hơn `as_of`.
+   Lần chạy `e2e-v5` ở §10.8 qua được chỉ vì dữ liệu seed cố định.
+2. **Replay không phải ảnh chụp tại một thời điểm.** Manifest giống từng byte
+   (P7-58) chỉ đúng khi Silver đứng yên giữa hai lần chạy.
+3. **Một crawl run lệch số đếm chặn publish mãi mãi.** Gate 8 đối soát mọi
+   crawl run có trong Silver, mà Silver thì luôn được đọc hết, nên chỉ cần một
+   observation rơi vào DLQ hoặc sink còn đang trễ là mọi batch về sau đều đỏ.
+
+### 11.2 Sửa
+
+| Thay đổi | Ở đâu |
+|---|---|
+| `observations_as_of()`: giữ `observed_at <= as_of` (bao gồm biên), cắt **trước** dedup | `batch_layer/marketplace_warehouse.py` |
+| `crawl_audit_as_of()`: attempt có `completed_at <= as_of`, crawl run có `started_at <= as_of` | như trên |
+| Gate 6 so `observed_at` với `least(fetched_at, produced_at) + tolerance` của chính dòng đó | `batch_layer/marketplace_quality.py` |
+| Gate 8 chỉ đối soát run đã **ổn định** (`completed_at <= as_of − settle`) và **còn trong lookback** (`>= as_of − lookback`); run đang `RUNNING` thì chờ; dòng Silver không có run audit thì xếp theo `observed_at` cuối | như trên |
+| `MARKETPLACE_QUALITY_RECONCILIATION_SETTLE_SECONDS=900`, `..._LOOKBACK_SECONDS=172800` | `config/settings.py`, context |
+| `quality-rules.v1` → **`quality-rules.v2`**, vì gate 6 và 8 đã đổi nghĩa | `config/settings.py` |
+
+Plan Phase 7 đã sửa theo: §5, §7.1, §13, §14 bước 2–3, §17 item 21 và 24.
+
+**Vì sao gate 6 phải đổi.** Khi đã cắt ở `as_of` thì không dòng nào còn vượt
+`as_of`, và so với `as_of` không bao giờ bắn được nữa. Điều còn đáng bắt là
+một observation tự nhận thời điểm muộn hơn chính response sinh ra nó hoặc
+message chở nó: đó là lỗi đồng hồ hoặc lỗi parse.
+
+**Đánh đổi của lookback, ghi rõ để khỏi đảo ngược nhầm:**
+
+- Lookback phải lớn hơn khoảng cách giữa hai batch cộng settle. Nếu không, một
+  crawl run có thể ổn định rồi trôi ra khỏi cửa sổ giữa hai batch mà chưa
+  được đối soát lần nào.
+- Lookback cũng là thời gian tối đa một chỗ lệch chặn publish. Sau đó run lệch
+  không còn bị phán lại, nhưng kết quả FAIL của các batch trước vẫn nằm trong
+  `audit.marketplace_quality_result`.
+- Gate 8 vẫn **không** phát hiện crawl run vắng mặt hoàn toàn khỏi Silver
+  (vẫn là left join, theo item 24). Muốn bắt ca đó thì phải đổi item 24.
+
+### 11.3 Kiểm chứng trên PostgreSQL + Spark 4.0.1 thật (container `mp-e2e`)
+
+Silver seed có 48 observation, từ 01/9 đến 12/9. Backfill tại `as_of=2026-09-08`:
+
+```text
+e2e-w1-old | code develop cũ, root scratch | QUALITY_FAILED  observed_at_within_future_tolerance = 20 dòng
+e2e-w2-new | code mới, root scratch        | GOLD_WRITTEN    PASS, silver_rows=28 (4 offer × 7 ngày)
+e2e-w3     | --quality-only, rồi thêm 1 dòng Silver ngày 20/9, rồi --resume → manifest IDENTICAL (2501 bytes)
+e2e-w3     | --resume --allow-backfill     | SUCCEEDED       cache=t, promoted=t
+e2e-w4     | as_of 2026-09-14              | SUCCEEDED       silver_rows=48 (dòng 20/9 bị cắt), pointer=e2e-w4, previous=e2e-w3
+```
+
+Dòng Silver giả ngày 20/9 đã xóa sau khi kiểm.
+
+Suite: **674 passed, 0 failed, 0 skipped**.
+
