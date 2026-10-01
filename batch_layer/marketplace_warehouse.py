@@ -21,6 +21,7 @@ from config.settings import (
     MARKETPLACE_ANOMALY_WINDOW_DAYS, MARKETPLACE_BATCH_APP_NAME,
     MARKETPLACE_BATCH_SHUFFLE_PARTITIONS,
     MARKETPLACE_QUALITY_FUTURE_TOLERANCE_SECONDS, MARKETPLACE_QUALITY_RULE_VERSION,
+    MARKETPLACE_QUALITY_RECONCILIATION_LOOKBACK_SECONDS, MARKETPLACE_QUALITY_RECONCILIATION_SETTLE_SECONDS,
     MARKETPLACE_COUNTER_MAX_GAP_SECONDS, MARKETPLACE_COUNTER_RULE_VERSION,
     MARKETPLACE_FRESHNESS_RULE_VERSION, MARKETPLACE_FRESHNESS_SECONDS,
     MARKETPLACE_GOLD_DATASET, MARKETPLACE_PERCENTILE_ACCURACY,
@@ -49,6 +50,8 @@ class MarketplaceBatchContext:
     anomaly_rule_version: str = MARKETPLACE_ANOMALY_RULE_VERSION
     quality_rule_version: str = MARKETPLACE_QUALITY_RULE_VERSION
     future_tolerance_seconds: int = MARKETPLACE_QUALITY_FUTURE_TOLERANCE_SECONDS
+    reconciliation_settle_seconds: int = MARKETPLACE_QUALITY_RECONCILIATION_SETTLE_SECONDS
+    reconciliation_lookback_seconds: int = MARKETPLACE_QUALITY_RECONCILIATION_LOOKBACK_SECONDS
     allowed_currencies: tuple[str, ...] = MARKETPLACE_ALLOWED_CURRENCIES
 
     def __post_init__(self) -> None:
@@ -57,11 +60,13 @@ class MarketplaceBatchContext:
         object.__setattr__(self, "as_of", self.as_of.astimezone(timezone.utc))
         for name in ("silver_uri", "gold_root_uri", "freshness_rule_version", "counter_rule_version", "anomaly_rule_version", "quality_rule_version"):
             if not getattr(self, name).strip(): raise ValueError(f"{name} must be non-empty")
-        for name in ("freshness_seconds", "counter_max_gap_seconds", "anomaly_window_days", "anomaly_min_samples", "anomaly_mad_threshold", "anomaly_iqr_multiplier", "future_tolerance_seconds"):
+        for name in ("freshness_seconds", "counter_max_gap_seconds", "anomaly_window_days", "anomaly_min_samples", "anomaly_mad_threshold", "anomaly_iqr_multiplier", "future_tolerance_seconds", "reconciliation_settle_seconds", "reconciliation_lookback_seconds"):
             if getattr(self, name) <= 0: raise ValueError(f"{name} must be positive")
         # A minimum above the frame size would make every row report
         # INSUFFICIENT_HISTORY while nothing looked broken.
         if self.anomaly_min_samples > self.anomaly_window_days: raise ValueError("anomaly_min_samples cannot exceed anomaly_window_days")
+        # An empty reconciliation window would reconcile nothing and pass.
+        if self.reconciliation_lookback_seconds <= self.reconciliation_settle_seconds: raise ValueError("reconciliation_lookback_seconds must exceed reconciliation_settle_seconds")
         # Normalised and sorted so a manifest built from this context is
         # byte-stable regardless of how the environment spelled the list.
         codes = tuple(sorted({str(code).strip().upper() for code in self.allowed_currencies if str(code).strip()}))
