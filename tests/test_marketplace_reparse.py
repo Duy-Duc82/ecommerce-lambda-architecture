@@ -341,3 +341,145 @@ def test_the_content_hash_ignores_only_the_envelope_produced_at():
     assert len(outcome.content_hashes[one]) == 64
     assert content_hash({"produced_at": "a", "x": 1}) == content_hash({"produced_at": "b", "x": 1})
     assert content_hash({"produced_at": "a", "x": 1}) != content_hash({"produced_at": "a", "x": 2})
+
+
+# ----------------------------------------------------------------------------
+# The real CLI, end to end. Only storage is a dict and the network is forbidden:
+# the adapter is the production TikiCrawler and Silver is laid out by the
+# production sink path, so neither half can drift into agreeing with a fake.
+# ----------------------------------------------------------------------------
+from pathlib import Path
+
+from common.serialization import serialize_for_wire
+from crawler.base import SiteCrawler
+from crawler.sites.tiki import TikiCrawler
+from data_ingestion.marketplace_silver_sink import silver_observation_path
+
+TIKI_BODY = (Path(__file__).parent / "fixtures" / "tiki_listing_sample.json").read_bytes()
+
+
+def forbid_network(monkeypatch):
+    import crawler.base as base
+
+    def refuse(*args, **kwargs):
+        raise AssertionError("a reparse must never touch the network")
+
+    monkeypatch.setattr(base.requests, "get", refuse)
+
+
+def stored_tiki_with_silver(monkeypatch, *, tamper=None):
+    """A Tiki artifact in Bronze plus the Silver records its ingest produced."""
+    forbid_network(monkeypatch)
+    store, ref = stored(body=TIKI_BODY, adapter_version=TikiCrawler.adapter_version)
+    original = reparse_raw_artifact(ref, adapter=TikiCrawler(categories=[], fetch_robots=False), reader=store.read, clock=clock())
+    assert original.status == IDENTICAL and original.observation_ids
+    from crawler.reparse import _rebuild, load_raw_artifact as load
+
+    metadata, body = load(ref, reader=store.read)
+    request, fetch_result, artifact = _rebuild(ref, metadata, body)
+    parsed = TikiCrawler(categories=[], fetch_robots=False).parse_listing_page(
+        request=request, fetch_result=fetch_result, raw_artifact=artifact,
+        crawl_run_id=artifact.crawl_run_id, produced_at=FETCHED_AT,
+    )
+    for index, event in enumerate(parsed.observations):
+        document = serialize_for_wire(event)
+        if tamper is not None and index == 0:
+            document = tamper(document)
+        if document is not None:
+            payload = json.dumps(document, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+            store.write("silver", silver_observation_path(event), payload)
+    import common.object_store as object_store
+
+    monkeypatch.setattr(object_store, "get_bytes", store.read)
+    return store, ref, len(parsed.observations)
+
+
+def cli_args(ref, *extra):
+    return [
+        "--marketplace", ref.marketplace_code, "--observed-date", ref.observed_date, "--hour", ref.hour,
+        "--crawl-run-id", ref.crawl_run_id, "--raw-artifact-id", ref.raw_artifact_id, *extra,
+    ]
+
+
+def test_a_parse_only_adapter_never_fetches_robots_and_refuses_every_url(monkeypatch):
+    forbid_network(monkeypatch)
+
+    adapter = TikiCrawler(categories=[], fetch_robots=False)
+
+    assert adapter.allowed(adapter.request_url("1846", 1)) is False
+
+
+def test_the_cli_reparses_a_real_tiki_artifact_against_silver(monkeypatch, capsys):
+    # The CLI used to call TikiCrawler() with no categories, which raised on
+    # every run, and it never read Silver, so any successful parse reported
+    # IDENTICAL without the comparison it exists to make.
+    _, ref, _ = stored_tiki_with_silver(monkeypatch)
+
+    code = main(cli_args(ref))
+
+    assert code == 0
+    assert json.loads(capsys.readouterr().out)["counts"] == {IDENTICAL: 1}
+
+
+def test_the_cli_reports_observations_missing_from_silver(monkeypatch, capsys):
+    _, ref, _ = stored_tiki_with_silver(monkeypatch, tamper=lambda document: None)
+
+    code = main(cli_args(ref))
+
+    report = json.loads(capsys.readouterr().out)
+    assert code == 1
+    assert report["counts"] == {NEW_OBSERVATIONS: 1}
+    assert len(report["problems"][0]["observation_ids"]) == 1
+
+
+def test_the_cli_reports_silver_content_that_diverged(monkeypatch, capsys):
+    def reprice(document):
+        document["payload"]["observation"]["current_price"] = "1.000000"
+        return document
+
+    _, ref, _ = stored_tiki_with_silver(monkeypatch, tamper=reprice)
+
+    code = main(cli_args(ref))
+
+    assert code == 1
+    assert json.loads(capsys.readouterr().out)["counts"] == {DIVERGED: 1}
+
+
+def test_the_cli_writes_the_same_report_to_the_report_path(monkeypatch, capsys, tmp_path):
+    store, ref, _ = stored_tiki_with_silver(monkeypatch)
+    report_path = tmp_path / "reparse.json"
+
+    main(cli_args(ref, "--report-path", str(report_path)))
+
+    printed = capsys.readouterr().out.strip()
+    assert report_path.read_text(encoding="utf-8") == printed
+    # The report is a local file, never an object in the lake.
+    assert all(zone in ("bronze", "silver") for zone, _ in store.objects)
+
+
+def test_the_cli_reads_silver_under_the_requested_dataset(monkeypatch, capsys):
+    _, ref, _ = stored_tiki_with_silver(monkeypatch)
+
+    code = main(cli_args(ref, "--silver-dataset", "marketplace/elsewhere"))
+
+    assert code == 1
+    assert json.loads(capsys.readouterr().out)["counts"] == {NEW_OBSERVATIONS: 1}
+
+
+def test_the_sink_lands_silver_where_the_reparse_looks_for_it():
+    store, ref = stored()
+    import crawler.reparse as reparse
+
+    metadata, body = load_raw_artifact(ref, reader=store.read)
+    request, fetch_result, artifact = reparse._rebuild(ref, metadata, body)
+    event = FakeAdapter().parse_listing_page(
+        request=request, fetch_result=fetch_result, raw_artifact=artifact,
+        crawl_run_id=CRAWL_RUN, produced_at=FETCHED_AT,
+    ).observations[0]
+
+    path = silver_observation_path(event)
+
+    assert path == (
+        "marketplace/offer_observations/marketplace=tiki/observed_date=2026-09-20/"
+        f"observation_id={event.payload.observation.observation_id}.json"
+    )
