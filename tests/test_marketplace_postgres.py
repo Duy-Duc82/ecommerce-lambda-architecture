@@ -509,6 +509,24 @@ def test_a_refused_run_is_recorded_as_quality_failed_not_failed():
     assert params[1] == 2
 
 
+def test_a_refused_backfill_is_recorded_as_gold_written_with_nothing_published():
+    cursor = FakeCursor()
+    audit = MarketplaceBatchAudit(_factory(cursor))
+
+    audit.mark_promotion_refused(
+        run_id="run-1", completed_at=AS_OF, reason="BACKFILL_REFUSED",
+        manifest_uri="s3a://gold/marketplace/manifests/run_id=run-1/manifest.json",
+    )
+
+    sql, params = cursor.executed[0]
+    assert "status='GOLD_WRITTEN'" in sql
+    assert "quality_status='PASS'" in sql
+    assert "manifest_promoted=FALSE" in sql
+    assert "cache_published=FALSE" in sql
+    assert params[0] == AS_OF
+    assert "BACKFILL_REFUSED" in params[1]
+
+
 def test_a_passing_decision_cannot_be_filed_as_a_quality_failure():
     audit = MarketplaceBatchAudit(_factory(FakeCursor()))
 

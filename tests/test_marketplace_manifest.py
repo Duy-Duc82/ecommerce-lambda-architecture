@@ -18,6 +18,7 @@ from batch_layer.marketplace_manifest import (
     manifest_chain,
     parse_manifest,
     promote_manifest,
+    promotion_refusal,
     read_current_manifest,
     run_manifest_path,
     serialize_manifest,
@@ -220,6 +221,34 @@ def test_an_older_as_of_is_refused_unless_backfill_is_allowed():
     allowed = promote_manifest(older, writer=store.write, reader=store.read, allow_backfill=True)
     assert allowed.promoted is True
     assert read_current_manifest(reader=store.read).run_id == "run-1"
+
+
+# 39
+@pytest.mark.parametrize("candidate, allow_backfill, expected", [
+    (lambda: manifest("run-1", as_of=AS_OF), False, BACKFILL_REFUSED),
+    (lambda: manifest("run-1", as_of=AS_OF), True, None),
+    (lambda: manifest("run-2", as_of=AS_OF + timedelta(days=2)), False, ALREADY_CURRENT),
+    (lambda: manifest("run-3", as_of=AS_OF, passed=False), False, QUALITY_FAILED),
+    (lambda: manifest("run-4", as_of=AS_OF + timedelta(days=3)), False, None),
+])
+def test_the_refusal_check_agrees_with_promotion_and_writes_nothing(candidate, allow_backfill, expected):
+    # The orchestrator asks this before publishing the cache, so it must give
+    # the answer promote_manifest gives afterwards.
+    store = FakeStore()
+    promote_manifest(manifest("run-2", as_of=AS_OF + timedelta(days=2)), writer=store.write, reader=store.read)
+    current = read_current_manifest(reader=store.read)
+    document = candidate()
+    writes_before = len(store.writes)
+
+    assert promotion_refusal(document, current, allow_backfill=allow_backfill) == expected
+    assert len(store.writes) == writes_before
+
+    result = promote_manifest(document, writer=store.write, reader=store.read, allow_backfill=allow_backfill)
+    assert result.reason == (expected or PROMOTED)
+
+
+def test_with_no_current_pointer_a_passing_manifest_is_never_refused():
+    assert promotion_refusal(manifest(), None) is None
 
 
 # 40
