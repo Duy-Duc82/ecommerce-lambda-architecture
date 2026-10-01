@@ -10,6 +10,7 @@ import pytest
 
 from batch_layer.marketplace_marts import (
     UNKNOWN_CATEGORY,
+    attach_marketplace_code,
     build_category_price_daily,
     build_counter_delta_daily,
     build_counter_transitions,
@@ -570,18 +571,91 @@ def test_the_counter_mart_never_names_a_proxy_as_sale_or_demand(spark):
     assert "velocity_proxy_per_hour" in daily.columns
 
 
+# The column sets below are copied from scripts/init_postgres.sql, not invented
+# to suit the transforms. The earlier fixtures gave `attempts` a `marketplace`
+# column and `runs` a `marketplace` column; neither table has one, so the code
+# path that has to resolve a marketplace from the real schema was never
+# exercised and shipped broken.
+ATTEMPT_SCHEMA = (
+    "crawl_run_id string, task_id string, attempt_number int, "
+    "started_at timestamp, completed_at timestamp, status string, "
+    "http_status int, latency_ms bigint, raw_artifact_id string, raw_uri string, "
+    "raw_bytes bigint, parsed_count bigint, rejected_count bigint, error_kind string"
+)
+RUN_SCHEMA = (
+    "crawl_run_id string, marketplace_id string, started_at timestamp, "
+    "completed_at timestamp, status string, requested bigint, succeeded bigint, "
+    "failed bigint, adapter_version string"
+)
+FRONTIER_SCHEMA = (
+    "task_id string, marketplace_code string, marketplace_id string, "
+    "target string, resource_type string, status string"
+)
+
+
+def _audit_frames(spark, attempt_rows):
+    """Build audit frames with the real column sets.
+
+    ``attempt_rows`` keeps the readable shape the tests already used:
+    ``(crawl_run_id, marketplace_code, request_date, status, latency_ms,
+    raw_bytes, parsed_count, rejected_count, error_kind)``.
+    """
+    attempts, runs, frontier = [], {}, {}
+    for index, row in enumerate(attempt_rows):
+        run_id, marketplace_code, request_date, status, latency, raw_bytes, parsed, rejected, error_kind = row
+        started = datetime(request_date.year, request_date.month, request_date.day, 8, tzinfo=timezone.utc)
+        completed = started + timedelta(minutes=3)
+        task_id = f"task-{run_id}"
+        attempts.append((
+            run_id, task_id, index + 1, started, completed, status,
+            200 if status != "FAILED" else 500, latency, f"raw-{run_id}-{index}",
+            f"file:///bronze/{run_id}-{index}.json", raw_bytes, parsed, rejected, error_kind,
+        ))
+        runs[run_id] = (run_id, f"marketplace-{marketplace_code}", started, completed, "COMPLETED", 1, 1, 0, "test-v1")
+        frontier[task_id] = (task_id, marketplace_code, f"marketplace-{marketplace_code}", "1846", "LISTING_PAGE", "SUCCEEDED")
+    return (
+        spark.createDataFrame(attempts, schema=ATTEMPT_SCHEMA),
+        spark.createDataFrame(list(runs.values()), schema=RUN_SCHEMA),
+        spark.createDataFrame(list(frontier.values()), schema=FRONTIER_SCHEMA),
+    )
+
+
 # 20, 21, 22, 23
 def _audit(spark, attempt_rows):
-    schema = (
-        "crawl_run_id string, marketplace string, request_date date, "
-        "status string, latency_ms bigint, raw_bytes bigint, "
-        "parsed_count bigint, rejected_count bigint, error_kind string"
+    """What read_crawl_audit() hands the marts: attempts already resolved."""
+    attempts, runs, frontier = _audit_frames(spark, attempt_rows)
+    return attach_marketplace_code(attempts, frontier), runs
+
+
+def test_the_marketplace_code_is_resolved_from_the_crawl_frontier(spark):
+    attempts, _runs, frontier = _audit_frames(
+        spark, [("run-1", "tiki", date(2026, 9, 4), "SUCCEEDED", 100, 10, 2, 0, None)]
     )
-    attempts = spark.createDataFrame(attempt_rows, schema=schema)
-    runs = spark.createDataFrame(
-        [("run-1", "tiki")], schema="crawl_run_id string, marketplace string"
+
+    resolved = attach_marketplace_code(attempts, frontier)
+
+    assert "marketplace_code" not in attempts.columns
+    assert one(resolved.select("crawl_run_id", "marketplace_code"))["marketplace_code"] == "tiki"
+
+
+def test_the_marketplace_id_is_never_used_as_a_marketplace_code(spark):
+    # crawl_run holds marketplace-tiki while an observation holds tiki. Joining
+    # on the id would match nothing and report every parsed count as zero.
+    _attempts, runs, frontier = _audit_frames(
+        spark, [("run-1", "tiki", date(2026, 9, 4), "SUCCEEDED", 100, 10, 2, 0, None)]
     )
-    return attempts, runs
+
+    assert one(runs.select("marketplace_id"))["marketplace_id"] == "marketplace-tiki"
+    assert one(frontier.select("marketplace_code"))["marketplace_code"] == "tiki"
+
+
+def test_audit_frames_that_cannot_name_a_marketplace_fail_loudly(spark):
+    attempts, runs, _frontier = _audit_frames(
+        spark, [("run-1", "tiki", date(2026, 9, 4), "SUCCEEDED", 100, 10, 2, 0, None)]
+    )
+
+    with pytest.raises(ValueError, match="cannot resolve a marketplace"):
+        build_crawl_reliability_daily(attempts, runs)
 
 
 def test_source_coverage_counts_reconcile(spark):

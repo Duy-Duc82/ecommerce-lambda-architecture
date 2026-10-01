@@ -586,7 +586,7 @@ CREATE TABLE IF NOT EXISTS cache.marketplace_price_anomaly_daily (
     window_days BIGINT NOT NULL, min_samples BIGINT NOT NULL,
     mad_threshold NUMERIC(38,6) NOT NULL, iqr_multiplier NUMERIC(38,6) NOT NULL,
     anomaly_rule_version VARCHAR(64) NOT NULL,
-    PRIMARY KEY (marketplace, offer_id, observed_date)
+    PRIMARY KEY (marketplace, offer_id, observed_date, currency)
 );
 ```
 
@@ -666,7 +666,10 @@ two never disagree about what “canonical” means.
 
 `datasets` is sorted by `dataset_name` and must contain exactly the ten Gold
 datasets. `previous_run_id` is read from the current pointer before promotion,
-which gives every manifest a backward chain without a separate index.
+which gives every manifest a backward chain without a separate index. When the
+pointer already names this run — a rerun, or a promotion whose reply was lost —
+the run keeps the predecessor that pointer recorded, never itself, so the run
+manifest stays byte-identical to `current.json`.
 
 ### 11.3 API
 
@@ -851,11 +854,21 @@ corrected once in the Tiki adapter, and a test pins it here.
 python -m crawler.reparse `
   --marketplace tiki `
   --observed-date 2026-09-20 `
-  [--crawl-run-id <id>] `
-  [--raw-artifact-id <id>] `
-  [--silver-uri <uri>] `
+  --hour 08 `
+  --crawl-run-id <id> `
+  --raw-artifact-id <id> [--raw-artifact-id <id> ...] `
+  [--silver-dataset <prefix>] `
   [--report-path <path>]
 ```
+
+The artifact is named exactly, because Bronze is addressed by key and the
+object store offers no listing here. The existing side is read from Silver by
+key too: the sink lands each observation at `silver_observation_path(event)`,
+so the CLI derives the same path from the reparsed event and reads it directly.
+`--silver-dataset` overrides the prefix, defaulting to the sink's. The adapter
+is built parse-only (`categories=[]`, `fetch_robots=False`), so a verification
+run never reaches the marketplace. `--report-path` writes the printed report to
+a local file, never to the lake.
 
 It prints one canonical JSON report — counts per status and, for divergences,
 the bounded sorted list of observation IDs. It exits non-zero when any artifact
@@ -897,6 +910,7 @@ class MarketplaceBatchResult:
     mandatory_failure_count: int
     manifest_uri: str | None
     manifest_promoted: bool
+    promotion_reason: str | None       # PROMOTED | ALREADY_CURRENT | BACKFILL_REFUSED
 ```
 
 Algorithm, replacing Phase 6 steps 6–9:
@@ -913,14 +927,34 @@ Algorithm, replacing Phase 6 steps 6–9:
    run manifest;
 10. if the decision failed: mark `QUALITY_FAILED` with the manifest URI, do not
     promote, do not stage, do not publish, raise `QualityGateFailure`;
-11. otherwise promote the pointer, then stage all ten marts and publish in one
-    transaction with the decision, then clean up staging;
-12. unpersist frames and stop owned Spark resources in `finally`;
-13. on any other error, record `FAILED` best-effort and re-raise.
+11. if the pointer would refuse the run as `BACKFILL_REFUSED` (an older
+    `as_of` without `--allow-backfill`), record `GOLD_WRITTEN` with
+    `cache_published = FALSE` and `manifest_promoted = FALSE`, do not stage,
+    do not publish, do not promote, and return with
+    `promotion_reason = BACKFILL_REFUSED`;
+12. otherwise stage all ten marts, publish in one transaction with the decision,
+    clean up staging, and **only then** promote the pointer. The publish
+    transaction records `cache_published = TRUE` and `manifest_promoted = FALSE`;
+    `manifest_promoted` becomes `TRUE` in its own update after the pointer
+    write, when the pointer moved or already named this run;
+13. unpersist frames and stop owned Spark resources in `finally`;
+14. on any other error, record `FAILED` best-effort and re-raise.
 
 Step 8 precedes step 10 deliberately. Step 9 precedes step 10 deliberately.
 Both exist so a refused run is fully documented in both PostgreSQL and object
 storage before the refusal propagates.
+
+Promotion is the last thing that happens, and only once everything the pointer
+would advertise actually exists. An earlier draft of this section promoted
+before publishing, which contradicted Section 13: a live run with a forced
+insert failure then rolled the cache back correctly while leaving the pointer
+advanced onto a Gold run whose cache was never written.
+
+Step 11 exists for the opposite failure. The cache publisher has no notion of
+time, so publishing before asking the pointer let a reprocessed older window
+replace the serving cache while the pointer refused it and still named the
+newer run. The orchestrator therefore asks `promotion_refusal()` — the same
+rule `promote_manifest()` applies — before it stages anything.
 
 New CLI flags on top of Phase 6's:
 
@@ -936,10 +970,20 @@ python -m batch_layer.marketplace_warehouse `
 - `--allow-backfill` is passed through to `promote_manifest`.
 - `--quality-only` runs steps 1–9 and then stops at `GOLD_WRITTEN`, printing the
   decision. It never promotes and never publishes. This is the flag an operator
-  uses to inspect a suspect window without touching the serving version.
+  uses to inspect a suspect window without touching the serving version. The
+  audit row is closed like a refused backfill (`mark_held`, reason
+  `QUALITY_ONLY`): `GOLD_WRITTEN` with a completion time, the verdict and the
+  manifest URI, so an inspection never looks like a hung run.
 - `--skip-postgres` keeps its Phase 6 meaning and additionally skips quality
   persistence, since there is no database; the manifest is still written and,
   when the gate passes, promoted.
+
+- `--gold-root-uri` other than the configured default makes a scratch run.
+  Manifests and `current.json` live at one fixed place in the active storage
+  profile, not under the Gold root, so a scratch run is judged and its quality
+  results recorded but it writes no manifest, publishes nothing, promotes
+  nothing, and is held with reason `SCRATCH_GOLD_ROOT`. Otherwise a replay into
+  a scratch root could promote the production pointer onto scratch datasets.
 
 The process exits non-zero on `QualityGateFailure`, and the printed JSON names
 the failing mandatory check names so a CI log is enough to diagnose the refusal.

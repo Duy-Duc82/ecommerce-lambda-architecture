@@ -608,9 +608,9 @@ Bổ sung 2026-08-16:
 
 > ⚠️ **LỖI THỜI (2026-08-17).** Kỳ vọng "44 passed" và đường dẫn
 > `.venv/Scripts/python.exe` đều không còn đúng: trên `develop` suite hiện có
-> **519 test** (**619** sau khi PR #4 của Phase 7 merge) và chạy bằng `python`
-> toàn cục (không có venv trong repo). Xem **§8** và **§9** để biết trạng thái
-> thật và việc tiếp theo.
+> **519 test** (**624** sau khi PR #4 của Phase 7 merge) và chạy bằng `python`
+> toàn cục (không có venv trong repo). Xem **§8**, **§9** và **§10** để biết
+> trạng thái thật và việc tiếp theo.
 
 
 ```bash
@@ -983,3 +983,189 @@ Phase 8.
 Không đổi so với §8.6. `pyspark` 4.0.4, Python 3.12.10, không có venv trong
 repo. Một lần chạy full suite mất ~15 phút; riêng `test_marketplace_quality.py`
 ~12 phút vì mỗi case dựng cả 10 mart trên Spark thật.
+
+---
+
+## 10. Session 2026-10-01 — đóng nợ end-to-end, hai bug production mới
+
+### 10.1 Mục tiêu
+
+Đóng sáu item chỉ có thể kiểm bằng chạy thật: Phase 6 item 33–35, 43 và
+Phase 7 item 56, 58. Tất cả đều cần PostgreSQL thật, không phải unit test.
+
+### 10.2 Dựng môi trường — ba trở ngại, không cái nào nằm trong code
+
+**Xung đột cổng với project khác.** Máy đang chạy `huvisoft-postgres-local`
+(giữ cả 5432 **và** 5433), `invoice-minio-local` (9000/9001),
+`invoice-redis-local` (6379). Mặc định của repo là Postgres 5433 và MinIO
+9000, nên chạy thẳng sẽ **ghi DDL vào database của project khác**. Đã dựng
+`docker-compose.override.yml` (untracked, đã thêm vào `.gitignore`) đổi sang
+5434 / 9010 / 9011 / 6380, cộng `.env` (vốn gitignore) cho phía client.
+
+Lưu ý khi làm lại: Compose **nối thêm** vào danh sách `ports` chứ không thay
+thế, nên phải dùng tag `!override`, nếu không binding 5433 cũ vẫn còn và bind
+vẫn fail.
+
+**MinIO không pull được nữa.** Tag `RELEASE.2025-09-07T16-13-09Z` không còn
+trên Docker Hub (`pull access denied`) lẫn quay.io (`401`). Dùng
+`minio/minio:latest` + `minio/mc:latest` đã có sẵn trên máy, kèm
+`pull_policy: never`.
+
+**Spark không chạy được trên Windows host.** Thiếu `winutils.exe` /
+`hadoop.dll`, mọi truy cập filesystem ném
+`UnsatisfiedLinkError: NativeIO$Windows.access0` ngay ở `read.json`. Đây chính
+là lý do item 33–35, 43 chưa bao giờ đóng được. Unit test không lộ vì chúng chỉ
+dùng `createDataFrame` trong bộ nhớ, chưa từng chạm Hadoop FileSystem.
+
+Không tải winutils từ repo bên thứ ba — binary native không rõ nguồn. Thay vào
+đó chạy job trong container Linux `apache/spark:4.0.1` (Python 3.10, Java 17),
+mount repo vào `/app`, mount JDBC jar vào `/opt/spark/jars`, join network
+`ecommerce-lambda-architecture_bigdata`.
+
+Bẫy nữa: Git Bash **dịch đường dẫn Unix thành đường Windows** trong `docker run
+-e`, biến `PYTHONPATH=/app:...` thành `C:\Program Files (x86)\Git\app;...`.
+Phải đặt `MSYS_NO_PATHCONV=1` và `MSYS2_ARG_CONV_EXCL='*'`.
+
+### 10.3 Dữ liệu chạy thật
+
+Seed bằng chính factory của project (`create_marketplace_offer` /
+`create_offer_observation` / `create_observation_event`), nên `observation_id`
+và hình dạng wire là của production: 4 offer × 12 ngày = 48 observation, 12
+`crawl_run` + `crawl_request_attempt` với `parsed_count` khớp từng run.
+
+Bốn offer có hình dạng giá khác nhau có chủ đích: một phẳng tuyệt đối rồi rơi
+mạnh, một trôi đều, một phẳng suốt, một **có nhiễu thật rồi rơi mạnh**.
+
+### 10.4 Sáu item, bằng chứng từng cái
+
+| Item | Kiểm chứng | Kết quả |
+|---|---|---|
+| P6-33 | 10 mart key + schema tường minh | 10 dataset Parquet, count đúng |
+| P6-34 | Gold run-scoped, không đè run khác | `runs/run_id=e2e-a` … `e2e-final` cùng tồn tại, mỗi cái đủ 10 dataset |
+| P6-35 | Rerun cùng run_id ra cùng dòng | `dataset_counts` giống hệt giữa hai lần `e2e-c` |
+| P6-43 | `--skip-postgres` vẫn ghi Gold | 10 dataset, **0 dòng** trong `marketplace_batch_run` |
+| P7-56 | Publish fail giữ cache **và** con trỏ | `cache_version=e2e-e`, 48 dòng, `pointer=e2e-e`, run ghi `FAILED` |
+| P7-58 | Rerun ra manifest giống từng byte | `IDENTICAL (2492 bytes)` |
+
+Gate chặn publish, kiểm bằng cách làm lệch `parsed_count` một crawl run:
+CLI in `{"failing_checks":["silver_parse_attempt_reconciliation"],...}` và exit
+1; `marketplace_batch_run` ghi `QUALITY_FAILED` với `cache_published=f`,
+`manifest_promoted=f`; `marketplace_quality_result` lưu `observed_value=1` kèm
+mẫu **chỉ chứa định danh** `{"keys":["run-2026-09-05"]}`. Manifest của run bị
+từ chối vẫn được ghi.
+
+Detector anomaly bắn đúng trên offer có nhiễu: 50000 → 12000, median 50000,
+MAD 1000, score −25.63 → `ANOMALOUS_LOW` / `MAD_SCORE_EXCEEDED`.
+
+Offer phẳng tuyệt đối rơi 100000 → 20000 ra `INSUFFICIENT_DISPERSION`, **không**
+bị gắn cờ — đúng quy tắc §6.3 nhánh 4. Đây là đánh đổi có chủ đích, nhưng hệ
+quả thực tế đáng nhớ: **một offer giá bất động tuyệt đối sẽ không bao giờ sinh
+anomaly, dù cú đổi giá đầu tiên lớn đến đâu.** Nếu muốn bắt ca đó thì cần một
+nhánh dự phòng theo biến thiên tương đối, và đó là thay đổi quy tắc, không phải
+sửa lỗi.
+
+### 10.5 Hai bug production mới, đều do chạy thật phát hiện
+
+| Bug | Vị trí | Hệ quả |
+|---|---|---|
+| `_with_marketplace()` chọn cột `marketplace_code` từ `audit.crawl_run` — bảng đó chỉ có `marketplace_id` | `batch_layer/marketplace_marts.py` | `UNRESOLVED_COLUMN`; **2/9 mart Phase 6** (`source_coverage_daily`, `crawl_reliability_daily`) chưa từng dựng được trên schema thật |
+| Con trỏ manifest được promote **trước** khi publish cache | `batch_layer/marketplace_warehouse.py` | Publish fail → cache rollback đúng nhưng con trỏ đã nhảy sang run hỏng; bản Gold "đang phục vụ" là bản chưa từng publish |
+
+Bug 1: fixture audit của Phase 6 khai cột theo cái code cần chứ không theo
+`scripts/init_postgres.sql`, nên cả 43 test đều đi nhánh khác và mù hoàn toàn.
+Đường đúng để lấy marketplace code là `attempts.task_id → crawl_frontier.
+marketplace_code`; `crawl_run.marketplace_id` **không** dùng thay được vì nó là
+`marketplace-tiki` còn observation là `tiki`, join sẽ rỗng và `parsed_count`
+thành 0 một cách âm thầm.
+
+Bug 2 bắt nguồn từ **plan tự mâu thuẫn**: §13 đòi publish fail phải giữ nguyên
+cả cache lẫn con trỏ, §14 bước 11 lại bảo promote trước rồi mới publish. Code
+làm theo §14. Đã sửa cả code lẫn §14.
+
+Cả hai sửa theo đúng quy tắc repo: commit test trước (đỏ, tái hiện lỗi), commit
+fix sau — `77c2650`/`d5eb226` và `57ed95e`/`a502586`.
+
+### 10.6 Ba hạn chế môi trường, chưa sửa, thuộc Phase 8
+
+1. **Spark không làm gì được với file trên Windows host** (thiếu winutils).
+   Mọi lần chạy thật phải trong container Linux.
+2. **`build_spark()` của marketplace job không gọi `spark_hadoop_options()`** —
+   chỉ `warehouse_job.py` legacy gọi. Nên job này **không có credential S3A** và
+   không đọc/ghi `s3a://` được dù MinIO đã chạy. Lần chạy này dùng lake file://.
+   Nghĩa là đường s3a của marketplace batch vẫn **chưa được kiểm chứng lần nào**.
+3. **`docker/spark-warehouse/Dockerfile` pin `apache/spark:3.5.1`**, mâu thuẫn
+   với ràng buộc pyspark 4.x ở §6, và chỉ có entrypoint cho `warehouse_job.py`
+   legacy — không chạy được marketplace job.
+
+Hệ quả cho Phase 8: Compose profile và one-command smoke phải dựng đường chạy
+Linux cho marketplace batch, và nếu muốn dùng MinIO thì phải nối
+`spark_hadoop_options()` vào `build_spark()` trước.
+
+Thêm một điểm đáng cân nhắc: sau bản sửa bug 2, bất biến "con trỏ không bao giờ
+đi trước cache" đúng cho run thường, nhưng `--skip-postgres` vẫn đẩy được con
+trỏ qua mặt cache. Đó là hành vi đã ghi trong plan §14 và là cờ do người vận
+hành chủ động bật, nên giữ nguyên — nhưng runbook Phase 8 nên nói rõ.
+
+### 10.7 Cách dựng lại môi trường này
+
+```bash
+# 1. Bật Docker Desktop, rồi:
+docker compose up -d postgres-dw minio minio-init   # cần docker-compose.override.yml
+
+# 2. Container chạy job (MSYS_NO_PATHCONV bắt buộc trên Git Bash)
+MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*' docker run -d --name mp-e2e --user root \
+  --network ecommerce-lambda-architecture_bigdata \
+  -v "D:/code/data/ecommerce-lambda-architecture:/app" \
+  -v "D:/code/data/ecommerce-lambda-architecture/.localjars/postgresql-42.7.5.jar:/opt/spark/jars/postgresql-42.7.5.jar:ro" \
+  -e POSTGRES_HOST=postgres-dw -e POSTGRES_PORT=5432 \
+  -e DATA_LAKE_PROFILE=local -e DATA_LAKE_LOCAL_ROOT=/app/data/lakehouse \
+  -e PYTHONPATH="/app:/opt/spark/python:/opt/spark/python/lib/py4j-0.10.9.9-src.zip" \
+  -e PYSPARK_PYTHON=python3 -e PYSPARK_DRIVER_PYTHON=python3 \
+  --entrypoint bash apache/spark:4.0.1 -lc "sleep infinity"
+docker exec mp-e2e python3 -m pip install psycopg2-binary==2.9.10 python-dotenv==1.0.1
+
+# 3. Chạy
+MSYS_NO_PATHCONV=1 docker exec mp-e2e bash -c \
+  'cd /app && python3 -m batch_layer.marketplace_warehouse --run-id <id> --as-of <iso>'
+```
+
+JDBC driver tải từ Maven Central vào `.localjars/` (untracked). Trên Windows
+host, **không** dùng `PYSPARK_SUBMIT_ARGS` để nạp jar — nó làm chết Java
+gateway; đặt jar thẳng vào `site-packages/pyspark/jars/` nếu cần chạy test
+dùng JDBC ngoài container.
+
+### 10.8 Review PR #4 — tám lỗi nữa, đều sửa trên cùng nhánh
+
+Review toàn bộ diff của PR #4 tìm ra tám lỗi mà 624 test không bắt được. Mỗi
+lỗi có một commit test tái hiện và một commit fix riêng.
+
+| # | Lỗi | Sửa |
+|---|---|---|
+| 1 | Chạy lại một khung ngày cũ mà không có `--allow-backfill` thì publish cache trước, rồi con trỏ mới từ chối → cache phục vụ dữ liệu cũ hơn con trỏ, run vẫn `SUCCEEDED` | `promotion_refusal()` được hỏi **trước** khi stage; run bị giữ lại là `GOLD_WRITTEN`, reason `BACKFILL_REFUSED` |
+| 2 | CLI reparse gọi `TikiCrawler()` không có `categories` → lỗi ở mọi lần chạy; không bao giờ đọc Silver nên luôn báo `IDENTICAL` | `fetch_robots=False` (fail closed); `silver_observation_path()` dùng chung với sink; đọc Silver theo key; thêm `--silver-dataset`, `--report-path` |
+| 3 | Khóa chính `cache.marketplace_price_anomaly_daily` thiếu `currency` → đổi tiền tệ trong cùng ngày thì gate xanh nhưng publish vi phạm unique | Khóa gồm `currency`; migration `DROP CONSTRAINT IF EXISTS` / `ADD CONSTRAINT` idempotent |
+| 4 | `previous_run_id` trỏ về chính run khi con trỏ đã là run đó → mất chuỗi manifest | Giữ predecessor mà con trỏ đã ghi |
+| 5 | Session `partitionOverwriteMode=dynamic` → resume để lại partition Gold cũ | Writer đặt `partitionOverwriteMode=static` |
+| 6 | Publish ghi `manifest_promoted=TRUE` trước khi con trỏ di chuyển | `mark_promotion()` ghi sau, theo kết quả promote |
+| 7 | `--quality-only` để lại dòng audit `completed_at=NULL` | `mark_held(reason)` dùng chung với backfill |
+| 8 | `--gold-root-uri` khác mặc định vẫn ghi manifest và promote con trỏ production | Root khác root phục vụ là scratch run: không manifest, không publish, không promote, reason `SCRATCH_GOLD_ROOT` |
+
+Kiểm chứng trên PostgreSQL và Spark 4.0.1 thật (container `mp-e2e`):
+
+```text
+e2e-v1 | SUCCEEDED      | cache=t | promoted=t |                          ← run mới
+e2e-v2 | QUALITY_FAILED | cache=f | promoted=f |                          ← gate chặn
+e2e-v3 | GOLD_WRITTEN   | cache=f | promoted=f | held: QUALITY_ONLY
+e2e-v4 | GOLD_WRITTEN   | cache=f | promoted=f | held: SCRATCH_GOLD_ROOT  ← không manifest nào ở production
+e2e-v5 | GOLD_WRITTEN   | cache=f | promoted=f | held: BACKFILL_REFUSED   ← cache và con trỏ giữ e2e-v1
+```
+
+Migration khóa anomaly chạy hai lần trên database thật, kết thúc ở khóa mới.
+Spark 4.0.1 xác nhận: ở chế độ dynamic, partition cũ còn lại; với `static`
+trên writer, partition cũ bị xóa.
+
+Suite: **655 passed, 0 failed, 0 skipped**.
+
+Nợ còn lại, thuộc Phase 8: chưa có khóa giữa các batch run chạy đồng thời. Con
+trỏ được đọc trước publish, nên một run khác có thể promote chen vào giữa.
+Cần lock hoặc compare-and-swap con trỏ.
