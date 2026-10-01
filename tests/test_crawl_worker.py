@@ -479,3 +479,61 @@ def test_the_runner_adapter_binds_phase_two_without_the_worker_knowing_the_site(
 
     assert report.status is AcquisitionStatus.SUCCEEDED
     assert seen == {"site": "tiki", "task_target": target, "crawl_run_id": "run-1"}
+
+
+# ----------------------------------------------------------------------------
+# Phase 8 plan section 6.1, item 5: a crawl attempt that parsed and stored its
+# raw response but could not publish every observation.
+# ----------------------------------------------------------------------------
+from types import SimpleNamespace
+
+from crawler.contracts import ObservationPublishError
+
+
+def _publish_failure(report, acknowledged):
+    def executor(*, task, crawl_run_id):
+        raise ObservationPublishError(report=report, acknowledged=acknowledged, cause=RuntimeError("broker unavailable"))
+
+    return executor
+
+
+def test_a_partial_publish_records_only_the_acknowledged_observations():
+    # Phase 7 check 8 compares parsed_count with Silver rows per crawl run.
+    # Only acknowledged observations can ever reach Silver, so recording the
+    # parsed total would leave that run mismatched for good.
+    report = FakeReport(observations=(1, 2, 3), rejections=(9,))
+    report.raw_artifact = SimpleNamespace(raw_artifact_id="raw_1", raw_uri="s3a://bronze/raw_1/body.bin", raw_bytes=512)
+    frontier, audit = FakeFrontier(tasks=[_task()]), FakeAudit()
+
+    result = _run(frontier, audit, _publish_failure(report, 2))
+
+    (attempt,) = audit.attempts
+    assert attempt.status == "FAILED"
+    assert attempt.error_kind == FailureKind.PUBLISH_ERROR
+    assert attempt.parsed_count == 2
+    assert attempt.rejected_count == 1
+    # The raw response was stored before parsing, and the audit must say where.
+    assert attempt.raw_artifact_id == "raw_1"
+    assert attempt.raw_uri == "s3a://bronze/raw_1/body.bin"
+    assert result.retried == 1
+
+
+def test_a_publish_failure_with_nothing_acknowledged_records_zero():
+    report = FakeReport(observations=(1, 2))
+    frontier, audit = FakeFrontier(tasks=[_task()]), FakeAudit()
+
+    _run(frontier, audit, _publish_failure(report, 0))
+
+    assert audit.attempts[0].parsed_count == 0
+
+
+def test_a_publish_failure_is_retried_and_never_opens_the_source_circuit():
+    # Kafka being down says nothing about the marketplace.
+    frontier, audit = FakeFrontier(tasks=[_task()]), FakeAudit()
+
+    _run(frontier, audit, _publish_failure(FakeReport(observations=(1,)), 0))
+
+    retry = next(call for call in frontier.calls if call[0] == "retry")
+    assert retry[2] is FailureKind.PUBLISH_ERROR
+    assert "source_failure" not in audit.kinds()
+    assert "source_success" not in audit.kinds()

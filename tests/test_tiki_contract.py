@@ -371,3 +371,49 @@ def test_no_clock_falls_back_to_wall_time(monkeypatch):
     assert adapter._clock is None
     first = adapter._now()
     assert first.tzinfo is not None, "wall-clock fallback must stay timezone-aware"
+
+
+# ----------------------------------------------------------------------------
+# Phase 8 plan section 6.1, item 8: the listing endpoint is configurable, so
+# the offline stub source can stand in for the live marketplace.
+# ----------------------------------------------------------------------------
+STUB_LISTING = "http://stub-source:8080/api/personalish/v1/blocks/listings"
+
+
+def test_the_default_listing_url_is_the_configured_setting():
+    from config.settings import TIKI_LISTING_URL
+
+    assert TikiCrawler(categories=["1846"], fetch_robots=False).listing_url == TIKI_LISTING_URL
+    assert LISTING_URL == TIKI_LISTING_URL
+
+
+def test_an_injected_listing_url_reaches_every_request():
+    adapter = TikiCrawler(categories=["1846"], fetch_robots=False, listing_url=STUB_LISTING)
+
+    url = urlparse(adapter.request_url("1846", 3))
+
+    assert f"{url.scheme}://{url.netloc}{url.path}" == STUB_LISTING
+    assert parse_qs(url.query)["page"] == ["3"]
+
+
+def test_robots_are_read_from_the_host_that_is_actually_fetched():
+    # RFC 9309 scopes robots.txt to one host. Reading tiki.vn's rules while
+    # fetching from another host would check permission against the wrong file.
+    assert TikiCrawler(categories=["1846"], fetch_robots=False, listing_url=STUB_LISTING).robots_url == "http://stub-source:8080/robots.txt"
+    assert TikiCrawler(categories=["1846"], fetch_robots=False).robots_url == "https://tiki.vn/robots.txt"
+
+
+def test_robots_are_fetched_from_the_configured_host(monkeypatch):
+    import crawler.base as base
+
+    requested = []
+
+    def fake_get(url, **kwargs):
+        requested.append(url)
+        return SimpleNamespace(status_code=200, text="User-agent: *\nAllow: /\n")
+
+    monkeypatch.setattr(base.requests, "get", fake_get)
+
+    TikiCrawler(categories=["1846"], listing_url=STUB_LISTING)
+
+    assert requested == ["http://stub-source:8080/robots.txt"]
