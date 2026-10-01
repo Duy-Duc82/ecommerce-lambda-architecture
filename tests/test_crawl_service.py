@@ -324,3 +324,53 @@ def test_both_entrypoints_answer_help():
         result = subprocess.run([sys.executable, "-m", module, "--help"], capture_output=True, text=True, timeout=300)
         assert result.returncode == 0, result.stderr
         assert "usage" in result.stdout.lower()
+
+
+# ----------------------------------------------------------------------------
+# The PostgreSQL factory closes what it opens.
+# ----------------------------------------------------------------------------
+class FakeConnection:
+    def __init__(self, log):
+        self.log = log
+
+    def __enter__(self):
+        self.log.append("begin")
+        return self
+
+    def __exit__(self, kind, value, traceback):
+        self.log.append("rollback" if kind else "commit")
+        return False
+
+    def close(self):
+        self.log.append("close")
+
+
+def _fake_psycopg2(monkeypatch, log):
+    module = type(sys)("psycopg2")
+    module.connect = lambda **kwargs: log.append("connect") or FakeConnection(log)
+    monkeypatch.setitem(sys.modules, "psycopg2", module)
+
+
+def test_the_connection_factory_commits_and_closes_each_connection(monkeypatch):
+    # with psycopg2's own connection, "with conn" commits but never closes,
+    # so a long-running service would leak one connection per call.
+    log = []
+    _fake_psycopg2(monkeypatch, log)
+    factory = service.postgres_connection_factory()
+
+    with factory() as conn:
+        assert isinstance(conn, FakeConnection)
+
+    assert log == ["connect", "begin", "commit", "close"]
+
+
+def test_the_connection_factory_rolls_back_and_still_closes_on_error(monkeypatch):
+    log = []
+    _fake_psycopg2(monkeypatch, log)
+    factory = service.postgres_connection_factory()
+
+    with pytest.raises(RuntimeError):
+        with factory():
+            raise RuntimeError("statement failed")
+
+    assert log == ["connect", "begin", "rollback", "close"]
