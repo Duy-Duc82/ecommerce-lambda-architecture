@@ -1133,3 +1133,39 @@ JDBC driver tải từ Maven Central vào `.localjars/` (untracked). Trên Windo
 host, **không** dùng `PYSPARK_SUBMIT_ARGS` để nạp jar — nó làm chết Java
 gateway; đặt jar thẳng vào `site-packages/pyspark/jars/` nếu cần chạy test
 dùng JDBC ngoài container.
+
+### 10.8 Review PR #4 — tám lỗi nữa, đều sửa trên cùng nhánh
+
+Review toàn bộ diff của PR #4 tìm ra tám lỗi mà 624 test không bắt được. Mỗi
+lỗi có một commit test tái hiện và một commit fix riêng.
+
+| # | Lỗi | Sửa |
+|---|---|---|
+| 1 | Chạy lại một khung ngày cũ mà không có `--allow-backfill` thì publish cache trước, rồi con trỏ mới từ chối → cache phục vụ dữ liệu cũ hơn con trỏ, run vẫn `SUCCEEDED` | `promotion_refusal()` được hỏi **trước** khi stage; run bị giữ lại là `GOLD_WRITTEN`, reason `BACKFILL_REFUSED` |
+| 2 | CLI reparse gọi `TikiCrawler()` không có `categories` → lỗi ở mọi lần chạy; không bao giờ đọc Silver nên luôn báo `IDENTICAL` | `fetch_robots=False` (fail closed); `silver_observation_path()` dùng chung với sink; đọc Silver theo key; thêm `--silver-dataset`, `--report-path` |
+| 3 | Khóa chính `cache.marketplace_price_anomaly_daily` thiếu `currency` → đổi tiền tệ trong cùng ngày thì gate xanh nhưng publish vi phạm unique | Khóa gồm `currency`; migration `DROP CONSTRAINT IF EXISTS` / `ADD CONSTRAINT` idempotent |
+| 4 | `previous_run_id` trỏ về chính run khi con trỏ đã là run đó → mất chuỗi manifest | Giữ predecessor mà con trỏ đã ghi |
+| 5 | Session `partitionOverwriteMode=dynamic` → resume để lại partition Gold cũ | Writer đặt `partitionOverwriteMode=static` |
+| 6 | Publish ghi `manifest_promoted=TRUE` trước khi con trỏ di chuyển | `mark_promotion()` ghi sau, theo kết quả promote |
+| 7 | `--quality-only` để lại dòng audit `completed_at=NULL` | `mark_held(reason)` dùng chung với backfill |
+| 8 | `--gold-root-uri` khác mặc định vẫn ghi manifest và promote con trỏ production | Root khác root phục vụ là scratch run: không manifest, không publish, không promote, reason `SCRATCH_GOLD_ROOT` |
+
+Kiểm chứng trên PostgreSQL và Spark 4.0.1 thật (container `mp-e2e`):
+
+```text
+e2e-v1 | SUCCEEDED      | cache=t | promoted=t |                          ← run mới
+e2e-v2 | QUALITY_FAILED | cache=f | promoted=f |                          ← gate chặn
+e2e-v3 | GOLD_WRITTEN   | cache=f | promoted=f | held: QUALITY_ONLY
+e2e-v4 | GOLD_WRITTEN   | cache=f | promoted=f | held: SCRATCH_GOLD_ROOT  ← không manifest nào ở production
+e2e-v5 | GOLD_WRITTEN   | cache=f | promoted=f | held: BACKFILL_REFUSED   ← cache và con trỏ giữ e2e-v1
+```
+
+Migration khóa anomaly chạy hai lần trên database thật, kết thúc ở khóa mới.
+Spark 4.0.1 xác nhận: ở chế độ dynamic, partition cũ còn lại; với `static`
+trên writer, partition cũ bị xóa.
+
+Suite: **655 passed, 0 failed, 0 skipped**.
+
+Nợ còn lại, thuộc Phase 8: chưa có khóa giữa các batch run chạy đồng thời. Con
+trỏ được đọc trước publish, nên một run khác có thể promote chen vào giữa.
+Cần lock hoặc compare-and-swap con trỏ.
