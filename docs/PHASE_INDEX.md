@@ -111,7 +111,7 @@ Phase 5/6 chỉ nằm ở ngọn một nhánh feature, không có ở commit g�
 | 5 | 5 | ✅ trong `develop` | đủ 38/38 item |
 | 6 | 6 | ✅ trong `develop` | **47/47 item** |
 | 7 | 7 | ✅ trong `develop` (PR #4); bản sửa cắt `as_of` trên `phase-7-asof-cutoff` | **61/61 item** |
-| 8 | 8 | ⏳ chưa bắt đầu | P1-12, Kibana (P1-11) |
+| 8 | 8 | 🔵 plan trong `develop` (PR #6); WP1 trên `phase-8-wp1-crawl-service` | P1-12, Kibana (P1-11) |
 | 9 | 9 | ⏳ chưa bắt đầu | P2-* |
 
 **Phase 1–7 đã xong** và nằm trong `develop`. Phase 7 (P1-08 quality gates,
