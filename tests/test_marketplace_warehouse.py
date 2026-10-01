@@ -275,9 +275,9 @@ class FakeAudit:
         self.log.append("audit.mark_promotion")
         self.promotion = kwargs
 
-    def mark_promotion_refused(self, **kwargs):
-        self.log.append("audit.mark_promotion_refused")
-        self.promotion_refused = kwargs
+    def mark_held(self, **kwargs):
+        self.log.append("audit.mark_held")
+        self.held = kwargs
 
 
 class FakeRepository:
@@ -438,9 +438,16 @@ def test_quality_only_writes_the_manifest_and_stops(monkeypatch):
         batch_context(), quality_only=True, writer=noop_writer, reader=empty_reader
     )
 
-    assert parts["log"] == ["audit.start_run", "audit.mark_gold_written", "quality.record", "manifest.write_run"]
+    # The audit row is closed too: an inspection run must not look hung.
+    assert parts["log"] == [
+        "audit.start_run", "audit.mark_gold_written", "quality.record", "manifest.write_run", "audit.mark_held",
+    ]
+    assert parts["audit"].held["reason"] == warehouse.QUALITY_ONLY
+    assert parts["audit"].held["manifest_uri"] == MANIFEST_URI
+    assert parts["audit"].held["completed_at"] is not None
     assert result.status == "GOLD_WRITTEN"
     assert result.manifest_promoted is False
+    assert result.promotion_reason == warehouse.QUALITY_ONLY
 
 
 def test_allow_backfill_reaches_the_promotion(monkeypatch):
@@ -562,9 +569,9 @@ def test_a_refused_backfill_is_closed_in_the_audit_row(monkeypatch):
 
     run_marketplace_warehouse(batch_context(), writer=store.write, reader=store.read)
 
-    assert parts["log"][-1] == "audit.mark_promotion_refused"
+    assert parts["log"][-1] == "audit.mark_held"
     assert "audit.mark_failed" not in parts["log"]
-    held = parts["audit"].promotion_refused
+    held = parts["audit"].held
     assert held["run_id"] == "run-1"
     assert held["reason"] == marketplace_manifest.BACKFILL_REFUSED
     assert held["manifest_uri"].endswith(marketplace_manifest.run_manifest_path("run-1"))
