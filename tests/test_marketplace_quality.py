@@ -137,10 +137,20 @@ def attempts(spark, parsed_count, *, run_ids=("run-1",)):
     return spark.createDataFrame(rows, schema=ATTEMPT_SCHEMA)
 
 
-def runs(spark, *, run_ids=("run-1",)):
+# The fixture crawl run finished an hour before as_of: settled, and well inside
+# any lookback, so the clean fixture is reconciled under the default windows.
+SETTLED_AT = AS_OF - timedelta(hours=1)
+RUN_SCHEMA = (
+    "crawl_run_id string, marketplace string, started_at timestamp, "
+    "completed_at timestamp, status string"
+)
+
+
+def runs(spark, *, run_ids=("run-1",), completed_at=SETTLED_AT):
+    status = "RUNNING" if completed_at is None else "COMPLETED"
     return spark.createDataFrame(
-        [(run_id, "tiki") for run_id in run_ids],
-        schema="crawl_run_id string, marketplace string",
+        [(run_id, "tiki", DAY, completed_at, status) for run_id in run_ids],
+        schema=RUN_SCHEMA,
     )
 
 
@@ -151,13 +161,13 @@ def clean_rows():
     ]
 
 
-def gates(spark, rows=None, *, parsed_count=None, ctx=None, attempt_frame=None, tamper=None):
+def gates(spark, rows=None, *, parsed_count=None, ctx=None, attempt_frame=None, run_frame=None, tamper=None):
     rows = clean_rows() if rows is None else rows
     ctx = ctx or context()
     frame = observations(spark, rows)
     counted = len(rows) if parsed_count is None else parsed_count
     attempt = attempt_frame if attempt_frame is not None else attempts(spark, counted)
-    run_frame = runs(spark)
+    run_frame = run_frame if run_frame is not None else runs(spark)
     marts = build_marketplace_marts(frame, attempt, run_frame, ctx)
     if tamper:
         marts = tamper(marts)
@@ -236,13 +246,48 @@ def test_a_negative_list_price_fails_the_non_negative_check(spark):
 # 20, 21
 @requires_spark
 def test_the_future_tolerance_boundary_is_inclusive(spark):
+    # The tolerance is measured against the row's own fetch, not the run's
+    # as_of: the run has already cut everything after as_of away, so a check
+    # against as_of could never fire. What it catches is an observation that
+    # claims a time after the response that produced it.
     ctx = context()
-    edge = ctx.as_of + timedelta(seconds=ctx.future_tolerance_seconds)
-    at_edge = clean_rows() + [observation(minute=DAILY * 4, observed_at=edge)]
-    past_edge = clean_rows() + [observation(minute=DAILY * 5, observed_at=edge + timedelta(seconds=1))]
+    fetched = DAY + timedelta(days=2, hours=6)
+    edge = fetched + timedelta(seconds=ctx.future_tolerance_seconds)
+    at_edge = clean_rows() + [observation(minute=DAILY * 4, observed_at=edge, fetched_at=fetched, produced_at=edge)]
+    past_edge = clean_rows() + [
+        observation(minute=DAILY * 5, observed_at=edge + timedelta(seconds=1), fetched_at=fetched, produced_at=edge + timedelta(seconds=1))
+    ]
 
     assert status_of(gates(spark, at_edge, ctx=ctx)[0], "observed_at_within_future_tolerance") == PASS
     assert status_of(gates(spark, past_edge, ctx=ctx)[0], "observed_at_within_future_tolerance") == FAIL
+
+
+# 21
+@requires_spark
+def test_an_observation_produced_before_it_claims_to_be_observed_fails(spark):
+    ctx = context()
+    observed = DAY + timedelta(days=2, hours=6)
+    skewed = clean_rows() + [
+        observation(
+            minute=DAILY * 4, observed_at=observed, fetched_at=observed,
+            produced_at=observed - timedelta(seconds=ctx.future_tolerance_seconds + 1),
+        )
+    ]
+
+    assert status_of(gates(spark, skewed, ctx=ctx)[0], "observed_at_within_future_tolerance") == FAIL
+
+
+# 21
+@requires_spark
+def test_a_row_later_than_as_of_is_not_a_clock_skew_violation(spark):
+    # Such a row is the input's business, not the gate's: the orchestrator cuts
+    # it before evaluation. If one is handed in anyway, check 6 judges only
+    # whether its own timestamps agree with each other.
+    ctx = context()
+    later = ctx.as_of + timedelta(days=2)
+    rows = clean_rows() + [observation(minute=DAILY * 6, observed_at=later)]
+
+    assert status_of(gates(spark, rows, ctx=ctx)[0], "observed_at_within_future_tolerance") == PASS
 
 
 # 20, 22
@@ -350,6 +395,140 @@ def test_reconciliation_ignores_crawl_runs_absent_from_this_input(spark):
     )
 
     assert status_of(gates(spark, rows, attempt_frame=extra)[0], "silver_parse_attempt_reconciliation") == PASS
+
+
+# 24
+@requires_spark
+def test_a_crawl_run_still_settling_is_not_reconciled_yet(spark):
+    # Its observations may still be on their way through Kafka to Silver. A
+    # short count here is lag, not loss; the next run reconciles it.
+    ctx = context()
+    settling = runs(spark, completed_at=ctx.as_of - timedelta(seconds=ctx.reconciliation_settle_seconds - 1))
+
+    results, _ = gates(spark, parsed_count=99, ctx=ctx, run_frame=settling)
+
+    assert status_of(results, "silver_parse_attempt_reconciliation") == PASS
+
+
+# 24
+@requires_spark
+def test_a_crawl_run_settled_exactly_at_the_delay_is_reconciled(spark):
+    ctx = context()
+    settled = runs(spark, completed_at=ctx.as_of - timedelta(seconds=ctx.reconciliation_settle_seconds))
+
+    results, _ = gates(spark, parsed_count=99, ctx=ctx, run_frame=settled)
+
+    assert status_of(results, "silver_parse_attempt_reconciliation") == FAIL
+
+
+# 24
+@requires_spark
+def test_an_unfinished_crawl_run_is_not_reconciled(spark):
+    results, _ = gates(spark, parsed_count=99, run_frame=runs(spark, completed_at=None))
+
+    assert status_of(results, "silver_parse_attempt_reconciliation") == PASS
+
+
+# 24
+@requires_spark
+def test_a_crawl_run_older_than_the_lookback_no_longer_blocks_publication(spark):
+    # A discrepancy that was already reported must not freeze publication
+    # forever: once the run leaves the lookback it stops being re-judged.
+    ctx = context()
+    old = runs(spark, completed_at=ctx.as_of - timedelta(seconds=ctx.reconciliation_lookback_seconds + 1))
+
+    results, _ = gates(spark, parsed_count=99, ctx=ctx, run_frame=old)
+
+    assert status_of(results, "silver_parse_attempt_reconciliation") == PASS
+
+
+# 24
+@requires_spark
+def test_a_crawl_run_at_the_lookback_edge_is_still_reconciled(spark):
+    ctx = context()
+    edge = runs(spark, completed_at=ctx.as_of - timedelta(seconds=ctx.reconciliation_lookback_seconds))
+
+    results, _ = gates(spark, parsed_count=99, ctx=ctx, run_frame=edge)
+
+    assert status_of(results, "silver_parse_attempt_reconciliation") == FAIL
+
+
+# 24
+@requires_spark
+def test_silver_rows_with_no_audit_run_are_placed_by_their_last_observation(spark):
+    ctx = context(reconciliation_lookback_seconds=2 * 86400)
+    recent = clean_rows() + [observation(minute=DAILY * 2 + 60, crawl_run_id="ghost")]
+    stale = clean_rows() + [
+        observation(
+            minute=0, observation_id="obs-ghost-old", crawl_run_id="ghost",
+            observed_at=ctx.as_of - timedelta(seconds=ctx.reconciliation_lookback_seconds + 60),
+        )
+    ]
+    audited = attempts(spark, len(clean_rows()))
+
+    # No provenance for rows inside the window is a discrepancy...
+    recent_results, _ = gates(spark, recent, ctx=ctx, attempt_frame=audited)
+    assert status_of(recent_results, "silver_parse_attempt_reconciliation") == FAIL
+    assert json.loads(result_of(recent_results, "silver_parse_attempt_reconciliation").failure_sample_json) == {"keys": ["ghost"]}
+    # ...but one that has aged out of the lookback is no longer re-judged.
+    stale_results, _ = gates(spark, stale, ctx=ctx, attempt_frame=audited)
+    assert status_of(stale_results, "silver_parse_attempt_reconciliation") == PASS
+
+
+# 23, 24
+@requires_spark
+def test_an_audit_without_run_completion_times_skips_reconciliation(spark):
+    bare = spark.createDataFrame([("run-1", "tiki")], schema="crawl_run_id string, marketplace string")
+
+    results, ctx = gates(spark, run_frame=bare)
+    reconciliation = result_of(results, "silver_parse_attempt_reconciliation")
+
+    assert reconciliation.status == SKIPPED
+    assert json.loads(reconciliation.failure_sample_json) == {"reason": "crawl run audit lacks completed_at"}
+    assert decide(results, ctx).passed is False
+
+
+# 21, 24
+@requires_spark
+def test_a_backfill_over_a_silver_that_kept_growing_passes_once_cut(spark):
+    # The case the cut exists for: Silver holds rows days past this run's
+    # as_of, from crawl runs that had not even started yet.
+    from batch_layer.marketplace_warehouse import crawl_audit_as_of, observations_as_of
+
+    ctx = context()
+    later = ctx.as_of + timedelta(days=2)
+    rows = clean_rows() + [observation(minute=DAILY * 6, observed_at=later, crawl_run_id="run-later")]
+    audit_attempts = spark.createDataFrame(
+        [
+            ("run-1", "SUCCEEDED", DAY, DAY, 120, 2048, len(clean_rows()), 0, None),
+            ("run-later", "SUCCEEDED", later, later, 120, 2048, 1, 0, None),
+        ],
+        schema=ATTEMPT_SCHEMA,
+    )
+    audit_runs = spark.createDataFrame(
+        [("run-1", "tiki", DAY, SETTLED_AT, "COMPLETED"), ("run-later", "tiki", later, later, "COMPLETED")],
+        schema=RUN_SCHEMA,
+    )
+
+    frame = observations_as_of(observations(spark, rows), ctx.as_of)
+    cut_attempts, cut_runs = crawl_audit_as_of(audit_attempts, audit_runs, ctx.as_of)
+    marts = build_marketplace_marts(frame, cut_attempts, cut_runs, ctx)
+    results = evaluate_quality_gates(frame, marts, cut_attempts, cut_runs, ctx)
+
+    assert [result.check_name for result in results if result.status != PASS] == []
+    assert frame.count() == len(clean_rows())
+
+
+# 18
+def test_the_rule_version_moved_when_checks_6_and_8_changed_meaning():
+    # Verdicts stored under v1 judged a different question. Keeping the old
+    # version would make them indistinguishable from verdicts under the new one.
+    import os
+    from config.settings import MARKETPLACE_QUALITY_RULE_VERSION
+
+    if "MARKETPLACE_QUALITY_RULE_VERSION" in os.environ:
+        pytest.skip("the environment overrides the rule version")
+    assert MARKETPLACE_QUALITY_RULE_VERSION == "quality-rules.v2"
 
 
 # 26

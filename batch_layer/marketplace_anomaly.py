@@ -102,9 +102,10 @@ def build_price_anomaly_daily(
 ) -> DataFrame:
     """Build ``price_anomaly_daily`` from ``offer_price_history_daily``.
 
-    Grain: exactly one row per ``(marketplace, offer_id, observed_date)``, so
-    the result joins one-to-one with its input. Currency is carried rather than
-    keyed, because the source mart already holds one currency per offer-day.
+    Grain: exactly one row per ``(marketplace, offer_id, observed_date,
+    currency)``, the same grain as the source mart, so the result joins
+    one-to-one with its input. Currency is part of the key because an offer
+    that switches currency within a day yields one source row per currency.
     """
     if window_days <= 0 or min_samples <= 0:
         raise ValueError("window_days and min_samples must be positive")

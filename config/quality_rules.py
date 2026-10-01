@@ -74,7 +74,7 @@ QUALITY_RULES: tuple[QualityRule, ...] = (
     ),
     QualityRule(
         "observed_at_within_future_tolerance", MANDATORY, "silver",
-        "observed_at is no later than the run as_of plus the configured future tolerance",
+        "observed_at is no later than the row's own fetched_at and produced_at plus the configured future tolerance",
     ),
     QualityRule(
         "currency_valid", MANDATORY, "silver",
@@ -82,7 +82,7 @@ QUALITY_RULES: tuple[QualityRule, ...] = (
     ),
     QualityRule(
         "silver_parse_attempt_reconciliation", MANDATORY, "audit",
-        "per crawl run present in this input, the Silver observation count equals the audit parsed_count",
+        "per crawl run present in this input that settled inside the reconciliation lookback, the Silver observation count equals the audit parsed_count",
     ),
     QualityRule(
         "offer_listing_key_unique", MANDATORY, "silver",

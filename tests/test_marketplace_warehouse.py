@@ -324,8 +324,10 @@ def wire_orchestration(monkeypatch, *, passed=True, publish_fails=False):
     monkeypatch.setattr(warehouse, "build_spark", lambda: FakeSpark())
     monkeypatch.setattr(warehouse, "read_marketplace_silver", lambda spark, uri: "wire")
     monkeypatch.setattr(warehouse, "flatten_marketplace_observations", lambda wire: FakeObservations())
+    monkeypatch.setattr(warehouse, "observations_as_of", lambda flat, as_of: flat)
     monkeypatch.setattr(warehouse, "deduplicate_marketplace_observations", lambda flat: flat)
     monkeypatch.setattr(warehouse, "read_crawl_audit", lambda spark: ("attempts", "runs"))
+    monkeypatch.setattr(warehouse, "crawl_audit_as_of", lambda attempts, runs, as_of: (attempts, runs))
     monkeypatch.setattr(
         marketplace_marts, "build_marketplace_marts", lambda *a, **k: {name: name for name in DATASETS}
     )
@@ -729,3 +731,124 @@ def test_the_cli_names_the_configured_gold_root_as_the_serving_one(monkeypatch, 
 
     assert seen["gold_root_uri"] == "file:///scratch/gold"
     assert seen["serving_gold_root_uri"] == warehouse.data_lake_uri("gold", warehouse.MARKETPLACE_GOLD_DATASET)
+
+
+# ----------------------------------------------------------------------------
+# The as_of cut. A run is a view of the warehouse as it stood at its as_of, so
+# nothing observed or recorded after that instant may reach its marts. Without
+# the cut, a backfill over a Silver that kept growing sees the newer rows and
+# its own future-tolerance gate refuses it, every time.
+# ----------------------------------------------------------------------------
+from tests.spark_support import requires_spark
+
+CUT_AS_OF = datetime(2026, 9, 5, 10, tzinfo=timezone.utc)
+
+
+@requires_spark
+def test_observations_after_as_of_never_reach_the_run(spark):
+    rows = [
+        ("before", CUT_AS_OF - timedelta(days=1)),
+        ("at", CUT_AS_OF),
+        ("after", CUT_AS_OF + timedelta(seconds=1)),
+    ]
+    flat = spark.createDataFrame(rows, schema="observation_id string, observed_at timestamp")
+
+    kept = warehouse.observations_as_of(flat, CUT_AS_OF)
+
+    # Inclusive: a row observed exactly at as_of belongs to the run.
+    assert sorted(row.observation_id for row in kept.collect()) == ["at", "before"]
+
+
+@requires_spark
+def test_crawl_audit_recorded_after_as_of_never_reaches_the_run(spark):
+    attempts = spark.createDataFrame(
+        [
+            ("run-a", CUT_AS_OF - timedelta(hours=2), CUT_AS_OF - timedelta(hours=1)),
+            ("run-b", CUT_AS_OF - timedelta(minutes=5), CUT_AS_OF + timedelta(minutes=5)),
+            ("run-c", CUT_AS_OF + timedelta(hours=1), CUT_AS_OF + timedelta(hours=2)),
+        ],
+        schema="crawl_run_id string, started_at timestamp, completed_at timestamp",
+    )
+    runs = spark.createDataFrame(
+        [
+            ("run-a", CUT_AS_OF - timedelta(hours=2)),
+            ("run-b", CUT_AS_OF - timedelta(minutes=5)),
+            ("run-c", CUT_AS_OF + timedelta(hours=1)),
+        ],
+        schema="crawl_run_id string, started_at timestamp",
+    )
+
+    cut_attempts, cut_runs = warehouse.crawl_audit_as_of(attempts, runs, CUT_AS_OF)
+
+    # An attempt is known once it has completed; one still in flight at as_of
+    # had not yet reported anything.
+    assert [row.crawl_run_id for row in cut_attempts.collect()] == ["run-a"]
+    # A crawl run exists once it has started, finished or not.
+    assert sorted(row.crawl_run_id for row in cut_runs.collect()) == ["run-a", "run-b"]
+
+
+@pytest.mark.parametrize("name", ["observations_as_of", "crawl_audit_as_of"])
+def test_the_cut_refuses_a_naive_as_of(name):
+    cut = getattr(warehouse, name)
+    args = (None, None) if name == "crawl_audit_as_of" else (None,)
+
+    with pytest.raises(ValueError, match="as_of"):
+        cut(*args, datetime(2026, 9, 5, 10))
+
+
+def test_the_run_reads_silver_and_audit_as_of_its_context(monkeypatch):
+    parts = wire_orchestration(monkeypatch)
+    seen = {}
+    flat = FakeObservations()
+
+    monkeypatch.setattr(warehouse, "flatten_marketplace_observations", lambda wire: flat)
+
+    def cut_observations(frame, as_of):
+        seen["observations"] = (frame, as_of)
+        return "cut-observations"
+
+    def deduplicate(frame):
+        seen["deduplicated"] = frame
+        return FakeObservations()
+
+    def cut_audit(attempts, runs, as_of):
+        seen["audit"] = (attempts, runs, as_of)
+        return "cut-attempts", "cut-runs"
+
+    def marts(observations, attempts, runs, context):
+        seen["marts"] = (attempts, runs)
+        return {name: name for name in DATASETS}
+
+    def gates(observations, marts, attempts, runs, context):
+        seen["gates"] = (attempts, runs)
+        return parts["results"]
+
+    monkeypatch.setattr(warehouse, "observations_as_of", cut_observations)
+    monkeypatch.setattr(warehouse, "deduplicate_marketplace_observations", deduplicate)
+    monkeypatch.setattr(warehouse, "crawl_audit_as_of", cut_audit)
+    monkeypatch.setattr(marketplace_marts, "build_marketplace_marts", marts)
+    monkeypatch.setattr(marketplace_quality, "evaluate_quality_gates", gates)
+
+    run_marketplace_warehouse(batch_context(), writer=noop_writer, reader=empty_reader)
+
+    assert seen["observations"] == (flat, AS_OF)
+    # Cut before deduplication, so a row past as_of cannot collide with one
+    # inside it and fail a run that never sees it.
+    assert seen["deduplicated"] == "cut-observations"
+    assert seen["audit"] == ("attempts", "runs", AS_OF)
+    assert seen["marts"] == ("cut-attempts", "cut-runs")
+    assert seen["gates"] == ("cut-attempts", "cut-runs")
+
+
+def test_context_rejects_a_reconciliation_lookback_inside_the_settle_delay():
+    with pytest.raises(ValueError, match="reconciliation_lookback_seconds"):
+        MarketplaceBatchContext(
+            "run-1", AS_OF, "file:///silver", "file:///gold",
+            reconciliation_settle_seconds=3600, reconciliation_lookback_seconds=3600,
+        )
+
+
+@pytest.mark.parametrize("field", ["reconciliation_settle_seconds", "reconciliation_lookback_seconds"])
+def test_context_rejects_non_positive_reconciliation_windows(field):
+    with pytest.raises(ValueError, match=field):
+        MarketplaceBatchContext("run-1", AS_OF, "file:///silver", "file:///gold", **{field: 0})

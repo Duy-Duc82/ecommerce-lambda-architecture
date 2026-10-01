@@ -21,6 +21,7 @@ from config.settings import (
     MARKETPLACE_ANOMALY_WINDOW_DAYS, MARKETPLACE_BATCH_APP_NAME,
     MARKETPLACE_BATCH_SHUFFLE_PARTITIONS,
     MARKETPLACE_QUALITY_FUTURE_TOLERANCE_SECONDS, MARKETPLACE_QUALITY_RULE_VERSION,
+    MARKETPLACE_QUALITY_RECONCILIATION_LOOKBACK_SECONDS, MARKETPLACE_QUALITY_RECONCILIATION_SETTLE_SECONDS,
     MARKETPLACE_COUNTER_MAX_GAP_SECONDS, MARKETPLACE_COUNTER_RULE_VERSION,
     MARKETPLACE_FRESHNESS_RULE_VERSION, MARKETPLACE_FRESHNESS_SECONDS,
     MARKETPLACE_GOLD_DATASET, MARKETPLACE_PERCENTILE_ACCURACY,
@@ -49,6 +50,8 @@ class MarketplaceBatchContext:
     anomaly_rule_version: str = MARKETPLACE_ANOMALY_RULE_VERSION
     quality_rule_version: str = MARKETPLACE_QUALITY_RULE_VERSION
     future_tolerance_seconds: int = MARKETPLACE_QUALITY_FUTURE_TOLERANCE_SECONDS
+    reconciliation_settle_seconds: int = MARKETPLACE_QUALITY_RECONCILIATION_SETTLE_SECONDS
+    reconciliation_lookback_seconds: int = MARKETPLACE_QUALITY_RECONCILIATION_LOOKBACK_SECONDS
     allowed_currencies: tuple[str, ...] = MARKETPLACE_ALLOWED_CURRENCIES
 
     def __post_init__(self) -> None:
@@ -57,11 +60,13 @@ class MarketplaceBatchContext:
         object.__setattr__(self, "as_of", self.as_of.astimezone(timezone.utc))
         for name in ("silver_uri", "gold_root_uri", "freshness_rule_version", "counter_rule_version", "anomaly_rule_version", "quality_rule_version"):
             if not getattr(self, name).strip(): raise ValueError(f"{name} must be non-empty")
-        for name in ("freshness_seconds", "counter_max_gap_seconds", "anomaly_window_days", "anomaly_min_samples", "anomaly_mad_threshold", "anomaly_iqr_multiplier", "future_tolerance_seconds"):
+        for name in ("freshness_seconds", "counter_max_gap_seconds", "anomaly_window_days", "anomaly_min_samples", "anomaly_mad_threshold", "anomaly_iqr_multiplier", "future_tolerance_seconds", "reconciliation_settle_seconds", "reconciliation_lookback_seconds"):
             if getattr(self, name) <= 0: raise ValueError(f"{name} must be positive")
         # A minimum above the frame size would make every row report
         # INSUFFICIENT_HISTORY while nothing looked broken.
         if self.anomaly_min_samples > self.anomaly_window_days: raise ValueError("anomaly_min_samples cannot exceed anomaly_window_days")
+        # An empty reconciliation window would reconcile nothing and pass.
+        if self.reconciliation_lookback_seconds <= self.reconciliation_settle_seconds: raise ValueError("reconciliation_lookback_seconds must exceed reconciliation_settle_seconds")
         # Normalised and sorted so a manifest built from this context is
         # byte-stable regardless of how the environment spelled the list.
         codes = tuple(sorted({str(code).strip().upper() for code in self.allowed_currencies if str(code).strip()}))
@@ -126,6 +131,33 @@ def flatten_marketplace_observations(wire: DataFrame) -> DataFrame:
     bad = result.filter(F.col("event_id").isNull() | F.col("observation_id").isNull() | (F.col("event_id") != F.col("observation_id")) | (F.col("offer_id") != F.col("observation_offer_id")) | (F.col("raw_uri") != F.col("observation_raw_uri")) | (F.col("crawl_run_id") != F.col("observation_crawl_run_id")) | F.col("current_price").isNull() | (F.col("current_price") < 0) | F.col("observed_at").isNull() | F.col("fetched_at").isNull() | F.col("raw_sha256").isNull() | F.col("raw_uri").isNull() | F.col("crawl_run_id").isNull())
     if bad.limit(1).count(): raise ValueError("invalid marketplace Silver row: missing lineage or non-negative numeric field")
     return result.drop("observation_offer_id", "observation_raw_uri", "observation_crawl_run_id")
+
+
+def _require_aware(as_of: datetime) -> datetime:
+    if as_of.tzinfo is None or as_of.utcoffset() is None: raise ValueError("as_of must be timezone-aware")
+    return as_of.astimezone(timezone.utc)
+
+
+def observations_as_of(flat: DataFrame, as_of: datetime) -> DataFrame:
+    """Silver as it stood at ``as_of``: nothing observed after it, inclusive.
+
+    A run is a view of one instant. Without this, Silver that kept growing
+    after as_of leaks into a rerun or a backfill, so the same context stops
+    producing the same Gold and an older window can never pass its gates.
+    """
+    cutoff = F.lit(_require_aware(as_of)).cast("timestamp")
+    return flat.filter(F.col("observed_at") <= cutoff)
+
+
+def crawl_audit_as_of(attempts: DataFrame, runs: DataFrame, as_of: datetime) -> tuple[DataFrame, DataFrame]:
+    """The crawl audit as it stood at ``as_of``.
+
+    An attempt is known once it completed, so one still in flight at as_of
+    reported nothing yet. A crawl run exists once it started, finished or not;
+    whether it had settled is check 8's question, not this cut's.
+    """
+    cutoff = F.lit(_require_aware(as_of)).cast("timestamp")
+    return attempts.filter(F.col("completed_at") <= cutoff), runs.filter(F.col("started_at") <= cutoff)
 
 
 def deduplicate_marketplace_observations(flat: DataFrame) -> DataFrame:
@@ -203,8 +235,11 @@ def run_marketplace_warehouse(context: MarketplaceBatchContext, *, publish_cache
             audit = MarketplaceBatchAudit.from_settings()
             audit.start_run(context, datetime.now(timezone.utc), resume=resume)
         wire = read_marketplace_silver(spark, context.silver_uri)
-        observations = deduplicate_marketplace_observations(flatten_marketplace_observations(wire)).cache()
-        attempts, runs = read_crawl_audit(spark)
+        # Flattening still validates every Silver row, so corruption fails the
+        # run whatever its window. The cut comes before deduplication, so a
+        # row past as_of can never collide with one inside it.
+        observations = deduplicate_marketplace_observations(observations_as_of(flatten_marketplace_observations(wire), context.as_of)).cache()
+        attempts, runs = crawl_audit_as_of(*read_crawl_audit(spark), context.as_of)
         marts = build_marketplace_marts(observations, attempts, runs, context)
         writes = write_run_scoped_gold(marts, context)
         silver_rows = observations.count()
