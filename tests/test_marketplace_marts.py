@@ -10,6 +10,7 @@ import pytest
 
 from batch_layer.marketplace_marts import (
     UNKNOWN_CATEGORY,
+    attach_marketplace_code,
     build_category_price_daily,
     build_counter_delta_daily,
     build_counter_transitions,
@@ -621,8 +622,40 @@ def _audit_frames(spark, attempt_rows):
 
 # 20, 21, 22, 23
 def _audit(spark, attempt_rows):
-    attempts, runs, _frontier = _audit_frames(spark, attempt_rows)
-    return attempts, runs
+    """What read_crawl_audit() hands the marts: attempts already resolved."""
+    attempts, runs, frontier = _audit_frames(spark, attempt_rows)
+    return attach_marketplace_code(attempts, frontier), runs
+
+
+def test_the_marketplace_code_is_resolved_from_the_crawl_frontier(spark):
+    attempts, _runs, frontier = _audit_frames(
+        spark, [("run-1", "tiki", date(2026, 9, 4), "SUCCEEDED", 100, 10, 2, 0, None)]
+    )
+
+    resolved = attach_marketplace_code(attempts, frontier)
+
+    assert "marketplace_code" not in attempts.columns
+    assert one(resolved.select("crawl_run_id", "marketplace_code"))["marketplace_code"] == "tiki"
+
+
+def test_the_marketplace_id_is_never_used_as_a_marketplace_code(spark):
+    # crawl_run holds marketplace-tiki while an observation holds tiki. Joining
+    # on the id would match nothing and report every parsed count as zero.
+    _attempts, runs, frontier = _audit_frames(
+        spark, [("run-1", "tiki", date(2026, 9, 4), "SUCCEEDED", 100, 10, 2, 0, None)]
+    )
+
+    assert one(runs.select("marketplace_id"))["marketplace_id"] == "marketplace-tiki"
+    assert one(frontier.select("marketplace_code"))["marketplace_code"] == "tiki"
+
+
+def test_audit_frames_that_cannot_name_a_marketplace_fail_loudly(spark):
+    attempts, runs, _frontier = _audit_frames(
+        spark, [("run-1", "tiki", date(2026, 9, 4), "SUCCEEDED", 100, 10, 2, 0, None)]
+    )
+
+    with pytest.raises(ValueError, match="cannot resolve a marketplace"):
+        build_crawl_reliability_daily(attempts, runs)
 
 
 def test_source_coverage_counts_reconcile(spark):

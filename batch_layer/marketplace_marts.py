@@ -95,13 +95,45 @@ def _audit_col(df: DataFrame, name: str, default=None):
     return default if isinstance(default, F.Column) else F.lit(default)
 
 
+def attach_marketplace_code(attempts: DataFrame, frontier: DataFrame) -> DataFrame:
+    """Give crawl attempts the marketplace code, taken from the frontier.
+
+    ``audit.crawl_request_attempt`` carries no marketplace at all and
+    ``audit.crawl_run`` carries only a ``marketplace_id``. The frontier is the
+    one audit table holding both, so the code is resolved through
+    ``task_id``.
+
+    The id is not a usable substitute: it reads ``marketplace-tiki`` while an
+    observation reads ``tiki``, so joining on it would match nothing and report
+    every parsed count as zero instead of failing.
+    """
+    for name, frame in (("attempts", attempts), ("frontier", frontier)):
+        if "task_id" not in frame.columns:
+            raise ValueError(f"{name} must expose task_id to resolve a marketplace code")
+    if "marketplace_code" not in frontier.columns:
+        raise ValueError("frontier must expose marketplace_code")
+    codes = frontier.select("task_id", F.col("marketplace_code").alias("_frontier_marketplace")).distinct()
+    return (attempts.join(codes, "task_id", "left")
+            .withColumn("marketplace_code", F.coalesce(_audit_col(attempts, "marketplace_code"), F.col("_frontier_marketplace")))
+            .drop("_frontier_marketplace"))
+
+
 def _with_marketplace(attempts: DataFrame, runs: DataFrame) -> DataFrame:
     if "marketplace" in attempts.columns or "marketplace_code" in attempts.columns:
         return attempts.withColumn("_marketplace", F.coalesce(_audit_col(attempts, "marketplace"), _audit_col(attempts, "marketplace_code")))
     if "crawl_run_id" in attempts.columns and "crawl_run_id" in runs.columns:
-        run_marketplace = "marketplace" if "marketplace" in runs.columns else "marketplace_code"
+        # Only a column the frame actually has. Naming one it does not turns a
+        # missing-evidence problem into an unresolved-column stack trace that
+        # says nothing about the audit schema.
+        run_marketplace = next((name for name in ("marketplace", "marketplace_code") if name in runs.columns), None)
+        if run_marketplace is None:
+            raise ValueError(
+                "cannot resolve a marketplace for crawl attempts: neither the attempts nor the runs "
+                "frame carries marketplace or marketplace_code. Join the frontier with "
+                "attach_marketplace_code() before building coverage or reliability marts."
+            )
         return attempts.join(runs.select("crawl_run_id", F.col(run_marketplace).alias("_marketplace")), "crawl_run_id", "left")
-    return attempts.withColumn("_marketplace", F.lit("unknown"))
+    raise ValueError("cannot resolve a marketplace for crawl attempts: no marketplace column and no crawl_run_id to join on")
 
 
 def build_source_coverage_daily(observations: DataFrame, attempts: DataFrame, runs: DataFrame, *, as_of: datetime, stale_after_seconds: int, rule_version: str) -> DataFrame:

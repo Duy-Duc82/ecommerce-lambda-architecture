@@ -130,12 +130,16 @@ def deduplicate_marketplace_observations(flat: DataFrame) -> DataFrame:
 
 
 def read_crawl_audit(spark: SparkSession) -> tuple[DataFrame, DataFrame]:
+    from batch_layer.marketplace_marts import attach_marketplace_code
     from config.settings import POSTGRES_DB, POSTGRES_HOST, POSTGRES_PASSWORD, POSTGRES_PORT, POSTGRES_USER
     jdbc = f"jdbc:postgresql://{POSTGRES_HOST}:{POSTGRES_PORT}/{POSTGRES_DB}"
     props = {"user": POSTGRES_USER, "password": POSTGRES_PASSWORD, "driver": "org.postgresql.Driver"}
     attempts = spark.read.jdbc(jdbc, "audit.crawl_request_attempt", properties=props)
     runs = spark.read.jdbc(jdbc, "audit.crawl_run", properties=props)
-    return attempts, runs
+    # Neither attempt nor run rows name a marketplace code; the frontier does.
+    # Resolving it here keeps the marts free of a third audit frame.
+    frontier = spark.read.jdbc(jdbc, "audit.crawl_frontier", properties=props)
+    return attach_marketplace_code(attempts, frontier), runs
 
 
 def _join_uri(root: str, *parts: str) -> str:
