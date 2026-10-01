@@ -17,7 +17,7 @@ from typing import Any, Callable, Protocol
 
 from config.marketplace_schema import CrawlRun, CrawlRunStatus
 from crawler.audit import CrawlAttemptAudit, CrawlAuditRepository
-from crawler.contracts import AcquisitionStatus, Phase2AcquisitionReport
+from crawler.contracts import AcquisitionStatus, ObservationPublishError, Phase2AcquisitionReport
 from crawler.frontier import LeaseLostError, PostgresCrawlFrontier
 from crawler.scheduling import (
     CrawlTask,
@@ -225,6 +225,15 @@ class CrawlWorker:
         error = error or RuntimeError(
             getattr(getattr(report, "failure", None), "message", "acquisition failed")
         )
+        parsed_count = len(report.observations) if report else 0
+        if isinstance(error, ObservationPublishError):
+            # The fetch, raw write and parse all happened; only publication
+            # failed part-way. The report rides on the error so the audit can
+            # still name the raw artifact, and only the observations Kafka
+            # acknowledged count as parsed: nothing else can reach Silver, and
+            # Phase 7 check 8 reconciles exactly this number against it.
+            report = error.report
+            parsed_count = error.acknowledged
         http_status = _http_status(report, error)
         kind = classify_failure(error, http_status)
         decision = decide_retry(
@@ -248,7 +257,7 @@ class CrawlWorker:
                 latency_ms=int((completed_at - started_at).total_seconds() * 1000),
                 raw_artifact_id=getattr(getattr(report, "raw_artifact", None), "raw_artifact_id", None),
                 raw_uri=getattr(getattr(report, "raw_artifact", None), "raw_uri", None),
-                parsed_count=len(report.observations) if report else 0,
+                parsed_count=parsed_count,
                 rejected_count=len(report.rejections) if report else 0,
                 error_kind=kind,
                 error_message=str(error),
