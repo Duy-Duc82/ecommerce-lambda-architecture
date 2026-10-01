@@ -139,3 +139,53 @@ def test_change_publish_rejects_a_price_change_with_a_drifted_rule_version():
 
     with pytest.raises(Exception):
         publish_change(producer, forged)
+
+
+# ----------------------------------------------------------------------------
+# The factories must build a producer the installed client accepts. Every
+# test above uses a fake, which is how enable_idempotence — an option
+# kafka-python-ng does not have — survived until the first real start
+# (Phase 8 WP1, 2026-10-01). Checked against the client's own config table,
+# so no broker is needed.
+# ----------------------------------------------------------------------------
+from data_ingestion import marketplace_change_producer, marketplace_producer
+
+
+def _captured_config(monkeypatch, factory):
+    kafka = pytest.importorskip("kafka")
+    captured = {}
+
+    class RecordingProducer:
+        def __init__(self, **configs):
+            captured.update(configs)
+
+    monkeypatch.setattr(kafka, "KafkaProducer", RecordingProducer)
+    factory("localhost:9092")
+    return captured
+
+
+def _known_options():
+    from kafka.producer.kafka import KafkaProducer
+
+    return set(KafkaProducer.DEFAULT_CONFIG)
+
+
+@pytest.mark.parametrize("factory", [marketplace_producer.create_marketplace_producer, marketplace_change_producer.create_change_producer])
+def test_the_producer_factory_passes_only_options_the_client_knows(monkeypatch, factory):
+    captured = _captured_config(monkeypatch, factory)
+
+    unknown = set(captured) - _known_options()
+
+    assert unknown == set(), f"KafkaProducer would refuse {sorted(unknown)}"
+
+
+@pytest.mark.parametrize("factory", [marketplace_producer.create_marketplace_producer, marketplace_change_producer.create_change_producer])
+def test_the_producer_keeps_per_key_order_under_retries(monkeypatch, factory):
+    # Without idempotence, a retried batch can overtake the next one when more
+    # than one request is in flight. One in flight is what keeps an offer's
+    # observations, and its changes, in the order they were sent.
+    captured = _captured_config(monkeypatch, factory)
+
+    assert captured["acks"] == "all"
+    assert captured["retries"] > 0
+    assert captured["max_in_flight_requests_per_connection"] == 1
