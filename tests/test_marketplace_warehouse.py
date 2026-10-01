@@ -250,6 +250,10 @@ class FakeAudit:
     def mark_failed(self, **kwargs):
         self.log.append("audit.mark_failed")
 
+    def mark_promotion_refused(self, **kwargs):
+        self.log.append("audit.mark_promotion_refused")
+        self.promotion_refused = kwargs
+
 
 class FakeRepository:
     def __init__(self, log):
@@ -457,3 +461,106 @@ def test_the_pointer_moves_only_after_the_cache_is_published(monkeypatch):
 
     log = parts["log"]
     assert log.index("publisher.publish") < log.index("manifest.promote")
+
+
+# ----------------------------------------------------------------------------
+# A reprocessed older window. The manifest functions are the real ones over a
+# dict store, because the defect lives in how their verdict reaches publication.
+# ----------------------------------------------------------------------------
+REAL_MANIFEST = {
+    name: getattr(marketplace_manifest, name)
+    for name in ("build_gold_manifest", "read_current_manifest", "write_run_manifest", "promote_manifest")
+}
+
+
+class DictStore:
+    def __init__(self):
+        self.objects = {}
+
+    def write(self, zone, path, data):
+        self.objects[(zone, path)] = data
+        return f"s3a://{zone}/{path}"
+
+    def read(self, zone, path):
+        return self.objects.get((zone, path))
+
+
+def serving_a_newer_run(monkeypatch):
+    for name, function in REAL_MANIFEST.items():
+        monkeypatch.setattr(marketplace_manifest, name, function)
+    store = DictStore()
+    newer = MarketplaceBatchContext("run-2", AS_OF + timedelta(days=2), "file:///silver", "file:///gold")
+    verdict = QualityDecision(
+        run_id="run-2", passed=True, rule_version="quality-rules.v1", evaluated_at=newer.as_of,
+        mandatory_total=13, mandatory_failures=0, advisory_failures=0, skipped=0,
+    )
+    serving = marketplace_manifest.build_gold_manifest(
+        {name: GoldWriteResult(name, "file:///gold/" + name, 1) for name in DATASETS},
+        verdict, newer, previous_run_id=None,
+    )
+    marketplace_manifest.promote_manifest(serving, writer=store.write, reader=store.read)
+    return store
+
+
+def serving_run_id(store):
+    return marketplace_manifest.read_current_manifest(reader=store.read).run_id
+
+
+def test_a_refused_backfill_never_reaches_the_cache(monkeypatch):
+    # The pointer refuses to move backwards in time, but the cache publisher
+    # has no notion of time at all. Publishing first and asking the pointer
+    # afterwards replaced the serving cache with an older window while the
+    # pointer still named the newer run, and the run reported SUCCEEDED.
+    parts = wire_orchestration(monkeypatch)
+    store = serving_a_newer_run(monkeypatch)
+
+    result = run_marketplace_warehouse(batch_context(), writer=store.write, reader=store.read)
+
+    assert "publisher.stage" not in parts["log"]
+    assert "publisher.publish" not in parts["log"]
+    assert parts["publisher"].published is None
+    assert serving_run_id(store) == "run-2"
+    assert result.status == "GOLD_WRITTEN"
+    assert result.manifest_promoted is False
+    assert result.promotion_reason == marketplace_manifest.BACKFILL_REFUSED
+    # The run manifest still exists, so the held window stays inspectable.
+    assert store.read("gold", marketplace_manifest.run_manifest_path("run-1")) is not None
+
+
+def test_a_refused_backfill_is_closed_in_the_audit_row(monkeypatch):
+    parts = wire_orchestration(monkeypatch)
+    store = serving_a_newer_run(monkeypatch)
+
+    run_marketplace_warehouse(batch_context(), writer=store.write, reader=store.read)
+
+    assert parts["log"][-1] == "audit.mark_promotion_refused"
+    assert "audit.mark_failed" not in parts["log"]
+    held = parts["audit"].promotion_refused
+    assert held["run_id"] == "run-1"
+    assert held["reason"] == marketplace_manifest.BACKFILL_REFUSED
+    assert held["manifest_uri"].endswith(marketplace_manifest.run_manifest_path("run-1"))
+
+
+def test_an_allowed_backfill_publishes_then_moves_the_pointer(monkeypatch):
+    parts = wire_orchestration(monkeypatch)
+    store = serving_a_newer_run(monkeypatch)
+
+    result = run_marketplace_warehouse(batch_context(), allow_backfill=True, writer=store.write, reader=store.read)
+
+    assert "publisher.publish" in parts["log"]
+    assert serving_run_id(store) == "run-1"
+    assert result.status == "SUCCEEDED"
+    assert result.manifest_promoted is True
+    assert result.promotion_reason == marketplace_manifest.PROMOTED
+
+
+def test_a_refused_backfill_without_postgres_leaves_the_pointer_alone(monkeypatch):
+    wire_orchestration(monkeypatch)
+    store = serving_a_newer_run(monkeypatch)
+
+    result = run_marketplace_warehouse(batch_context(), publish_cache=False, writer=store.write, reader=store.read)
+
+    assert serving_run_id(store) == "run-2"
+    assert result.status == "GOLD_WRITTEN"
+    assert result.manifest_promoted is False
+    assert result.promotion_reason == marketplace_manifest.BACKFILL_REFUSED
