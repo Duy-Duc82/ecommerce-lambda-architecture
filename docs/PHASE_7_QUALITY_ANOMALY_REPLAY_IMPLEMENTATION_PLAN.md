@@ -933,7 +933,10 @@ Algorithm, replacing Phase 6 steps 6–9:
     do not publish, do not promote, and return with
     `promotion_reason = BACKFILL_REFUSED`;
 12. otherwise stage all ten marts, publish in one transaction with the decision,
-    clean up staging, and **only then** promote the pointer;
+    clean up staging, and **only then** promote the pointer. The publish
+    transaction records `cache_published = TRUE` and `manifest_promoted = FALSE`;
+    `manifest_promoted` becomes `TRUE` in its own update after the pointer
+    write, when the pointer moved or already named this run;
 13. unpersist frames and stop owned Spark resources in `finally`;
 14. on any other error, record `FAILED` best-effort and re-raise.
 
