@@ -199,10 +199,20 @@ MARKETPLACE_ANOMALY_MIN_SAMPLES = int(os.getenv("MARKETPLACE_ANOMALY_MIN_SAMPLES
 MARKETPLACE_ANOMALY_MAD_THRESHOLD = _env_decimal("MARKETPLACE_ANOMALY_MAD_THRESHOLD", "3.5")
 MARKETPLACE_ANOMALY_IQR_MULTIPLIER = _env_decimal("MARKETPLACE_ANOMALY_IQR_MULTIPLIER", "1.5")
 
-# Phase 7 quality gate. The tolerance absorbs clock skew between a source and
-# this pipeline; anything beyond it is a real ordering defect, not jitter.
-MARKETPLACE_QUALITY_RULE_VERSION = os.getenv("MARKETPLACE_QUALITY_RULE_VERSION", "quality-rules.v1")
+# Phase 7 quality gate. The tolerance absorbs clock skew between the fetch of
+# a response and the observation it yields; anything beyond it is a real
+# ordering defect, not jitter. v2: check 6 judges a row against its own fetch,
+# and check 8 reconciles only settled crawl runs inside the lookback.
+MARKETPLACE_QUALITY_RULE_VERSION = os.getenv("MARKETPLACE_QUALITY_RULE_VERSION", "quality-rules.v2")
 MARKETPLACE_QUALITY_FUTURE_TOLERANCE_SECONDS = int(os.getenv("MARKETPLACE_QUALITY_FUTURE_TOLERANCE_SECONDS", "300"))
+# A crawl run is reconciled against Silver only once it has been finished for
+# the settle delay, which covers Kafka-to-Silver lag, and only while it is
+# inside the lookback. The lookback must exceed the gap between batch runs plus
+# the settle delay, or a run could settle and age out between two batches
+# without ever being reconciled. It also bounds how long one discrepancy can
+# hold publication back.
+MARKETPLACE_QUALITY_RECONCILIATION_SETTLE_SECONDS = int(os.getenv("MARKETPLACE_QUALITY_RECONCILIATION_SETTLE_SECONDS", "900"))
+MARKETPLACE_QUALITY_RECONCILIATION_LOOKBACK_SECONDS = int(os.getenv("MARKETPLACE_QUALITY_RECONCILIATION_LOOKBACK_SECONDS", "172800"))
 # A failure sample exists to point a human at the first few offending rows, so
 # it stays small and carries identifiers only.
 MARKETPLACE_QUALITY_SAMPLE_LIMIT = int(os.getenv("MARKETPLACE_QUALITY_SAMPLE_LIMIT", "10"))
@@ -240,6 +250,8 @@ def validate_marketplace_settings() -> None:
         "MARKETPLACE_ANOMALY_MIN_SAMPLES": MARKETPLACE_ANOMALY_MIN_SAMPLES,
         "MARKETPLACE_QUALITY_FUTURE_TOLERANCE_SECONDS": MARKETPLACE_QUALITY_FUTURE_TOLERANCE_SECONDS,
         "MARKETPLACE_QUALITY_SAMPLE_LIMIT": MARKETPLACE_QUALITY_SAMPLE_LIMIT,
+        "MARKETPLACE_QUALITY_RECONCILIATION_SETTLE_SECONDS": MARKETPLACE_QUALITY_RECONCILIATION_SETTLE_SECONDS,
+        "MARKETPLACE_QUALITY_RECONCILIATION_LOOKBACK_SECONDS": MARKETPLACE_QUALITY_RECONCILIATION_LOOKBACK_SECONDS,
     }
     if any(value <= 0 for value in positive.values()):
         bad = next(name for name, value in positive.items() if value <= 0)
@@ -248,6 +260,9 @@ def validate_marketplace_settings() -> None:
         # Otherwise no row could ever reach the minimum and the whole mart would
         # read INSUFFICIENT_HISTORY without anything looking broken.
         raise ValueError("MARKETPLACE_ANOMALY_MIN_SAMPLES cannot exceed MARKETPLACE_ANOMALY_WINDOW_DAYS")
+    if MARKETPLACE_QUALITY_RECONCILIATION_LOOKBACK_SECONDS <= MARKETPLACE_QUALITY_RECONCILIATION_SETTLE_SECONDS:
+        # An empty window would reconcile nothing and pass every run.
+        raise ValueError("MARKETPLACE_QUALITY_RECONCILIATION_LOOKBACK_SECONDS must exceed MARKETPLACE_QUALITY_RECONCILIATION_SETTLE_SECONDS")
     if MARKETPLACE_ANOMALY_MAD_THRESHOLD <= 0:
         raise ValueError("MARKETPLACE_ANOMALY_MAD_THRESHOLD must be positive")
     if MARKETPLACE_ANOMALY_IQR_MULTIPLIER <= 0:

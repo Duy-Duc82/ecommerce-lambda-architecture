@@ -161,7 +161,7 @@ def _counted(
 
 def _silver_row_checks(observations: DataFrame, context: "MarketplaceBatchContext") -> dict[str, Column]:
     """The seven row-level Silver predicates, each True when the row offends."""
-    future_limit = context.as_of + timedelta(seconds=context.future_tolerance_seconds)
+    tolerance = F.expr(f"INTERVAL {int(context.future_tolerance_seconds)} SECONDS")
     blank = lambda name: F.col(name).isNull() | (F.trim(F.col(name)) == "")  # noqa: E731
     return {
         "raw_artifact_checksum_and_uri_present":
@@ -174,10 +174,15 @@ def _silver_row_checks(observations: DataFrame, context: "MarketplaceBatchContex
         "price_non_negative":
             (F.col("current_price") < F.lit(0))
             | (F.col("list_price").isNotNull() & (F.col("list_price") < F.lit(0))),
-        # The boundary is inclusive: a row exactly at as_of plus the tolerance
-        # is still acceptable clock skew.
+        # Judged against the row's own fetch and production, not the run's
+        # as_of: the orchestrator cut everything after as_of before this
+        # point, so that comparison could never fire. An observation claiming
+        # a time after the response that yielded it, or after the message that
+        # carried it, is a clock or parsing defect. least() skips a missing
+        # timestamp; a missing fetched_at is check 2's to report. The boundary
+        # is inclusive.
         "observed_at_within_future_tolerance":
-            F.col("observed_at") > F.lit(future_limit).cast("timestamp"),
+            F.col("observed_at") > F.least(F.col("fetched_at"), F.col("produced_at")) + tolerance,
         "currency_valid":
             F.col("currency").isNull() | ~F.col("currency").rlike(_ISO_CURRENCY)
             | ~F.col("currency").isin(list(context.allowed_currencies)),
@@ -218,7 +223,7 @@ def _evaluate_silver(observations: DataFrame, context: "MarketplaceBatchContext"
 
 
 def _evaluate_audit_reconciliation(
-    observations: DataFrame, attempts: DataFrame, context: "MarketplaceBatchContext"
+    observations: DataFrame, attempts: DataFrame, runs: DataFrame, context: "MarketplaceBatchContext"
 ) -> QualityResult:
     name = "silver_parse_attempt_reconciliation"
     missing = {"crawl_run_id", "parsed_count"} - set(attempts.columns)
@@ -227,19 +232,34 @@ def _evaluate_audit_reconciliation(
             name, context, status=SKIPPED, observed_value=None,
             reason=f"crawl attempt audit lacks {','.join(sorted(missing))}",
         )
+    if "completed_at" not in runs.columns:
+        return _result(name, context, status=SKIPPED, observed_value=None, reason="crawl run audit lacks completed_at")
     if attempts.limit(1).count() == 0:
         # Not a pass. Without audit evidence the reconciliation has nothing to
         # compare against, and a mandatory skip fails the gate in decide().
         return _result(name, context, status=SKIPPED, observed_value=None, reason="crawl attempt audit is empty")
 
-    silver_runs = observations.groupBy("crawl_run_id").agg(F.count(F.lit(1)).alias("_silver_rows"))
+    silver_runs = observations.groupBy("crawl_run_id").agg(
+        F.count(F.lit(1)).alias("_silver_rows"), F.max("observed_at").alias("_last_observed_at"),
+    )
     audit_runs = attempts.groupBy("crawl_run_id").agg(F.sum("parsed_count").alias("_parsed"))
-    # Left join: only crawl runs present in this input are reconciled, so a run
-    # whose observations fall outside the read window is not a discrepancy. A
-    # run present in Silver with no audit row is one, because those rows have
-    # no recorded provenance.
+    run_ends = runs.select("crawl_run_id", F.col("completed_at").alias("_completed_at"), F.lit(True).alias("_audited"))
+    # A run is judged once it has been finished for the settle delay, so rows
+    # still on their way from Kafka to Silver are lag, not loss, and the next
+    # run picks it up. It stops being judged once it leaves the lookback, so a
+    # discrepancy already reported cannot hold publication back forever. A
+    # run still in progress has no end yet and waits. Rows with no audit run
+    # at all are placed by their last observation, and inside the window they
+    # are a discrepancy, because they have no recorded provenance.
+    settled_at = F.when(F.col("_audited"), F.col("_completed_at")).otherwise(F.col("_last_observed_at"))
+    newest = F.lit(context.as_of - timedelta(seconds=context.reconciliation_settle_seconds)).cast("timestamp")
+    oldest = F.lit(context.as_of - timedelta(seconds=context.reconciliation_lookback_seconds)).cast("timestamp")
+    # Left joins: only crawl runs present in this input are reconciled. A run
+    # absent from Silver altogether is not detected here.
     mismatched = (
         silver_runs.join(audit_runs, "crawl_run_id", "left")
+        .join(run_ends, "crawl_run_id", "left")
+        .filter(settled_at.isNotNull() & (settled_at <= newest) & (settled_at >= oldest))
         .filter(F.coalesce(F.col("_parsed"), F.lit(-1)) != F.col("_silver_rows"))
     )
     return _counted(name, context, violations=mismatched.count(), frame=mismatched, key=F.col("crawl_run_id"))
@@ -383,9 +403,9 @@ def evaluate_quality_gates(
 ) -> tuple[QualityResult, ...]:
     """Run every registered rule and return exactly one result for each.
 
-    ``runs`` is accepted for symmetry with the mart builders and the plan's
-    signature; the reconciliation reads its evidence from ``attempts``, which
-    is where parsed counts live.
+    The reconciliation reads parsed counts from ``attempts`` and each crawl
+    run's completion time from ``runs``, which decides whether the run has
+    settled and is still inside the lookback.
     """
     required = {rule.dataset_name for rule in QUALITY_RULES} - {"silver", "audit"}
     absent = required - set(marts)
@@ -393,7 +413,7 @@ def evaluate_quality_gates(
         raise ValueError(f"quality evaluation needs these marts: {sorted(absent)}")
 
     results, silver_rows = _evaluate_silver(observations, context)
-    results.append(_evaluate_audit_reconciliation(observations, attempts, context))
+    results.append(_evaluate_audit_reconciliation(observations, attempts, runs, context))
     results.extend(_evaluate_gold(observations, marts, context, silver_rows))
     results.extend(_evaluate_advisory(marts, context, silver_rows))
 
