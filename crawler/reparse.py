@@ -32,6 +32,7 @@ PARSE_FAILED = "PARSE_FAILED"
 ADAPTER_VERSION_CHANGED = "ADAPTER_VERSION_CHANGED"
 
 BRONZE_ZONE = "bronze"
+SILVER_ZONE = "silver"
 
 Reader = Callable[[str, str], "bytes | None"]
 
@@ -81,6 +82,8 @@ class ReparseOutcome:
     diverged_observation_ids: tuple[str, ...] = ()
     error_type: str | None = None
     error_message: str | None = None
+    # observation_id -> where the original ingest landed it in Silver.
+    silver_paths: Mapping[str, str] = field(default_factory=dict)
 
     @property
     def ok(self) -> bool:
@@ -169,7 +172,8 @@ def _rebuild(ref: RawArtifactRef, metadata: Mapping[str, Any], body: bytes):
 
 
 def reparse_raw_artifact(
-    ref: RawArtifactRef, *, adapter, reader: Reader, clock: Callable[[], datetime]
+    ref: RawArtifactRef, *, adapter, reader: Reader, clock: Callable[[], datetime],
+    silver_dataset: str | None = None,
 ) -> ReparseOutcome:
     """Re-run the adapter over a stored body in the mandatory order."""
     try:
@@ -202,12 +206,35 @@ def reparse_raw_artifact(
     except Exception as error:
         return ReparseOutcome(ref.raw_artifact_id, PARSE_FAILED, error_type=type(error).__name__, error_message=str(error))
 
+    from data_ingestion.marketplace_silver_sink import silver_observation_path
+
     hashes = {observation.event_id: content_hash(observation) for observation in parsed.observations}
+    paths = {
+        observation.event_id: silver_observation_path(observation, *([silver_dataset] if silver_dataset else []))
+        for observation in parsed.observations
+    }
     return ReparseOutcome(
         ref.raw_artifact_id, IDENTICAL,
         observation_ids=tuple(sorted(hashes)),
         content_hashes=hashes,
+        silver_paths=paths,
     )
+
+
+def read_silver_hashes(outcome: ReparseOutcome, *, reader: Reader) -> dict[str, str]:
+    """Content hashes of the Silver records a reparse should match.
+
+    Silver holds one object per observation at a path derived from the event,
+    so the existing side is a handful of direct reads, not a scan. An absent
+    object is simply missing from the result, which ``classify`` reports as
+    ``NEW_OBSERVATIONS``.
+    """
+    existing = {}
+    for observation_id, path in outcome.silver_paths.items():
+        payload = reader(SILVER_ZONE, path)
+        if payload is not None:
+            existing[observation_id] = content_hash(json.loads(payload.decode("utf-8")))
+    return existing
 
 
 def diff_reparsed_observations(
@@ -255,11 +282,25 @@ def reparse_batch(
     reader: Reader,
     clock: Callable[[], datetime],
     existing: Mapping[str, str] | None = None,
+    silver_reader: Reader | None = None,
+    silver_dataset: str | None = None,
 ) -> tuple[ReparseOutcome, ...]:
+    """Reparse every artifact and grade it against Silver.
+
+    The existing side comes from ``existing`` when given, otherwise from
+    reading Silver through ``silver_reader``. With neither, an outcome is
+    ungraded, which only a unit test should ever want.
+    """
     outcomes = []
     for ref in refs:
-        outcome = reparse_raw_artifact(ref, adapter=adapter_for(ref.marketplace_code), reader=reader, clock=clock)
-        outcomes.append(outcome if existing is None else classify(outcome, existing))
+        outcome = reparse_raw_artifact(
+            ref, adapter=adapter_for(ref.marketplace_code), reader=reader, clock=clock, silver_dataset=silver_dataset,
+        )
+        if existing is not None:
+            outcome = classify(outcome, existing)
+        elif silver_reader is not None:
+            outcome = classify(outcome, read_silver_hashes(outcome, reader=silver_reader))
+        outcomes.append(outcome)
     return tuple(outcomes)
 
 
@@ -292,9 +333,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--hour", required=True)
     parser.add_argument("--crawl-run-id", required=True)
     parser.add_argument("--raw-artifact-id", required=True, action="append")
+    parser.add_argument("--silver-dataset", default=None, help="Silver dataset prefix the ingest landed observations under")
+    parser.add_argument("--report-path", default=None, help="also write the report to this local file")
     args = parser.parse_args(argv)
 
-    from common.object_store import get_bytes
+    import common.object_store as object_store
     from crawler.sites.tiki import TikiCrawler
 
     adapters = {"tiki": TikiCrawler}
@@ -304,11 +347,20 @@ def main(argv: Sequence[str] | None = None) -> int:
     ]
     outcomes = reparse_batch(
         refs,
-        adapter_for=lambda code: adapters[code](),
-        reader=get_bytes,
+        # Parse-only: no categories to crawl, and no robots.txt fetch, so a
+        # verification run never reaches the marketplace.
+        adapter_for=lambda code: adapters[code](categories=[], fetch_robots=False),
+        reader=object_store.get_bytes,
         clock=lambda: datetime.now(timezone.utc),
+        silver_reader=object_store.get_bytes,
+        silver_dataset=args.silver_dataset,
     )
-    print(json.dumps(summarise(outcomes, reported_at=datetime.now(timezone.utc)), ensure_ascii=False, sort_keys=True))
+    report = json.dumps(summarise(outcomes, reported_at=datetime.now(timezone.utc)), ensure_ascii=False, sort_keys=True)
+    print(report)
+    if args.report_path:
+        from pathlib import Path
+
+        Path(args.report_path).write_text(report, encoding="utf-8")
     return 0 if all(outcome.ok for outcome in outcomes) else 1
 
 
