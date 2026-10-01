@@ -100,7 +100,7 @@ Phase 5/6 chỉ nằm ở ngọn một nhánh feature, không có ở commit g�
    thiếu plan, dừng lại và hỏi — không tự viết plan mới.
 4. Đổi ranh giới phase phải sửa file này trước, theo Brief §27 change-control.
 
-## 5. Trạng thái hiện tại (2026-09-30)
+## 5. Trạng thái hiện tại (2026-10-01)
 
 | Phase | Tuần | Trạng thái | Test |
 |---|---|---|---|
@@ -109,33 +109,59 @@ Phase 5/6 chỉ nằm ở ngọn một nhánh feature, không có ở commit g�
 | 3 | 3 | ✅ trong `develop` | 113 (đủ 30/30 item) |
 | 4 | 4 | ✅ trong `develop` | |
 | 5 | 5 | ✅ trong `develop` | đủ 38/38 item |
-| 6 | 6 | ✅ trong `develop` | 43/47 item |
-| 7 | 7 | 🔵 xong trên `phase-7-quality-anomaly-replay`, chờ PR vào `develop` | 59/61 item |
+| 6 | 6 | ✅ trong `develop` | **47/47 item** |
+| 7 | 7 | 🔵 xong trên `phase-7-quality-anomaly-replay`, chờ PR vào `develop` | **61/61 item** |
 | 8 | 8 | ⏳ chưa bắt đầu | P1-12, Kibana (P1-11) |
 | 9 | 9 | ⏳ chưa bắt đầu | P2-* |
 
 **Phase 1–6 đã xong** và nằm trong `develop`. Phase 7 (P1-08 quality gates,
-P1-09 gold publish manifest) xong trên nhánh của nó, 9 commit.
-Suite: **619 pass, 0 fail, 0 skip** (trước Phase 7 là 519).
+P1-09 gold publish manifest) xong trên nhánh của nó.
+Suite: **624 pass, 0 fail, 0 skip** (trước Phase 7 là 519).
 
-Bốn item Phase 6 chưa phủ là 33–35 và 43: cần chạy thật
-`run_marketplace_warehouse` end-to-end (ghi Parquet + publish Postgres),
-không phải unit test.
+**Nợ cũ đã đóng bằng chạy thật (2026-10-01).** Bốn item Phase 6 (33–35, 43) và
+hai item Phase 7 (56, 58) đều được kiểm bằng `run_marketplace_warehouse` chạy
+end-to-end trên PostgreSQL thật với 48 observation seed từ chính factory của
+project. Chi tiết bằng chứng ở `PROGRESS.md` §10.
 
-Hai item Phase 7 chưa phủ là 56 và 58, cùng lý do: cần PostgreSQL thật để
-chứng minh publish fail giữ nguyên **cả** cache cũ **lẫn** con trỏ manifest cũ,
-và để rerun cùng context ra manifest giống nhau từng byte end-to-end. Phần
-byte-stability của manifest đã có unit test (`test_marketplace_manifest.py`
-item 33); phần còn thiếu là lần chạy thật.
+Lần chạy đó phát hiện **hai bug production** mà không unit test nào lộ ra, cả
+hai đã sửa trên nhánh Phase 7 (commit test riêng, commit fix riêng):
 
-**Lỗi đặc tả cần sửa ở Phase 8:** cả plan Phase 6 §16 lẫn plan Phase 7 §18 đều
-mô tả một "offline smoke với `--skip-postgres`". Smoke đó không chạy được:
-`run_marketplace_warehouse` gọi `read_crawl_audit()` vô điều kiện và hàm này
-đọc `audit.crawl_request_attempt`/`audit.crawl_run` qua JDBC, vì hai mart
-`source_coverage_daily` và `crawl_reliability_daily` bắt buộc cần bằng chứng
-audit. `--skip-postgres` chỉ bỏ qua publish. Phase 8 sở hữu Compose profile và
-one-command smoke, nên đường chạy offline (hoặc một profile tối thiểu có
-Postgres) thuộc về phase đó — không sửa lén trong Phase 7.
+- `_with_marketplace()` chọn cột `marketplace_code` từ `audit.crawl_run`, bảng
+  đó chỉ có `marketplace_id`. Hai trong chín mart Phase 6
+  (`source_coverage_daily`, `crawl_reliability_daily`) chưa từng dựng được trên
+  schema thật. Fixture audit của Phase 6 khai cột theo cái code cần chứ không
+  theo `scripts/init_postgres.sql`, nên cả 43 test đều mù.
+- Con trỏ manifest được promote **trước** khi publish cache. Publish fail thì
+  cache rollback đúng nhưng con trỏ đã nhảy sang run hỏng. Nguyên nhân gốc là
+  plan Phase 7 tự mâu thuẫn — §13 đòi giữ con trỏ, §14 bước 11 bảo promote
+  trước; §14 đã được sửa.
+
+## 5b. Ba hạn chế môi trường, để lại cho Phase 8
+
+Phát hiện khi chạy thật, chưa sửa, đều nằm ngoài phạm vi Phase 7:
+
+1. **Spark không truy cập được filesystem trên Windows host** — thiếu
+   `winutils.exe`/`hadoop.dll`, ném `UnsatisfiedLinkError:
+   NativeIO$Windows.access0`. Mọi lần chạy thật phải trong container Linux.
+   Đây là lý do item 33–35 và 43 treo từ Phase 6; unit test không lộ vì chúng
+   chỉ dùng `createDataFrame` trong bộ nhớ.
+2. **`build_spark()` của marketplace job không gọi `spark_hadoop_options()`** —
+   chỉ `warehouse_job.py` legacy gọi. Job này do đó không có credential S3A và
+   **đường `s3a://` chưa từng được kiểm chứng lần nào**. Lần chạy 2026-10-01
+   dùng lake `file://`.
+3. **`docker/spark-warehouse/Dockerfile` pin `apache/spark:3.5.1`** — mâu thuẫn
+   với ràng buộc pyspark 4.x ở §6, và chỉ có entrypoint cho `warehouse_job.py`
+   legacy.
+
+Hệ quả: Compose profile và one-command smoke của Phase 8 phải dựng đường chạy
+Linux cho marketplace batch, và muốn dùng MinIO thì phải nối
+`spark_hadoop_options()` vào `build_spark()` trước.
+
+Điều này cũng giải thích **"offline smoke với `--skip-postgres`"** mà plan
+Phase 6 §16 và Phase 7 §18 mô tả: smoke đó không chạy được, vì
+`read_crawl_audit()` được gọi vô điều kiện (hai mart coverage/reliability bắt
+buộc cần bằng chứng audit qua JDBC) còn `--skip-postgres` chỉ bỏ qua publish.
+Sửa chỗ này thuộc Phase 8.
 
 Các nhánh cũ `phase-1-marketplace-foundation`, `phase-3-4-scheduler-kafka-silver`,
 `phase-5-6-speed-gold` có trước mô hình `develop`; giữ làm lịch sử, công việc
