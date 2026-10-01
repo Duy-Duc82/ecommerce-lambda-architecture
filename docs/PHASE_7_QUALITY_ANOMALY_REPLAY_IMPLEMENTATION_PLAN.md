@@ -913,14 +913,20 @@ Algorithm, replacing Phase 6 steps 6–9:
    run manifest;
 10. if the decision failed: mark `QUALITY_FAILED` with the manifest URI, do not
     promote, do not stage, do not publish, raise `QualityGateFailure`;
-11. otherwise promote the pointer, then stage all ten marts and publish in one
-    transaction with the decision, then clean up staging;
+11. otherwise stage all ten marts, publish in one transaction with the decision,
+    clean up staging, and **only then** promote the pointer;
 12. unpersist frames and stop owned Spark resources in `finally`;
 13. on any other error, record `FAILED` best-effort and re-raise.
 
 Step 8 precedes step 10 deliberately. Step 9 precedes step 10 deliberately.
 Both exist so a refused run is fully documented in both PostgreSQL and object
 storage before the refusal propagates.
+
+Promotion is the last thing that happens, and only once everything the pointer
+would advertise actually exists. An earlier draft of this section promoted
+before publishing, which contradicted Section 13: a live run with a forced
+insert failure then rolled the cache back correctly while leaving the pointer
+advanced onto a Gold run whose cache was never written.
 
 New CLI flags on top of Phase 6's:
 

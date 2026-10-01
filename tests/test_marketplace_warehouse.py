@@ -358,14 +358,14 @@ def empty_reader(*args):
     return None
 
 
-def test_a_passing_run_promotes_before_it_publishes(monkeypatch):
+def test_a_passing_run_publishes_before_it_promotes(monkeypatch):
     parts = wire_orchestration(monkeypatch)
 
     result = run_marketplace_warehouse(batch_context(), writer=noop_writer, reader=empty_reader)
 
     assert parts["log"] == [
-        "audit.start_run", "audit.mark_gold_written", "quality.record",
-        "manifest.promote", "publisher.stage", "publisher.publish", "publisher.cleanup",
+        "audit.start_run", "audit.mark_gold_written", "quality.record", "manifest.write_run",
+        "publisher.stage", "publisher.publish", "publisher.cleanup", "manifest.promote",
     ]
     assert result.status == "SUCCEEDED"
     assert result.manifest_promoted is True
@@ -427,7 +427,7 @@ def test_skipping_postgres_still_evaluates_and_promotes(monkeypatch):
         batch_context(), publish_cache=False, writer=noop_writer, reader=empty_reader
     )
 
-    assert parts["log"] == ["manifest.promote"]
+    assert parts["log"] == ["manifest.write_run", "manifest.promote"]
     assert result.status == "GOLD_WRITTEN"
     assert result.manifest_promoted is True
 
