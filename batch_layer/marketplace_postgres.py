@@ -81,7 +81,7 @@ class MarketplaceBatchAudit:
         with self.connection_factory() as conn, conn.cursor() as cur:
             cur.execute("UPDATE audit.marketplace_batch_run SET manifest_promoted=%s WHERE run_id=%s", (promoted, run_id))
 
-    def mark_held(self, *, run_id: str, completed_at: datetime, reason: str, manifest_uri: str) -> None:
+    def mark_held(self, *, run_id: str, completed_at: datetime, reason: str, manifest_uri: str | None) -> None:
         # GOLD_WRITTEN, not SUCCEEDED: the run passed its gate but was held back
         # from serving — a refused backfill, or an inspection with
         # --quality-only — so it stays resumable once an operator opts in.

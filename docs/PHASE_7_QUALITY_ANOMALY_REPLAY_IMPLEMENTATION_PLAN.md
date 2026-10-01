@@ -978,6 +978,13 @@ python -m batch_layer.marketplace_warehouse `
   persistence, since there is no database; the manifest is still written and,
   when the gate passes, promoted.
 
+- `--gold-root-uri` other than the configured default makes a scratch run.
+  Manifests and `current.json` live at one fixed place in the active storage
+  profile, not under the Gold root, so a scratch run is judged and its quality
+  results recorded but it writes no manifest, publishes nothing, promotes
+  nothing, and is held with reason `SCRATCH_GOLD_ROOT`. Otherwise a replay into
+  a scratch root could promote the production pointer onto scratch datasets.
+
 The process exits non-zero on `QualityGateFailure`, and the printed JSON names
 the failing mandatory check names so a CI log is enough to diagnose the refusal.
 
