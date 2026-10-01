@@ -168,8 +168,10 @@ MARKETPLACE_ANOMALY_WINDOW_DAYS = 14
 MARKETPLACE_ANOMALY_MIN_SAMPLES = 7
 MARKETPLACE_ANOMALY_MAD_THRESHOLD = "3.5"
 MARKETPLACE_ANOMALY_IQR_MULTIPLIER = "1.5"
-MARKETPLACE_QUALITY_RULE_VERSION = "quality-rules.v1"
+MARKETPLACE_QUALITY_RULE_VERSION = "quality-rules.v2"   # v1 before the as_of cut, see 7.1
 MARKETPLACE_QUALITY_FUTURE_TOLERANCE_SECONDS = 300
+MARKETPLACE_QUALITY_RECONCILIATION_SETTLE_SECONDS = 900
+MARKETPLACE_QUALITY_RECONCILIATION_LOOKBACK_SECONDS = 172800
 MARKETPLACE_QUALITY_SAMPLE_LIMIT = 10
 MARKETPLACE_ALLOWED_CURRENCIES = "VND,USD"
 MARKETPLACE_MANIFEST_SCHEMA_VERSION = "marketplace-gold-manifest.v1"
@@ -191,6 +193,8 @@ anomaly_iqr_multiplier: Decimal = Decimal(MARKETPLACE_ANOMALY_IQR_MULTIPLIER)
 anomaly_rule_version: str = MARKETPLACE_ANOMALY_RULE_VERSION
 quality_rule_version: str = MARKETPLACE_QUALITY_RULE_VERSION
 future_tolerance_seconds: int = MARKETPLACE_QUALITY_FUTURE_TOLERANCE_SECONDS
+reconciliation_settle_seconds: int = MARKETPLACE_QUALITY_RECONCILIATION_SETTLE_SECONDS
+reconciliation_lookback_seconds: int = MARKETPLACE_QUALITY_RECONCILIATION_LOOKBACK_SECONDS
 allowed_currencies: tuple[str, ...] = ("VND", "USD")
 ```
 
@@ -201,6 +205,8 @@ Additional `__post_init__` rules:
 - `anomaly_min_samples <= anomaly_window_days`, otherwise no row can ever be
   evaluated and the mart would silently be all `INSUFFICIENT_HISTORY`;
 - `anomaly_mad_threshold` and `anomaly_iqr_multiplier` are positive Decimals;
+- both reconciliation windows are positive and the lookback exceeds the settle
+  delay, otherwise check 8 would reconcile nothing and pass every run;
 - `allowed_currencies` is a non-empty tuple of distinct `^[A-Z]{3}$` codes,
   normalised and sorted so the manifest is deterministic;
 - `anomaly_rule_version` and `quality_rule_version` are non-empty.
@@ -388,9 +394,9 @@ produce exactly these thirteen with severity `MANDATORY`, no more and no fewer.
 | 3 | `observation_id_unique` | `count(distinct observation_id) = count(*)` |
 | 4 | `offer_key_and_price_complete` | `offer_id`, `marketplace`, `observed_at` and `current_price` are all non-null |
 | 5 | `price_non_negative` | `current_price >= 0` and `list_price` is null or `>= 0` |
-| 6 | `observed_at_within_future_tolerance` | `observed_at <= as_of + future_tolerance_seconds` |
+| 6 | `observed_at_within_future_tolerance` | `observed_at <= least(fetched_at, produced_at) + future_tolerance_seconds` |
 | 7 | `currency_valid` | `currency` matches `^[A-Z]{3}$` and is in `allowed_currencies` |
-| 8 | `silver_parse_attempt_reconciliation` | Silver observation count equals audit `parsed_count` for the same crawl runs |
+| 8 | `silver_parse_attempt_reconciliation` | Silver observation count equals audit `parsed_count` for the same crawl runs, over runs settled inside the lookback |
 | 9 | `offer_listing_key_unique` | no `(marketplace_id, platform_listing_id)` maps to more than one `offer_id` |
 | 10 | `offer_current_single_row_per_offer` | `offer_current` has exactly one row per `offer_id` |
 | 11 | `gold_daily_row_count_reconciles` | `sum(offer_price_history_daily.observation_count)` equals the deduplicated Silver row count |
@@ -399,14 +405,34 @@ produce exactly these thirteen with severity `MANDATORY`, no more and no fewer.
 
 Notes that change the implementation:
 
+- **The run reads Silver and audit as of its `as_of`** (amended 2026-10-01).
+  The first version of this plan spoke of a "read window" that no code
+  implemented: the run read all of Silver, so a backfill over a Silver that
+  kept growing always failed check 6, and a rerun stopped being a replay once
+  Silver grew. The orchestrator now keeps observations with
+  `observed_at <= as_of`, attempts with `completed_at <= as_of` and crawl runs
+  with `started_at <= as_of`, before deduplication. Checks 6 and 8 changed
+  meaning with it, so the rule version moved to `quality-rules.v2`.
 - Check 8 reads `audit.crawl_request_attempt` and `audit.crawl_run`. It
   reconciles only over crawl run IDs actually present in this run's Silver
-  input; a crawl run whose observations are outside the read window is not a
-  discrepancy. The check is `SKIPPED` — not `PASS` — when the audit frames are
-  empty, so an unavailable audit database can never be read as a green gate.
+  input, and among those only runs that **settled**
+  (`completed_at <= as_of - reconciliation_settle_seconds`) and are **still
+  inside the lookback** (`completed_at >= as_of - reconciliation_lookback_seconds`).
+  The settle delay covers Kafka-to-Silver lag, so a run still landing is not
+  reported as loss; the lookback bounds how long one discrepancy can hold
+  publication back. A run still `RUNNING` waits. Silver rows whose crawl run
+  has no audit row are placed by their last `observed_at` and, inside the
+  window, are a discrepancy. The lookback must exceed the gap between batch
+  runs plus the settle delay, or a run could settle and age out unreconciled.
+  A crawl run absent from Silver altogether is still not detected. The check
+  is `SKIPPED` — not `PASS` — when the attempt audit is empty or the run audit
+  lacks `completed_at`, so an unavailable audit database can never be read as
+  a green gate.
 - Check 12 recomputes from Silver rather than trusting the mart, which is the
   entire point; comparing the mart against itself would always pass.
-- Check 6 uses `context.as_of`, never a wall clock.
+- Check 6 compares each row with its own `fetched_at` and `produced_at`,
+  never a wall clock. It used to compare with `context.as_of`; after the cut
+  that comparison could never fire.
 
 ### 7.2 The four advisory checks
 
@@ -880,7 +906,10 @@ Read-only by construction is what makes it safe to run against production data.
 No new module. These are behaviours the existing code must exhibit, each with a
 test in Section 17:
 
-- rerunning the same `run_id` with the same Silver produces identical Gold rows
+- rerunning the same `run_id` produces identical Gold rows even after Silver
+  grew with observations later than its `as_of`, because the run reads Silver
+  as of then. A row observed before `as_of` that landed late still changes
+  the rerun; that is new evidence, not drift
   (Phase 6 already), identical quality results, and byte-identical manifest
   bytes;
 - a rerun after a `QUALITY_FAILED` run is allowed with `--resume` and the same
@@ -916,8 +945,8 @@ class MarketplaceBatchResult:
 Algorithm, replacing Phase 6 steps 6–9:
 
 1. record `RUNNING`;
-2. read, flatten, validate and deduplicate Silver; cache once;
-3. read Phase 3 audit tables;
+2. read, flatten and validate Silver, cut it at `as_of`, deduplicate; cache once;
+3. read Phase 3 audit tables and cut them at `as_of`;
 4. build all ten marts, including `price_anomaly_daily`;
 5. write run-scoped Gold for all ten datasets;
 6. mark `GOLD_WRITTEN` with URIs and counts;
@@ -1067,11 +1096,15 @@ connections, and no network or service container.
 20. each of the thirteen mandatory checks fails on a targeted corrupted fixture
     and passes on the clean fixture — thirteen focused cases, not one blanket
     assertion;
-21. check 6 uses `context.as_of` and its tolerance boundary is inclusive;
+21. check 6 judges a row against its own fetch and production time, its
+    tolerance boundary is inclusive, and a backfill over a grown Silver passes
+    once cut at `as_of`;
 22. check 7 rejects a currency outside the allowlist and a malformed code;
 23. check 8 reports `SKIPPED` when the audit frames are empty, and `decide()`
     treats that skip as a gate failure;
-24. check 8 reconciles only over crawl run IDs present in this run's Silver;
+24. check 8 reconciles only over crawl run IDs present in this run's Silver,
+    settled for the settle delay and inside the lookback, both bounds
+    inclusive; unfinished runs wait;
 25. check 12 recomputes from Silver and catches a mart aggregate that was
     tampered with;
 26. an advisory failure alone leaves `decision.passed` true;
