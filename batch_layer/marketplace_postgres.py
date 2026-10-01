@@ -75,6 +75,14 @@ class MarketplaceBatchAudit:
                 quality_status='FAIL',mandatory_failure_count=%s,manifest_uri=%s,manifest_promoted=FALSE,cache_published=FALSE
                 WHERE run_id=%s""", (completed_at, decision.mandatory_failures, manifest_uri, run_id))
 
+    def mark_promotion_refused(self, *, run_id: str, completed_at: datetime, reason: str, manifest_uri: str) -> None:
+        # GOLD_WRITTEN, not SUCCEEDED: the run passed its gate but was held back
+        # from serving, so it stays resumable once an operator opts in.
+        with self.connection_factory() as conn, conn.cursor() as cur:
+            cur.execute("""UPDATE audit.marketplace_batch_run SET status='GOLD_WRITTEN',completed_at=%s,error_message=%s,
+                quality_status='PASS',mandatory_failure_count=0,manifest_uri=%s,manifest_promoted=FALSE,cache_published=FALSE
+                WHERE run_id=%s""", (completed_at, f"promotion refused: {reason}", manifest_uri, run_id))
+
 
 class MarketplaceQualityRepository:
     """Persists one row per rule per run, for refused runs as much as passing ones.

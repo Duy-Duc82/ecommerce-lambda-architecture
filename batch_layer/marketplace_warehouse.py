@@ -90,6 +90,7 @@ class MarketplaceBatchResult:
     mandatory_failure_count: int = 0
     manifest_uri: str | None = None
     manifest_promoted: bool = False
+    promotion_reason: str | None = None
 
 
 def build_spark() -> SparkSession:
@@ -171,7 +172,7 @@ def run_marketplace_warehouse(context: MarketplaceBatchContext, *, publish_cache
     propagates, so a blocked run is fully documented in both PostgreSQL and
     object storage rather than leaving a log line and nothing else.
     """
-    from batch_layer.marketplace_manifest import build_gold_manifest, promote_manifest, read_current_manifest, write_run_manifest
+    from batch_layer.marketplace_manifest import BACKFILL_REFUSED, build_gold_manifest, promote_manifest, promotion_refusal, read_current_manifest, write_run_manifest
     from batch_layer.marketplace_marts import build_marketplace_marts
     from batch_layer.marketplace_quality import QualityGateFailure, decide, evaluate_quality_gates
     if writer is None or reader is None:
@@ -219,6 +220,14 @@ def run_marketplace_warehouse(context: MarketplaceBatchContext, *, publish_cache
             # Inspect a suspect window without touching the serving version.
             return MarketplaceBatchResult(context.run_id, "GOLD_WRITTEN", silver_rows, counts, "PASS", 0, manifest_uri, False)
 
+        # Asked before publication, not after: the cache has no notion of time,
+        # so publishing a window the pointer then refuses would leave the cache
+        # serving older data than the pointer names.
+        if promotion_refusal(manifest, previous, allow_backfill=allow_backfill) == BACKFILL_REFUSED:
+            if audit:
+                audit.mark_promotion_refused(run_id=context.run_id, completed_at=datetime.now(timezone.utc), reason=BACKFILL_REFUSED, manifest_uri=manifest_uri)
+            return MarketplaceBatchResult(context.run_id, "GOLD_WRITTEN", silver_rows, counts, "PASS", 0, manifest_uri, False, BACKFILL_REFUSED)
+
         if publish_cache:
             from batch_layer.marketplace_postgres import MarketplaceCachePublisher
             publisher = MarketplaceCachePublisher.from_settings()
@@ -230,7 +239,7 @@ def run_marketplace_warehouse(context: MarketplaceBatchContext, *, publish_cache
         # manifest naming a Gold run whose cache was never written, which is a
         # worse state than either the cache or the pointer failing alone.
         promotion = promote_manifest(manifest, writer=writer, reader=reader, allow_backfill=allow_backfill)
-        return MarketplaceBatchResult(context.run_id, "SUCCEEDED" if publish_cache else "GOLD_WRITTEN", silver_rows, counts, "PASS", 0, promotion.manifest_uri, promotion.promoted)
+        return MarketplaceBatchResult(context.run_id, "SUCCEEDED" if publish_cache else "GOLD_WRITTEN", silver_rows, counts, "PASS", 0, promotion.manifest_uri, promotion.promoted, promotion.reason)
     except QualityGateFailure:
         raise
     except Exception as error:
@@ -267,7 +276,8 @@ def main() -> None:
     print(json.dumps({"run_id": result.run_id, "status": result.status, "silver_rows": result.silver_rows,
                       "dataset_counts": result.dataset_counts, "quality_status": result.quality_status,
                       "mandatory_failure_count": result.mandatory_failure_count,
-                      "manifest_uri": result.manifest_uri, "manifest_promoted": result.manifest_promoted}, sort_keys=True))
+                      "manifest_uri": result.manifest_uri, "manifest_promoted": result.manifest_promoted,
+                      "promotion_reason": result.promotion_reason}, sort_keys=True))
 
 
 if __name__ == "__main__": main()

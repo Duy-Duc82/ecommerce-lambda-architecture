@@ -897,6 +897,7 @@ class MarketplaceBatchResult:
     mandatory_failure_count: int
     manifest_uri: str | None
     manifest_promoted: bool
+    promotion_reason: str | None       # PROMOTED | ALREADY_CURRENT | BACKFILL_REFUSED
 ```
 
 Algorithm, replacing Phase 6 steps 6–9:
@@ -913,10 +914,15 @@ Algorithm, replacing Phase 6 steps 6–9:
    run manifest;
 10. if the decision failed: mark `QUALITY_FAILED` with the manifest URI, do not
     promote, do not stage, do not publish, raise `QualityGateFailure`;
-11. otherwise stage all ten marts, publish in one transaction with the decision,
+11. if the pointer would refuse the run as `BACKFILL_REFUSED` (an older
+    `as_of` without `--allow-backfill`), record `GOLD_WRITTEN` with
+    `cache_published = FALSE` and `manifest_promoted = FALSE`, do not stage,
+    do not publish, do not promote, and return with
+    `promotion_reason = BACKFILL_REFUSED`;
+12. otherwise stage all ten marts, publish in one transaction with the decision,
     clean up staging, and **only then** promote the pointer;
-12. unpersist frames and stop owned Spark resources in `finally`;
-13. on any other error, record `FAILED` best-effort and re-raise.
+13. unpersist frames and stop owned Spark resources in `finally`;
+14. on any other error, record `FAILED` best-effort and re-raise.
 
 Step 8 precedes step 10 deliberately. Step 9 precedes step 10 deliberately.
 Both exist so a refused run is fully documented in both PostgreSQL and object
@@ -927,6 +933,12 @@ would advertise actually exists. An earlier draft of this section promoted
 before publishing, which contradicted Section 13: a live run with a forced
 insert failure then rolled the cache back correctly while leaving the pointer
 advanced onto a Gold run whose cache was never written.
+
+Step 11 exists for the opposite failure. The cache publisher has no notion of
+time, so publishing before asking the pointer let a reprocessed older window
+replace the serving cache while the pointer refused it and still named the
+newer run. The orchestrator therefore asks `promotion_refusal()` — the same
+rule `promote_manifest()` applies — before it stages anything.
 
 New CLI flags on top of Phase 6's:
 

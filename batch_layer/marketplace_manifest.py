@@ -228,19 +228,38 @@ def promote_manifest(
     current = read_current_manifest(reader=reader)
     previous_run_id = current.run_id if current else None
 
-    if manifest.quality.get("status") != "PASS":
-        return PromotionResult(False, QUALITY_FAILED, manifest_uri, previous_run_id)
-    if current is not None and current.run_id == manifest.run_id:
-        # Re-promoting the run that is already current writes nothing. The
-        # pointer already holds these exact bytes.
-        return PromotionResult(False, ALREADY_CURRENT, manifest_uri, previous_run_id)
-    if current is not None and current.as_of > manifest.as_of and not allow_backfill:
-        # A reprocessed older window must not silently become the serving
-        # version. Say so and let the operator opt in.
-        return PromotionResult(False, BACKFILL_REFUSED, manifest_uri, previous_run_id)
+    refusal = promotion_refusal(manifest, current, allow_backfill=allow_backfill)
+    if refusal is not None:
+        return PromotionResult(False, refusal, manifest_uri, previous_run_id)
 
     writer(GOLD_ZONE, CURRENT_POINTER_PATH, serialize_manifest(manifest))
     return PromotionResult(True, PROMOTED, manifest_uri, previous_run_id)
+
+
+def promotion_refusal(
+    manifest: GoldManifest,
+    current: GoldManifest | None,
+    *,
+    allow_backfill: bool = False,
+) -> str | None:
+    """Why the pointer would not move to ``manifest``, or None if it would.
+
+    Pure, and shared with the orchestrator, which must know the answer before
+    it publishes the cache: the cache has no notion of time, so a refusal
+    discovered only after publication would leave it serving an older window
+    than the pointer names.
+    """
+    if manifest.quality.get("status") != "PASS":
+        return QUALITY_FAILED
+    if current is not None and current.run_id == manifest.run_id:
+        # Re-promoting the run that is already current writes nothing. The
+        # pointer already holds these exact bytes.
+        return ALREADY_CURRENT
+    if current is not None and current.as_of > manifest.as_of and not allow_backfill:
+        # A reprocessed older window must not silently become the serving
+        # version. Say so and let the operator opt in.
+        return BACKFILL_REFUSED
+    return None
 
 
 def manifest_chain(manifests: Sequence[GoldManifest]) -> tuple[str, ...]:
