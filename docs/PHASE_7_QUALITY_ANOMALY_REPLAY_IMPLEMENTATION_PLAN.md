@@ -970,7 +970,10 @@ python -m batch_layer.marketplace_warehouse `
 - `--allow-backfill` is passed through to `promote_manifest`.
 - `--quality-only` runs steps 1–9 and then stops at `GOLD_WRITTEN`, printing the
   decision. It never promotes and never publishes. This is the flag an operator
-  uses to inspect a suspect window without touching the serving version.
+  uses to inspect a suspect window without touching the serving version. The
+  audit row is closed like a refused backfill (`mark_held`, reason
+  `QUALITY_ONLY`): `GOLD_WRITTEN` with a completion time, the verdict and the
+  manifest URI, so an inspection never looks like a hung run.
 - `--skip-postgres` keeps its Phase 6 meaning and additionally skips quality
   persistence, since there is no database; the manifest is still written and,
   when the gate passes, promoted.
