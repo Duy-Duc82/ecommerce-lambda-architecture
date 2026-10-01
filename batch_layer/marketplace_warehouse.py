@@ -207,7 +207,10 @@ def run_marketplace_warehouse(context: MarketplaceBatchContext, *, publish_cache
             MarketplaceQualityRepository.from_settings().record(results, run_id=context.run_id)
 
         previous = read_current_manifest(reader=reader)
-        manifest = build_gold_manifest(writes, decision, context, previous_run_id=previous.run_id if previous else None)
+        # A pointer that already names this run (a rerun, or a promotion whose
+        # reply was lost) is not its own predecessor: keep the one it recorded.
+        previous_run_id = None if previous is None else previous.previous_run_id if previous.run_id == context.run_id else previous.run_id
+        manifest = build_gold_manifest(writes, decision, context, previous_run_id=previous_run_id)
 
         if not decision.passed:
             manifest_uri = write_run_manifest(manifest, writer=writer)
