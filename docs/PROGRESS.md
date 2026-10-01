@@ -607,9 +607,10 @@ Bổ sung 2026-08-16:
 ## 6b. Cách tiếp tục ngay (resume ở đây)
 
 > ⚠️ **LỖI THỜI (2026-08-17).** Kỳ vọng "44 passed" và đường dẫn
-> `.venv/Scripts/python.exe` đều không còn đúng: suite hiện có **519 test** và
-> chạy bằng `python` toàn cục (không có venv trong repo). Xem **§8** để biết
-> trạng thái thật và việc tiếp theo.
+> `.venv/Scripts/python.exe` đều không còn đúng: trên `develop` suite hiện có
+> **519 test** (**619** sau khi PR #4 của Phase 7 merge) và chạy bằng `python`
+> toàn cục (không có venv trong repo). Xem **§8** và **§9** để biết trạng thái
+> thật và việc tiếp theo.
 
 
 ```bash
@@ -803,3 +804,182 @@ phase-5-6-speed-gold          GIỮ làm tham chiếu — 15 commit riêng,
 **Còn nợ:** 4/47 item Phase 6 (33–35, 43) cần chạy thật
 `run_marketplace_warehouse` end-to-end với MinIO + PostgreSQL, không phải unit
 test — cần Docker.
+
+---
+
+## 9. Session 2026-09-30 — Phase 7: quality gates, anomaly, manifest, reparse
+
+### 9.1 Bắt đầu từ đâu
+
+Mở session với yêu cầu "tiếp tục ở phase 7". Không có
+`docs/PHASE_7_*.md` — đã tìm trên `develop`, `master`, `phase-5-6-speed-gold`
+và toàn bộ lịch sử (`git log --all --diff-filter=A`): chưa từng tồn tại.
+`PHASE_INDEX.md` §4.3 nói rõ "thiếu plan thì dừng lại và hỏi", nên đã dừng và
+hỏi thay vì tự suy ra.
+
+Sau khi user duyệt: viết plan trước, commit vào `develop`, rồi mới cắt nhánh.
+
+### 9.2 Nhánh và PR
+
+```text
+develop                            6f746f0  docs: adopt the phase 7 plan
+phase-7-quality-anomaly-replay     f8a13d5  10 commit, PR #4 -> develop (OPEN)
+```
+
+Plan nằm ở `docs/PHASE_7_QUALITY_ANOMALY_REPLAY_IMPLEMENTATION_PLAN.md`
+(1334 dòng), **commit vào `develop` trước khi viết dòng code nào** — đúng
+§4.2, quy tắc thêm sau sự cố 2026-09.
+
+PR #4: https://github.com/Duy-Duc82/ecommerce-lambda-architecture/pull/4
+20 file, +3601/−43. Chờ review, chưa merge.
+
+### 9.3 Phase 7 làm gì
+
+Backlog **P1-08** (mandatory quality gates) + **P1-09** (gold publish manifest).
+Không lấn P1-11 Kibana, P1-12 recovery drills hay P2.
+
+```text
+Phase 6 run-scoped Gold (9 mart)
+  -> price_anomaly_daily        mart Gold thứ 10
+  -> 13 mandatory + 4 advisory quality check
+  -> quality result lưu lại, kể cả khi run bị từ chối
+  -> gold publish manifest, con trỏ current chỉ tiến khi gate xanh
+  -> PostgreSQL cache refresh chịu chung một quyết định
+  -> raw reparse chứng minh cùng raw ra cùng observation
+```
+
+Module mới:
+
+| File | Vai trò |
+|---|---|
+| `batch_layer/marketplace_anomaly.py` | rolling median / MAD / IQR fallback |
+| `config/quality_rules.py` | registry 13 MANDATORY + 4 ADVISORY |
+| `batch_layer/marketplace_quality.py` | `evaluate_quality_gates()`, `decide()` |
+| `batch_layer/marketplace_manifest.py` | manifest + con trỏ `current.json` |
+| `crawler/reparse.py` | verify reparse, read-only tuyệt đối |
+| `display/superset/create_marketplace_quality_dashboard.py` | dashboard quality/audit |
+
+Bảng mới: `cache.marketplace_price_anomaly_daily`,
+`audit.marketplace_quality_result`. `audit.marketplace_batch_run` thêm
+`quality_status`, `mandatory_failure_count`, `manifest_uri`,
+`manifest_promoted` và status mới `QUALITY_FAILED`.
+
+### 9.4 Năm quyết định thiết kế — đừng đảo ngược mà không đọc lý do
+
+**Baseline anomaly loại ngày đang xét.** Frame là
+`ROWS BETWEEN n PRECEDING AND 1 PRECEDING`. Nếu gộp ngày đang xét vào baseline
+của chính nó, một giá cực đoan kéo median về phía nó rồi **tự ẩn**. Test ghim:
+đặt giá ngày cuối `999999`, median vẫn phải là 30.
+
+**Order statistic chính xác, không `percentile_approx`.** Frame bị chặn bởi
+`anomaly_window_days` nên `collect_list` + `array_sort` rẻ; chính xác mới cho
+phép kiểm chứng lại một verdict đã lưu từ tham số đã lưu. Một helper
+`_ordered_percentile()` phục vụ cả median/p25/p75 để ba định nghĩa không trôi
+khỏi nhau.
+
+**MAD = 0 **và** IQR = 0 thì không phán anomaly** (`INSUFFICIENT_DISPERSION`).
+Mọi sai lệch so với lịch sử phẳng tuyệt đối đều trông vô cùng đáng kể; báo
+anomaly ở đây sẽ gắn cờ **lần đổi giá đầu tiên của mọi offer ổn định**.
+
+**Mandatory check bị SKIP = gate đỏ.** `decide()` tính cả `SKIPPED` lẫn kết quả
+thiếu hẳn vào `mandatory_failures`. Audit DB rỗng làm check 8 trả `SKIPPED` và
+chặn publish. Coi skip là pass tức là để một dependency chết publish được run
+chưa hề được kiểm.
+
+**Run bị từ chối ghi bằng chứng TRƯỚC khi lỗi lan ra.** Thứ tự trong
+`run_marketplace_warehouse` là hợp đồng, không phải chi tiết cài đặt:
+evaluate → lưu mọi quality result → ghi run manifest → mới xử lý verdict.
+Trạng thái `QUALITY_FAILED` cố ý khác `FAILED`: run tạo ra Gold đầy đủ, soi
+được, và bị từ chối — khác hẳn crash. Một publish bị chặn mà không để lại bằng
+chứng thì không phân biệt được với crash.
+
+Thêm: **manifest không mang wall clock.** `created_at = as_of`. Rerun cùng
+context ra manifest **giống nhau từng byte** — đó là thứ làm replay kiểm chứng
+được. Wall clock chỉ nằm ở `audit.marketplace_batch_run`.
+
+### 9.5 Một bug production, do test bắt được
+
+| Bug | Vị trí | Hệ quả |
+|---|---|---|
+| Advisory `counter_invalid_transition_rate` tính cả counter mà sàn không hề công bố | `batch_layer/marketplace_quality.py` | Counter vắng mặt mang `MISSING_VALUE` ở mọi transition → một sàn không có `sold_count` hiện **100% invalid vĩnh viễn** |
+
+Giá trị thiếu không phải transition xấu — nó là transition **không tồn tại**.
+Mẫu số giờ lọc `last_value IS NOT NULL`. Phát hiện vì test "clean run phải pass
+mọi check" đỏ trên fixture có counter null. Sửa trong `338092e`.
+
+### 9.6 Ba chỗ lệch khỏi plan, đều có lý do
+
+1. **WP1 tách thành 2 commit.** Plan bảo nối mart thứ 10 vào
+   `build_marketplace_marts` ngay, nhưng `write_run_scoped_gold` và `stage()`
+   còn đòi đúng 9 → suite đỏ giữa WP1 và WP6. Đã kéo phần *hợp đồng dataset thứ
+   10* (`DATASET_COLUMNS` + cache DDL) vào WP1; WP6 giữ phần *gating*.
+2. **WP6 và WP7 gộp một commit** (`f8ba430`). `publish()` nhận `QualityDecision`
+   bắt buộc, không caller nào cấp được cho tới khi orchestration chạy gate.
+   Tách ra thì commit trung gian có orchestration không chạy được.
+3. **WP8 không dùng fixture tĩnh.** Test gọi thẳng `persist_fetch_result` của
+   production để sinh artifact vào một dict, nên sidecar luôn đúng hình dạng
+   crawler thật ghi thay vì một file chép tay sẽ trôi khỏi nó.
+
+Và một quyết định schema ghi ở §2.1 của plan:
+`audit.marketplace_quality_result` là **bảng mới**, không mở rộng
+`audit.data_quality_result` như ghi chú Phase 6 dự kiến — bảng cũ do pipeline
+legacy ghi, `checked_at` là `TIMESTAMP` naive trong khi mọi cột audit
+marketplace là `TIMESTAMPTZ`, và PK không có chỗ cho severity/dataset.
+
+### 9.7 Trạng thái test
+
+**619 passed, 0 failed, 0 skipped** (14m42s) — toàn bộ suite, không loại file
+nào. Đầu session: 519. Phase 7 thêm 100 test, Spark chạy thật.
+
+Phủ **59/61** item của plan §17.
+
+### 9.8 Còn nợ và một lỗi đặc tả
+
+**Nợ cần Docker** (chưa chạy được trên máy này, `dockerDesktopLinuxEngine`
+không kết nối):
+
+- Phase 6 item **33–35, 43**: chạy thật `run_marketplace_warehouse` end-to-end
+  với MinIO + PostgreSQL.
+- Phase 7 item **56, 58**: chứng minh publish fail giữ nguyên *cả* cache cũ
+  *lẫn* con trỏ manifest cũ; rerun cùng context ra manifest giống nhau từng
+  byte end-to-end. (Byte-stability của manifest đã có unit test — item 33 của
+  `test_marketplace_manifest.py`; thiếu là lần chạy thật.)
+
+Chạy một lượt là đóng được cả sáu, giờ đã có gate và manifest tại chỗ.
+
+**Lỗi đặc tả — đã ghi vào `PHASE_INDEX.md` §5 thay vì vá lén:** cả plan Phase 6
+§16 lẫn Phase 7 §18 mô tả một "offline smoke với `--skip-postgres`". Smoke đó
+**không chạy được**: `run_marketplace_warehouse` gọi `read_crawl_audit()` vô
+điều kiện (`marketplace_warehouse.py:187`) và hàm này đọc
+`audit.crawl_request_attempt` / `audit.crawl_run` qua JDBC, vì hai mart
+`source_coverage_daily` và `crawl_reliability_daily` bắt buộc cần bằng chứng
+audit. `--skip-postgres` chỉ bỏ qua publish. Phase 8 sở hữu Compose profile và
+one-command smoke nên đường chạy offline thuộc về phase đó.
+
+### 9.9 Việc tiếp theo
+
+**Trước hết: chờ review PR #4**, merge vào `develop`.
+
+**Phase 8 (Tuần 8)** — chưa bắt đầu. Theo Brief §21 và `PHASE_INDEX.md` §1:
+P1-12 + nửa Kibana của P1-11.
+
+- Compose profile cho crawler, sink, speed và batch
+- One-command start / smoke / validate — **và sửa luôn lỗi đặc tả ở §9.8**
+- Failure drill (`QUALITY_FAILED` giờ là trạng thái tạo ra được có chủ đích,
+  drill phải dựng được nó rồi hồi phục)
+- Kibana source-health và freshness dashboard
+- Backup/export — phải giữ được con trỏ manifest, vì đó là định nghĩa duy nhất
+  của "bản Gold tốt cuối cùng đang phục vụ"
+- Cập nhật `docs/ARCHITECTURE.md` và `docs/DATA_MODEL.md`
+
+`crawler/reparse.py` là bước verify read-only trong runbook hồi phục của
+Phase 8.
+
+**Chưa có `docs/PHASE_8_*.md`.** Theo `PHASE_INDEX.md` §4.3: đọc file đó lấy
+đúng backlog ID, thấy thiếu plan thì **dừng lại và hỏi**, không tự viết.
+
+### 9.10 Ghi chú môi trường
+
+Không đổi so với §8.6. `pyspark` 4.0.4, Python 3.12.10, không có venv trong
+repo. Một lần chạy full suite mất ~15 phút; riêng `test_marketplace_quality.py`
+~12 phút vì mỗi case dựng cả 10 mart trên Spark thật.
