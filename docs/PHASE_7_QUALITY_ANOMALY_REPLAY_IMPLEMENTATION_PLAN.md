@@ -666,7 +666,10 @@ two never disagree about what “canonical” means.
 
 `datasets` is sorted by `dataset_name` and must contain exactly the ten Gold
 datasets. `previous_run_id` is read from the current pointer before promotion,
-which gives every manifest a backward chain without a separate index.
+which gives every manifest a backward chain without a separate index. When the
+pointer already names this run — a rerun, or a promotion whose reply was lost —
+the run keeps the predecessor that pointer recorded, never itself, so the run
+manifest stays byte-identical to `current.json`.
 
 ### 11.3 API
 
