@@ -655,3 +655,77 @@ def test_a_pointer_that_already_names_the_run_counts_as_promoted(monkeypatch):
     run_marketplace_warehouse(batch_context(), resume=True, writer=store.write, reader=store.read)
 
     assert parts["audit"].promotion == {"run_id": "run-1", "promoted": True}
+
+
+# ----------------------------------------------------------------------------
+# A scratch Gold root. Manifests and the pointer live at one fixed place in the
+# active storage profile, whatever --gold-root-uri says, so a replay into a
+# scratch root used to promote the production pointer onto scratch datasets.
+# ----------------------------------------------------------------------------
+SERVING_ROOT = "file:///gold"
+
+
+def scratch_context():
+    return MarketplaceBatchContext("run-1", AS_OF, "file:///silver", "file:///scratch/gold")
+
+
+def test_a_scratch_gold_root_never_touches_the_serving_manifests(monkeypatch):
+    parts = wire_orchestration(monkeypatch)
+
+    result = run_marketplace_warehouse(
+        scratch_context(), serving_gold_root_uri=SERVING_ROOT, writer=noop_writer, reader=empty_reader,
+    )
+
+    log = parts["log"]
+    assert "manifest.write_run" not in log
+    assert "publisher.publish" not in log
+    assert "manifest.promote" not in log
+    assert log[-1] == "audit.mark_held"
+    assert parts["audit"].held["reason"] == warehouse.SCRATCH_GOLD_ROOT
+    assert parts["audit"].held["manifest_uri"] is None
+    assert result.status == "GOLD_WRITTEN"
+    assert result.manifest_uri is None
+    assert result.promotion_reason == warehouse.SCRATCH_GOLD_ROOT
+
+
+def test_a_refused_scratch_run_still_records_evidence_but_no_manifest(monkeypatch):
+    parts = wire_orchestration(monkeypatch, passed=False)
+
+    with pytest.raises(QualityGateFailure):
+        run_marketplace_warehouse(
+            scratch_context(), serving_gold_root_uri=SERVING_ROOT, writer=noop_writer, reader=empty_reader,
+        )
+
+    assert "quality.record" in parts["log"]
+    assert "manifest.write_run" not in parts["log"]
+    assert parts["audit"].quality_failed["manifest_uri"] is None
+
+
+def test_the_serving_root_matches_regardless_of_a_trailing_slash(monkeypatch):
+    parts = wire_orchestration(monkeypatch)
+
+    result = run_marketplace_warehouse(
+        batch_context(), serving_gold_root_uri=SERVING_ROOT + "/", writer=noop_writer, reader=empty_reader,
+    )
+
+    assert "manifest.promote" in parts["log"]
+    assert result.status == "SUCCEEDED"
+
+
+def test_the_cli_names_the_configured_gold_root_as_the_serving_one(monkeypatch, capsys):
+    seen = {}
+
+    def fake_run(context, **kwargs):
+        seen.update(kwargs, gold_root_uri=context.gold_root_uri)
+        return warehouse.MarketplaceBatchResult(context.run_id, "GOLD_WRITTEN", 0, {})
+
+    monkeypatch.setattr(warehouse, "run_marketplace_warehouse", fake_run)
+    monkeypatch.setattr(sys, "argv", [
+        "marketplace_warehouse", "--run-id", "run-1", "--as-of", "2026-09-05T10:00:00Z",
+        "--gold-root-uri", "file:///scratch/gold",
+    ])
+
+    warehouse.main()
+
+    assert seen["gold_root_uri"] == "file:///scratch/gold"
+    assert seen["serving_gold_root_uri"] == warehouse.data_lake_uri("gold", warehouse.MARKETPLACE_GOLD_DATASET)
