@@ -16,6 +16,11 @@ class SourceRecord:
 class SilverSinkResult:
     status: str; object_uri: str; event_id: str | None; dlq_id: str | None
 
+def silver_observation_path(event, dataset: str = "marketplace/offer_observations") -> str:
+    """Where an observation lands in Silver; the raw reparse reads it back here."""
+    observation = event.payload.observation
+    return f"{dataset.strip('/')}/marketplace={quote(event.marketplace, safe='')}/observed_date={observation.observed_at.date().isoformat()}/observation_id={quote(observation.observation_id, safe='')}.json"
+
 def process_record(record: SourceRecord, *, writer, dlq_producer, clock):
     if record.topic != MARKETPLACE_OBSERVATIONS.name: raise ValueError("source topic is not marketplace observations")
     text = None; stage = DlqStage.DECODE
@@ -26,7 +31,7 @@ def process_record(record: SourceRecord, *, writer, dlq_producer, clock):
         event = marketplace_observation_from_wire(raw)
         key = record.key.decode("utf-8") if record.key is not None else None
         if key != event.partition_key: raise ValueError("Kafka key does not equal event partition_key")
-        path = f"marketplace/offer_observations/marketplace={quote(event.marketplace, safe='')}/observed_date={event.payload.observation.observed_at.date().isoformat()}/observation_id={quote(event.payload.observation.observation_id, safe='')}.json"
+        path = silver_observation_path(event)
         payload = json.dumps(serialize_for_wire(event), ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
         return SilverSinkResult("SILVER", writer("silver", path, payload), event.event_id, None)
     except Exception as error:

@@ -851,11 +851,21 @@ corrected once in the Tiki adapter, and a test pins it here.
 python -m crawler.reparse `
   --marketplace tiki `
   --observed-date 2026-09-20 `
-  [--crawl-run-id <id>] `
-  [--raw-artifact-id <id>] `
-  [--silver-uri <uri>] `
+  --hour 08 `
+  --crawl-run-id <id> `
+  --raw-artifact-id <id> [--raw-artifact-id <id> ...] `
+  [--silver-dataset <prefix>] `
   [--report-path <path>]
 ```
+
+The artifact is named exactly, because Bronze is addressed by key and the
+object store offers no listing here. The existing side is read from Silver by
+key too: the sink lands each observation at `silver_observation_path(event)`,
+so the CLI derives the same path from the reparsed event and reads it directly.
+`--silver-dataset` overrides the prefix, defaulting to the sink's. The adapter
+is built parse-only (`categories=[]`, `fetch_robots=False`), so a verification
+run never reaches the marketplace. `--report-path` writes the printed report to
+a local file, never to the lake.
 
 It prints one canonical JSON report — counts per status and, for divergences,
 the bounded sorted list of observation IDs. It exits non-zero when any artifact
