@@ -19,6 +19,11 @@ class FakeWriter:
         self.log = log
         self.name = name
         self.partitions = None
+        self.options = {}
+
+    def option(self, key, value):
+        self.options[key] = value
+        return self
 
     def mode(self, mode):
         self.mode_value = mode
@@ -44,7 +49,8 @@ class FakeFrame:
 
     @property
     def write(self):
-        return FakeWriter(self.log, self.name)
+        self.writer = FakeWriter(self.log, self.name)
+        return self.writer
 
 
 def _marts(log):
@@ -162,6 +168,21 @@ def test_daily_marts_are_partitioned_by_marketplace_and_their_date_column():
     assert partitions["offer_price_history_daily"] == ("marketplace", "observed_date")
     assert partitions["offer_current"] is None
     assert {mode for _, _, mode, _ in log} == {"overwrite"}
+
+
+def test_a_rewritten_run_replaces_every_partition_it_held():
+    # The session runs with partitionOverwriteMode=dynamic, under which a rerun
+    # into the same run directory replaces only the partitions it still has
+    # rows for. A resume after fixing future-dated Silver rows then left the
+    # rejected partitions on disk, under a manifest whose counts excluded them.
+    log = []
+    marts = _marts(log)
+
+    write_run_scoped_gold(marts, MarketplaceBatchContext("run-1", AS_OF, "file:///silver", "file:///gold"))
+
+    assert {name: frame.writer.options.get("partitionOverwriteMode") for name, frame in marts.items()} == {
+        name: "static" for name in DATASETS
+    }
 
 
 def test_gold_write_requires_exactly_the_ten_datasets():
