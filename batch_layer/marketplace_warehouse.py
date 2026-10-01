@@ -80,6 +80,10 @@ class GoldWriteResult:
     row_count: int
 
 
+# A passing run deliberately kept off the serving version for inspection.
+QUALITY_ONLY = "QUALITY_ONLY"
+
+
 @dataclass(frozen=True)
 class MarketplaceBatchResult:
     run_id: str
@@ -224,14 +228,16 @@ def run_marketplace_warehouse(context: MarketplaceBatchContext, *, publish_cache
         manifest_uri = write_run_manifest(manifest, writer=writer)
         if quality_only:
             # Inspect a suspect window without touching the serving version.
-            return MarketplaceBatchResult(context.run_id, "GOLD_WRITTEN", silver_rows, counts, "PASS", 0, manifest_uri, False)
+            if audit:
+                audit.mark_held(run_id=context.run_id, completed_at=datetime.now(timezone.utc), reason=QUALITY_ONLY, manifest_uri=manifest_uri)
+            return MarketplaceBatchResult(context.run_id, "GOLD_WRITTEN", silver_rows, counts, "PASS", 0, manifest_uri, False, QUALITY_ONLY)
 
         # Asked before publication, not after: the cache has no notion of time,
         # so publishing a window the pointer then refuses would leave the cache
         # serving older data than the pointer names.
         if promotion_refusal(manifest, previous, allow_backfill=allow_backfill) == BACKFILL_REFUSED:
             if audit:
-                audit.mark_promotion_refused(run_id=context.run_id, completed_at=datetime.now(timezone.utc), reason=BACKFILL_REFUSED, manifest_uri=manifest_uri)
+                audit.mark_held(run_id=context.run_id, completed_at=datetime.now(timezone.utc), reason=BACKFILL_REFUSED, manifest_uri=manifest_uri)
             return MarketplaceBatchResult(context.run_id, "GOLD_WRITTEN", silver_rows, counts, "PASS", 0, manifest_uri, False, BACKFILL_REFUSED)
 
         if publish_cache:
