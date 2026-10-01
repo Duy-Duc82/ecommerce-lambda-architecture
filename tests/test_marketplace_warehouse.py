@@ -337,6 +337,7 @@ def wire_orchestration(monkeypatch, *, passed=True, publish_fails=False):
 
     monkeypatch.setattr(marketplace_manifest, "write_run_manifest", fake_write_run_manifest)
     monkeypatch.setattr(marketplace_manifest, "promote_manifest", fake_promote)
+    monkeypatch.setattr(marketplace_manifest, "promotion_refusal", lambda manifest, current, **k: None)
 
     audit, repository, publisher = FakeAudit(log), FakeRepository(log), FakePublisher(log, fails=publish_fails)
     monkeypatch.setattr(marketplace_postgres.MarketplaceBatchAudit, "from_settings", classmethod(lambda cls: audit))
@@ -469,7 +470,9 @@ def test_the_pointer_moves_only_after_the_cache_is_published(monkeypatch):
 # ----------------------------------------------------------------------------
 REAL_MANIFEST = {
     name: getattr(marketplace_manifest, name)
-    for name in ("build_gold_manifest", "read_current_manifest", "write_run_manifest", "promote_manifest")
+    for name in (
+        "build_gold_manifest", "read_current_manifest", "write_run_manifest", "promote_manifest", "promotion_refusal",
+    )
 }
 
 
