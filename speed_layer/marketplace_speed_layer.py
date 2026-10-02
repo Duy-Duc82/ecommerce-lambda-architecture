@@ -80,8 +80,10 @@ def decode_observation_stream(raw: DataFrame) -> tuple[DataFrame, DataFrame]:
         (F.col("decoded.partition_key") == F.concat(F.lower("decoded.marketplace"), F.lit(":"), F.col("decoded.payload.offer.platform_listing_id"))) &
         (F.col("decoded.payload.observation.current_price").cast("decimal(38,6)") >= 0)
     )
+    # ignoreNullFields=false: to_json drops null fields by default, and the
+    # strict wire contract that re-reads event_json requires every key.
     valid = (parsed.filter(valid_condition)
-             .select("source_topic", "source_partition", "source_offset", "kafka_timestamp", F.to_json("decoded").alias("event_json"), F.col("decoded.marketplace").alias("marketplace"), F.col("decoded.payload.offer.offer_id").alias("offer_id"), F.col("decoded.payload.observation.observation_id").alias("observation_id"), F.to_timestamp("decoded.payload.observation.observed_at").alias("event_time")))
+             .select("source_topic", "source_partition", "source_offset", "kafka_timestamp", F.to_json("decoded", {"ignoreNullFields": "false"}).alias("event_json"), F.col("decoded.marketplace").alias("marketplace"), F.col("decoded.payload.offer.offer_id").alias("offer_id"), F.col("decoded.payload.observation.observation_id").alias("observation_id"), F.to_timestamp("decoded.payload.observation.observed_at").alias("event_time")))
     invalid = (parsed.filter(~valid_condition)
                .select("source_topic", "source_partition", "source_offset", F.lit("INVALID").alias("output_kind"), F.lit("OBSERVATION_CONTRACT").alias("error_type"), F.lit("invalid marketplace observation envelope, key, or lineage").alias("error_message")))
     return valid, invalid
