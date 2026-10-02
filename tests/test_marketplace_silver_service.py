@@ -5,6 +5,7 @@ sleeps: waits go to a recording stop signal.
 """
 import subprocess
 import sys
+from collections import namedtuple
 from types import SimpleNamespace
 
 import pytest
@@ -15,8 +16,12 @@ from data_ingestion.marketplace_silver_sink import SilverWriteError
 TOPIC = "marketplace.observations.v1"
 
 
+# kafka.structs.TopicPartition is a namedtuple, hashable, and a dict key.
+TopicPartition = namedtuple("TopicPartition", ["topic", "partition"])
+
+
 def _tp(partition):
-    return SimpleNamespace(topic=TOPIC, partition=partition)
+    return TopicPartition(TOPIC, partition)
 
 
 def _msg(partition, offset):

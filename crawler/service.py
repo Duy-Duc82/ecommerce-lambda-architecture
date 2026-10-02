@@ -19,44 +19,17 @@ import dataclasses
 import json
 import os
 import random
-import signal
 import socket
-import threading
-from contextlib import contextmanager
 from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any, Callable
 
 from common.identity import deterministic_id
+# Re-exported: the crawl service was their first home, and callers import them here.
+from common.lifecycle import StopSignal, install_signal_handlers  # noqa: F401
+from common.postgres import postgres_connection_factory  # noqa: F401
 from crawler.contracts import AcquisitionStatus, ObservationPublishError
 from crawler.scheduling import CrawlTask
-
-
-class StopSignal:
-    """Set once, by a signal handler; every wait returns as soon as it is."""
-
-    def __init__(self) -> None:
-        self._event = threading.Event()
-
-    def set(self) -> None:
-        self._event.set()
-
-    def is_set(self) -> bool:
-        return self._event.is_set()
-
-    def wait(self, seconds: float) -> bool:
-        """Wait up to ``seconds``; True if the service should stop."""
-        return self._event.wait(seconds)
-
-
-def install_signal_handlers(stop: StopSignal) -> None:
-    """SIGTERM (``docker stop``) and SIGINT (Ctrl+C) both ask for a clean stop."""
-
-    def handler(signum, frame) -> None:  # noqa: ARG001 - the signal API's shape
-        stop.set()
-
-    for sig in (signal.SIGTERM, signal.SIGINT):
-        signal.signal(sig, handler)
 
 
 def crawl_run_id_for(task: CrawlTask) -> str:
@@ -135,31 +108,6 @@ def run_service(
         if stop.wait(idle_seconds if result.leased == 0 else poll_seconds):
             break
     return cycles
-
-
-def postgres_connection_factory() -> Callable[[], Any]:
-    """A factory whose connections are closed, not just committed.
-
-    The frontier and audit repositories use ``with factory() as conn``. On a
-    bare psycopg2 connection that block commits or rolls back but leaves the
-    connection open, which a long-running service would leak once per call
-    until PostgreSQL ran out of connections.
-    """
-    import psycopg2
-
-    from config.settings import POSTGRES_DB, POSTGRES_HOST, POSTGRES_PASSWORD, POSTGRES_PORT, POSTGRES_USER
-
-    @contextmanager
-    def connect():
-        conn = psycopg2.connect(host=POSTGRES_HOST, port=POSTGRES_PORT, user=POSTGRES_USER,
-                                password=POSTGRES_PASSWORD, dbname=POSTGRES_DB)
-        try:
-            with conn:
-                yield conn
-        finally:
-            conn.close()
-
-    return connect
 
 
 def build_worker(*, site: str, worker_id: str, publish: Callable[[Any], Any], connection_factory: Callable[[], Any]):
