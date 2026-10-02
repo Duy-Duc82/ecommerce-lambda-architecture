@@ -87,7 +87,12 @@ services:
       KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
       KAFKA_SHARE_COORDINATOR_STATE_TOPIC_REPLICATION_FACTOR: 1
       KAFKA_SHARE_COORDINATOR_STATE_TOPIC_MIN_ISR: 1
-      KAFKA_LOG_DIRS: /tmp/kraft-combined-logs
+      # On a named volume: a recreated container (any config change does it)
+      # would otherwise start with empty topics, and the speed query, whose
+      # checkpoint remembers the old offsets, stops on the apparent data loss.
+      # The image ships this directory owned by its appuser, so a fresh volume
+      # inherits that ownership.
+      KAFKA_LOG_DIRS: /var/lib/kafka/data
       CLUSTER_ID: 4L6g3nShT-eMCtK--X86sw
     healthcheck:
       # Tools inside the container use the internal listener. The host one
@@ -100,6 +105,8 @@ services:
       timeout: 10s
       retries: 5
       start_period: 30s
+    volumes:
+      - kafka_data:/var/lib/kafka/data
     networks:
       - bigdata
 
@@ -509,6 +516,7 @@ networks:
     driver: bridge
 
 volumes:
+  kafka_data:
   minio_data:
   redis_data:
   pg_data:
