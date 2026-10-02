@@ -1,0 +1,5 @@
+# The images copy only their requirements; the source is mounted at run time.
+# Without this the build context is the whole repository, .git and the
+# locally downloaded jars included.
+*
+!requirements-marketplace.txt
