@@ -168,17 +168,31 @@ def test_each_micro_batch_closes_its_audit_connections(monkeypatch):
         def __init__(self, *, producer, es, redis, audit):
             self.audit = audit
 
-        def write_batch(self, outputs, batch_id):
-            built.append(("batch", batch_id, len(outputs)))
+        def write_batch(self, outputs, batch_id, *, query_id):
+            built.append(("batch", batch_id, len(outputs), query_id))
 
     import speed_layer.marketplace_sinks as sinks
 
     monkeypatch.setattr(sinks, "MarketplaceSpeedSinks", RecordingSinks)
     monkeypatch.setattr(layer, "_sink_clients", lambda: (object(), object(), object()))
 
-    layer.write_marketplace_batch(SimpleNamespace(collect=lambda: []), 7)
+    layer.write_marketplace_batch(_micro_batch("query-uuid"), 7)
 
-    assert built == ["closing", ("batch", 7, 0)]
+    assert built == ["closing", ("batch", 7, 0, "query-uuid")]
+
+
+def _micro_batch(query_id):
+    # foreachBatch's frame: its session's context carries the query id as a
+    # local property, set by Spark for every micro-batch.
+    context = SimpleNamespace(getLocalProperty=lambda key: query_id if key == "sql.streaming.queryId" else None)
+    return SimpleNamespace(collect=lambda: [], sparkSession=SimpleNamespace(sparkContext=context))
+
+
+def test_a_micro_batch_without_a_query_id_is_refused(monkeypatch):
+    monkeypatch.setattr(layer, "_sink_clients", lambda: (object(), object(), object()))
+
+    with pytest.raises(ValueError, match="query id"):
+        layer.write_marketplace_batch(_micro_batch(None), 7)
 
 
 def test_the_default_kafka_connector_matches_the_spark_major_version():
