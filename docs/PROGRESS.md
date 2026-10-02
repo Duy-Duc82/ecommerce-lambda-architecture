@@ -1504,11 +1504,19 @@ restart trong cùng interval. Tick kế tiếp đã sang cửa sổ mới. Muố
 cửa sổ cũ thì dùng CLI với `--resume` (và `--allow-backfill` nếu nó cũ hơn
 con trỏ).
 
+### 14.3b Review PR #9 — hai bug, mỗi bug một cặp test → fix
+
+| Bug | Hệ quả | Sửa |
+|---|---|---|
+| `tick()` tra status run **ngoài** `try` | Postgres restart đúng lúc tick chạy làm process scheduler chết; mọi cửa sổ sau đó chờ restart tay | tra status trong `try`, lỗi thành outcome `FAILED` |
+| CAS con trỏ chỉ chạy lúc promote, **sau** khi cache đã publish | Lock nằm trên connection idle suốt run Spark, có thể rớt. Nếu run khác promote trong lúc đó thì cache phục vụ run này, con trỏ phục vụ run kia, audit ghi `SUCCEEDED` và scheduler skip cửa sổ mãi | đọc lại con trỏ ngay trước khi publish; lệch → `GOLD_WRITTEN` + `PROMOTION_CONFLICT`, resume được. CAS lúc promote vẫn giữ, chỉ còn vài mili giây publish không được che |
+
 ### 14.4 Trạng thái test
 
-**791 passed, 0 failed, 0 skipped** (trước WP3: 749). Chạy thành hai lượt:
-phần còn lại của suite (749 passed, 3m51s) và `test_marketplace_quality.py`
-riêng (42 passed, 20m01s).
+**793 passed, 0 failed, 0 skipped** (trước WP3: 749). Chạy thành hai lượt:
+phần còn lại của suite (751 passed, 3m50s) và `test_marketplace_quality.py`
+riêng (42 passed, 20m01s, chạy trước hai bản sửa review; file đó không gọi
+code nào hai bản sửa đụng tới).
 
 ### 14.5 Việc tiếp theo (resume ở đây)
 
