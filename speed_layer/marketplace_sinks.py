@@ -77,6 +77,24 @@ class MarketplaceSpeedAudit:
                 WHERE query_name=%s AND batch_id=%s""", (status, completed_at, counts.input_rows, counts.invalid_rows, counts.applied_rows, counts.duplicate_rows, counts.late_rows, counts.change_rows, counts.kafka_rows, counts.es_rows, counts.redis_rows, error, query_name, batch_id))
 
 
+def _change_document(change: dict) -> dict:
+    """The Elasticsearch projection of one change event.
+
+    ``previous_value`` and ``current_value`` hold a scalar for most change
+    types but the whole offer for NEW_OFFER. One Elasticsearch field cannot be
+    an object and a scalar, so an object value is stored as its canonical
+    JSON string. The Kafka event keeps its own shape; only this projection
+    changes.
+    """
+    from config.marketplace_wire import canonical_json
+
+    doc = dict(change)
+    for field in ("previous_value", "current_value"):
+        if isinstance(doc.get(field), (dict, list)):
+            doc[field] = canonical_json(doc[field])
+    return doc
+
+
 class MarketplaceSpeedSinks:
     def __init__(self, *, producer: Any, es: Any, redis: Any, audit: Any):
         self.producer, self.es, self.redis, self.audit = producer, es, redis, audit
@@ -94,7 +112,7 @@ class MarketplaceSpeedSinks:
             es_actions = []
             change_rows = [r for r in rows if r.output_kind == "CHANGE" and r.change_json]
             for row, event in zip(change_rows, changes):
-                doc = json.loads(row.change_json)
+                doc = _change_document(json.loads(row.change_json))
                 es_actions.append({"index": {"_index": ES_INDEX_MARKETPLACE_CHANGES, "_id": event.event_id}})
                 es_actions.append(doc)
             state_rows = [r for r in rows if r.output_kind == "STATE" and r.state_json]
@@ -107,8 +125,13 @@ class MarketplaceSpeedSinks:
                     result = self.es.bulk(operations=es_actions) if hasattr(self.es, "bulk") else self.es.bulk(es_actions)
                 except TypeError:
                     result = self.es.bulk(es_actions)
-                if result.get("errors") or any((detail.get("error") or detail.get("status", 200) >= 300) for item in result.get("items", []) for detail in item.values()):
-                    raise RuntimeError("Elasticsearch item failure")
+                failed = [detail for item in result.get("items", []) for detail in item.values() if detail.get("error") or detail.get("status", 200) >= 300]
+                if result.get("errors") or failed:
+                    # The first reason is enough to tell a mapping conflict
+                    # from an outage in the audit row and the log.
+                    error = (failed[0].get("error") if failed else None) or {}
+                    reason = f"{error.get('type', '')}: {error.get('reason', '')}" if isinstance(error, dict) else str(error)
+                    raise RuntimeError(f"Elasticsearch item failure ({len(failed)} item(s)): {reason}"[:1000])
             pipe = self.redis.pipeline() if hasattr(self.redis, "pipeline") else self.redis
             for row, event in zip(change_rows, changes):
                 wire = json.loads(row.change_json)
