@@ -1321,13 +1321,29 @@ Nhánh `phase-8-wp2-sink-speed-services`, cắt từ `develop` sau khi PR #7 mer
 
 Lệch plan: trigger dùng `MARKETPLACE_STREAM_TRIGGER` đã có sẵn, không thêm `MARKETPLACE_SPEED_TRIGGER_SECONDS`.
 
-### 13.2 Ba bug production, mỗi bug một cặp test → fix
+### 13.2 Bảy bug production, mỗi bug một cặp test → fix
+
+Ba bug đầu tìm thấy khi viết service; bốn bug sau chỉ lộ ra khi speed query
+chạy thật lần đầu (§13.4).
 
 | Bug | Vị trí | Hệ quả |
 |---|---|---|
 | Lỗi ghi Silver của một observation **hợp lệ** nằm chung `except` với lỗi decode/validate | `data_ingestion/marketplace_silver_sink.py` | MinIO sập → observation tốt bị đẩy vào DLQ như `CONTRACT_VALIDATION`, không bao giờ vào Silver (plan §6.2) |
 | `F.to_json("decoded")` bỏ các field null; `_process_group` parse lại bằng wire contract nghiêm ngặt, đòi đủ mọi key | `speed_layer/marketplace_speed_layer.py` | Mọi observation có `brand`/`seller_id` null (thường gặp với Tiki) làm micro-batch chết |
 | `SPARK_KAFKA_PACKAGE` vẫn là `_2.12:3.5.1` | `config/settings.py` | Không nạp được trên Spark 4 (Scala 2.13): speed query chết ngay khi khởi động |
+| Hàm stateful coi tham số là **một** pandas DataFrame và trả về một DataFrame; `applyInPandasWithState` truyền vào và đòi lại một **iterator** | `speed_layer/marketplace_speed_layer.py` | Mọi micro-batch chết: `'generator' object has no attribute 'to_dict'`. Cùng chỗ: timeout chỉ được đặt khi có STATE mới, nên offer mà lần gọi cuối chỉ có bản trùng/đến muộn sẽ không bao giờ thành `OFFER_STALE` |
+| `NEW_OFFER` đặt cả offer vào `current_value`, còn change khác đặt scalar; một field ES không thể vừa là object vừa là scalar | `speed_layer/marketplace_sinks.py` | `NEW_OFFER` đầu tiên khóa mapping thành object → lần đổi giá đầu tiên bị từ chối, query chết |
+| Audit speed khóa theo `(query_name, batch_id)` và bỏ qua batch `SUCCEEDED`; checkpoint mới đánh số batch lại từ 0 | `speed_layer/marketplace_sinks.py`, `scripts/init_postgres.sql` | Replay với checkpoint mới **mất sạch dữ liệu**: batch 0 (16 observation) bị bỏ qua, offset vẫn được commit. Thủ tục dựng lại ES ở plan §11.4 không chạy được |
+| `spark.sql.shuffle.partitions` để mặc định 200 | `speed_layer/marketplace_speed_service.py` | 200+ task cho vài chục record mỗi micro-batch; con số này bị khóa vào checkpoint ngay lần chạy đầu |
+
+Bản sửa audit dùng `query_id`, lấy từ local property `sql.streaming.queryId`
+mà Spark gắn vào mỗi micro-batch. Đã kiểm trên Spark 4.0.1 rằng giá trị này
+giữ nguyên qua restart với cùng checkpoint và đổi khi dùng checkpoint khác.
+Bảng audit có thêm cột `query_id` trong khóa chính, qua migration idempotent;
+các dòng cũ mang giá trị `''`.
+
+Bản sửa projection ES lưu giá trị dạng object thành chuỗi JSON chuẩn tắc.
+Event Kafka giữ nguyên hình dạng.
 
 Bug thứ hai lọt qua vì test decode của Phase 5 chỉ kiểm cột, chưa bao giờ đưa dòng đã decode vào xử lý tiếp.
 
@@ -1347,21 +1363,50 @@ MinIO bật lại                             8 SILVER, 8 object trong ecommerce
 Client `minio` tự retry nội bộ trước khi trả lỗi. Vì vậy trong 40 giây MinIO
 sập chỉ thấy một lần thất bại, và backoff của service cộng thêm vào đó.
 
-### 13.4 Speed service — chưa kiểm chứng thật
+### 13.4 Speed service — kiểm chứng trên Kafka + ES + Redis + Postgres thật
 
-Docker engine sập khi pull image Elasticsearch: pull báo `unexpected EOF`,
-còn `docker info` không trả lời. **Nguyên nhân gốc: ổ `C:` hết sạch dung
-lượng (0 GB trống).** File đĩa ảo `docker_data.vhdx` (19 GB) nằm trên `C:`
-nên không lớn thêm được.
+Môi trường: chạy trong container `apache/spark:4.0.1` (`mp-e2e`), Kafka
+`kafka:19092`, Redis, Postgres. Elasticsearch là một container tạm
+`es-verify` dùng bản **8.18.1** (lý do ở dưới); client `elasticsearch==8.18.0`.
 
-Đã restart Docker Desktop theo yêu cầu (kèm `wsl --shutdown`, vì lần restart
-đầu engine vẫn kẹt). Container của project khác tự lên lại, nhưng container
-của project này báo `Input/output error` khi đọc file, vì ổ vẫn còn đầy.
-Đây là chuyện môi trường, không phải lỗi code. Speed query **chưa chạy lần
-nào trên Kafka thật**; mới được kiểm bằng test offline và Spark batch.
+```text
+lần 1                      chết: applyInPandasWithState ('generator'...)       → bug 4
+lần 2, 14 observation      batch 0 SUCCEEDED: 14 in, 2 NEW_OFFER, ES/Redis 2 offer
+kill -9, chạy lại          tiếp từ batch 2, input 0, change topic không tăng   → checkpoint đúng
+giá giảm 199000 → 99500    batch chết: ES từ chối current_value scalar           → bug 5
+replay, checkpoint mới     batch 0 bị audit bỏ qua, ES không được dựng lại       → bug 6
+sau cả ba bản sửa          batch 0 SUCCEEDED: 16 in, 4 change
+                           NEW_OFFER ×2, PRICE_CHANGED 199000→99500, LARGE_PRICE_DROP
+                           ES: 4 change, 2 offer; Redis: 2 offer, 4 change gần đây
+SIGTERM                    dừng trong ≤ 24 giây; batch đang chạy bị hủy, không lỗi
+```
+
+Change topic có 8 message cho 4 change khác nhau: 2 từ lần chạy đầu, 2 từ
+batch chết ở bug 5 (sink publish Kafka **trước** khi ghi ES), và 4 từ lần
+replay. Đây là at-least-once, đúng với cam kết; `event_id` tất định nên
+downstream gộp được, và ES đã gộp.
+
+**Sự cố môi trường trong lúc kiểm.** Ổ `C:` hết sạch dung lượng (0 GB), mà
+`docker_data.vhdx` nằm trên đó, nên Docker engine sập khi đang pull
+Elasticsearch. Đã dọn theo yêu cầu của chủ dự án:
+
+- cache npm, pip, Gradle;
+- `node_modules` của các project khác (1,3 GB trên `C:`, 4,5 GB trên `D:`);
+- image Docker không còn container nào dùng, cùng build cache 7,7 GB;
+- nén vhdx từ 19 GB xuống 15,1 GB.
+
+`C:` còn trống khoảng 10 GB. Volume dữ liệu của project khác không bị đụng
+tới.
+
+Image `elasticsearch:8.18.0` bị pull **đúng lúc ổ đầy**. Bản giải nén của nó
+có `/bin/tini`, `docker-entrypoint.sh`, `cacerts`, ... dài 0 byte, và vẫn hỏng
+như vậy sau `rmi` + pull lại + restart engine. Containerd dùng lại snapshot
+cũ dù đã tải blob mới (`Downloaded newer image`). Bản 8.18.1 giải nén bình
+thường. Compose vẫn pin 8.18.0; việc pin version thuộc WP4, và trên máy này
+phải đổi tag hoặc dọn snapshot thì mới chạy được 8.18.0.
 
 ### 13.5 Trạng thái test
 
-**734 passed, 0 failed, 0 skipped** (trước WP2: 711). Chạy thành hai lượt:
-phần còn lại của suite (692 passed, 3m25s) và `test_marketplace_quality.py`
-riêng (42 passed, 17m13s).
+**749 passed, 0 failed, 0 skipped** (trước WP2: 711). Chạy thành hai lượt:
+phần còn lại của suite (707 passed, 3m51s) và `test_marketplace_quality.py`
+riêng (42 passed, 18m42s).
