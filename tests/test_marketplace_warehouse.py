@@ -1,6 +1,7 @@
 """Batch context and Gold layout tests, items 34 and 46 of the Phase 6 plan."""
 import subprocess
 import sys
+from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -317,9 +318,23 @@ def decision(*, passed=True, failures=0):
     )
 
 
-def wire_orchestration(monkeypatch, *, passed=True, publish_fails=False):
+def wire_orchestration(monkeypatch, *, passed=True, publish_fails=False, lock_refused=False):
     log = []
-    parts = {"log": log}
+    parts = {"log": log, "lock": []}
+
+    @contextmanager
+    def fake_lock():
+        # Kept out of ``log``: those assertions describe the run itself.
+        if lock_refused:
+            from batch_layer.marketplace_lock import BatchAlreadyRunning
+            raise BatchAlreadyRunning(820801)
+        parts["lock"].append("acquire")
+        try:
+            yield
+        finally:
+            parts["lock"].append("release")
+
+    monkeypatch.setattr(warehouse, "default_batch_lock", fake_lock)
 
     monkeypatch.setattr(warehouse, "build_spark", lambda: FakeSpark())
     monkeypatch.setattr(warehouse, "read_marketplace_silver", lambda spark, uri: "wire")

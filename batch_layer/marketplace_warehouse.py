@@ -206,7 +206,26 @@ def write_run_scoped_gold(marts: Mapping[str, DataFrame], context: MarketplaceBa
     return results
 
 
-def run_marketplace_warehouse(context: MarketplaceBatchContext, *, publish_cache: bool = True, resume: bool = False, spark: SparkSession | None = None, allow_backfill: bool = False, quality_only: bool = False, writer=None, reader=None, serving_gold_root_uri: str | None = None) -> MarketplaceBatchResult:
+def default_batch_lock():
+    from batch_layer.marketplace_lock import exclusive_batch
+    from common.postgres import postgres_connection_factory
+    return exclusive_batch(postgres_connection_factory())
+
+
+def run_marketplace_warehouse(context: MarketplaceBatchContext, *, lock=None, **options) -> MarketplaceBatchResult:
+    """Run one batch under the exclusive batch lock (Phase 8 plan section 6.5).
+
+    The lock is taken before anything else, even under ``publish_cache=False``,
+    which still reads the crawl audit from PostgreSQL. A run refused with
+    ``BatchAlreadyRunning`` has therefore started nothing: no Spark session,
+    no audit row, no Gold. ``lock`` is a zero-argument callable returning a
+    context manager; the default is the PostgreSQL advisory lock.
+    """
+    with (lock or default_batch_lock)():
+        return _run_marketplace_warehouse(context, **options)
+
+
+def _run_marketplace_warehouse(context: MarketplaceBatchContext, *, publish_cache: bool = True, resume: bool = False, spark: SparkSession | None = None, allow_backfill: bool = False, quality_only: bool = False, writer=None, reader=None, serving_gold_root_uri: str | None = None) -> MarketplaceBatchResult:
     """Read Silver, build Gold, judge it, and publish only if it earns it.
 
     The order below is the contract, not an implementation detail. Quality
@@ -329,6 +348,7 @@ def main() -> None:
     parser.add_argument("--allow-backfill", action="store_true", help="let an older as-of become the published version")
     parser.add_argument("--quality-only", action="store_true", help="write Gold and the run manifest, then stop; never promote or publish")
     args = parser.parse_args()
+    from batch_layer.marketplace_lock import ALREADY_RUNNING_EXIT_CODE, BatchAlreadyRunning
     from batch_layer.marketplace_quality import QualityGateFailure
     context = MarketplaceBatchContext(args.run_id, datetime.fromisoformat(args.as_of.replace("Z", "+00:00")), args.silver_uri, args.gold_root_uri)
     try:
@@ -339,6 +359,10 @@ def main() -> None:
                           "mandatory_failure_count": refusal.decision.mandatory_failures,
                           "failing_checks": list(refusal.failing)}, sort_keys=True))
         raise SystemExit(1)
+    except BatchAlreadyRunning as refusal:
+        # Nothing was started, so there is nothing to clean up or audit.
+        print(json.dumps({"run_id": context.run_id, "status": "ALREADY_RUNNING", "lock_key": refusal.key}, sort_keys=True))
+        raise SystemExit(ALREADY_RUNNING_EXIT_CODE)
     print(json.dumps({"run_id": result.run_id, "status": result.status, "silver_rows": result.silver_rows,
                       "dataset_counts": result.dataset_counts, "quality_status": result.quality_status,
                       "mandatory_failure_count": result.mandatory_failure_count,
