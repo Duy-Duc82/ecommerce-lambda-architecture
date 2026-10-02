@@ -197,8 +197,16 @@ def write_marketplace_batch(batch_df: DataFrame, batch_id: int) -> None:
     query_id = batch_df.sparkSession.sparkContext.getLocalProperty("sql.streaming.queryId")
     if not query_id: raise ValueError("micro-batch carries no streaming query id; refusing to audit it as another run's batch")
     producer, es, redis = _sink_clients()
-    # A closing factory: the query runs for days, one micro-batch every
-    # trigger, and a bare psycopg2 connection would leak on every audit call.
-    audit = MarketplaceSpeedAudit(postgres.postgres_connection_factory())
-    outputs = [SpeedOutput(**row.asDict()) for row in batch_df.collect()]
-    MarketplaceSpeedSinks(producer=producer, es=es, redis=redis, audit=audit).write_batch(outputs, batch_id, query_id=query_id)
+    try:
+        # A closing factory: the query runs for days, one micro-batch every
+        # trigger, and a bare psycopg2 connection would leak on every audit call.
+        audit = MarketplaceSpeedAudit(postgres.postgres_connection_factory())
+        outputs = [SpeedOutput(**row.asDict()) for row in batch_df.collect()]
+        MarketplaceSpeedSinks(producer=producer, es=es, redis=redis, audit=audit).write_batch(outputs, batch_id, query_id=query_id)
+    finally:
+        # The same holds for the three sink clients: a producer left open per
+        # batch keeps its network thread and sockets alive. Closing an already
+        # closed client (the sink closes them on failure) is a no-op.
+        for client in (producer, es, redis):
+            try: client.close()
+            except Exception: pass
