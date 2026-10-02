@@ -130,6 +130,21 @@ def test_a_failed_window_is_reported_not_raised(error, outcome):
         assert report["mandatory_failure_count"] == 2
 
 
+# 16: PostgreSQL restarting when a tick fires must not end the scheduler.
+def test_an_unreachable_audit_table_is_reported_not_raised():
+    def unreachable(run_id):
+        raise ConnectionError("could not connect to server")
+    batch = RecordingBatch()
+
+    report = scheduler.tick(at("2026-10-02T01:00:00"), run_status=unreachable, run_batch=batch,
+                            silver_uri="file:///silver", gold_root_uri="file:///gold",
+                            interval_seconds=DAY, lag_seconds=LAG)
+
+    assert report["outcome"] == "FAILED"
+    assert "could not connect" in report["error"]
+    assert batch.calls == []
+
+
 class Clock:
     def __init__(self, now):
         self.now = now
