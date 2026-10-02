@@ -1303,3 +1303,65 @@ một mạch trước đó bị treo trong file quality, sau khoảng 12 test Sp
 riêng thì không treo lại. Nghi do môi trường Spark trên Windows host chứ
 không do code, nhưng **chưa xác minh được nguyên nhân**. Nếu lặp lại, chạy
 file quality riêng.
+
+---
+
+## 13. Session 2026-10-02 — Phase 8 WP2: Silver sink và speed services
+
+### 13.1 Đã làm
+
+Nhánh `phase-8-wp2-sink-speed-services`, cắt từ `develop` sau khi PR #7 merge.
+
+| Thay đổi | Ở đâu |
+|---|---|
+| `python -m data_ingestion.marketplace_silver_service`: commit thủ công từng offset, **chỉ sau khi** record đã xử lý xong; record lỗi được retry tại đúng offset đó với backoff gấp đôi có trần; khi bỏ một batch thì tua lại mọi partition mà `poll()` đã đi qua | `data_ingestion/marketplace_silver_service.py` |
+| `python -m speed_layer.marketplace_speed_service`: một query Structured Streaming có checkpoint; SIGTERM → `query.stop()`; bản ghi invalid được union vào output để audit đếm được | `speed_layer/marketplace_speed_service.py` |
+| `MARKETPLACE_SPEED_CHECKPOINT_ROOT`; mỗi micro-batch dùng connection factory có đóng | `speed_layer/marketplace_speed_layer.py` |
+| Connection factory và stop signal chuyển sang `common/` để các service dùng chung | `common/postgres.py`, `common/lifecycle.py` |
+
+Lệch plan: trigger dùng `MARKETPLACE_STREAM_TRIGGER` đã có sẵn, không thêm `MARKETPLACE_SPEED_TRIGGER_SECONDS`.
+
+### 13.2 Ba bug production, mỗi bug một cặp test → fix
+
+| Bug | Vị trí | Hệ quả |
+|---|---|---|
+| Lỗi ghi Silver của một observation **hợp lệ** nằm chung `except` với lỗi decode/validate | `data_ingestion/marketplace_silver_sink.py` | MinIO sập → observation tốt bị đẩy vào DLQ như `CONTRACT_VALIDATION`, không bao giờ vào Silver (plan §6.2) |
+| `F.to_json("decoded")` bỏ các field null; `_process_group` parse lại bằng wire contract nghiêm ngặt, đòi đủ mọi key | `speed_layer/marketplace_speed_layer.py` | Mọi observation có `brand`/`seller_id` null (thường gặp với Tiki) làm micro-batch chết |
+| `SPARK_KAFKA_PACKAGE` vẫn là `_2.12:3.5.1` | `config/settings.py` | Không nạp được trên Spark 4 (Scala 2.13): speed query chết ngay khi khởi động |
+
+Bug thứ hai lọt qua vì test decode của Phase 5 chỉ kiểm cột, chưa bao giờ đưa dòng đã decode vào xử lý tiếp.
+
+### 13.3 Kiểm chứng Silver sink trên Kafka + MinIO thật
+
+```text
+6 message WP1 để lại, lake local          6 SILVER, 6 file, offset 6, lag 0
+8 message mới, MinIO bị DỪNG              lỗi HTTPConnectionPool, không commit, DLQ = 0
+MinIO bật lại                             8 SILVER, 8 object trong ecommerce-silver, offset 14, lag 0, DLQ = 0
+```
+
+**Một lần chạy đầu bị loại.** Host lúc đó chưa cài gói `minio`, nên mọi lần
+"thất bại" thực ra là `No module named 'minio'` chứ không phải MinIO sập. Lần
+đó chỉ chứng minh lỗi ghi được retry và không vào DLQ. Đã cài `minio>=7.2.15`
+(có trong `requirements.txt`) rồi làm lại; bảng trên là lần làm lại.
+
+Client `minio` tự retry nội bộ trước khi trả lỗi. Vì vậy trong 40 giây MinIO
+sập chỉ thấy một lần thất bại, và backoff của service cộng thêm vào đó.
+
+### 13.4 Speed service — chưa kiểm chứng thật
+
+Docker engine sập khi pull image Elasticsearch: pull báo `unexpected EOF`,
+còn `docker info` không trả lời. **Nguyên nhân gốc: ổ `C:` hết sạch dung
+lượng (0 GB trống).** File đĩa ảo `docker_data.vhdx` (19 GB) nằm trên `C:`
+nên không lớn thêm được.
+
+Đã restart Docker Desktop theo yêu cầu (kèm `wsl --shutdown`, vì lần restart
+đầu engine vẫn kẹt). Container của project khác tự lên lại, nhưng container
+của project này báo `Input/output error` khi đọc file, vì ổ vẫn còn đầy.
+Đây là chuyện môi trường, không phải lỗi code. Speed query **chưa chạy lần
+nào trên Kafka thật**; mới được kiểm bằng test offline và Spark batch.
+
+### 13.5 Trạng thái test
+
+**734 passed, 0 failed, 0 skipped** (trước WP2: 711). Chạy thành hai lượt:
+phần còn lại của suite (692 passed, 3m25s) và `test_marketplace_quality.py`
+riêng (42 passed, 17m13s).
