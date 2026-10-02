@@ -179,3 +179,20 @@ def test_each_micro_batch_closes_its_audit_connections(monkeypatch):
     layer.write_marketplace_batch(SimpleNamespace(collect=lambda: []), 7)
 
     assert built == ["closing", ("batch", 7, 0)]
+
+
+def test_the_default_kafka_connector_matches_the_spark_major_version():
+    # Spark 4 is built on Scala 2.13. The old default, _2.12:3.5.1, cannot
+    # load on it, so the query would die at start before reading a record.
+    import os
+
+    import pyspark
+
+    if "SPARK_KAFKA_PACKAGE" in os.environ:
+        pytest.skip("the environment overrides the connector")
+    from config.settings import SPARK_KAFKA_PACKAGE
+
+    group, artifact, version = SPARK_KAFKA_PACKAGE.split(":")
+    assert group == "org.apache.spark"
+    assert artifact == "spark-sql-kafka-0-10_2.13"
+    assert version.split(".")[0] == pyspark.__version__.split(".")[0]
