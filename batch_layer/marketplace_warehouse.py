@@ -320,10 +320,13 @@ def _run_marketplace_warehouse(context: MarketplaceBatchContext, *, publish_cach
         # actually exists. Promoting before publication leaves a serving
         # manifest naming a Gold run whose cache was never written, which is a
         # worse state than either the cache or the pointer failing alone.
-        promotion = promote_manifest(manifest, writer=writer, reader=reader, allow_backfill=allow_backfill)
+        # Compare-and-swap against the pointer read above: if another run
+        # promoted in between, this one must not overwrite it.
+        promotion = promote_manifest(manifest, writer=writer, reader=reader, allow_backfill=allow_backfill,
+                                     expected_current_run_id=None if previous is None else previous.run_id)
         if audit:
             audit.mark_promotion(run_id=context.run_id, promoted=promotion.promoted or promotion.reason == ALREADY_CURRENT)
-        return MarketplaceBatchResult(context.run_id, "SUCCEEDED" if publish_cache else "GOLD_WRITTEN", silver_rows, counts, "PASS", 0, promotion.manifest_uri, promotion.promoted, promotion.reason)
+        return MarketplaceBatchResult(context.run_id, "SUCCEEDED" if publish_cache else "GOLD_WRITTEN", silver_rows, counts, "PASS", 0, promotion.manifest_uri or manifest_uri, promotion.promoted, promotion.reason)
     except QualityGateFailure:
         raise
     except Exception as error:
