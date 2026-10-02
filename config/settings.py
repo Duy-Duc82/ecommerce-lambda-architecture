@@ -25,8 +25,11 @@ KAFKA_TOPIC_EVENTS: str = os.getenv("KAFKA_TOPIC_EVENTS", "ecommerce_events")
 # SPARK
 # ============================================================
 SPARK_MASTER_URL: str = os.getenv("SPARK_MASTER_URL", "spark://spark:7077")
+# Spark 4 is built on Scala 2.13 (pyspark is pinned to 4.x, PROGRESS §6), and
+# the connector must match the runtime's version. Set it empty inside an
+# image whose connector jars are already on the classpath.
 SPARK_KAFKA_PACKAGE: str = os.getenv(
-    "SPARK_KAFKA_PACKAGE", "org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.1"
+    "SPARK_KAFKA_PACKAGE", "org.apache.spark:spark-sql-kafka-0-10_2.13:4.0.1"
 )
 
 # ============================================================
