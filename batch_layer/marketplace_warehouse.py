@@ -245,7 +245,7 @@ def _run_marketplace_warehouse(context: MarketplaceBatchContext, *, publish_cach
     quality results recorded, but it writes no manifest, publishes nothing and
     promotes nothing.
     """
-    from batch_layer.marketplace_manifest import ALREADY_CURRENT, BACKFILL_REFUSED, build_gold_manifest, promote_manifest, promotion_refusal, read_current_manifest, write_run_manifest
+    from batch_layer.marketplace_manifest import ALREADY_CURRENT, BACKFILL_REFUSED, PROMOTION_CONFLICT, build_gold_manifest, promote_manifest, promotion_refusal, read_current_manifest, write_run_manifest
     from batch_layer.marketplace_marts import build_marketplace_marts
     from batch_layer.marketplace_quality import QualityGateFailure, decide, evaluate_quality_gates
     if writer is None or reader is None:
@@ -317,6 +317,18 @@ def _run_marketplace_warehouse(context: MarketplaceBatchContext, *, publish_cach
                 audit.mark_held(run_id=context.run_id, completed_at=datetime.now(timezone.utc), reason=BACKFILL_REFUSED, manifest_uri=manifest_uri)
             return MarketplaceBatchResult(context.run_id, "GOLD_WRITTEN", silver_rows, counts, "PASS", 0, manifest_uri, False, BACKFILL_REFUSED)
 
+        # The pointer was read before minutes of Spark work, and the batch lock
+        # lives on a connection idle all that time, which can drop. Check again
+        # before the cache moves: a conflict found only at promotion would leave
+        # the cache serving this run, the pointer another, and the audit row
+        # SUCCEEDED, so no later tick would ever revisit the window.
+        expected_current_run_id = None if previous is None else previous.run_id
+        now_current = read_current_manifest(reader=reader)
+        if (None if now_current is None else now_current.run_id) != expected_current_run_id:
+            if audit:
+                audit.mark_held(run_id=context.run_id, completed_at=datetime.now(timezone.utc), reason=PROMOTION_CONFLICT, manifest_uri=manifest_uri)
+            return MarketplaceBatchResult(context.run_id, "GOLD_WRITTEN", silver_rows, counts, "PASS", 0, manifest_uri, False, PROMOTION_CONFLICT)
+
         if publish_cache:
             from batch_layer.marketplace_postgres import MarketplaceCachePublisher
             publisher = MarketplaceCachePublisher.from_settings()
@@ -327,10 +339,10 @@ def _run_marketplace_warehouse(context: MarketplaceBatchContext, *, publish_cach
         # actually exists. Promoting before publication leaves a serving
         # manifest naming a Gold run whose cache was never written, which is a
         # worse state than either the cache or the pointer failing alone.
-        # Compare-and-swap against the pointer read above: if another run
-        # promoted in between, this one must not overwrite it.
+        # Compare-and-swap once more at the write itself. Only the few
+        # milliseconds of publication remain unguarded here.
         promotion = promote_manifest(manifest, writer=writer, reader=reader, allow_backfill=allow_backfill,
-                                     expected_current_run_id=None if previous is None else previous.run_id)
+                                     expected_current_run_id=expected_current_run_id)
         if audit:
             audit.mark_promotion(run_id=context.run_id, promoted=promotion.promoted or promotion.reason == ALREADY_CURRENT)
         return MarketplaceBatchResult(context.run_id, "SUCCEEDED" if publish_cache else "GOLD_WRITTEN", silver_rows, counts, "PASS", 0, promotion.manifest_uri or manifest_uri, promotion.promoted, promotion.reason)
