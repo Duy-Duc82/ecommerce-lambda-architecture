@@ -525,6 +525,13 @@ the lock, for example by a future caller.
 `mark_promotion` records `promoted=False` on a conflict, and the result carries
 `promotion_reason="PROMOTION_CONFLICT"`.
 
+Amended in WP3 review: the orchestrator also re-reads the pointer **before
+publishing the cache**. The lock's connection idles through the whole Spark
+run and can drop, and a conflict found only at promotion would leave the cache
+serving this run, the pointer another, and the audit row `SUCCEEDED`, so the
+scheduler would skip the window for good. A pointer that moved by then holds
+the run as `GOLD_WRITTEN` with `PROMOTION_CONFLICT`, which stays resumable.
+
 ### 6.6 The `s3a://` path
 
 `build_spark()` applies `config.storage.spark_hadoop_options()` whenever the

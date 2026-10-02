@@ -118,7 +118,7 @@ Phase 5/6 chỉ nằm ở ngọn một nhánh feature, không có ở commit g�
 P1-09 gold publish manifest) merge qua PR #4 ngày 2026-09-30. Bản sửa sau
 merge — run đọc Silver và audit *tại* `as_of`, gate 8 có cửa sổ đối soát — nằm
 trên `phase-7-asof-cutoff`, chi tiết ở `PROGRESS.md` §11.
-Suite: **791 pass, 0 fail, 0 skip** trên nhánh WP3 (`PROGRESS.md` §14.4; sau Phase 7 là 674, trước Phase 7 là 519).
+Suite: **793 pass, 0 fail, 0 skip** trên nhánh WP3 (`PROGRESS.md` §14.4; sau Phase 7 là 674, trước Phase 7 là 519).
 `master` vẫn chưa nhận phase nào: chờ thầy hướng dẫn duyệt `develop`.
 
 **Phase 4/5 chưa từng chạy như dịch vụ.** Hai phase này ✅ ở mức code và test,
