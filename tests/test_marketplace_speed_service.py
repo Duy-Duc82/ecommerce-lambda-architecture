@@ -210,3 +210,31 @@ def test_the_default_kafka_connector_matches_the_spark_major_version():
     assert group == "org.apache.spark"
     assert artifact == "spark-sql-kafka-0-10_2.13"
     assert version.split(".")[0] == pyspark.__version__.split(".")[0]
+
+
+def test_the_speed_session_pins_a_small_shuffle_partition_count(monkeypatch):
+    # Spark fixes a stateful operator's partition count in the checkpoint on
+    # the first run, so this has to be right before a production checkpoint
+    # exists. The default, 200, ran 200+ tasks per micro-batch for a few dozen
+    # records on the first real run.
+    from config.settings import MARKETPLACE_SPEED_SHUFFLE_PARTITIONS
+
+    captured = {}
+
+    class Builder:
+        def appName(self, name):
+            return self
+
+        def config(self, key, value):
+            captured[key] = value
+            return self
+
+        def getOrCreate(self):
+            return "session"
+
+    monkeypatch.setattr(service.SparkSession, "builder", Builder())
+
+    assert service.build_spark() == "session"
+    assert captured["spark.sql.shuffle.partitions"] == str(MARKETPLACE_SPEED_SHUFFLE_PARTITIONS)
+    assert 1 <= MARKETPLACE_SPEED_SHUFFLE_PARTITIONS <= 16
+    assert captured["spark.sql.session.timeZone"] == "UTC"
