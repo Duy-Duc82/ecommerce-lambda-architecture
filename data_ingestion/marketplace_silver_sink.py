@@ -16,6 +16,14 @@ class SourceRecord:
 class SilverSinkResult:
     status: str; object_uri: str; event_id: str | None; dlq_id: str | None
 
+
+class SilverWriteError(RuntimeError):
+    """A valid observation could not be written to Silver.
+
+    Not a bad record: the caller must retry it at the same offset. Sending it
+    to the DLQ would lose a good observation to a storage outage.
+    """
+
 def silver_observation_path(event, dataset: str = "marketplace/offer_observations") -> str:
     """Where an observation lands in Silver; the raw reparse reads it back here."""
     observation = event.payload.observation
@@ -33,7 +41,6 @@ def process_record(record: SourceRecord, *, writer, dlq_producer, clock):
         if key != event.partition_key: raise ValueError("Kafka key does not equal event partition_key")
         path = silver_observation_path(event)
         payload = json.dumps(serialize_for_wire(event), ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
-        return SilverSinkResult("SILVER", writer("silver", path, payload), event.event_id, None)
     except Exception as error:
         if text is None: text = record.value.decode("utf-8", "replace")
         key = None
@@ -46,3 +53,10 @@ def process_record(record: SourceRecord, *, writer, dlq_producer, clock):
         uri = writer("silver", path, json.dumps(serialize_for_wire(dlq), ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8"))
         publish_marketplace_dlq(dlq_producer, dlq, ack_timeout_seconds=30)
         return SilverSinkResult("QUARANTINE", uri, None, dlq.dlq_id)
+    # Outside the except above on purpose: only decoding and validation decide
+    # that a record is bad. A write that fails here is the store's fault.
+    try:
+        uri = writer("silver", path, payload)
+    except Exception as error:
+        raise SilverWriteError(f"Silver write failed for {event.event_id}: {error}") from error
+    return SilverSinkResult("SILVER", uri, event.event_id, None)
