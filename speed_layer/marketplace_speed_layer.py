@@ -112,6 +112,50 @@ def _process_group(rows: Iterable[dict], previous=None, config: ChangeRuleConfig
     return result
 
 
+def make_state_function(config: ChangeRuleConfig):
+    """The per-offer function ``applyInPandasWithState`` calls.
+
+    Spark passes an *iterator* of pandas frames for one key and expects an
+    iterator of frames back. All of a key's rows in a trigger are read before
+    any is processed, because ``_process_group`` orders them by event time.
+
+    With ``ProcessingTimeTimeout`` a key's timeout must be set on every call,
+    or Spark drops it. It is re-armed whenever the key holds a state, from
+    the latest observed instant, so an offer whose last call brought only a
+    duplicate or a late row can still go stale.
+    """
+    import pandas as pd
+    from config.marketplace_wire import canonical_json
+    from speed_layer.marketplace_change_rules import offer_state_from_json
+
+    def arm_timeout(state, observed_at) -> None:
+        due_ms = int((observed_at.timestamp() + config.stale_after_seconds) * 1000)
+        state.setTimeoutDuration(max(1, due_ms - state.getCurrentProcessingTimeMs()))
+
+    def state_fn(key, frames, state):
+        prior = offer_state_from_json(state.get[0]) if state.exists else None
+        if state.hasTimedOut and prior is not None:
+            stale_state, stale_change = detect_stale_change(prior, config)
+            state.update((offer_state_to_json(stale_state), stale_state.observed_at, stale_state.observation_id))
+            if stale_change is not None:
+                yield pd.DataFrame([SpeedOutput("CHANGE", stale_state.marketplace, stale_state.offer_id, stale_state.observation_id,
+                                                stale_change.event_id, stale_change.detected_at,
+                                                change_json=canonical_json(stale_change)).__dict__])
+            return
+        rows = [row for frame in frames for row in frame.to_dict("records")]
+        outputs = _process_group(rows, prior, config)
+        latest = next((o for o in reversed(outputs) if o.output_kind == "STATE"), None)
+        current = offer_state_from_json(latest.state_json) if latest else prior
+        if latest:
+            state.update((latest.state_json, current.observed_at, current.observation_id))
+        if current is not None:
+            arm_timeout(state, current.observed_at)
+        if outputs:
+            yield pd.DataFrame([o.__dict__ for o in outputs])
+
+    return state_fn
+
+
 def build_change_stream(valid: DataFrame, config: ChangeRuleConfig) -> DataFrame:
     """Build the deterministic grouped transform.
 
@@ -123,24 +167,7 @@ def build_change_stream(valid: DataFrame, config: ChangeRuleConfig) -> DataFrame
     if valid.isStreaming and hasattr(valid.groupBy("offer_id"), "applyInPandasWithState"):
         from pyspark.sql.types import StructType
         state_schema = StructType([StructField("state_json", StringType(), False), StructField("observed_at", TimestampType(), False), StructField("observation_id", StringType(), False)])
-        def state_fn(key, pdf, state):
-            prior = None
-            if state.exists: prior = __import__("speed_layer.marketplace_change_rules", fromlist=["offer_state_from_json"]).offer_state_from_json(state.get[0])
-            if state.hasTimedOut and prior is not None:
-                stale_state, stale_change = detect_stale_change(prior, config)
-                state.update((offer_state_to_json(stale_state), stale_state.observed_at, stale_state.observation_id))
-                if stale_change is None:
-                    return __import__("pandas").DataFrame([], columns=SPEED_OUTPUT_SCHEMA.names)
-                from config.marketplace_wire import canonical_json
-                return __import__("pandas").DataFrame([SpeedOutput("CHANGE", stale_state.marketplace, stale_state.offer_id, stale_state.observation_id, stale_change.event_id, stale_change.detected_at, change_json=canonical_json(stale_change)).__dict__])
-            outputs = _process_group(pdf.to_dict("records"), prior, config)
-            if outputs:
-                latest = next((o for o in reversed(outputs) if o.output_kind == "STATE"), None)
-                if latest:
-                    st = __import__("speed_layer.marketplace_change_rules", fromlist=["offer_state_from_json"]).offer_state_from_json(latest.state_json)
-                    state.update((latest.state_json, st.observed_at, st.observation_id))
-                    state.setTimeoutDuration(max(1, int((st.observed_at.timestamp() + config.stale_after_seconds) * 1000 - state.getCurrentProcessingTimeMs())))
-            return __import__("pandas").DataFrame([o.__dict__ for o in outputs])
+        state_fn = make_state_function(config)
         return valid.groupBy("offer_id").applyInPandasWithState(state_fn, outputStructType=SPEED_OUTPUT_SCHEMA, stateStructType=state_schema, outputMode="Append", timeoutConf="ProcessingTimeTimeout")
     # A finite DataFrame path deliberately avoids Arrow/pandas so unit tests
     # remain runnable on a plain local Spark installation. The streaming path
