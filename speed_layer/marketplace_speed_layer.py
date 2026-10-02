@@ -16,7 +16,7 @@ from pyspark.sql.types import LongType, StringType, StructField, StructType, Tim
 
 from config.marketplace_wire import marketplace_observation_from_wire
 from config.settings import (
-    CHECKPOINTS_DIR, KAFKA_BOOTSTRAP_SERVERS, MARKETPLACE_CHANGE_RULE_VERSION,
+    CHECKPOINTS_DIR, KAFKA_BOOTSTRAP_SERVERS, MARKETPLACE_CHANGE_RULE_VERSION, MARKETPLACE_SPEED_CHECKPOINT_ROOT,
     MARKETPLACE_LARGE_DROP_ABSOLUTE, MARKETPLACE_LARGE_DROP_RELATIVE,
     MARKETPLACE_STALE_AFTER_SECONDS, MARKETPLACE_STREAM_CHECKPOINT_VERSION,
     MARKETPLACE_STREAM_TRIGGER, MARKETPLACE_STREAM_WATERMARK,
@@ -53,7 +53,12 @@ def speed_output_schema() -> StructType:
 
 
 def checkpoint_path() -> str:
-    return str((CHECKPOINTS_DIR / "marketplace_speed" / MARKETPLACE_STREAM_CHECKPOINT_VERSION).resolve())
+    # The version is always the last component, so bumping it starts a fresh
+    # checkpoint wherever the root was moved to.
+    from pathlib import Path
+
+    root = Path(MARKETPLACE_SPEED_CHECKPOINT_ROOT) if MARKETPLACE_SPEED_CHECKPOINT_ROOT else CHECKPOINTS_DIR / "marketplace_speed"
+    return str((root / MARKETPLACE_STREAM_CHECKPOINT_VERSION).resolve())
 
 
 def read_marketplace_observations(spark: SparkSession) -> DataFrame:
@@ -149,16 +154,20 @@ def build_change_stream(valid: DataFrame, config: ChangeRuleConfig) -> DataFrame
     return valid.sparkSession.createDataFrame(outputs, schema=SPEED_OUTPUT_SCHEMA)
 
 
-def write_marketplace_batch(batch_df: DataFrame, batch_id: int) -> None:
-    from speed_layer.marketplace_sinks import MarketplaceSpeedAudit, MarketplaceSpeedSinks
-    from config.settings import ES_HOST, POSTGRES_DB, POSTGRES_HOST, POSTGRES_PASSWORD, POSTGRES_PORT, POSTGRES_USER, REDIS_DB, REDIS_HOST, REDIS_PORT
+def _sink_clients():
+    from config.settings import ES_HOST, REDIS_DB, REDIS_HOST, REDIS_PORT
     from data_ingestion.marketplace_change_producer import create_change_producer
-    import psycopg2
-    from redis import Redis
     from elasticsearch import Elasticsearch
-    producer = create_change_producer()
-    es = Elasticsearch(ES_HOST)
-    redis = Redis(host=REDIS_HOST, port=REDIS_PORT, db=REDIS_DB)
-    audit = MarketplaceSpeedAudit(lambda: psycopg2.connect(host=POSTGRES_HOST, port=POSTGRES_PORT, user=POSTGRES_USER, password=POSTGRES_PASSWORD, dbname=POSTGRES_DB))
+    from redis import Redis
+    return create_change_producer(), Elasticsearch(ES_HOST), Redis(host=REDIS_HOST, port=REDIS_PORT, db=REDIS_DB)
+
+
+def write_marketplace_batch(batch_df: DataFrame, batch_id: int) -> None:
+    from common import postgres
+    from speed_layer.marketplace_sinks import MarketplaceSpeedAudit, MarketplaceSpeedSinks
+    producer, es, redis = _sink_clients()
+    # A closing factory: the query runs for days, one micro-batch every
+    # trigger, and a bare psycopg2 connection would leak on every audit call.
+    audit = MarketplaceSpeedAudit(postgres.postgres_connection_factory())
     outputs = [SpeedOutput(**row.asDict()) for row in batch_df.collect()]
     MarketplaceSpeedSinks(producer=producer, es=es, redis=redis, audit=audit).write_batch(outputs, batch_id)

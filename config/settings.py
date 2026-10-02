@@ -157,6 +157,10 @@ MARKETPLACE_LARGE_DROP_RELATIVE = _env_decimal("MARKETPLACE_LARGE_DROP_RELATIVE"
 MARKETPLACE_STALE_AFTER_SECONDS = int(os.getenv("MARKETPLACE_STALE_AFTER_SECONDS", "21600"))
 MARKETPLACE_STREAM_WATERMARK = os.getenv("MARKETPLACE_STREAM_WATERMARK", "2 hours")
 MARKETPLACE_STREAM_TRIGGER = os.getenv("MARKETPLACE_STREAM_TRIGGER", "30 seconds")
+# Where the speed query's checkpoint lives; empty means data/checkpoints/
+# marketplace_speed. The version directory is appended either way, so bumping
+# MARKETPLACE_STREAM_CHECKPOINT_VERSION always starts a fresh checkpoint.
+MARKETPLACE_SPEED_CHECKPOINT_ROOT = os.getenv("MARKETPLACE_SPEED_CHECKPOINT_ROOT", "").strip()
 MARKETPLACE_STREAM_CHECKPOINT_VERSION = os.getenv("MARKETPLACE_STREAM_CHECKPOINT_VERSION", "v1")
 # ============================================================
 # CRAWL SCHEDULER - frontier cadence, retry and circuit (Phase 3)
