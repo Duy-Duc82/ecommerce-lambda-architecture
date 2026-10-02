@@ -419,13 +419,22 @@ def test_successful_batch_counts_separate_inputs_from_derived_changes():
 
 
 def test_change_documents_reach_elasticsearch_as_canonical_wire():
+    # The projection may not drift from the Kafka event. The one exception,
+    # since Phase 8 WP2: an object-valued previous_value/current_value is
+    # stored as its canonical JSON string (see the tests below).
     outputs, changes, _ = _batch()
     sinks, parts = _sinks()
 
     sinks.write_batch(outputs, batch_id=1)
 
-    operations = parts["es"].calls[0]
-    assert operations[1] == json.loads(canonical_json(changes[0]))
+    documents = _change_documents(parts)
+    for change, doc in zip(changes, documents):
+        wire = json.loads(canonical_json(change))
+        expected = {key: canonical_json(value) if key in ("previous_value", "current_value") and isinstance(value, (dict, list)) else value
+                    for key, value in wire.items()}
+        assert doc == expected
+    # A scalar change is the wire, byte for byte.
+    assert documents[1] == json.loads(canonical_json(changes[1]))
 
 
 # ----------------------------------------------------------------------------
