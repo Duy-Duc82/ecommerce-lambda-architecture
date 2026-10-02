@@ -99,12 +99,17 @@ function Wait-Http {
     throw "$Name is not ready: $Url"
 }
 
+# The Kaggle demo's services moved off the default Compose profile in Phase 8:
+# `legacy` holds Spark 3.5.1 and the legacy Kibana importer, `serve` holds
+# Kibana and Superset. Passing both starts what `up` used to start.
+$ComposeProfiles = @("--profile", "legacy", "--profile", "serve")
+
 function Start-DockerStack {
     Invoke-Step -Title "Start Docker stack" -Script {
-        docker compose up -d
+        docker compose @ComposeProfiles up -d
     }
     Start-Sleep -Seconds 10
-    docker compose ps --format "table {{.Name}}\t{{.Status}}\t{{.Ports}}"
+    docker compose @ComposeProfiles ps --format "table {{.Name}}\t{{.Status}}\t{{.Ports}}"
 }
 
 function Initialize-KafkaTopics {
@@ -112,7 +117,7 @@ function Initialize-KafkaTopics {
         $topics = @("ecommerce_events", "marketplace.observations.v1", "marketplace.observations.v1.dlq", "marketplace.changes.v1")
         foreach ($topic in $topics) {
             docker exec kafka /opt/kafka/bin/kafka-topics.sh `
-                --create --bootstrap-server localhost:9092 `
+                --create --bootstrap-server kafka:19092 `
                 --topic $topic --partitions 3 --replication-factor 1 --if-not-exists | Out-Null
             Write-Host "  [OK] $topic" -ForegroundColor Green
         }
@@ -174,7 +179,7 @@ function Start-BatchWarehouse {
 function Refresh-SupersetBI {
     if (-not $SkipSupersetInit) {
         Invoke-Step -Title "Import Superset datasets" -Script {
-            docker compose run --rm superset-init
+            docker compose @ComposeProfiles run --rm superset-init
         }
     }
 

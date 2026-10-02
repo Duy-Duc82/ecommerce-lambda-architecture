@@ -1525,3 +1525,98 @@ code nào hai bản sửa đụng tới).
    `hadoop-aws-3.4.1` + `bundle-2.24.6` và JDBC Postgres; xử lý image
    `elasticsearch:8.18.0` hỏng trên máy này (§13.4).
 3. Ổ `C:` còn khoảng 6,5 GB. Đồ tải lớn đặt trên `D:` (chủ dự án đã đồng ý).
+
+---
+
+## 15. Session 2026-10-02 (tối) — merge WP3, Phase 8 WP4: image và Compose profiles
+
+### 15.1 PR #9 trước khi merge
+
+Review tìm ra hai bug; cả hai đã sửa trước khi merge (`7818ca5`). Chi tiết ở
+§14.3b.
+
+### 15.2 Đã làm
+
+Nhánh `phase-8-wp4-images-compose`, cắt từ `develop` sau khi PR #9 merge.
+
+| Thay đổi | Ở đâu |
+|---|---|
+| Image `ecommerce/marketplace-python:1` (`python:3.12.11-slim`, 235 MB) cho crawl-worker và silver-sink | `docker/marketplace-python/Dockerfile` |
+| Image `ecommerce/spark-marketplace:4.0.1`, chạy dưới user `spark`. Jar có pin version và ghi nguồn: Kafka connector 4.0.1, kafka-clients 3.9.1, commons-pool2 2.12.0, hadoop-aws 3.4.1, AWS SDK bundle 2.24.6, postgresql 42.7.5 | `docker/spark-marketplace/Dockerfile` |
+| Pin chính xác các gói đã chạy thật | `requirements-marketplace.txt` |
+| `docker compose up` chỉ chạy core; các profile `crawl`, `ingest`, `speed`, `batch` (kèm `batch-once`), `serve`, `legacy`; có healthcheck; mount source read-only; volume `speed_checkpoints` | `docker-compose.yml` |
+| `kafka-init` tạo idempotent 3 topic đóng băng | như trên |
+| Port host lấy từ `*_HOST_PORT` trong `.env` | `docker-compose.yml`, `.env.example` |
+| Heartbeat mỗi vòng lặp cho crawl và silver; healthcheck chạy `python -m common.heartbeat --check` | `common/heartbeat.py`, hai service |
+| `start_all.ps1` truyền `--profile legacy --profile serve` | `scripts/start_all.ps1` |
+| Pin image và cách kiểm pull | `docs/RUNBOOK.md` |
+
+### 15.3 Lệch plan, đều có lý do
+
+- **MinIO không còn image nào pull được.** Mọi tag trên Docker Hub và quay.io,
+  kể cả `latest`, đều trả `denied`. Theo §5.3, pin theo digest của bản đang
+  cache trên máy, kèm `pull_policy: missing`. Runbook ghi cách `docker save`
+  / `docker load` sang máy khác.
+- **ES/Kibana lên 8.18.1.** Image 8.18.0 trên máy này bị hỏng (§13.4) và đã
+  được xoá.
+- **`warehouse-job` giữ profile `jobs`**, không chuyển sang `legacy`.
+  `scripts/run_warehouse.ps1` gọi `--profile jobs`, mà file đó không được
+  sửa. Nếu nằm dưới `legacy` thì `start_all.ps1` sẽ khởi động nó mỗi lần `up`.
+- **Kibana nằm ở cả `serve` lẫn `legacy`**, vì `kibana-setup` của legacy phụ
+  thuộc nó.
+- **Healthcheck service Spark dùng `pgrep`**: image không có `curl`.
+- **Thêm `.dockerignore`** (ngoài §4). Không có file này thì build context là
+  cả repo, gồm `.git` và 535 MB jar trong `.localjars/`.
+- **Chưa có service `ops`, `stub-source`, `ops-projector`,
+  `kibana-marketplace-setup`.** Code của chúng thuộc WP5 và WP8; profile `ops`
+  và `smoke` sẽ được thêm cùng code.
+- Kafka vẫn ghi log vào filesystem của container (`/tmp/kraft-combined-logs`),
+  không có volume. Image chạy dưới user không phải root, nên một volume mới
+  sẽ thuộc root và Kafka không ghi được. `docker restart` giữ dữ liệu, còn
+  tạo lại container thì mất.
+
+### 15.4 Kiểm chứng trên stack thật
+
+Core dựng lại bằng `docker compose -f docker-compose.yml up -d` (bỏ qua file
+override). Crawler trỏ vào một stub tạm phục vụ fixture Tiki
+(`TIKI_LISTING_URL=http://tiki-stub:8000/...`), không gọi Tiki thật.
+
+```text
+core                         7 service; kafka-init exit 0 ("marketplace topics ready"), minio-init exit 0
+                             ES 8.18.1 healthy; Kafka, Redis không bị tạo lại vì config thực tế không đổi
+4 service profile            đều healthy sau khoảng 90 giây
+crawl-worker                 cycle 1: leased 4, succeeded 4; các cycle sau idle
+silver-sink                  ghi các offset mới thành SILVER
+speed                        batch 0: 24 input, 5 change → ES: 5 change, 2 offer
+batch-scheduler              mp-20261002T0000Z → SKIPPED_SUCCEEDED
+stop cả 4 service            4 giây, cả 4 exit 0
+start lại speed, gửi lại 1 observation
+                             batch 5, cùng query_id → checkpoint trong volume được dùng lại
+```
+
+`.env` local của chủ dự án được thêm `POSTGRES_HOST_PORT=5434`,
+`MINIO_API_HOST_PORT=9010`, `MINIO_CONSOLE_HOST_PORT=9011`,
+`REDIS_HOST_PORT=6380`. File `docker-compose.override.yml` giờ thừa và có thể
+xoá. Nếu còn, nó vẫn áp `!override` và `minio:latest` của nó.
+
+### 15.4b Review PR #10: ba điểm, đều đã sửa
+
+| Điểm | Kết quả kiểm | Sửa |
+|---|---|---|
+| Đổi `KAFKA_HOST_PORT` làm hỏng công cụ Kafka chạy *trong* container | Dựng broker thử với port host 9019. `kafka-topics.sh --bootstrap-server localhost:9092` **treo** (bị chuyển hướng sang `localhost:9019`). Healthcheck `kafka-broker-api-versions` thì vẫn pass, nên phần review nói về healthcheck không tái hiện được | `start_all.ps1`, `smoke_fullstack.ps1` và healthcheck dùng `kafka:19092` |
+| `smoke_fullstack.ps1` vẫn chạy `up` không kèm profile, nên Kibana/Superset mà script kiểm không bao giờ được khởi động | đúng | truyền `--profile legacy --profile serve`. File này nằm ngoài §4, nhưng là caller bị chính WP4 làm hỏng |
+| Silver sink chỉ beat mỗi lần poll; một poll backlog có tới 500 record vượt 180 giây | đúng | beat thêm sau mỗi record; test `6b24080` → fix `b0c4a94`. Đã kiểm lại `silver-sink` healthy trên stack |
+
+### 15.5 Trạng thái test
+
+Không tính `test_marketplace_quality.py`: **756 passed** (trước WP4: 751, có
+thêm 5 test heartbeat). File quality không đụng tới code nào WP4 sửa (42
+passed ở §14.4). Tổng: **798**.
+
+### 15.6 Việc tiếp theo (resume ở đây)
+
+1. Review và merge PR WP4.
+2. **WP5:** `ops/stub_source.py` (thay stub tạm của §15.4), `ops validate`,
+   `ops smoke`, `scripts/mp.ps1`; thêm profile `smoke` và `ops`.
+3. Ổ `C:` còn khoảng 6,5 GB, image Spark marketplace nặng 3,6 GB. Lần build
+   lại sau dùng được cache layer.
