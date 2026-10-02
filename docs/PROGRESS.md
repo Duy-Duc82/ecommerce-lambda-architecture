@@ -1410,3 +1410,28 @@ phải đổi tag hoặc dọn snapshot thì mới chạy được 8.18.0.
 **749 passed, 0 failed, 0 skipped** (trước WP2: 711). Chạy thành hai lượt:
 phần còn lại của suite (707 passed, 3m51s) và `test_marketplace_quality.py`
 riêng (42 passed, 18m42s).
+
+### 13.6 Việc tiếp theo (resume ở đây)
+
+1. **Review và merge PR #8** (WP2) vào `develop`.
+2. **WP3** (plan Phase 8 §6.4–6.6, test 14–21):
+   - batch scheduler dạng loop, với `as_of` và `run_id` tất định;
+   - advisory lock để không chạy chồng; compare-and-swap con trỏ manifest
+     (`PROMOTION_CONFLICT`);
+   - `build_spark()` gọi `spark_hadoop_options()` để chạy được `s3a://`;
+   - `validate_settings()` từ chối lookback ≤ interval + settle.
+   Nhánh mới cắt từ `develop` sau khi PR #8 merge.
+3. **WP4** (image + Compose) phải xử lý image `elasticsearch:8.18.0` hỏng
+   trên máy này (§13.4): đổi pin sang một bản 8.18.x giải nén được, kèm
+   Kibana cùng minor, hoặc dọn snapshot containerd. Plan §5.3 đòi pin version
+   có lý do; ghi lý do vào Dockerfile/Compose.
+
+**Môi trường đang để lại:**
+
+- container `postgres-dw`, `minio`, `kafka`, `redis`, `mp-e2e` đang chạy;
+  `es-verify` đã xoá. Kafka giữ 16 observation, 8 change, DLQ rỗng.
+- Host Python đã cài thêm `kafka-python-ng` và `minio`; `mp-e2e` đã cài
+  pandas, pyarrow, redis, elasticsearch, kafka-python-ng, minio. Cả hai nhóm
+  đều nằm trong `requirements.txt`.
+- Trước khi pull image lớn hay chạy suite dài, kiểm dung lượng trống `C:`
+  (`df -h /c`).
