@@ -1599,11 +1599,19 @@ start lại speed, gửi lại 1 observation
 `REDIS_HOST_PORT=6380`. File `docker-compose.override.yml` giờ thừa và có thể
 xoá. Nếu còn, nó vẫn áp `!override` và `minio:latest` của nó.
 
+### 15.4b Review PR #10: ba điểm, đều đã sửa
+
+| Điểm | Kết quả kiểm | Sửa |
+|---|---|---|
+| Đổi `KAFKA_HOST_PORT` làm hỏng công cụ Kafka chạy *trong* container | Dựng broker thử với port host 9019. `kafka-topics.sh --bootstrap-server localhost:9092` **treo** (bị chuyển hướng sang `localhost:9019`). Healthcheck `kafka-broker-api-versions` thì vẫn pass, nên phần review nói về healthcheck không tái hiện được | `start_all.ps1`, `smoke_fullstack.ps1` và healthcheck dùng `kafka:19092` |
+| `smoke_fullstack.ps1` vẫn chạy `up` không kèm profile, nên Kibana/Superset mà script kiểm không bao giờ được khởi động | đúng | truyền `--profile legacy --profile serve`. File này nằm ngoài §4, nhưng là caller bị chính WP4 làm hỏng |
+| Silver sink chỉ beat mỗi lần poll; một poll backlog có tới 500 record vượt 180 giây | đúng | beat thêm sau mỗi record; test `6b24080` → fix `b0c4a94`. Đã kiểm lại `silver-sink` healthy trên stack |
+
 ### 15.5 Trạng thái test
 
-Không tính `test_marketplace_quality.py`: **755 passed** (trước WP4: 751, có
-thêm 4 test heartbeat). File quality không đụng tới code nào WP4 sửa (42
-passed ở §14.4). Tổng: **797**.
+Không tính `test_marketplace_quality.py`: **756 passed** (trước WP4: 751, có
+thêm 5 test heartbeat). File quality không đụng tới code nào WP4 sửa (42
+passed ở §14.4). Tổng: **798**.
 
 ### 15.6 Việc tiếp theo (resume ở đây)
 
