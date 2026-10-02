@@ -287,3 +287,34 @@ def test_a_key_that_disagrees_with_the_envelope_is_invalid(spark):
 
     assert valid.count() == 0
     assert invalid.count() == 1
+
+
+# ----------------------------------------------------------------------------
+# Found when Phase 8 assembled the query (2026-10-02). Spark's to_json drops
+# null fields by default, and the re-serialised event_json then fails the
+# strict wire contract, which requires every key. Tiki leaves brand and
+# seller_id null on many listings, so each such observation would crash its
+# micro-batch. The decode test above checks columns only; this one carries a
+# decoded row all the way through the change rules.
+# ----------------------------------------------------------------------------
+@requires_spark
+def test_a_decoded_observation_with_null_optional_fields_reaches_the_change_rules(spark):
+    event = _event()
+    wire = json.loads(canonical_json(event))
+    wire["payload"]["offer"]["brand"] = None
+    wire["payload"]["offer"]["seller_id"] = None
+    raw = spark.createDataFrame(
+        [("marketplace.observations.v1", 0, 3, event.partition_key, json.dumps(wire), None)],
+        "source_topic string, source_partition long, source_offset long, "
+        "source_key string, value string, kafka_timestamp timestamp",
+    )
+
+    valid, invalid = decode_observation_stream(raw)
+    (row,) = [r.asDict() for r in valid.collect()]
+
+    assert invalid.count() == 0
+    decoded = json.loads(row["event_json"])
+    assert decoded["payload"]["offer"]["brand"] is None
+    assert decoded["payload"]["offer"]["seller_id"] is None
+    outputs = _process_group([row], config=CONFIG)
+    assert _kinds(outputs)[0] == "STATE"
