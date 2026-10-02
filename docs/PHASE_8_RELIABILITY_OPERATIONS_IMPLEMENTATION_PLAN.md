@@ -446,9 +446,14 @@ spark-submit ... -m speed_layer.marketplace_speed_service    (inside the Spark 4
    - `option("checkpointLocation", checkpoint_path())`, where
      `checkpoint_path()` honours `MARKETPLACE_SPEED_CHECKPOINT_ROOT` and still
      ends in `MARKETPLACE_STREAM_CHECKPOINT_VERSION`;
-   - `trigger(processingTime=f"{MARKETPLACE_SPEED_TRIGGER_SECONDS} seconds")`.
-3. `awaitTermination()`. On SIGTERM, call `query.stop()`, which lets the
-   running micro-batch finish.
+   - `trigger(processingTime=MARKETPLACE_STREAM_TRIGGER)`, the setting Phase 5
+     already had (amended in WP2; no `MARKETPLACE_SPEED_TRIGGER_SECONDS`);
+   - `spark.sql.shuffle.partitions = MARKETPLACE_SPEED_SHUFFLE_PARTITIONS`
+     (default 4), set on the session. Spark fixes it in the checkpoint on the
+     first run, so changing it later needs a new checkpoint version.
+3. `awaitTermination()`. On SIGTERM, call `query.stop()`. On Spark 4.0.1 this
+   cancels a micro-batch in progress; that is safe, because its offsets were
+   not committed and every sink is idempotent.
 
 The checkpoint lives on a named Docker volume (`speed_checkpoints`). It is
 derived state: losing it means replaying from `earliest`, which the
@@ -712,10 +717,14 @@ templates with explicit mappings for every `marketplace-*` index:
 - identifiers as `keyword`, timestamps as `date`, counts as `long`;
 - `dynamic: strict` for the projector indices, so a stray field fails loudly.
 
-Because `previous_value` / `current_value` hold different types per
-`field_name` (price, rating, availability), the change template also maps
-them as `keyword`, plus `scaled_float` subfields for numeric parsing with
-`ignore_malformed: true`. Do not change the wire contract to fix this.
+`previous_value` / `current_value` hold a scalar for most change types but the
+whole offer, an object, for `NEW_OFFER`, and no Elasticsearch mapping takes
+both. Amended in WP2: the sink's projection stores an object value as its
+canonical JSON string (`_change_document`), so the template maps both fields
+as `keyword`, plus `scaled_float` subfields with `ignore_malformed: true` for
+numeric charts. The wire contract is unchanged. Without the projection, the
+first `NEW_OFFER` fixed the field as an object and the first price change was
+refused (`PROGRESS.md` §13.2).
 
 ### 11.2 Ops projector — `ops/es_projector.py`
 
@@ -786,6 +795,12 @@ Procedure, also in the runbook:
 
 Redis is rebuilt by the same replay. This is the D5 replay drill run once on
 purpose.
+
+The replay relies on the speed audit keying a batch by
+`(query_name, query_id, batch_id)` (fixed in WP2). Batch IDs restart at 0
+under a new checkpoint, and with the old `(query_name, batch_id)` key the
+audit skipped every replayed batch as already `SUCCEEDED`, so the indices were
+never rebuilt.
 
 ## 12. Backup, export and restore (WP9)
 
