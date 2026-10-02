@@ -83,6 +83,7 @@ def run_service(
     max_cycles: int | None = None,
     log: Callable[[str], None] = print,
     run_id_for: Callable[[CrawlTask], str] = crawl_run_id_for,
+    beat: Callable[[], None] = lambda: None,
 ) -> int:
     """Run cycles until stopped, or until ``max_cycles``; return the cycle count.
 
@@ -98,6 +99,7 @@ def run_service(
         raise ValueError("max_cycles must be positive")
     cycles = 0
     while not stop.is_set():
+        beat()
         result = worker.run_once(crawl_run_id_for=run_id_for)
         cycles += 1
         log(json.dumps({"event": "crawl_cycle", "cycle": cycles, **dataclasses.asdict(result)}, sort_keys=True))
@@ -145,7 +147,8 @@ def main() -> None:
     parser.add_argument("--max-cycles", type=int, default=None, help="stop after N cycles (tests and smoke only)")
     args = parser.parse_args()
 
-    from config.settings import CRAWL_SERVICE_IDLE_SECONDS, CRAWL_SERVICE_WORKER_ID, CRAWL_WORKER_POLL_SECONDS
+    from common.heartbeat import heartbeat
+    from config.settings import CRAWL_SERVICE_IDLE_SECONDS, CRAWL_SERVICE_WORKER_ID, CRAWL_WORKER_POLL_SECONDS, SERVICE_HEARTBEAT_FILE
     from data_ingestion.marketplace_producer import create_marketplace_producer, publish_observation
 
     stop = StopSignal()
@@ -160,7 +163,7 @@ def main() -> None:
         )
         run_service(worker, stop=stop, idle_seconds=CRAWL_SERVICE_IDLE_SECONDS,
                     poll_seconds=CRAWL_WORKER_POLL_SECONDS, max_cycles=args.max_cycles,
-                    log=lambda line: print(line, flush=True))
+                    log=lambda line: print(line, flush=True), beat=heartbeat(SERVICE_HEARTBEAT_FILE))
     finally:
         producer.flush()
         producer.close()
