@@ -75,6 +75,10 @@ at it. Then it:
    (60 s in the smoke) after the last crawl run finished;
 5. runs `validate`, whose report lands in `data/ops/smoke-validate.json`.
 
+However it ends, the smoke stops the crawler, parks its tasks (`DISABLED`, so a
+later `mp up` against the real Tiki never crawls the made-up categories) and
+restores the environment variables it set. The next smoke re-enables them.
+
 The plan asks for a **fresh stack**. To get one without touching the
 development data, run the smoke in its own Compose project and remove that
 project afterwards:
