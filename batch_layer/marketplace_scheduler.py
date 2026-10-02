@@ -91,11 +91,13 @@ def tick(
     as_of = window_as_of(now, interval_seconds=interval_seconds, lag_seconds=lag_seconds)
     run_id = run_id_for(as_of)
     report = {"event": "batch_tick", "run_id": run_id, "as_of": as_of.isoformat()}
-    previous = run_status(run_id)
-    if previous == "SUCCEEDED":
-        return {**report, "outcome": "SKIPPED_SUCCEEDED"}
     context = MarketplaceBatchContext(run_id, as_of, silver_uri, gold_root_uri)
     try:
+        # Inside the try: PostgreSQL restarting as a tick fires is one failed
+        # window, not the end of the scheduler.
+        previous = run_status(run_id)
+        if previous == "SUCCEEDED":
+            return {**report, "outcome": "SKIPPED_SUCCEEDED"}
         # Never allow_backfill: a backfill is a deliberate operator command.
         result = run_batch(context, resume=previous is not None, serving_gold_root_uri=gold_root_uri)
     except BatchAlreadyRunning:
