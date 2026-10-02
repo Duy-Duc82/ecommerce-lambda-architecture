@@ -22,7 +22,8 @@ from pyspark.sql import functions as F
 
 from config.settings import (
     MARKETPLACE_CHANGE_RULE_VERSION, MARKETPLACE_LARGE_DROP_ABSOLUTE, MARKETPLACE_LARGE_DROP_RELATIVE,
-    MARKETPLACE_SPEED_QUERY_NAME, MARKETPLACE_STALE_AFTER_SECONDS, MARKETPLACE_STREAM_TRIGGER,
+    MARKETPLACE_SPEED_QUERY_NAME, MARKETPLACE_SPEED_SHUFFLE_PARTITIONS, MARKETPLACE_STALE_AFTER_SECONDS,
+    MARKETPLACE_STREAM_TRIGGER,
     SPARK_KAFKA_PACKAGE,
 )
 from speed_layer import marketplace_speed_layer as layer
@@ -68,8 +69,10 @@ def start_query(
 def await_query(query: Any, *, stop: Any, poll_seconds: float = 5) -> None:
     """Block until the query ends by itself, or stop it once asked to.
 
-    ``query.stop()`` lets the micro-batch in progress finish, and the
-    checkpoint then resumes after it.
+    ``query.stop()`` cancels a micro-batch in progress rather than waiting
+    for it (seen on Spark 4.0.1). That is safe: the batch's offsets were not
+    committed to the checkpoint, so the next start runs it again, and every
+    sink is idempotent by deterministic ID.
     """
     while not query.awaitTermination(poll_seconds):
         if stop.is_set():
@@ -79,7 +82,9 @@ def await_query(query: Any, *, stop: Any, poll_seconds: float = 5) -> None:
 
 def build_spark() -> SparkSession:
     builder = (SparkSession.builder.appName(MARKETPLACE_SPEED_QUERY_NAME)
-               .config("spark.sql.session.timeZone", "UTC"))
+               .config("spark.sql.session.timeZone", "UTC")
+               # Fixed in the checkpoint on first run; see the setting.
+               .config("spark.sql.shuffle.partitions", str(MARKETPLACE_SPEED_SHUFFLE_PARTITIONS)))
     # Empty inside the Spark 4 image, whose jars are baked in; set on a host
     # that must resolve the connector at start.
     if SPARK_KAFKA_PACKAGE:

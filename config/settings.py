@@ -164,6 +164,11 @@ MARKETPLACE_STREAM_TRIGGER = os.getenv("MARKETPLACE_STREAM_TRIGGER", "30 seconds
 # marketplace_speed. The version directory is appended either way, so bumping
 # MARKETPLACE_STREAM_CHECKPOINT_VERSION always starts a fresh checkpoint.
 MARKETPLACE_SPEED_CHECKPOINT_ROOT = os.getenv("MARKETPLACE_SPEED_CHECKPOINT_ROOT", "").strip()
+# Shuffle partitions for the speed query. Spark fixes the stateful operator's
+# partition count in the checkpoint on its first run: changing this later
+# needs a new checkpoint version (and a replay). Spark's default of 200 ran
+# 200+ tasks per micro-batch for a few dozen records.
+MARKETPLACE_SPEED_SHUFFLE_PARTITIONS = int(os.getenv("MARKETPLACE_SPEED_SHUFFLE_PARTITIONS", "4"))
 MARKETPLACE_STREAM_CHECKPOINT_VERSION = os.getenv("MARKETPLACE_STREAM_CHECKPOINT_VERSION", "v1")
 # ============================================================
 # CRAWL SCHEDULER - frontier cadence, retry and circuit (Phase 3)
@@ -269,6 +274,7 @@ def validate_marketplace_settings() -> None:
         "MARKETPLACE_COUNTER_MAX_GAP_SECONDS": MARKETPLACE_COUNTER_MAX_GAP_SECONDS,
         "MARKETPLACE_PERCENTILE_ACCURACY": MARKETPLACE_PERCENTILE_ACCURACY,
         "MARKETPLACE_BATCH_SHUFFLE_PARTITIONS": MARKETPLACE_BATCH_SHUFFLE_PARTITIONS,
+        "MARKETPLACE_SPEED_SHUFFLE_PARTITIONS": MARKETPLACE_SPEED_SHUFFLE_PARTITIONS,
         "KAFKA_MARKETPLACE_PARTITIONS": KAFKA_MARKETPLACE_PARTITIONS,
         "KAFKA_PRODUCER_ACK_TIMEOUT_SECONDS": KAFKA_PRODUCER_ACK_TIMEOUT_SECONDS,
         "MARKETPLACE_ANOMALY_WINDOW_DAYS": MARKETPLACE_ANOMALY_WINDOW_DAYS,
