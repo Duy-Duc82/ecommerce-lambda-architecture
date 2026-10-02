@@ -1570,10 +1570,10 @@ Nhánh `phase-8-wp4-images-compose`, cắt từ `develop` sau khi PR #9 merge.
 - **Chưa có service `ops`, `stub-source`, `ops-projector`,
   `kibana-marketplace-setup`.** Code của chúng thuộc WP5 và WP8; profile `ops`
   và `smoke` sẽ được thêm cùng code.
-- Kafka vẫn ghi log vào filesystem của container (`/tmp/kraft-combined-logs`),
-  không có volume. Image chạy dưới user không phải root, nên một volume mới
-  sẽ thuộc root và Kafka không ghi được. `docker restart` giữ dữ liệu, còn
-  tạo lại container thì mất.
+- ~~Kafka vẫn ghi log vào filesystem của container, không có volume, vì một
+  volume mới sẽ thuộc root.~~ **Lập luận này sai, và đã gây sự cố ở WP5
+  (§16.3).** Image có sẵn `/var/lib/kafka/data` thuộc `appuser`, nên volume
+  mới thừa hưởng đúng quyền. Đã sửa ở WP5.
 
 ### 15.4 Kiểm chứng trên stack thật
 
@@ -1620,3 +1620,97 @@ passed ở §14.4). Tổng: **798**.
    `ops smoke`, `scripts/mp.ps1`; thêm profile `smoke` và `ops`.
 3. Ổ `C:` còn khoảng 6,5 GB, image Spark marketplace nặng 3,6 GB. Lần build
    lại sau dùng được cache layer.
+
+---
+
+## 16. Session 2026-10-02 (đêm) — merge WP4, Phase 8 WP5: stub, validate, smoke
+
+### 16.1 PR #10 trước khi merge
+
+Review tìm ra ba điểm; cả ba đã sửa trước khi merge (`56380af`). Chi tiết ở
+§15.4b.
+
+### 16.2 Đã làm
+
+Nhánh `phase-8-wp5-stub-ops-cli`, cắt từ `develop` sau khi PR #10 merge.
+
+| Thay đổi | Ở đâu |
+|---|---|
+| Stub Tiki offline: robots.txt; trang listing dựng từ fixture thật đã đóng băng; listing ID riêng cho từng `(category, page)`; giá theo bảng cố định `(100, 95, 60, 100) %` đánh chỉ số bằng bộ đếm lượt phục vụ của từng trang; `POST /_stub/mode` với `429`/`500`/`timeout`/`drift` | `ops/stub_source.py` |
+| `python -m ops`: `migrate`, `seed`, `seed-smoke`, `smoke-wait`, `wait-quiet`, `batch-plan`, `validate`, `status` | `ops/__main__.py` |
+| 11 check §9.2, chỉ đọc, qua `Sources` có thể inject; một report JSON đã sắp xếp; exit 1 nếu có check fail | `ops/validate.py` |
+| Các bước chờ của smoke | `ops/smoke.py` |
+| `mp up/down/status/migrate/seed/smoke/validate/batch` | `scripts/mp.ps1` |
+| Profile `ops` và `smoke`; `pyarrow` chuyển sang image Python | `docker-compose.yml`, `requirements-marketplace.txt` |
+| Kafka ghi log lên volume `kafka_data` | `docker-compose.yml` (fix `0cabf20`) |
+
+### 16.3 Smoke chạy thật: bốn lần, ba lần fail đều có lý do
+
+| Lần | Kết quả | Nguyên nhân | Sửa |
+|---|---|---|---|
+| 1 | dừng tay | Speed chết với `Some data may have been lost`. Container Kafka đã bị tạo lại lúc sửa review WP4, log nằm trong container nên offset về 1, trong khi checkpoint speed vẫn nhớ offset 25. Thêm nữa, điều kiện "mỗi task thành công 2 lần" đếm theo task ID, nhưng mỗi lần crawl lại tạo ra **task mới** cho target đó | Kafka lên named volume (`0cabf20`; đã kiểm `--force-recreate` giữ nguyên offset); đếm theo target |
+| 2 | 9/11 check | `kafka_to_silver_lag = 2`: crawler vẫn chạy lúc validate. `bronze_present`: §16.4 | smoke dừng crawler và chờ lag về 0 (`wait-quiet`); smoke chạy trên stack trắng |
+| 3 | batch `QUALITY_FAILED` | `as_of = now − settle`, làm tròn xuống phút, ra 09:36:00, trong khi crawl đầu tiên chạy 09:36:11. Audit bị cắt hết, nên gate 8 SKIPPED, mà skip ở gate bắt buộc là fail | `batch-plan --after-last-crawl`: `as_of` = mốc phút đầu tiên ≥ crawl run cuối + settle, rồi chờ đồng hồ vượt qua |
+| 4 | **SMOKE PASSED**, 309 giây, stack trắng (`COMPOSE_PROJECT_NAME=mp-smoke`) | | |
+
+Lần 4: 12 attempt và Bronze đầy đủ; Silver lag 0; DLQ rỗng; ES 30 change
+không trùng; 12 offer có trong Redis; batch `mp-20261002T0945Z` gồm 24 dòng
+Silver, quality PASS, SUCCEEDED; con trỏ = cache; đủ 10 dataset Gold đúng số
+dòng; đủ 17 kết quả quality; gate 8 khớp. **11/11 PASS.**
+
+### 16.3b Review PR #11: bốn bug, đều đã sửa
+
+| Bug | Hệ quả | Sửa |
+|---|---|---|
+| Task giả của smoke (category 9001–9003, ACTIVE) ở lại trong frontier thật sau khi smoke kết thúc | Một lần `mp up` sau đó, với `TIKI_LISTING_URL` thật, sẽ crawl **Tiki thật** cho các category bịa này mỗi giờ, và dữ liệu đó chảy vào Silver/Gold. Phá đúng cam kết "không chạm marketplace thật" | `park-smoke` chuyển chúng sang `DISABLED` mỗi khi smoke kết thúc, pass hay fail; `seed-smoke` bật lại cho lần sau |
+| `mp.ps1` đặt biến môi trường cấp process cho smoke và `Set-Location` mà không khôi phục | Lệnh tiếp theo trong cùng shell thừa hưởng URL stub, cadence 1 phút và settle 60 giây | khôi phục trong `finally`; `Push-Location`/`Pop-Location`; script chỉ `exit` một lần |
+| `validate -Json` copy report bất kể exit code | trả về report của lần chạy trước như thể của lần này | xoá report cũ trước; chỉ copy khi file mới tồn tại |
+| `consumer_lag` cộng một danh sách partition rỗng thành 0 | topic không có metadata thì `kafka_to_silver_lag` pass, và `wait-quiet` trả về ngay | báo lỗi |
+
+Test `e5a421f` → fix `8088af1` (Python) và `78f691b` (`mp.ps1`).
+
+**Kiểm lại trên stack trắng:**
+- smoke lần 5 gọi từ `C:\Users`: PASSED sau 326 giây. Sau đó thư mục vẫn là `C:\Users`, cả ba biến môi trường đều trống, và 6 task smoke đang chờ ở `DISABLED` (`parked_smoke: 6`).
+- smoke lần 6 trên cùng stack: PASSED sau 339 giây, với `created: 0, reactivated: 6`, rồi lại `parked_smoke: 6`. Chạy lại trên stack cũ vẫn trung thực, vì các điều kiện chỉ đếm từ lúc smoke bắt đầu.
+
+### 16.4 Phát hiện chưa sửa: lineage `file://` không khả chuyển
+
+Các attempt WP1 chạy trên host với lake `local` ghi `raw_uri` là
+`file:///D:/code/...`. Từ container không đọc được đường dẫn đó, nên
+`bronze_present` fail trên stack dev, dù file vẫn nằm trên ổ D:. Check báo
+đúng. Nguyên nhân là lineage được ghi dưới dạng đường dẫn tuyệt đối của host.
+Muốn sửa phải ghi URI tương đối với gốc lake, mà việc đó đụng tới hợp đồng
+Bronze của Phase 2, nên để ngoài Phase 8 và ghi vào runbook.
+
+### 16.5 Lệch plan
+
+- Fixture: `tests/fixtures/marketplace_raw/` mà §8 nhắc tới **không tồn
+  tại**. Dùng fixture Tiki thật duy nhất có trong repo,
+  `tests/fixtures/tiki_listing_sample.json`: 3 dòng, trong đó 1 dòng cố ý
+  invalid. Mỗi trang ra 2 observation và 1 bản ghi bị từ chối.
+- Test 31 nằm ở `tests/test_ops_stub_source.py` (plan không nêu tên file).
+- `source_health_projected` chuyển sang WP8: index mà check này đọc chỉ có
+  khi có ops projector.
+- `redis_offer_state_present` chỉ đòi các offer còn trong TTL của Redis,
+  tính từ offer mới nhất. Offer cũ hơn đã hết hạn một cách hợp lệ.
+- Phần cần Docker (`up`, `down`, batch Spark) do `mp.ps1` chạy trên host,
+  vì container `ops` không có Docker. Thêm các lệnh `seed-smoke`,
+  `smoke-wait`, `wait-quiet`, `batch-plan` cho các bước của smoke.
+- Smoke có vũ trụ riêng: category `9001`–`9003`, ACTIVE, cadence 1 phút,
+  settle 60 giây. Điều kiện chỉ đếm từ lúc smoke bắt đầu, nên chạy lại trên
+  stack cũ vẫn trung thực.
+- `mp drill`, `mp backup`, `mp restore` sẽ có ở WP6–WP9.
+
+### 16.6 Trạng thái test
+
+Không tính `test_marketplace_quality.py`: **799 passed** (trước WP5: 756).
+File quality không đụng tới code nào WP5 sửa (42). Tổng: **841**.
+
+### 16.7 Việc tiếp theo (resume ở đây)
+
+1. Review và merge PR WP5.
+2. **WP6:** drill D1–D6 (`tests/drills/test_drills.py`, marker `drill`,
+   `pytest.ini`), dùng `stub-source` cho các chế độ lỗi.
+3. Stack dev đang chạy core. `speed_checkpoints` đã bị xoá vì topic Kafka
+   được tạo lại (§16.3); bật lại `speed` sẽ dựng checkpoint mới.
+4. Ổ `C:` còn khoảng 5 GB.

@@ -1,7 +1,7 @@
 # Runtime dependencies of the marketplace services' images (Phase 8 plan
 # section 7.1). Exact pins of packages requirements.txt already lists, at the
 # versions the 2026-10-01/02 end-to-end runs used. The Spark image adds
-# pandas, pyarrow and numpy in its Dockerfile; pyspark comes with the image.
+# pandas and numpy in its Dockerfile; pyspark comes with the image.
 kafka-python-ng==2.2.3
 minio==7.2.20
 psycopg2-binary==2.9.10
@@ -9,3 +9,5 @@ redis==7.4.0
 elasticsearch==8.18.0
 python-dotenv==1.0.1
 requests==2.34.2
+# ops validate reads Gold parquet footers for their row counts.
+pyarrow==24.0.0
