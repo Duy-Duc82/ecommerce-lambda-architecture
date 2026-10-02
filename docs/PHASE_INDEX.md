@@ -121,6 +121,13 @@ trên `phase-7-asof-cutoff`, chi tiết ở `PROGRESS.md` §11.
 Suite: **674 pass, 0 fail, 0 skip** (trước Phase 7 là 519).
 `master` vẫn chưa nhận phase nào: chờ thầy hướng dẫn duyệt `develop`.
 
+**Phase 4/5 chưa từng chạy như dịch vụ.** Hai phase này ✅ ở mức code và test,
+nhưng crawler chưa publish vào Kafka, Silver sink không có consumer loop, và
+speed layer marketplace không có entrypoint. Phase 8 hoàn thiện phần nối này
+(plan Phase 8 §2.1 D1). Đoạn `crawl -> Bronze -> Kafka` chạy thật lần đầu ở
+WP1 (2026-10-01), và lộ ra hai bug Phase 3/4: producer không tạo được, lease
+không chạy (`PROGRESS.md` §12.2).
+
 **Nợ cũ đã đóng bằng chạy thật (2026-10-01).** Bốn item Phase 6 (33–35, 43) và
 hai item Phase 7 (56, 58) đều được kiểm bằng `run_marketplace_warehouse` chạy
 end-to-end trên PostgreSQL thật với 48 observation seed từ chính factory của
