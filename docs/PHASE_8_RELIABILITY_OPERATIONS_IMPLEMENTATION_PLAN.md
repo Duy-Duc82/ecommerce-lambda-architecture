@@ -483,7 +483,10 @@ Each tick:
 5. `QualityGateFailure` is logged with its failing checks and the loop goes
    on. A refused window must not stop later windows; the evidence is already in
    PostgreSQL. Any other exception is logged and the loop goes on.
-6. Sleep until the next interval boundary.
+6. Sleep until the next interval boundary **plus the lag** (amended before
+   WP3). Waking at the bare boundary computes `now - lag` inside the previous
+   interval, so `floor` returns the window just run: that tick is a no-op and
+   every window is published one interval late instead of one lag late.
 
 The scheduler never passes `--allow-backfill`. A backfill stays a deliberate
 operator command (Section 12, runbook).
@@ -522,6 +525,13 @@ the lock, for example by a future caller.
 `mark_promotion` records `promoted=False` on a conflict, and the result carries
 `promotion_reason="PROMOTION_CONFLICT"`.
 
+Amended in WP3 review: the orchestrator also re-reads the pointer **before
+publishing the cache**. The lock's connection idles through the whole Spark
+run and can drop, and a conflict found only at promotion would leave the cache
+serving this run, the pointer another, and the audit row `SUCCEEDED`, so the
+scheduler would skip the window for good. A pointer that moved by then holds
+the run as `GOLD_WRITTEN` with `PROMOTION_CONFLICT`, which stays resumable.
+
 ### 6.6 The `s3a://` path
 
 `build_spark()` applies `config.storage.spark_hadoop_options()` whenever the
@@ -529,6 +539,12 @@ active storage profile is not `local`. This is the first time the marketplace
 batch can read or write MinIO (`PROGRESS.md` §10.6 item 2). The Compose `batch`
 profile runs against MinIO by default. A test asserts that the S3A options
 reach the builder for a `minio` profile and are absent for `local`.
+
+The options alone are not enough (amended before WP3): `apache/spark:4.0.1`
+ships no `hadoop-aws`. A real `s3a://` run needs `hadoop-aws` matching the
+image's Hadoop (3.4.x) and the AWS SDK v2 bundle it depends on. WP3 verifies
+the path by loading them through `spark.jars.packages`; WP4 bakes them into
+`docker/spark-marketplace/Dockerfile`.
 
 ## 7. Images and Compose profiles (WP4)
 

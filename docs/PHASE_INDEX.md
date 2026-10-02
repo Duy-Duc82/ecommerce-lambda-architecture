@@ -111,14 +111,14 @@ Phase 5/6 chỉ nằm ở ngọn một nhánh feature, không có ở commit g�
 | 5 | 5 | ✅ trong `develop` | đủ 38/38 item |
 | 6 | 6 | ✅ trong `develop` | **47/47 item** |
 | 7 | 7 | ✅ trong `develop` (PR #4); bản sửa cắt `as_of` trên `phase-7-asof-cutoff` | **61/61 item** |
-| 8 | 8 | 🔵 WP1 trong `develop` (PR #7); WP2 trên `phase-8-wp2-sink-speed-services` (PR #8); WP3–WP10 chưa làm | P1-12, Kibana (P1-11) |
+| 8 | 8 | 🔵 WP1–WP2 trong `develop` (PR #7, #8); WP3 trên `phase-8-wp3-batch-scheduler`; WP4–WP10 chưa làm | P1-12, Kibana (P1-11) |
 | 9 | 9 | ⏳ chưa bắt đầu | P2-* |
 
 **Phase 1–7 đã xong** và nằm trong `develop`. Phase 7 (P1-08 quality gates,
 P1-09 gold publish manifest) merge qua PR #4 ngày 2026-09-30. Bản sửa sau
 merge — run đọc Silver và audit *tại* `as_of`, gate 8 có cửa sổ đối soát — nằm
 trên `phase-7-asof-cutoff`, chi tiết ở `PROGRESS.md` §11.
-Suite: **749 pass, 0 fail, 0 skip** trên nhánh WP2 (sau Phase 7 là 674, trước Phase 7 là 519).
+Suite: **793 pass, 0 fail, 0 skip** trên nhánh WP3 (`PROGRESS.md` §14.4; sau Phase 7 là 674, trước Phase 7 là 519).
 `master` vẫn chưa nhận phase nào: chờ thầy hướng dẫn duyệt `develop`.
 
 **Phase 4/5 chưa từng chạy như dịch vụ.** Hai phase này ✅ ở mức code và test,

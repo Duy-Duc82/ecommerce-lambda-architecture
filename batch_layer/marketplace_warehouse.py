@@ -106,10 +106,17 @@ class MarketplaceBatchResult:
 
 
 def build_spark() -> SparkSession:
-    return (SparkSession.builder.appName(MARKETPLACE_BATCH_APP_NAME)
-            .config("spark.sql.session.timeZone", "UTC")
-            .config("spark.sql.shuffle.partitions", str(MARKETPLACE_BATCH_SHUFFLE_PARTITIONS))
-            .config("spark.sql.sources.partitionOverwriteMode", "dynamic").getOrCreate())
+    from config.storage import spark_hadoop_options
+    builder = (SparkSession.builder.appName(MARKETPLACE_BATCH_APP_NAME)
+               .config("spark.sql.session.timeZone", "UTC")
+               .config("spark.sql.shuffle.partitions", str(MARKETPLACE_BATCH_SHUFFLE_PARTITIONS))
+               .config("spark.sql.sources.partitionOverwriteMode", "dynamic"))
+    # Empty for the local profile. For any other the S3A credentials and
+    # endpoint come from the profile, which is what lets this job read and
+    # write MinIO or a cloud bucket at all (Phase 8 plan section 6.6).
+    for key, value in spark_hadoop_options().items():
+        builder = builder.config(f"spark.hadoop.{key}", value)
+    return builder.getOrCreate()
 
 
 def read_marketplace_silver(spark: SparkSession, silver_uri: str) -> DataFrame:
@@ -206,7 +213,26 @@ def write_run_scoped_gold(marts: Mapping[str, DataFrame], context: MarketplaceBa
     return results
 
 
-def run_marketplace_warehouse(context: MarketplaceBatchContext, *, publish_cache: bool = True, resume: bool = False, spark: SparkSession | None = None, allow_backfill: bool = False, quality_only: bool = False, writer=None, reader=None, serving_gold_root_uri: str | None = None) -> MarketplaceBatchResult:
+def default_batch_lock():
+    from batch_layer.marketplace_lock import exclusive_batch
+    from common.postgres import postgres_connection_factory
+    return exclusive_batch(postgres_connection_factory())
+
+
+def run_marketplace_warehouse(context: MarketplaceBatchContext, *, lock=None, **options) -> MarketplaceBatchResult:
+    """Run one batch under the exclusive batch lock (Phase 8 plan section 6.5).
+
+    The lock is taken before anything else, even under ``publish_cache=False``,
+    which still reads the crawl audit from PostgreSQL. A run refused with
+    ``BatchAlreadyRunning`` has therefore started nothing: no Spark session,
+    no audit row, no Gold. ``lock`` is a zero-argument callable returning a
+    context manager; the default is the PostgreSQL advisory lock.
+    """
+    with (lock or default_batch_lock)():
+        return _run_marketplace_warehouse(context, **options)
+
+
+def _run_marketplace_warehouse(context: MarketplaceBatchContext, *, publish_cache: bool = True, resume: bool = False, spark: SparkSession | None = None, allow_backfill: bool = False, quality_only: bool = False, writer=None, reader=None, serving_gold_root_uri: str | None = None) -> MarketplaceBatchResult:
     """Read Silver, build Gold, judge it, and publish only if it earns it.
 
     The order below is the contract, not an implementation detail. Quality
@@ -219,7 +245,7 @@ def run_marketplace_warehouse(context: MarketplaceBatchContext, *, publish_cache
     quality results recorded, but it writes no manifest, publishes nothing and
     promotes nothing.
     """
-    from batch_layer.marketplace_manifest import ALREADY_CURRENT, BACKFILL_REFUSED, build_gold_manifest, promote_manifest, promotion_refusal, read_current_manifest, write_run_manifest
+    from batch_layer.marketplace_manifest import ALREADY_CURRENT, BACKFILL_REFUSED, PROMOTION_CONFLICT, build_gold_manifest, promote_manifest, promotion_refusal, read_current_manifest, write_run_manifest
     from batch_layer.marketplace_marts import build_marketplace_marts
     from batch_layer.marketplace_quality import QualityGateFailure, decide, evaluate_quality_gates
     if writer is None or reader is None:
@@ -291,6 +317,18 @@ def run_marketplace_warehouse(context: MarketplaceBatchContext, *, publish_cache
                 audit.mark_held(run_id=context.run_id, completed_at=datetime.now(timezone.utc), reason=BACKFILL_REFUSED, manifest_uri=manifest_uri)
             return MarketplaceBatchResult(context.run_id, "GOLD_WRITTEN", silver_rows, counts, "PASS", 0, manifest_uri, False, BACKFILL_REFUSED)
 
+        # The pointer was read before minutes of Spark work, and the batch lock
+        # lives on a connection idle all that time, which can drop. Check again
+        # before the cache moves: a conflict found only at promotion would leave
+        # the cache serving this run, the pointer another, and the audit row
+        # SUCCEEDED, so no later tick would ever revisit the window.
+        expected_current_run_id = None if previous is None else previous.run_id
+        now_current = read_current_manifest(reader=reader)
+        if (None if now_current is None else now_current.run_id) != expected_current_run_id:
+            if audit:
+                audit.mark_held(run_id=context.run_id, completed_at=datetime.now(timezone.utc), reason=PROMOTION_CONFLICT, manifest_uri=manifest_uri)
+            return MarketplaceBatchResult(context.run_id, "GOLD_WRITTEN", silver_rows, counts, "PASS", 0, manifest_uri, False, PROMOTION_CONFLICT)
+
         if publish_cache:
             from batch_layer.marketplace_postgres import MarketplaceCachePublisher
             publisher = MarketplaceCachePublisher.from_settings()
@@ -301,10 +339,13 @@ def run_marketplace_warehouse(context: MarketplaceBatchContext, *, publish_cache
         # actually exists. Promoting before publication leaves a serving
         # manifest naming a Gold run whose cache was never written, which is a
         # worse state than either the cache or the pointer failing alone.
-        promotion = promote_manifest(manifest, writer=writer, reader=reader, allow_backfill=allow_backfill)
+        # Compare-and-swap once more at the write itself. Only the few
+        # milliseconds of publication remain unguarded here.
+        promotion = promote_manifest(manifest, writer=writer, reader=reader, allow_backfill=allow_backfill,
+                                     expected_current_run_id=expected_current_run_id)
         if audit:
             audit.mark_promotion(run_id=context.run_id, promoted=promotion.promoted or promotion.reason == ALREADY_CURRENT)
-        return MarketplaceBatchResult(context.run_id, "SUCCEEDED" if publish_cache else "GOLD_WRITTEN", silver_rows, counts, "PASS", 0, promotion.manifest_uri, promotion.promoted, promotion.reason)
+        return MarketplaceBatchResult(context.run_id, "SUCCEEDED" if publish_cache else "GOLD_WRITTEN", silver_rows, counts, "PASS", 0, promotion.manifest_uri or manifest_uri, promotion.promoted, promotion.reason)
     except QualityGateFailure:
         raise
     except Exception as error:
@@ -329,6 +370,7 @@ def main() -> None:
     parser.add_argument("--allow-backfill", action="store_true", help="let an older as-of become the published version")
     parser.add_argument("--quality-only", action="store_true", help="write Gold and the run manifest, then stop; never promote or publish")
     args = parser.parse_args()
+    from batch_layer.marketplace_lock import ALREADY_RUNNING_EXIT_CODE, BatchAlreadyRunning
     from batch_layer.marketplace_quality import QualityGateFailure
     context = MarketplaceBatchContext(args.run_id, datetime.fromisoformat(args.as_of.replace("Z", "+00:00")), args.silver_uri, args.gold_root_uri)
     try:
@@ -339,6 +381,10 @@ def main() -> None:
                           "mandatory_failure_count": refusal.decision.mandatory_failures,
                           "failing_checks": list(refusal.failing)}, sort_keys=True))
         raise SystemExit(1)
+    except BatchAlreadyRunning as refusal:
+        # Nothing was started, so there is nothing to clean up or audit.
+        print(json.dumps({"run_id": context.run_id, "status": "ALREADY_RUNNING", "lock_key": refusal.key}, sort_keys=True))
+        raise SystemExit(ALREADY_RUNNING_EXIT_CODE)
     print(json.dumps({"run_id": result.run_id, "status": result.status, "silver_rows": result.silver_rows,
                       "dataset_counts": result.dataset_counts, "quality_status": result.quality_status,
                       "mandatory_failure_count": result.mandatory_failure_count,
