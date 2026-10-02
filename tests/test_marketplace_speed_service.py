@@ -181,6 +181,45 @@ def test_each_micro_batch_closes_its_audit_connections(monkeypatch):
     assert built == ["closing", ("batch", 7, 0, "query-uuid")]
 
 
+class _ClosingClient:
+    def __init__(self):
+        self.closed = 0
+
+    def close(self):
+        self.closed += 1
+
+
+# One micro-batch every trigger, for days: clients a batch opens must not
+# outlive it, whether the batch succeeds, is skipped or never reaches the sink.
+@pytest.mark.parametrize("outcome", ["succeeded", "collect_failed"])
+def test_each_micro_batch_closes_its_sink_clients(monkeypatch, outcome):
+    from common import postgres
+    import speed_layer.marketplace_sinks as sinks
+
+    clients = (_ClosingClient(), _ClosingClient(), _ClosingClient())
+    monkeypatch.setattr(postgres, "postgres_connection_factory", lambda: (lambda: None))
+    monkeypatch.setattr(layer, "_sink_clients", lambda: clients)
+
+    class SucceedingSinks:
+        def __init__(self, **kwargs): pass
+
+        def write_batch(self, outputs, batch_id, *, query_id): pass
+
+    monkeypatch.setattr(sinks, "MarketplaceSpeedSinks", SucceedingSinks)
+    batch = _micro_batch("query-uuid")
+    if outcome == "collect_failed":
+        def failing_collect(): raise RuntimeError("executor lost")
+        batch.collect = failing_collect
+
+    if outcome == "succeeded":
+        layer.write_marketplace_batch(batch, 7)
+    else:
+        with pytest.raises(RuntimeError, match="executor lost"):
+            layer.write_marketplace_batch(batch, 7)
+
+    assert [client.closed for client in clients] == [1, 1, 1]
+
+
 def _micro_batch(query_id):
     # foreachBatch's frame: its session's context carries the query id as a
     # local property, set by Spark for every micro-batch.
