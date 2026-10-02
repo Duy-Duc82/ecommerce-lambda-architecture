@@ -25,8 +25,11 @@ KAFKA_TOPIC_EVENTS: str = os.getenv("KAFKA_TOPIC_EVENTS", "ecommerce_events")
 # SPARK
 # ============================================================
 SPARK_MASTER_URL: str = os.getenv("SPARK_MASTER_URL", "spark://spark:7077")
+# Spark 4 is built on Scala 2.13 (pyspark is pinned to 4.x, PROGRESS §6), and
+# the connector must match the runtime's version. Set it empty inside an
+# image whose connector jars are already on the classpath.
 SPARK_KAFKA_PACKAGE: str = os.getenv(
-    "SPARK_KAFKA_PACKAGE", "org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.1"
+    "SPARK_KAFKA_PACKAGE", "org.apache.spark:spark-sql-kafka-0-10_2.13:4.0.1"
 )
 
 # ============================================================
@@ -157,6 +160,15 @@ MARKETPLACE_LARGE_DROP_RELATIVE = _env_decimal("MARKETPLACE_LARGE_DROP_RELATIVE"
 MARKETPLACE_STALE_AFTER_SECONDS = int(os.getenv("MARKETPLACE_STALE_AFTER_SECONDS", "21600"))
 MARKETPLACE_STREAM_WATERMARK = os.getenv("MARKETPLACE_STREAM_WATERMARK", "2 hours")
 MARKETPLACE_STREAM_TRIGGER = os.getenv("MARKETPLACE_STREAM_TRIGGER", "30 seconds")
+# Where the speed query's checkpoint lives; empty means data/checkpoints/
+# marketplace_speed. The version directory is appended either way, so bumping
+# MARKETPLACE_STREAM_CHECKPOINT_VERSION always starts a fresh checkpoint.
+MARKETPLACE_SPEED_CHECKPOINT_ROOT = os.getenv("MARKETPLACE_SPEED_CHECKPOINT_ROOT", "").strip()
+# Shuffle partitions for the speed query. Spark fixes the stateful operator's
+# partition count in the checkpoint on its first run: changing this later
+# needs a new checkpoint version (and a replay). Spark's default of 200 ran
+# 200+ tasks per micro-batch for a few dozen records.
+MARKETPLACE_SPEED_SHUFFLE_PARTITIONS = int(os.getenv("MARKETPLACE_SPEED_SHUFFLE_PARTITIONS", "4"))
 MARKETPLACE_STREAM_CHECKPOINT_VERSION = os.getenv("MARKETPLACE_STREAM_CHECKPOINT_VERSION", "v1")
 # ============================================================
 # CRAWL SCHEDULER - frontier cadence, retry and circuit (Phase 3)
@@ -237,6 +249,11 @@ KAFKA_TOPIC_MARKETPLACE_CHANGES = os.getenv("KAFKA_TOPIC_MARKETPLACE_CHANGES", "
 KAFKA_MARKETPLACE_PARTITIONS = int(os.getenv("KAFKA_MARKETPLACE_PARTITIONS", "3"))
 KAFKA_PRODUCER_ACK_TIMEOUT_SECONDS = int(os.getenv("KAFKA_PRODUCER_ACK_TIMEOUT_SECONDS", "30"))
 KAFKA_SILVER_CONSUMER_GROUP = os.getenv("KAFKA_SILVER_CONSUMER_GROUP", "marketplace-silver-v1")
+# Phase 8 Silver sink service. A record that fails is retried at the same
+# offset, waiting base, then double, up to max.
+MARKETPLACE_SILVER_POLL_TIMEOUT_MS = int(os.getenv("MARKETPLACE_SILVER_POLL_TIMEOUT_MS", "1000"))
+MARKETPLACE_SILVER_RETRY_BASE_SECONDS = int(os.getenv("MARKETPLACE_SILVER_RETRY_BASE_SECONDS", "2"))
+MARKETPLACE_SILVER_RETRY_MAX_SECONDS = int(os.getenv("MARKETPLACE_SILVER_RETRY_MAX_SECONDS", "60"))
 
 
 def validate_marketplace_settings() -> None:
@@ -246,6 +263,9 @@ def validate_marketplace_settings() -> None:
         raise ValueError("MARKETPLACE_LARGE_DROP_RELATIVE must be between 0 and 1")
     positive = {
         "CRAWL_SERVICE_IDLE_SECONDS": CRAWL_SERVICE_IDLE_SECONDS,
+        "MARKETPLACE_SILVER_POLL_TIMEOUT_MS": MARKETPLACE_SILVER_POLL_TIMEOUT_MS,
+        "MARKETPLACE_SILVER_RETRY_BASE_SECONDS": MARKETPLACE_SILVER_RETRY_BASE_SECONDS,
+        "MARKETPLACE_SILVER_RETRY_MAX_SECONDS": MARKETPLACE_SILVER_RETRY_MAX_SECONDS,
         "MARKETPLACE_STALE_AFTER_SECONDS": MARKETPLACE_STALE_AFTER_SECONDS,
         "KAFKA_CHANGE_ACK_TIMEOUT_SECONDS": KAFKA_CHANGE_ACK_TIMEOUT_SECONDS,
         "REDIS_MARKETPLACE_OFFER_TTL_SECONDS": REDIS_MARKETPLACE_OFFER_TTL_SECONDS,
@@ -254,6 +274,7 @@ def validate_marketplace_settings() -> None:
         "MARKETPLACE_COUNTER_MAX_GAP_SECONDS": MARKETPLACE_COUNTER_MAX_GAP_SECONDS,
         "MARKETPLACE_PERCENTILE_ACCURACY": MARKETPLACE_PERCENTILE_ACCURACY,
         "MARKETPLACE_BATCH_SHUFFLE_PARTITIONS": MARKETPLACE_BATCH_SHUFFLE_PARTITIONS,
+        "MARKETPLACE_SPEED_SHUFFLE_PARTITIONS": MARKETPLACE_SPEED_SHUFFLE_PARTITIONS,
         "KAFKA_MARKETPLACE_PARTITIONS": KAFKA_MARKETPLACE_PARTITIONS,
         "KAFKA_PRODUCER_ACK_TIMEOUT_SECONDS": KAFKA_PRODUCER_ACK_TIMEOUT_SECONDS,
         "MARKETPLACE_ANOMALY_WINDOW_DAYS": MARKETPLACE_ANOMALY_WINDOW_DAYS,

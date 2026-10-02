@@ -1303,3 +1303,135 @@ một mạch trước đó bị treo trong file quality, sau khoảng 12 test Sp
 riêng thì không treo lại. Nghi do môi trường Spark trên Windows host chứ
 không do code, nhưng **chưa xác minh được nguyên nhân**. Nếu lặp lại, chạy
 file quality riêng.
+
+---
+
+## 13. Session 2026-10-02 — Phase 8 WP2: Silver sink và speed services
+
+### 13.1 Đã làm
+
+Nhánh `phase-8-wp2-sink-speed-services`, cắt từ `develop` sau khi PR #7 merge.
+
+| Thay đổi | Ở đâu |
+|---|---|
+| `python -m data_ingestion.marketplace_silver_service`: commit thủ công từng offset, **chỉ sau khi** record đã xử lý xong; record lỗi được retry tại đúng offset đó với backoff gấp đôi có trần; khi bỏ một batch thì tua lại mọi partition mà `poll()` đã đi qua | `data_ingestion/marketplace_silver_service.py` |
+| `python -m speed_layer.marketplace_speed_service`: một query Structured Streaming có checkpoint; SIGTERM → `query.stop()`; bản ghi invalid được union vào output để audit đếm được | `speed_layer/marketplace_speed_service.py` |
+| `MARKETPLACE_SPEED_CHECKPOINT_ROOT`; mỗi micro-batch dùng connection factory có đóng | `speed_layer/marketplace_speed_layer.py` |
+| Connection factory và stop signal chuyển sang `common/` để các service dùng chung | `common/postgres.py`, `common/lifecycle.py` |
+
+Lệch plan: trigger dùng `MARKETPLACE_STREAM_TRIGGER` đã có sẵn, không thêm `MARKETPLACE_SPEED_TRIGGER_SECONDS`.
+
+### 13.2 Bảy bug production, mỗi bug một cặp test → fix
+
+Ba bug đầu tìm thấy khi viết service; bốn bug sau chỉ lộ ra khi speed query
+chạy thật lần đầu (§13.4).
+
+| Bug | Vị trí | Hệ quả |
+|---|---|---|
+| Lỗi ghi Silver của một observation **hợp lệ** nằm chung `except` với lỗi decode/validate | `data_ingestion/marketplace_silver_sink.py` | MinIO sập → observation tốt bị đẩy vào DLQ như `CONTRACT_VALIDATION`, không bao giờ vào Silver (plan §6.2) |
+| `F.to_json("decoded")` bỏ các field null; `_process_group` parse lại bằng wire contract nghiêm ngặt, đòi đủ mọi key | `speed_layer/marketplace_speed_layer.py` | Mọi observation có `brand`/`seller_id` null (thường gặp với Tiki) làm micro-batch chết |
+| `SPARK_KAFKA_PACKAGE` vẫn là `_2.12:3.5.1` | `config/settings.py` | Không nạp được trên Spark 4 (Scala 2.13): speed query chết ngay khi khởi động |
+| Hàm stateful coi tham số là **một** pandas DataFrame và trả về một DataFrame; `applyInPandasWithState` truyền vào và đòi lại một **iterator** | `speed_layer/marketplace_speed_layer.py` | Mọi micro-batch chết: `'generator' object has no attribute 'to_dict'`. Cùng chỗ: timeout chỉ được đặt khi có STATE mới, nên offer mà lần gọi cuối chỉ có bản trùng/đến muộn sẽ không bao giờ thành `OFFER_STALE` |
+| `NEW_OFFER` đặt cả offer vào `current_value`, còn change khác đặt scalar; một field ES không thể vừa là object vừa là scalar | `speed_layer/marketplace_sinks.py` | `NEW_OFFER` đầu tiên khóa mapping thành object → lần đổi giá đầu tiên bị từ chối, query chết |
+| Audit speed khóa theo `(query_name, batch_id)` và bỏ qua batch `SUCCEEDED`; checkpoint mới đánh số batch lại từ 0 | `speed_layer/marketplace_sinks.py`, `scripts/init_postgres.sql` | Replay với checkpoint mới **mất sạch dữ liệu**: batch 0 (16 observation) bị bỏ qua, offset vẫn được commit. Thủ tục dựng lại ES ở plan §11.4 không chạy được |
+| `spark.sql.shuffle.partitions` để mặc định 200 | `speed_layer/marketplace_speed_service.py` | 200+ task cho vài chục record mỗi micro-batch; con số này bị khóa vào checkpoint ngay lần chạy đầu |
+
+Bản sửa audit dùng `query_id`, lấy từ local property `sql.streaming.queryId`
+mà Spark gắn vào mỗi micro-batch. Đã kiểm trên Spark 4.0.1 rằng giá trị này
+giữ nguyên qua restart với cùng checkpoint và đổi khi dùng checkpoint khác.
+Bảng audit có thêm cột `query_id` trong khóa chính, qua migration idempotent;
+các dòng cũ mang giá trị `''`.
+
+Bản sửa projection ES lưu giá trị dạng object thành chuỗi JSON chuẩn tắc.
+Event Kafka giữ nguyên hình dạng.
+
+Bug thứ hai lọt qua vì test decode của Phase 5 chỉ kiểm cột, chưa bao giờ đưa dòng đã decode vào xử lý tiếp.
+
+### 13.3 Kiểm chứng Silver sink trên Kafka + MinIO thật
+
+```text
+6 message WP1 để lại, lake local          6 SILVER, 6 file, offset 6, lag 0
+8 message mới, MinIO bị DỪNG              lỗi HTTPConnectionPool, không commit, DLQ = 0
+MinIO bật lại                             8 SILVER, 8 object trong ecommerce-silver, offset 14, lag 0, DLQ = 0
+```
+
+**Một lần chạy đầu bị loại.** Host lúc đó chưa cài gói `minio`, nên mọi lần
+"thất bại" thực ra là `No module named 'minio'` chứ không phải MinIO sập. Lần
+đó chỉ chứng minh lỗi ghi được retry và không vào DLQ. Đã cài `minio>=7.2.15`
+(có trong `requirements.txt`) rồi làm lại; bảng trên là lần làm lại.
+
+Client `minio` tự retry nội bộ trước khi trả lỗi. Vì vậy trong 40 giây MinIO
+sập chỉ thấy một lần thất bại, và backoff của service cộng thêm vào đó.
+
+### 13.4 Speed service — kiểm chứng trên Kafka + ES + Redis + Postgres thật
+
+Môi trường: chạy trong container `apache/spark:4.0.1` (`mp-e2e`), Kafka
+`kafka:19092`, Redis, Postgres. Elasticsearch là một container tạm
+`es-verify` dùng bản **8.18.1** (lý do ở dưới); client `elasticsearch==8.18.0`.
+
+```text
+lần 1                      chết: applyInPandasWithState ('generator'...)       → bug 4
+lần 2, 14 observation      batch 0 SUCCEEDED: 14 in, 2 NEW_OFFER, ES/Redis 2 offer
+kill -9, chạy lại          tiếp từ batch 2, input 0, change topic không tăng   → checkpoint đúng
+giá giảm 199000 → 99500    batch chết: ES từ chối current_value scalar           → bug 5
+replay, checkpoint mới     batch 0 bị audit bỏ qua, ES không được dựng lại       → bug 6
+sau cả ba bản sửa          batch 0 SUCCEEDED: 16 in, 4 change
+                           NEW_OFFER ×2, PRICE_CHANGED 199000→99500, LARGE_PRICE_DROP
+                           ES: 4 change, 2 offer; Redis: 2 offer, 4 change gần đây
+SIGTERM                    dừng trong ≤ 24 giây; batch đang chạy bị hủy, không lỗi
+```
+
+Change topic có 8 message cho 4 change khác nhau: 2 từ lần chạy đầu, 2 từ
+batch chết ở bug 5 (sink publish Kafka **trước** khi ghi ES), và 4 từ lần
+replay. Đây là at-least-once, đúng với cam kết; `event_id` tất định nên
+downstream gộp được, và ES đã gộp.
+
+**Sự cố môi trường trong lúc kiểm.** Ổ `C:` hết sạch dung lượng (0 GB), mà
+`docker_data.vhdx` nằm trên đó, nên Docker engine sập khi đang pull
+Elasticsearch. Đã dọn theo yêu cầu của chủ dự án:
+
+- cache npm, pip, Gradle;
+- `node_modules` của các project khác (1,3 GB trên `C:`, 4,5 GB trên `D:`);
+- image Docker không còn container nào dùng, cùng build cache 7,7 GB;
+- nén vhdx từ 19 GB xuống 15,1 GB.
+
+`C:` còn trống khoảng 10 GB. Volume dữ liệu của project khác không bị đụng
+tới.
+
+Image `elasticsearch:8.18.0` bị pull **đúng lúc ổ đầy**. Bản giải nén của nó
+có `/bin/tini`, `docker-entrypoint.sh`, `cacerts`, ... dài 0 byte, và vẫn hỏng
+như vậy sau `rmi` + pull lại + restart engine. Containerd dùng lại snapshot
+cũ dù đã tải blob mới (`Downloaded newer image`). Bản 8.18.1 giải nén bình
+thường. Compose vẫn pin 8.18.0; việc pin version thuộc WP4, và trên máy này
+phải đổi tag hoặc dọn snapshot thì mới chạy được 8.18.0.
+
+### 13.5 Trạng thái test
+
+**749 passed, 0 failed, 0 skipped** (trước WP2: 711). Chạy thành hai lượt:
+phần còn lại của suite (707 passed, 3m51s) và `test_marketplace_quality.py`
+riêng (42 passed, 18m42s).
+
+### 13.6 Việc tiếp theo (resume ở đây)
+
+1. **Review và merge PR #8** (WP2) vào `develop`.
+2. **WP3** (plan Phase 8 §6.4–6.6, test 14–21):
+   - batch scheduler dạng loop, với `as_of` và `run_id` tất định;
+   - advisory lock để không chạy chồng; compare-and-swap con trỏ manifest
+     (`PROMOTION_CONFLICT`);
+   - `build_spark()` gọi `spark_hadoop_options()` để chạy được `s3a://`;
+   - `validate_settings()` từ chối lookback ≤ interval + settle.
+   Nhánh mới cắt từ `develop` sau khi PR #8 merge.
+3. **WP4** (image + Compose) phải xử lý image `elasticsearch:8.18.0` hỏng
+   trên máy này (§13.4): đổi pin sang một bản 8.18.x giải nén được, kèm
+   Kibana cùng minor, hoặc dọn snapshot containerd. Plan §5.3 đòi pin version
+   có lý do; ghi lý do vào Dockerfile/Compose.
+
+**Môi trường đang để lại:**
+
+- container `postgres-dw`, `minio`, `kafka`, `redis`, `mp-e2e` đang chạy;
+  `es-verify` đã xoá. Kafka giữ 16 observation, 8 change, DLQ rỗng.
+- Host Python đã cài thêm `kafka-python-ng` và `minio`; `mp-e2e` đã cài
+  pandas, pyarrow, redis, elasticsearch, kafka-python-ng, minio. Cả hai nhóm
+  đều nằm trong `requirements.txt`.
+- Trước khi pull image lớn hay chạy suite dài, kiểm dung lượng trống `C:`
+  (`df -h /c`).

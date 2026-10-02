@@ -126,7 +126,7 @@ CREATE TABLE IF NOT EXISTS audit.data_quality_result (
 
 -- ---------- Marketplace speed-layer audit (Phase 5) ----------
 CREATE TABLE IF NOT EXISTS audit.marketplace_speed_batch (
-    query_name VARCHAR(128) NOT NULL, batch_id BIGINT NOT NULL,
+    query_name VARCHAR(128) NOT NULL, query_id VARCHAR(64) NOT NULL DEFAULT '', batch_id BIGINT NOT NULL,
     status VARCHAR(16) NOT NULL CHECK (status IN ('RUNNING','SUCCEEDED','FAILED')),
     started_at TIMESTAMPTZ NOT NULL, completed_at TIMESTAMPTZ,
     input_rows BIGINT NOT NULL DEFAULT 0 CHECK (input_rows >= 0),
@@ -139,11 +139,17 @@ CREATE TABLE IF NOT EXISTS audit.marketplace_speed_batch (
     es_rows BIGINT NOT NULL DEFAULT 0 CHECK (es_rows >= 0),
     redis_rows BIGINT NOT NULL DEFAULT 0 CHECK (redis_rows >= 0),
     error_message TEXT CHECK (length(error_message) <= 2000),
-    PRIMARY KEY (query_name, batch_id),
+    PRIMARY KEY (query_name, query_id, batch_id),
     CHECK (completed_at IS NULL OR status IN ('SUCCEEDED','FAILED')),
     CHECK (status = 'RUNNING' OR completed_at IS NOT NULL),
     CHECK (input_rows = 0 OR input_rows = invalid_rows + applied_rows + duplicate_rows + late_rows)
 );
+-- Phase 8: batch IDs restart at 0 under a new checkpoint, so a batch is
+-- identified by the streaming query id as well. Rows written before this
+-- carry '' and stay distinct from any real query id. Safe to run twice.
+ALTER TABLE audit.marketplace_speed_batch ADD COLUMN IF NOT EXISTS query_id VARCHAR(64) NOT NULL DEFAULT '';
+ALTER TABLE audit.marketplace_speed_batch DROP CONSTRAINT IF EXISTS marketplace_speed_batch_pkey;
+ALTER TABLE audit.marketplace_speed_batch ADD CONSTRAINT marketplace_speed_batch_pkey PRIMARY KEY (query_name, query_id, batch_id);
 
 -- ---------- Marketplace temporal warehouse cache (Phase 6) ----------
 CREATE TABLE IF NOT EXISTS cache.marketplace_offer_current (

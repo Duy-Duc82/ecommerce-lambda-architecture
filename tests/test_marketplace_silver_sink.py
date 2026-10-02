@@ -224,3 +224,43 @@ def test_dlq_record_rejects_a_naive_failed_at():
             payload_text="x",
             error=RuntimeError("boom"),
         )
+
+
+# ----------------------------------------------------------------------------
+# Phase 8 plan section 6.2. A valid observation whose Silver write fails is
+# not a bad record: it must be retried, never quarantined. The sink used to
+# wrap the write in the same except as decoding and validation, so a MinIO
+# outage sent perfectly good observations to the DLQ as CONTRACT_VALIDATION,
+# and they never reached Silver.
+# ----------------------------------------------------------------------------
+from data_ingestion.marketplace_silver_sink import SilverWriteError
+
+
+class SilverOutageWriter(MemoryWriter):
+    """Refuses Silver observation writes; quarantine writes still work."""
+
+    def __call__(self, bucket, path, payload):
+        if path.startswith("marketplace/offer_observations/"):
+            raise ConnectionError("MinIO unavailable")
+        return super().__call__(bucket, path, payload)
+
+
+def test_a_silver_write_failure_on_a_valid_event_raises_and_produces_no_dlq_record():
+    writer, producer = SilverOutageWriter(), FakeProducer()
+
+    with pytest.raises(SilverWriteError) as caught:
+        process_record(_record(), writer=writer, dlq_producer=producer, clock=lambda: FAILED_AT)
+
+    assert isinstance(caught.value.__cause__, ConnectionError)
+    assert producer.sent == []
+    assert writer.objects == {}
+
+
+def test_bad_records_are_still_quarantined_while_silver_is_down():
+    # The outage must not change what counts as a bad record.
+    writer, producer = SilverOutageWriter(), FakeProducer()
+
+    result = process_record(_record(value=b"\xff\xfe not utf-8"), writer=writer, dlq_producer=producer, clock=lambda: FAILED_AT)
+
+    assert result.status == "QUARANTINE"
+    assert len(producer.sent) == 1
