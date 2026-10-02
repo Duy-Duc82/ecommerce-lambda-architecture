@@ -1658,6 +1658,21 @@ không trùng; 12 offer có trong Redis; batch `mp-20261002T0945Z` gồm 24 dòn
 Silver, quality PASS, SUCCEEDED; con trỏ = cache; đủ 10 dataset Gold đúng số
 dòng; đủ 17 kết quả quality; gate 8 khớp. **11/11 PASS.**
 
+### 16.3b Review PR #11: bốn bug, đều đã sửa
+
+| Bug | Hệ quả | Sửa |
+|---|---|---|
+| Task giả của smoke (category 9001–9003, ACTIVE) ở lại trong frontier thật sau khi smoke kết thúc | Một lần `mp up` sau đó, với `TIKI_LISTING_URL` thật, sẽ crawl **Tiki thật** cho các category bịa này mỗi giờ, và dữ liệu đó chảy vào Silver/Gold. Phá đúng cam kết "không chạm marketplace thật" | `park-smoke` chuyển chúng sang `DISABLED` mỗi khi smoke kết thúc, pass hay fail; `seed-smoke` bật lại cho lần sau |
+| `mp.ps1` đặt biến môi trường cấp process cho smoke và `Set-Location` mà không khôi phục | Lệnh tiếp theo trong cùng shell thừa hưởng URL stub, cadence 1 phút và settle 60 giây | khôi phục trong `finally`; `Push-Location`/`Pop-Location`; script chỉ `exit` một lần |
+| `validate -Json` copy report bất kể exit code | trả về report của lần chạy trước như thể của lần này | xoá report cũ trước; chỉ copy khi file mới tồn tại |
+| `consumer_lag` cộng một danh sách partition rỗng thành 0 | topic không có metadata thì `kafka_to_silver_lag` pass, và `wait-quiet` trả về ngay | báo lỗi |
+
+Test `2e51dfa` → fix `172f9b9` (Python) và `457f6f8` (`mp.ps1`).
+
+**Kiểm lại trên stack trắng:**
+- smoke lần 5 gọi từ `C:\Users`: PASSED sau 326 giây. Sau đó thư mục vẫn là `C:\Users`, cả ba biến môi trường đều trống, và 6 task smoke đang chờ ở `DISABLED` (`parked_smoke: 6`).
+- smoke lần 6 trên cùng stack: PASSED sau 339 giây, với `created: 0, reactivated: 6`, rồi lại `parked_smoke: 6`. Chạy lại trên stack cũ vẫn trung thực, vì các điều kiện chỉ đếm từ lúc smoke bắt đầu.
+
 ### 16.4 Phát hiện chưa sửa: lineage `file://` không khả chuyển
 
 Các attempt WP1 chạy trên host với lake `local` ghi `raw_uri` là
@@ -1688,8 +1703,8 @@ Bronze của Phase 2, nên để ngoài Phase 8 và ghi vào runbook.
 
 ### 16.6 Trạng thái test
 
-Không tính `test_marketplace_quality.py`: **796 passed** (trước WP5: 756).
-File quality không đụng tới code nào WP5 sửa (42). Tổng: **838**.
+Không tính `test_marketplace_quality.py`: **799 passed** (trước WP5: 756).
+File quality không đụng tới code nào WP5 sửa (42). Tổng: **841**.
 
 ### 16.7 Việc tiếp theo (resume ở đây)
 
