@@ -236,3 +236,34 @@ def test_the_entrypoint_answers_help():
 
     assert result.returncode == 0, result.stderr
     assert "usage" in result.stdout.lower()
+
+
+# Phase 8 plan section 7.2: one heartbeat per poll, retrying or not, so a sink
+# waiting out a storage outage still reads as alive.
+def test_the_sink_beats_once_per_poll_even_while_retrying():
+    consumer = ScriptedConsumer([{_tp(0): [_msg(0, 5)]}, {_tp(0): [_msg(0, 5)]}])
+    calls, beats = [], []
+
+    def flaky(record):
+        calls.append(record.offset)
+        if len(calls) == 1:
+            raise RuntimeError("minio down")
+
+    _run(consumer, flaky, max_records=1, beat=lambda: beats.append(1))
+
+    assert calls == [5, 5]
+    # One per poll, retrying or not, plus one for the record that succeeded.
+    assert len(consumer.calls("poll")) == 2
+    assert len(beats) == 2 + 1
+
+
+# A backlog batch can hold up to max_poll_records (500 by default), each a
+# MinIO write: one heartbeat per poll would let a working sink go stale.
+def test_the_sink_beats_once_per_record_within_a_large_batch():
+    consumer = ScriptedConsumer([{_tp(0): [_msg(0, offset) for offset in range(5)]}])
+    beats = []
+
+    _run(consumer, lambda record: None, max_records=5, beat=lambda: beats.append(1))
+
+    assert len(consumer.calls("poll")) == 1
+    assert len(beats) >= 5

@@ -374,3 +374,38 @@ def test_the_connection_factory_rolls_back_and_still_closes_on_error(monkeypatch
             raise RuntimeError("statement failed")
 
     assert log == ["connect", "begin", "rollback", "close"]
+
+
+# Phase 8 plan section 7.2: the container healthcheck reads a heartbeat the
+# loop touches once per cycle.
+def test_the_service_beats_once_per_cycle():
+    beats = []
+
+    _serve(ScriptedWorker([1, 0, 2]), RecordingStop(), max_cycles=3, beat=lambda: beats.append(1))
+
+    assert len(beats) == 3
+
+
+def test_a_heartbeat_file_is_fresh_only_after_a_beat(tmp_path):
+    from common.heartbeat import heartbeat, is_fresh, main
+
+    path = str(tmp_path / "heartbeat")
+    assert not is_fresh(path, max_age_seconds=60)
+    assert main(["--check", path, "--max-age", "60"]) == 1
+
+    heartbeat(path)()
+
+    assert is_fresh(path, max_age_seconds=60)
+    assert main(["--check", path, "--max-age", "60"]) == 0
+    import os
+    modified = os.path.getmtime(path)
+    assert not is_fresh(path, max_age_seconds=60, now=modified + 61)
+
+
+def test_an_empty_heartbeat_path_writes_nothing(tmp_path, monkeypatch):
+    from common.heartbeat import heartbeat
+
+    monkeypatch.chdir(tmp_path)
+    heartbeat("")()
+
+    assert list(tmp_path.iterdir()) == []

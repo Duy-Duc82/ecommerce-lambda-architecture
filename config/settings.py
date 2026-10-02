@@ -192,6 +192,9 @@ CRAWL_WORKER_BATCH_SIZE = int(os.getenv("CRAWL_WORKER_BATCH_SIZE", "10"))
 # CRAWL_WORKER_POLL_SECONDS.
 CRAWL_SERVICE_WORKER_ID = os.getenv("CRAWL_SERVICE_WORKER_ID", "").strip()
 CRAWL_SERVICE_IDLE_SECONDS = int(os.getenv("CRAWL_SERVICE_IDLE_SECONDS", "30"))
+# Touched once per loop iteration by the Python services; their container
+# healthcheck fails when it goes stale. Empty disables it (tests, host runs).
+SERVICE_HEARTBEAT_FILE = os.getenv("SERVICE_HEARTBEAT_FILE", "")
 
 KAFKA_CHANGE_ACK_TIMEOUT_SECONDS = int(os.getenv("KAFKA_CHANGE_ACK_TIMEOUT_SECONDS", "30"))
 ES_INDEX_MARKETPLACE_CHANGES = os.getenv("ES_INDEX_MARKETPLACE_CHANGES", "marketplace-changes-v1")

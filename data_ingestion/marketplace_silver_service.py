@@ -43,6 +43,7 @@ def run_sink(
     max_records: int | None = None,
     log: Callable[[str], None] = print,
     commit_offsets: Callable[[Any, int], dict] = _offset,
+    beat: Callable[[], None] = lambda: None,
 ) -> int:
     """Consume until stopped, or until ``max_records`` were handled; return that count."""
     if poll_timeout_ms <= 0:
@@ -55,6 +56,9 @@ def run_sink(
     delay = retry_base_seconds
     while not stop.is_set():
         batch = consumer.poll(timeout_ms=poll_timeout_ms)
+        # Once per poll, retrying or not: a sink waiting out a storage outage
+        # is alive, and its failures show in the log and the drills.
+        beat()
         # poll() has already advanced every partition past what it returned.
         # Whatever is left unprocessed in this batch is rewound before it is
         # abandoned, or it would be skipped for good.
@@ -77,6 +81,9 @@ def run_sink(
                 consumer.commit(offsets=commit_offsets(tp, record.offset + 1))
                 pending[tp].pop(0)
                 handled += 1
+                # And once per record: a backlog poll can return hundreds,
+                # each a storage write, and the sink is working throughout.
+                beat()
                 delay = retry_base_seconds
                 log(json.dumps({"event": "silver_record", "partition": record.partition, "offset": record.offset,
                                 "status": getattr(outcome, "status", None)}, sort_keys=True))
@@ -118,10 +125,12 @@ def main() -> None:
     parser.add_argument("--max-records", type=int, default=None, help="stop after N records (tests and smoke only)")
     args = parser.parse_args()
 
+    from common.heartbeat import heartbeat
     from common.lifecycle import StopSignal, install_signal_handlers
     from common.object_store import put_bytes
     from config.settings import (
         MARKETPLACE_SILVER_POLL_TIMEOUT_MS, MARKETPLACE_SILVER_RETRY_BASE_SECONDS, MARKETPLACE_SILVER_RETRY_MAX_SECONDS,
+        SERVICE_HEARTBEAT_FILE,
     )
     from data_ingestion.marketplace_producer import create_marketplace_producer
     from data_ingestion.marketplace_silver_sink import process_record
@@ -141,6 +150,7 @@ def main() -> None:
             retry_max_seconds=MARKETPLACE_SILVER_RETRY_MAX_SECONDS,
             max_records=args.max_records,
             log=lambda line: print(line, flush=True),
+            beat=heartbeat(SERVICE_HEARTBEAT_FILE),
         )
     finally:
         consumer.close()

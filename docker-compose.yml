@@ -2,6 +2,66 @@
 # Big Data Lambda Architecture - Docker Compose
 # E-Commerce Analytics Platform
 # ============================================================
+#
+# `docker compose up -d` starts only the core: Kafka, MinIO, PostgreSQL,
+# Redis and Elasticsearch, plus their one-shot init containers. Everything
+# else runs under a profile (Phase 8 plan section 7.2):
+#
+#   crawl   crawl-worker           ingest  silver-sink
+#   speed   speed                  batch   batch-scheduler, batch-once
+#   serve   kibana, superset       legacy  the Kaggle demo (Spark 3.5.1)
+#
+# Host ports come from .env (see .env.example), so a machine whose ports are
+# taken needs no override file. Container-side values stay literal: a
+# developer's .env holds host-side addresses such as localhost:9010, which
+# must never reach a container.
+
+x-marketplace-env: &marketplace-env
+  KAFKA_BOOTSTRAP_SERVERS: kafka:19092
+  POSTGRES_HOST: postgres-dw
+  POSTGRES_PORT: "5432"
+  POSTGRES_USER: ${POSTGRES_USER:-admin}
+  POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-admin123}
+  POSTGRES_DB: ${POSTGRES_DB:-data_warehouse}
+  DATA_LAKE_PROFILE: minio
+  MINIO_ENDPOINT: minio:9000
+  MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-minioadmin}
+  MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
+  MINIO_USE_SSL: "false"
+  REDIS_HOST: redis
+  REDIS_PORT: "6379"
+  ES_HOST: http://elasticsearch:9200
+
+x-marketplace-python: &marketplace-python
+  build:
+    context: .
+    dockerfile: docker/marketplace-python/Dockerfile
+  image: ecommerce/marketplace-python:1
+  volumes:
+    # Read-only: data goes to MinIO, PostgreSQL or a named volume.
+    - ./:/app:ro
+  networks:
+    - bigdata
+
+x-spark-marketplace: &spark-marketplace
+  build:
+    context: .
+    dockerfile: docker/spark-marketplace/Dockerfile
+  image: ecommerce/spark-marketplace:4.0.1
+  # Spark may write scratch files into its working directory; /app is read-only.
+  working_dir: /tmp
+  volumes:
+    - ./:/app:ro
+  networks:
+    - bigdata
+
+x-core-ready: &core-ready
+  kafka-init:
+    condition: service_completed_successfully
+  minio-init:
+    condition: service_completed_successfully
+  postgres-dw:
+    condition: service_healthy
 
 services:
   # ── INGESTION LAYER ─────────────────────────────────────────
@@ -10,13 +70,14 @@ services:
     container_name: kafka
     hostname: kafka
     ports:
-      - "9092:9092"
+      - "${KAFKA_HOST_PORT:-9092}:9092"
     environment:
       KAFKA_NODE_ID: 1
       KAFKA_PROCESS_ROLES: broker,controller
       KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:29093
       KAFKA_LISTENERS: CONTROLLER://:29093,PLAINTEXT_HOST://:9092,PLAINTEXT://:19092
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT_HOST://localhost:9092,PLAINTEXT://kafka:19092
+      # The host listener must advertise the published port, not the container's.
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT_HOST://localhost:${KAFKA_HOST_PORT:-9092},PLAINTEXT://kafka:19092
       KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
       KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
       KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
@@ -29,7 +90,12 @@ services:
       KAFKA_LOG_DIRS: /tmp/kraft-combined-logs
       CLUSTER_ID: 4L6g3nShT-eMCtK--X86sw
     healthcheck:
-      test: /opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 || exit 1
+      # Tools inside the container use the internal listener. The host one
+      # advertises localhost:${KAFKA_HOST_PORT}, which nothing serves in here
+      # once that port is not 9092; kafka-topics.sh, which follows metadata,
+      # hangs on it (checked 2026-10-02). This check happens not to, but stays
+      # on the same listener as the other in-container tools.
+      test: /opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server kafka:19092 || exit 1
       interval: 15s
       timeout: 10s
       retries: 5
@@ -37,8 +103,123 @@ services:
     networks:
       - bigdata
 
-  # ── PROCESSING LAYER (SPARK) ────────────────────────────────
+  # The three frozen marketplace topics (Brief section 11), created
+  # idempotently. The legacy ecommerce_events topic stays with start_all.ps1.
+  kafka-init:
+    image: apache/kafka:4.2.0
+    container_name: kafka-init
+    depends_on:
+      kafka:
+        condition: service_healthy
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -e
+        for topic in marketplace.observations.v1 marketplace.observations.v1.dlq marketplace.changes.v1; do
+          /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:19092 --create --if-not-exists \
+            --topic "$$topic" --partitions ${KAFKA_MARKETPLACE_PARTITIONS:-3} --replication-factor 1
+        done
+        echo "marketplace topics ready"
+    networks:
+      - bigdata
+
+  # ── MARKETPLACE SERVICES ───────────────────────────────────
+  crawl-worker:
+    <<: *marketplace-python
+    profiles: ["crawl"]
+    container_name: crawl-worker
+    command: ["python", "-m", "crawler.service"]
+    environment:
+      <<: *marketplace-env
+      CRAWL_SERVICE_WORKER_ID: crawl-worker
+      # Overridable so a smoke or drill can point the crawler at a stub.
+      TIKI_LISTING_URL: ${TIKI_LISTING_URL:-https://tiki.vn/api/personalish/v1/blocks/listings}
+      SERVICE_HEARTBEAT_FILE: /tmp/heartbeat
+    # SIGTERM finishes the cycle in hand: up to CRAWL_WORKER_BATCH_SIZE pages
+    # at CRAWL_REQUEST_DELAY_SECONDS each, plus their fetches.
+    stop_grace_period: 120s
+    healthcheck:
+      # One cycle plus the idle wait, three times over.
+      test: ["CMD", "python", "-m", "common.heartbeat", "--check", "/tmp/heartbeat", "--max-age", "600"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    depends_on: *core-ready
+
+  silver-sink:
+    <<: *marketplace-python
+    profiles: ["ingest"]
+    container_name: silver-sink
+    command: ["python", "-m", "data_ingestion.marketplace_silver_service"]
+    environment:
+      <<: *marketplace-env
+      SERVICE_HEARTBEAT_FILE: /tmp/heartbeat
+    healthcheck:
+      # Beats once per poll; three of the longest retry backoff (60 s).
+      test: ["CMD", "python", "-m", "common.heartbeat", "--check", "/tmp/heartbeat", "--max-age", "180"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    depends_on: *core-ready
+
+  speed:
+    <<: *spark-marketplace
+    profiles: ["speed"]
+    container_name: speed
+    command: ["python3", "-m", "speed_layer.marketplace_speed_service"]
+    environment:
+      <<: *marketplace-env
+      MARKETPLACE_SPEED_CHECKPOINT_ROOT: /data/checkpoints
+    volumes:
+      - ./:/app:ro
+      - speed_checkpoints:/data/checkpoints
+    stop_grace_period: 60s
+    healthcheck:
+      test: ["CMD", "pgrep", "-f", "speed_layer.marketplace_speed_service"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 120s
+    depends_on:
+      <<: *core-ready
+      redis:
+        condition: service_healthy
+      elasticsearch:
+        condition: service_healthy
+
+  batch-scheduler:
+    <<: *spark-marketplace
+    profiles: ["batch"]
+    container_name: batch-scheduler
+    command: ["python3", "-m", "batch_layer.marketplace_scheduler"]
+    environment:
+      <<: *marketplace-env
+    # A stop waits for the batch in progress; see run_scheduler().
+    stop_grace_period: 30m
+    healthcheck:
+      test: ["CMD", "pgrep", "-f", "batch_layer.marketplace_scheduler"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+    depends_on: *core-ready
+
+  # Operator commands, never started by `up`:
+  #   docker compose --profile batch run --rm batch-once \
+  #     python3 -m batch_layer.marketplace_warehouse --run-id ... --as-of ... [--resume]
+  batch-once:
+    <<: *spark-marketplace
+    profiles: ["batch"]
+    command: ["python3", "-m", "batch_layer.marketplace_warehouse", "--help"]
+    restart: "no"
+    environment:
+      <<: *marketplace-env
+    depends_on: *core-ready
+
+  # ── LEGACY KAGGLE DEMO (Spark 3.5.1) ───────────────────────
   spark:
+    profiles: ["legacy"]
     image: apache/spark:3.5.1
     container_name: spark
     hostname: spark
@@ -54,12 +235,13 @@ services:
     environment:
       SPARK_PUBLIC_DNS: localhost
     ports:
-      - "8080:8080"   # Spark Master Web UI
-      - "7077:7077"   # Spark Master RPC
+      - "${SPARK_UI_HOST_PORT:-8080}:8080"   # Spark Master Web UI
+      - "${SPARK_RPC_HOST_PORT:-7077}:7077"  # Spark Master RPC
     networks:
       - bigdata
 
   spark-worker:
+    profiles: ["legacy"]
     image: apache/spark:3.5.1
     container_name: spark-worker
     hostname: spark-worker
@@ -76,13 +258,15 @@ services:
       SPARK_WORKER_CORES: ${SPARK_WORKER_CORES:-4}
       SPARK_WORKER_MEMORY: ${SPARK_WORKER_MEMORY:-8g}
     ports:
-      - "8081:8081"   # Spark Worker Web UI
+      - "${SPARK_WORKER_UI_HOST_PORT:-8081}:8081"   # Spark Worker Web UI
     depends_on:
       - spark
     networks:
       - bigdata
 
   # Reproducible batch runtime with pinned PostgreSQL JDBC and MinIO S3A jars.
+  # Kept on its own `jobs` profile: scripts/run_warehouse.ps1 runs it with
+  # `--profile jobs run --rm`, and under `legacy` an `up` would start it.
   warehouse-job:
     profiles: ["jobs"]
     build:
@@ -93,16 +277,16 @@ services:
     environment:
       DATA_LAKE_MODE: s3a
       MINIO_ENDPOINT: minio:9000
-      MINIO_ACCESS_KEY: minioadmin
-      MINIO_SECRET_KEY: minioadmin
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
       MINIO_BUCKET_BRONZE: ecommerce-bronze
       MINIO_BUCKET_SILVER: ecommerce-silver
       MINIO_BUCKET_GOLD: ecommerce-gold
       POSTGRES_HOST: postgres-dw
       POSTGRES_PORT: 5432
-      POSTGRES_USER: admin
-      POSTGRES_PASSWORD: admin123
-      POSTGRES_DB: data_warehouse
+      POSTGRES_USER: ${POSTGRES_USER:-admin}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-admin123}
+      POSTGRES_DB: ${POSTGRES_DB:-data_warehouse}
       PYSPARK_PYTHON: python3
       PYSPARK_DRIVER_PYTHON: python3
     volumes:
@@ -119,16 +303,20 @@ services:
 
   # ── DATA LAKE (MinIO - S3 Compatible) ──────────────────────
   minio:
-    image: minio/minio:RELEASE.2025-09-07T16-13-09Z
+    # MinIO no longer publishes pullable images (every Docker Hub and quay.io
+    # tag answers `denied`, checked 2026-10-02). Pinned by the digest of the
+    # copy already cached here; see docs/RUNBOOK.md for how to get one.
+    image: minio/minio@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e
+    pull_policy: missing
     container_name: minio
     hostname: minio
     command: server /data --console-address ":9001"
     environment:
-      MINIO_ROOT_USER: minioadmin
-      MINIO_ROOT_PASSWORD: minioadmin
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
     ports:
-      - "9000:9000"   # S3 API
-      - "9001:9001"   # MinIO Console
+      - "${MINIO_API_HOST_PORT:-9000}:9000"       # S3 API
+      - "${MINIO_CONSOLE_HOST_PORT:-9001}:9001"   # MinIO Console
     volumes:
       - minio_data:/data
     healthcheck:
@@ -142,19 +330,23 @@ services:
 
   # MinIO Client - tao bucket khi khoi dong
   minio-init:
-    image: minio/mc:RELEASE.2025-08-13T08-35-41Z
+    image: minio/mc@sha256:a7fe349ef4bd8521fb8497f55c6042871b2ae640607cf99d9bede5e9bdf11727
+    pull_policy: missing
     container_name: minio-init
     depends_on:
       minio:
         condition: service_healthy
     entrypoint: >
       /bin/sh -c "
-      mc alias set local http://minio:9000 minioadmin minioadmin;
-      mc mb local/ecommerce-bronze --ignore-existing;
-      mc mb local/ecommerce-silver --ignore-existing;
-      mc mb local/ecommerce-gold --ignore-existing;
-      echo 'MinIO Bronze/Silver/Gold buckets created successfully';
+      mc alias set local http://minio:9000 $${MINIO_ROOT_USER} $${MINIO_ROOT_PASSWORD} &&
+      mc mb local/ecommerce-bronze --ignore-existing &&
+      mc mb local/ecommerce-silver --ignore-existing &&
+      mc mb local/ecommerce-gold --ignore-existing &&
+      echo 'MinIO Bronze/Silver/Gold buckets created successfully'
       "
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
     networks:
       - bigdata
 
@@ -163,7 +355,7 @@ services:
     image: redis:8.6.2
     container_name: redis
     ports:
-      - "6379:6379"
+      - "${REDIS_HOST_PORT:-6379}:6379"
     volumes:
       - redis_data:/data
     healthcheck:
@@ -178,17 +370,17 @@ services:
     image: postgres:18.3
     container_name: postgres-dw
     environment:
-      - POSTGRES_USER=admin
-      - POSTGRES_PASSWORD=admin123
-      - POSTGRES_DB=data_warehouse
+      - POSTGRES_USER=${POSTGRES_USER:-admin}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-admin123}
+      - POSTGRES_DB=${POSTGRES_DB:-data_warehouse}
       - PGDATA=/var/lib/postgresql/data/pgdata
     ports:
-      - "5433:5432"
+      - "${POSTGRES_HOST_PORT:-5433}:5432"
     volumes:
       - pg_data:/var/lib/postgresql/data
       - ./scripts/init_postgres.sql:/docker-entrypoint-initdb.d/init.sql
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U admin -d data_warehouse"]
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -197,7 +389,10 @@ services:
 
   # ── SEARCH & ANALYTICS ─────────────────────────────────────
   elasticsearch:
-    image: docker.elastic.co/elasticsearch/elasticsearch:8.18.0
+    # 8.18.1, not 8.18.0: on the development machine the 8.18.0 image was
+    # pulled while the disk was full and its snapshot stayed corrupt across
+    # re-pulls (PROGRESS.md section 13.4). Kibana is pinned to the same patch.
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.18.1
     container_name: elasticsearch
     environment:
       - discovery.type=single-node
@@ -206,7 +401,7 @@ services:
       - xpack.monitoring.collection.enabled=true
       - "ES_JAVA_OPTS=-Xms1g -Xmx1g"
     ports:
-      - "9200:9200"
+      - "${ES_HOST_PORT:-9200}:9200"
     volumes:
       - es_data:/usr/share/elasticsearch/data
     healthcheck:
@@ -219,7 +414,9 @@ services:
       - bigdata
 
   kibana:
-    image: docker.elastic.co/kibana/kibana:8.18.0
+    # Also under `legacy`, whose dashboard importer depends on it.
+    profiles: ["serve", "legacy"]
+    image: docker.elastic.co/kibana/kibana:8.18.1
     container_name: kibana
     environment:
       - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
@@ -229,7 +426,7 @@ services:
       - XPACK_SECURITY_ENCRYPTIONKEY=a7a6311933d3503b89bc2dbc36572c33a6c10925682e591bffcab6911c06786d
       - KIBANA_DEFAULTAPPID=dashboards
     ports:
-      - "5601:5601"
+      - "${KIBANA_HOST_PORT:-5601}:5601"
     depends_on:
       elasticsearch:
         condition: service_healthy
@@ -242,8 +439,9 @@ services:
     networks:
       - bigdata
 
-  # Auto-import Kibana dashboards on startup
+  # Auto-import the legacy Kaggle dashboards.
   kibana-setup:
+    profiles: ["legacy"]
     image: python:3.12-slim
     container_name: kibana-setup
     depends_on:
@@ -263,6 +461,7 @@ services:
 
   # ── SERVING LAYER BI (Apache Superset) ─────────────────────
   superset:
+    profiles: ["serve"]
     image: apache/superset:4.1.1
     container_name: superset
     command: >
@@ -274,7 +473,7 @@ services:
     environment:
       - SUPERSET_CONFIG_PATH=/app/custom_config/superset_config.py
     ports:
-      - "8088:8088"
+      - "${SUPERSET_HOST_PORT:-8088}:8088"
     volumes:
       - ./display/superset:/app/custom_config
       - superset_home:/app/superset_home
@@ -287,6 +486,7 @@ services:
       - bigdata
 
   superset-init:
+    profiles: ["serve"]
     image: apache/superset:4.1.1
     container_name: superset-init
     user: root
@@ -314,3 +514,4 @@ volumes:
   pg_data:
   es_data:
   superset_home:
+  speed_checkpoints:
