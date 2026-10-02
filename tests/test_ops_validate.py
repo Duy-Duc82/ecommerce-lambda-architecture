@@ -291,3 +291,57 @@ def test_the_smoke_batch_window_covers_every_settled_crawl_run(monkeypatch, caps
     # 09:37:50 + 60 s = 09:38:50, up to the next minute.
     assert plan == {"run_id": "mp-20261002T0939Z", "as_of": "2026-10-02T09:39:00Z"}
     assert slept, "it waited for the clock to pass as_of"
+
+
+# The smoke's made-up categories must never outlive the smoke: a later `mp up`
+# with the real TIKI_LISTING_URL would crawl the live marketplace for them.
+class RecordingConnection:
+    def __init__(self, log): self.log = log
+    def __enter__(self): return self
+    def __exit__(self, *exc): return False
+    def cursor(self): return self
+    def execute(self, sql, params=()): self.log.append((" ".join(sql.split()), params))
+    @property
+    def rowcount(self): return 6
+
+
+def test_parking_disables_every_pending_smoke_task_and_only_those():
+    log = []
+
+    parked = smoke.park(lambda: RecordingConnection(log))
+
+    (sql, params), = log
+    assert sql.startswith("UPDATE audit.crawl_frontier SET status = 'DISABLED'")
+    assert "status IN ('READY', 'RETRY_WAIT', 'LEASED')" in sql
+    assert "marketplace_code = 'tiki'" in sql
+    assert params[0] == smoke.smoke_targets()
+    assert parked == 6
+
+
+def test_activating_reenables_parked_smoke_tasks_now():
+    log = []
+
+    smoke.activate(lambda: RecordingConnection(log))
+
+    (sql, params), = log
+    assert sql.startswith("UPDATE audit.crawl_frontier SET status = 'READY'")
+    assert "scheduled_for = now()" in sql
+    assert "status = 'DISABLED'" in sql
+    assert params[0] == smoke.smoke_targets()
+
+
+def test_a_topic_without_partitions_is_an_error_not_zero_lag(monkeypatch):
+    import kafka
+
+    class NoTopic:
+        def __init__(self, **kwargs): pass
+        def partitions_for_topic(self, topic): return None
+        def list_consumer_group_offsets(self, group): return {}
+        def close(self): pass
+
+    monkeypatch.setattr(kafka, "KafkaConsumer", NoTopic)
+    monkeypatch.setattr(kafka, "KafkaAdminClient", NoTopic)
+    sources = v.LiveSources.__new__(v.LiveSources)
+
+    with pytest.raises(RuntimeError, match="no partitions"):
+        sources.consumer_lag("group", "marketplace.observations.v1")
