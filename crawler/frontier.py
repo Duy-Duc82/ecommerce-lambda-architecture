@@ -27,6 +27,9 @@ _COLUMNS = (
     "lease_expires_at, last_http_status, last_error_kind, last_error, "
     "last_success_at"
 )
+# The same columns, qualified, for a statement that joins another relation
+# with a task_id of its own; unqualified, PostgreSQL rejects them as ambiguous.
+_FRONTIER_COLUMNS = ", ".join(f"f.{column.strip()}" for column in _COLUMNS.split(","))
 
 
 class LeaseLostError(RuntimeError):
@@ -149,7 +152,7 @@ class PostgresCrawlFrontier:
                 "SET status = 'LEASED', lease_owner = %s, lease_expires_at = %s,"
                 "    attempts = f.attempts + 1, updated_at = %s "
                 "FROM due WHERE f.task_id = due.task_id "
-                f"RETURNING {_COLUMNS}",
+                f"RETURNING {_FRONTIER_COLUMNS}",
                 (now, now, limit, worker_id, expires_at, now),
             )
             rows = cur.fetchall() or []

@@ -26,6 +26,7 @@ from crawler.contracts import (
     FetchTransportError,
     HttpResponseError,
     ListingPageParseError,
+    ObservationPublishError,
     RawPersistenceError,
     RobotsDeniedError,
 )
@@ -55,6 +56,9 @@ class FailureKind(str, Enum):
     STORAGE_ERROR = "STORAGE_ERROR"
     PARSE_ERROR = "PARSE_ERROR"
     VALIDATION_ERROR = "VALIDATION_ERROR"
+    # Kafka refused or timed out after a good fetch and parse. Retryable, and
+    # never a reason to open the source circuit: the marketplace was fine.
+    PUBLISH_ERROR = "PUBLISH_ERROR"
     UNKNOWN = "UNKNOWN"
 
 
@@ -64,6 +68,7 @@ _RETRYABLE_KINDS = frozenset(
         FailureKind.TRANSIENT_NETWORK,
         FailureKind.SERVER_ERROR,
         FailureKind.STORAGE_ERROR,
+        FailureKind.PUBLISH_ERROR,
     }
 )
 # 408 Request Timeout, 425 Too Early and 429 Too Many Requests are the only
@@ -238,6 +243,9 @@ def next_scheduled_for(tier: CrawlTier, after: datetime) -> datetime:
 
 def classify_failure(error: Exception, http_status: int | None = None) -> FailureKind:
     """Map a Phase 2 boundary failure onto the persisted error taxonomy."""
+    # First: the fetch behind it succeeded, so its HTTP status says nothing.
+    if isinstance(error, ObservationPublishError):
+        return FailureKind.PUBLISH_ERROR
     if isinstance(error, RobotsDeniedError):
         return FailureKind.ROBOTS_DENIED
     if isinstance(error, RawPersistenceError):

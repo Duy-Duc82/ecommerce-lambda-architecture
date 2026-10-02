@@ -1234,3 +1234,72 @@ Dòng Silver giả ngày 20/9 đã xóa sau khi kiểm.
 
 Suite: **674 passed, 0 failed, 0 skipped**.
 
+
+---
+
+## 12. Session 2026-10-01 (tối) — Phase 8 WP1: crawl service
+
+### 12.1 Đã làm
+
+Nhánh `phase-8-wp1-crawl-service`, cắt từ `develop` sau khi PR #5 và #6 merge.
+
+| Thay đổi | Ở đâu |
+|---|---|
+| `python -m crawler.service`: vòng lặp quanh `CrawlWorker.run_once`, chờ trên stop signal, SIGTERM xong cả cycle rồi mới dừng | `crawler/service.py` |
+| `publishing_executor`: publish từng observation theo thứ tự, đợi ack; lỗi ở vị trí `k` → `ObservationPublishError(acknowledged=k)` | như trên |
+| `PUBLISH_ERROR`: retryable, không mở circuit nguồn; attempt ghi `parsed_count = số đã ack` | `crawler/scheduling.py`, `crawler/worker.py`, `crawler/contracts.py` |
+| Migration hai CHECK constraint error-kind, idempotent | `scripts/init_postgres.sql` |
+| `python -m crawler.seed_frontier`: lần chạy đầu của mỗi target neo ở 1970-01-01, nên seed lại là no-op | `crawler/seed_frontier.py` |
+| `TIKI_LISTING_URL`; robots.txt đọc từ host thật sự được fetch | `config/settings.py`, `crawler/base.py`, `crawler/sites/tiki.py` |
+| Connection factory đóng connection sau mỗi lần dùng | `crawler/service.py` |
+
+Plan Phase 8 sửa theo ba điều WP1 phát hiện (commit `a60b98c`):
+
+- bỏ `TIKI_ROBOTS_URL`;
+- dừng sau khi xong cả cycle, không dừng giữa batch đã lease;
+- neo task khi seed.
+
+### 12.2 Ba bug production, đều chỉ lộ ra khi chạy thật lần đầu
+
+| Bug | Vị trí | Hệ quả |
+|---|---|---|
+| `create_marketplace_producer()` **và** `create_change_producer()` truyền `enable_idempotence=True`, mà `kafka-python-ng 2.2.3` không có tham số đó | `data_ingestion/marketplace_producer.py`, `marketplace_change_producer.py` | Chưa factory nào từng tạo được producer: crawler không publish được, mọi micro-batch speed marketplace sẽ chết ở change producer |
+| `lease_due()` `RETURNING task_id, …` không qualify, trong khi UPDATE join CTE `due` cũng có `task_id` | `crawler/frontier.py` | `AmbiguousColumn`: worker Phase 3 **chưa từng lease được task nào** trên Postgres thật |
+| `with connection_factory() as conn` trên connection psycopg2 trần chỉ commit, không đóng | cách dùng ở `frontier.py`, `audit.py` | Service chạy lâu sẽ rò một connection mỗi lần gọi. Sửa bằng factory đóng connection (`postgres_connection_factory`); bản thân repository không đổi |
+
+Hai bug đầu lọt qua vì mọi test producer và frontier chỉ dùng fake: fake producer nhận mọi tham số, fake cursor nhận mọi chuỗi SQL. Test mới:
+
+- kiểm option của producer bằng chính bảng `DEFAULT_CONFIG` của client, không cần broker;
+- kiểm cột trong `RETURNING` đã được qualify.
+
+Hai bug này theo đúng quy tắc repo, mỗi bug một cặp commit test rồi fix: `5a81baf`/`680fc97` và `e8a1f1a`/`13509b0`. Bug connection lộ ra khi viết entrypoint, nên factory và test của nó nằm luôn trong commit feature `a593cd7`.
+
+Bỏ `enable_idempotence` cũng buộc giảm `max_in_flight_requests_per_connection` xuống 1. Producer không idempotent mà để 5 request in-flight thì retry có thể đảo thứ tự message của một offer. Delivery giờ được ghi rõ là **at-least-once**, đúng với điều §2 đã chốt từ trước. Bản sao bị trùng được ID tất định hấp thụ ở downstream.
+
+### 12.3 Kiểm chứng trên Postgres + Kafka thật
+
+Dùng `postgres-dw` và `kafka` của Compose. Nguồn dữ liệu là một HTTP server tạm phục vụ fixture Tiki đã đóng băng; không gọi Tiki thật.
+
+```text
+init_postgres.sql chạy 2 lần             exit 0 cả hai; cả hai constraint chứa PUBLISH_ERROR
+seed 1846 × 2 trang, seed lại             2 task mới, rồi 0
+crawl.service --max-cycles 1              leased=2 succeeded=2; 2 attempt PARTIAL parsed=2; Kafka +4; Bronze body+metadata
+Kafka dừng sau khi producer đã kết nối    attempt FAILED, http 200, PUBLISH_ERROR, parsed=0, raw_uri có; task RETRY_WAIT;
+                                          crawl_source_state.consecutive_failures = 0
+Kafka bật lại, 1 cycle                    attempt 2 PARTIAL parsed=2; task SUCCEEDED, lần kế READY
+Σ parsed_count mọi attempt = 6 = tổng offset Kafka
+```
+
+Dòng cuối là bất biến mà gate 8 của Phase 7 dựa vào: số observation được ghi là đã parse luôn bằng số observation thật sự vào Kafka.
+
+`kafka-python-ng` đã được cài vào Python của host. Gói này có trong `requirements.txt` nhưng trước đó chưa cài.
+
+### 12.4 Trạng thái test
+
+**711 passed, 0 failed, 0 skipped** trên HEAD của WP1 (trước WP1: 674). Số này
+gồm hai lượt cộng lại: `test_marketplace_quality.py` chạy riêng (42 passed,
+19m36s) và phần còn lại của suite (669 passed, 4m04s). Lượt full suite liền
+một mạch trước đó bị treo trong file quality, sau khoảng 12 test Spark; chạy
+riêng thì không treo lại. Nghi do môi trường Spark trên Windows host chứ
+không do code, nhưng **chưa xác minh được nguyên nhân**. Nếu lặp lại, chạy
+file quality riêng.

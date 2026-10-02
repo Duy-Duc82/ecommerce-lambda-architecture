@@ -79,6 +79,25 @@ class CanonicalRecordError(Phase2AcquisitionError):
     pass
 
 
+class ObservationPublishError(Exception):
+    """An attempt stored and parsed its response but could not publish it all.
+
+    Not a Phase 2 acquisition failure: the fetch, the raw write and the parse
+    all succeeded. ``acknowledged`` counts the observations Kafka accepted
+    before the failure, in publish order, and is what the attempt audit
+    records as parsed — only those can ever reach Silver.
+    """
+
+    def __init__(self, *, report: Any, acknowledged: int, cause: BaseException):
+        observations = len(getattr(report, "observations", ()) or ())
+        if isinstance(acknowledged, bool) or not isinstance(acknowledged, int) or not 0 <= acknowledged < max(observations, 1):
+            raise ValueError(f"acknowledged must be between 0 and {max(observations - 1, 0)}, got {acknowledged!r}")
+        self.report = report
+        self.acknowledged = acknowledged
+        super().__init__(f"published {acknowledged} of {observations} observations: {cause}")
+        self.__cause__ = cause
+
+
 def _require_text(value: Any, field_name: str) -> str:
     if not isinstance(value, str):
         raise ValueError(f"{field_name} must be text")
