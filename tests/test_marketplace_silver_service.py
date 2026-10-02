@@ -252,7 +252,9 @@ def test_the_sink_beats_once_per_poll_even_while_retrying():
     _run(consumer, flaky, max_records=1, beat=lambda: beats.append(1))
 
     assert calls == [5, 5]
-    assert len(beats) == len(consumer.calls("poll")) == 2
+    # One per poll, retrying or not, plus one for the record that succeeded.
+    assert len(consumer.calls("poll")) == 2
+    assert len(beats) == 2 + 1
 
 
 # A backlog batch can hold up to max_poll_records (500 by default), each a

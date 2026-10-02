@@ -81,6 +81,9 @@ def run_sink(
                 consumer.commit(offsets=commit_offsets(tp, record.offset + 1))
                 pending[tp].pop(0)
                 handled += 1
+                # And once per record: a backlog poll can return hundreds,
+                # each a storage write, and the sink is working throughout.
+                beat()
                 delay = retry_base_seconds
                 log(json.dumps({"event": "silver_record", "partition": record.partition, "offset": record.offset,
                                 "status": getattr(outcome, "status", None)}, sort_keys=True))
