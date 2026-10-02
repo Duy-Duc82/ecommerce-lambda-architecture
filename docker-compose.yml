@@ -10,6 +10,9 @@
 #   crawl   crawl-worker           ingest  silver-sink
 #   speed   speed                  batch   batch-scheduler, batch-once
 #   serve   kibana, superset       legacy  the Kaggle demo (Spark 3.5.1)
+#   ops     ops (run --rm tool)    smoke   stub-source, the offline Tiki stub
+#
+# scripts/mp.ps1 wraps all of this; see docs/RUNBOOK.md.
 #
 # Host ports come from .env (see .env.example), so a machine whose ports are
 # taken needs no override file. Container-side values stay literal: a
@@ -141,6 +144,8 @@ services:
       CRAWL_SERVICE_WORKER_ID: crawl-worker
       # Overridable so a smoke or drill can point the crawler at a stub.
       TIKI_LISTING_URL: ${TIKI_LISTING_URL:-https://tiki.vn/api/personalish/v1/blocks/listings}
+      # The smoke recrawls its ACTIVE tasks every minute instead of every hour.
+      CRAWL_ACTIVE_CADENCE_MINUTES: ${CRAWL_ACTIVE_CADENCE_MINUTES:-60}
       SERVICE_HEARTBEAT_FILE: /tmp/heartbeat
     # SIGTERM finishes the cycle in hand: up to CRAWL_WORKER_BATCH_SIZE pages
     # at CRAWL_REQUEST_DELAY_SECONDS each, plus their fetches.
@@ -222,7 +227,40 @@ services:
     restart: "no"
     environment:
       <<: *marketplace-env
+      # The smoke judges a window minutes old, so it shortens the settle delay.
+      MARKETPLACE_QUALITY_RECONCILIATION_SETTLE_SECONDS: ${MARKETPLACE_QUALITY_RECONCILIATION_SETTLE_SECONDS:-900}
     depends_on: *core-ready
+
+  # ── OPERATIONS ─────────────────────────────────────────────
+  # The tool container behind scripts/mp.ps1: `run --rm ops python -m ops ...`.
+  ops:
+    <<: *marketplace-python
+    profiles: ["ops"]
+    command: ["python", "-m", "ops", "--help"]
+    restart: "no"
+    environment:
+      <<: *marketplace-env
+      MARKETPLACE_QUALITY_RECONCILIATION_SETTLE_SECONDS: ${MARKETPLACE_QUALITY_RECONCILIATION_SETTLE_SECONDS:-900}
+      CRAWL_ACTIVE_CADENCE_MINUTES: ${CRAWL_ACTIVE_CADENCE_MINUTES:-60}
+    volumes:
+      - ./:/app:ro
+      # validate --json writes its report here, the one writable path.
+      - ./data/ops:/reports
+    depends_on: *core-ready
+
+  # Offline stand-in for the Tiki listing API (plan section 8). The smoke and
+  # the drills set TIKI_LISTING_URL to http://stub-source:8000/...
+  stub-source:
+    <<: *marketplace-python
+    profiles: ["smoke"]
+    container_name: stub-source
+    command: ["python", "-m", "ops.stub_source", "--port", "8000"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/robots.txt', timeout=5)"]
+      interval: 10s
+      timeout: 6s
+      retries: 3
+      start_period: 10s
 
   # ── LEGACY KAGGLE DEMO (Spark 3.5.1) ───────────────────────
   spark:

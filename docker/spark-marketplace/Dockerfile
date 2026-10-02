@@ -31,7 +31,7 @@ RUN set -eux; cd /opt/spark/jars; \
 
 COPY requirements-marketplace.txt /tmp/requirements-marketplace.txt
 RUN pip install --no-cache-dir -r /tmp/requirements-marketplace.txt \
-      pandas==2.3.3 pyarrow==24.0.0 numpy==2.2.6 \
+      pandas==2.3.3 numpy==2.2.6 \
  && rm /tmp/requirements-marketplace.txt
 
 # The jars are baked in: an empty SPARK_KAFKA_PACKAGE stops the speed service
