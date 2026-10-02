@@ -711,6 +711,28 @@ def test_a_promotion_conflict_is_recorded_as_not_promoted(monkeypatch):
     assert result.manifest_uri is not None
 
 
+# The Spark run takes minutes and the lock lives on an idle connection that
+# can drop. A pointer that moved meanwhile must stop the run before the cache
+# is published, or cache and pointer would serve different runs while the
+# audit row reads SUCCEEDED and the scheduler never looks at the window again.
+def test_a_pointer_that_moved_during_the_run_stops_it_before_publication(monkeypatch):
+    from types import SimpleNamespace
+
+    from batch_layer.marketplace_manifest import PROMOTION_CONFLICT
+    parts = wire_orchestration(monkeypatch)
+    reads = iter([None, SimpleNamespace(run_id="run-9", previous_run_id=None)])
+    monkeypatch.setattr(marketplace_manifest, "read_current_manifest", lambda **k: next(reads))
+
+    result = run_marketplace_warehouse(batch_context(), writer=noop_writer, reader=empty_reader)
+
+    assert "publisher.publish" not in parts["log"]
+    assert "manifest.promote" not in parts["log"]
+    assert parts["audit"].held["reason"] == PROMOTION_CONFLICT
+    assert result.status == "GOLD_WRITTEN"
+    assert result.manifest_promoted is False
+    assert result.promotion_reason == PROMOTION_CONFLICT
+
+
 # ----------------------------------------------------------------------------
 # A scratch Gold root. Manifests and the pointer live at one fixed place in the
 # active storage profile, whatever --gold-root-uri says, so a replay into a
