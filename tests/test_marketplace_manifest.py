@@ -13,6 +13,7 @@ from batch_layer.marketplace_manifest import (
     CURRENT_POINTER_PATH,
     GOLD_ZONE,
     PROMOTED,
+    PROMOTION_CONFLICT,
     QUALITY_FAILED,
     build_gold_manifest,
     manifest_chain,
@@ -152,10 +153,10 @@ def test_an_unknown_schema_version_is_refused():
 def test_a_refused_run_writes_its_manifest_and_leaves_the_pointer_alone():
     store = FakeStore()
     good = manifest("run-1")
-    promote_manifest(good, writer=store.write, reader=store.read)
+    promote_manifest(good, writer=store.write, reader=store.read, expected_current_run_id=None)
     pointer_before = store.objects[(GOLD_ZONE, CURRENT_POINTER_PATH)]
 
-    result = promote_manifest(manifest("run-2", passed=False), writer=store.write, reader=store.read)
+    result = promote_manifest(manifest("run-2", passed=False), writer=store.write, reader=store.read, expected_current_run_id="run-1")
 
     assert result.promoted is False
     assert result.reason == QUALITY_FAILED
@@ -168,7 +169,7 @@ def test_a_passing_run_writes_a_pointer_identical_to_its_run_manifest():
     store = FakeStore()
     document = manifest("run-1")
 
-    result = promote_manifest(document, writer=store.write, reader=store.read)
+    result = promote_manifest(document, writer=store.write, reader=store.read, expected_current_run_id=None)
 
     assert result.promoted is True
     assert result.reason == PROMOTED
@@ -180,11 +181,11 @@ def test_a_passing_run_writes_a_pointer_identical_to_its_run_manifest():
 def test_the_manifest_chains_back_to_the_pointer_it_replaced():
     store = FakeStore()
     first = manifest("run-1")
-    promote_manifest(first, writer=store.write, reader=store.read)
+    promote_manifest(first, writer=store.write, reader=store.read, expected_current_run_id=None)
 
     previous = read_current_manifest(reader=store.read).run_id
     second = manifest("run-2", as_of=AS_OF + timedelta(days=1), previous=previous)
-    promote_manifest(second, writer=store.write, reader=store.read)
+    promote_manifest(second, writer=store.write, reader=store.read, expected_current_run_id="run-1")
 
     assert second.previous_run_id == "run-1"
     assert read_current_manifest(reader=store.read).previous_run_id == "run-1"
@@ -195,10 +196,10 @@ def test_the_manifest_chains_back_to_the_pointer_it_replaced():
 def test_promoting_the_run_that_is_already_current_writes_nothing():
     store = FakeStore()
     document = manifest("run-1")
-    promote_manifest(document, writer=store.write, reader=store.read)
+    promote_manifest(document, writer=store.write, reader=store.read, expected_current_run_id=None)
     written = len(store.writes)
 
-    result = promote_manifest(document, writer=store.write, reader=store.read)
+    result = promote_manifest(document, writer=store.write, reader=store.read, expected_current_run_id="run-1")
 
     assert result.reason == ALREADY_CURRENT
     assert result.promoted is False
@@ -210,15 +211,15 @@ def test_promoting_the_run_that_is_already_current_writes_nothing():
 # 39
 def test_an_older_as_of_is_refused_unless_backfill_is_allowed():
     store = FakeStore()
-    promote_manifest(manifest("run-2", as_of=AS_OF + timedelta(days=2)), writer=store.write, reader=store.read)
+    promote_manifest(manifest("run-2", as_of=AS_OF + timedelta(days=2)), writer=store.write, reader=store.read, expected_current_run_id=None)
     older = manifest("run-1", as_of=AS_OF)
 
-    refused = promote_manifest(older, writer=store.write, reader=store.read)
+    refused = promote_manifest(older, writer=store.write, reader=store.read, expected_current_run_id="run-2")
     assert refused.promoted is False
     assert refused.reason == BACKFILL_REFUSED
     assert read_current_manifest(reader=store.read).run_id == "run-2"
 
-    allowed = promote_manifest(older, writer=store.write, reader=store.read, allow_backfill=True)
+    allowed = promote_manifest(older, writer=store.write, reader=store.read, allow_backfill=True, expected_current_run_id="run-2")
     assert allowed.promoted is True
     assert read_current_manifest(reader=store.read).run_id == "run-1"
 
@@ -235,7 +236,7 @@ def test_the_refusal_check_agrees_with_promotion_and_writes_nothing(candidate, a
     # The orchestrator asks this before publishing the cache, so it must give
     # the answer promote_manifest gives afterwards.
     store = FakeStore()
-    promote_manifest(manifest("run-2", as_of=AS_OF + timedelta(days=2)), writer=store.write, reader=store.read)
+    promote_manifest(manifest("run-2", as_of=AS_OF + timedelta(days=2)), writer=store.write, reader=store.read, expected_current_run_id=None)
     current = read_current_manifest(reader=store.read)
     document = candidate()
     writes_before = len(store.writes)
@@ -243,8 +244,30 @@ def test_the_refusal_check_agrees_with_promotion_and_writes_nothing(candidate, a
     assert promotion_refusal(document, current, allow_backfill=allow_backfill) == expected
     assert len(store.writes) == writes_before
 
-    result = promote_manifest(document, writer=store.write, reader=store.read, allow_backfill=allow_backfill)
+    result = promote_manifest(document, writer=store.write, reader=store.read, allow_backfill=allow_backfill, expected_current_run_id="run-2")
     assert result.reason == (expected or PROMOTED)
+
+
+# Phase 8 test 19: the pointer is compared and swapped, never blindly replaced.
+@pytest.mark.parametrize("expected", ["run-1", None])
+def test_a_pointer_that_moved_is_a_conflict_and_nothing_is_written(expected):
+    store = FakeStore()
+    if expected is not None:
+        promote_manifest(manifest("run-1"), writer=store.write, reader=store.read, expected_current_run_id=None)
+    # Another run promotes after this one read the pointer.
+    promote_manifest(manifest("run-2", as_of=AS_OF + timedelta(days=1)), writer=store.write, reader=store.read,
+                     expected_current_run_id=expected)
+    writes_before = list(store.writes)
+    pointer_before = store.objects[(GOLD_ZONE, CURRENT_POINTER_PATH)]
+
+    result = promote_manifest(manifest("run-3", as_of=AS_OF + timedelta(days=2)), writer=store.write, reader=store.read,
+                              expected_current_run_id=expected)
+
+    assert result.promoted is False
+    assert result.reason == PROMOTION_CONFLICT
+    assert result.previous_run_id == "run-2"
+    assert store.writes == writes_before
+    assert store.objects[(GOLD_ZONE, CURRENT_POINTER_PATH)] == pointer_before
 
 
 def test_with_no_current_pointer_a_passing_manifest_is_never_refused():
@@ -276,9 +299,9 @@ def test_a_transport_error_does_not_become_an_implicit_first_promotion():
     store = FakeStore()
 
     with pytest.raises(ConnectionError):
-        promote_manifest(manifest(), writer=store.write, reader=broken_reader)
-    # The run manifest is written before the pointer is consulted; the pointer
-    # itself must not have been touched.
+        promote_manifest(manifest(), writer=store.write, reader=broken_reader, expected_current_run_id=None)
+    # The pointer is consulted before anything is written, and must not have
+    # been touched.
     assert (GOLD_ZONE, CURRENT_POINTER_PATH) not in store.objects
 
 

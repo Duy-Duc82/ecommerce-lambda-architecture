@@ -372,9 +372,10 @@ def wire_orchestration(monkeypatch, *, passed=True, publish_fails=False, lock_re
         log.append("manifest.write_run")
         return MANIFEST_URI
 
-    def fake_promote(manifest, *, writer, reader, allow_backfill=False):
+    def fake_promote(manifest, *, writer, reader, allow_backfill=False, expected_current_run_id):
         log.append("manifest.promote")
         parts["allow_backfill"] = allow_backfill
+        parts["expected_current_run_id"] = expected_current_run_id
         return PromotionResult(True, PROMOTED, MANIFEST_URI, None)
 
     monkeypatch.setattr(marketplace_manifest, "write_run_manifest", fake_write_run_manifest)
@@ -551,7 +552,7 @@ def serving_a_newer_run(monkeypatch):
         {name: GoldWriteResult(name, "file:///gold/" + name, 1) for name in DATASETS},
         verdict, newer, previous_run_id=None,
     )
-    marketplace_manifest.promote_manifest(serving, writer=store.write, reader=store.read)
+    marketplace_manifest.promote_manifest(serving, writer=store.write, reader=store.read, expected_current_run_id=None)
     return store
 
 
@@ -628,7 +629,7 @@ def serving_this_run(monkeypatch, *, previous_run_id):
         {name: GoldWriteResult(name, "file:///gold/" + name, 1) for name in DATASETS},
         decision(), batch_context(), previous_run_id=previous_run_id,
     )
-    marketplace_manifest.promote_manifest(served, writer=store.write, reader=store.read)
+    marketplace_manifest.promote_manifest(served, writer=store.write, reader=store.read, expected_current_run_id=None)
     return store
 
 
@@ -652,7 +653,7 @@ def test_rerunning_the_current_run_keeps_its_real_predecessor(monkeypatch):
 def test_a_pointer_write_failure_never_records_a_promotion(monkeypatch):
     parts = wire_orchestration(monkeypatch)
 
-    def broken_promote(manifest, *, writer, reader, allow_backfill=False):
+    def broken_promote(manifest, *, writer, reader, allow_backfill=False, expected_current_run_id):
         parts["log"].append("manifest.promote")
         raise ConnectionError("object store unreachable")
 
@@ -672,6 +673,42 @@ def test_a_pointer_that_already_names_the_run_counts_as_promoted(monkeypatch):
     run_marketplace_warehouse(batch_context(), resume=True, writer=store.write, reader=store.read)
 
     assert parts["audit"].promotion == {"run_id": "run-1", "promoted": True}
+
+
+# Phase 8 test 19, the orchestrator's side: it compares against the pointer it
+# read before publishing, and a conflict is not recorded as a promotion.
+def test_the_run_promotes_against_the_pointer_it_read(monkeypatch):
+    from types import SimpleNamespace
+    parts = wire_orchestration(monkeypatch)
+    monkeypatch.setattr(marketplace_manifest, "read_current_manifest",
+                        lambda **k: SimpleNamespace(run_id="run-0", previous_run_id=None))
+
+    run_marketplace_warehouse(batch_context(), writer=noop_writer, reader=empty_reader)
+
+    assert parts["expected_current_run_id"] == "run-0"
+
+
+def test_with_no_pointer_the_run_expects_none(monkeypatch):
+    parts = wire_orchestration(monkeypatch)
+
+    run_marketplace_warehouse(batch_context(), writer=noop_writer, reader=empty_reader)
+
+    assert parts["expected_current_run_id"] is None
+
+
+def test_a_promotion_conflict_is_recorded_as_not_promoted(monkeypatch):
+    parts = wire_orchestration(monkeypatch)
+    from batch_layer.marketplace_manifest import PROMOTION_CONFLICT, PromotionResult
+    monkeypatch.setattr(marketplace_manifest, "promote_manifest",
+                        lambda manifest, **k: PromotionResult(False, PROMOTION_CONFLICT, None, "run-9"))
+
+    result = run_marketplace_warehouse(batch_context(), writer=noop_writer, reader=empty_reader)
+
+    assert parts["audit"].promotion == {"run_id": "run-1", "promoted": False}
+    assert result.manifest_promoted is False
+    assert result.promotion_reason == PROMOTION_CONFLICT
+    # The run manifest the orchestrator wrote still names this run's evidence.
+    assert result.manifest_uri is not None
 
 
 # ----------------------------------------------------------------------------
