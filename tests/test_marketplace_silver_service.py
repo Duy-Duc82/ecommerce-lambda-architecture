@@ -253,3 +253,15 @@ def test_the_sink_beats_once_per_poll_even_while_retrying():
 
     assert calls == [5, 5]
     assert len(beats) == len(consumer.calls("poll")) == 2
+
+
+# A backlog batch can hold up to max_poll_records (500 by default), each a
+# MinIO write: one heartbeat per poll would let a working sink go stale.
+def test_the_sink_beats_once_per_record_within_a_large_batch():
+    consumer = ScriptedConsumer([{_tp(0): [_msg(0, offset) for offset in range(5)]}])
+    beats = []
+
+    _run(consumer, lambda record: None, max_records=5, beat=lambda: beats.append(1))
+
+    assert len(consumer.calls("poll")) == 1
+    assert len(beats) >= 5
