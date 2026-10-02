@@ -13,3 +13,6 @@ docker-compose.override.yml
 
 # Local JDBC driver used for container runs; not part of the project.
 .localjars/
+
+# ops validate/smoke reports (scripts/mp.ps1)
+data/ops/
