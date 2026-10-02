@@ -16,7 +16,7 @@ from pyspark.sql.types import LongType, StringType, StructField, StructType, Tim
 
 from config.marketplace_wire import marketplace_observation_from_wire
 from config.settings import (
-    CHECKPOINTS_DIR, KAFKA_BOOTSTRAP_SERVERS, MARKETPLACE_CHANGE_RULE_VERSION,
+    CHECKPOINTS_DIR, KAFKA_BOOTSTRAP_SERVERS, MARKETPLACE_CHANGE_RULE_VERSION, MARKETPLACE_SPEED_CHECKPOINT_ROOT,
     MARKETPLACE_LARGE_DROP_ABSOLUTE, MARKETPLACE_LARGE_DROP_RELATIVE,
     MARKETPLACE_STALE_AFTER_SECONDS, MARKETPLACE_STREAM_CHECKPOINT_VERSION,
     MARKETPLACE_STREAM_TRIGGER, MARKETPLACE_STREAM_WATERMARK,
@@ -53,7 +53,12 @@ def speed_output_schema() -> StructType:
 
 
 def checkpoint_path() -> str:
-    return str((CHECKPOINTS_DIR / "marketplace_speed" / MARKETPLACE_STREAM_CHECKPOINT_VERSION).resolve())
+    # The version is always the last component, so bumping it starts a fresh
+    # checkpoint wherever the root was moved to.
+    from pathlib import Path
+
+    root = Path(MARKETPLACE_SPEED_CHECKPOINT_ROOT) if MARKETPLACE_SPEED_CHECKPOINT_ROOT else CHECKPOINTS_DIR / "marketplace_speed"
+    return str((root / MARKETPLACE_STREAM_CHECKPOINT_VERSION).resolve())
 
 
 def read_marketplace_observations(spark: SparkSession) -> DataFrame:
@@ -80,8 +85,10 @@ def decode_observation_stream(raw: DataFrame) -> tuple[DataFrame, DataFrame]:
         (F.col("decoded.partition_key") == F.concat(F.lower("decoded.marketplace"), F.lit(":"), F.col("decoded.payload.offer.platform_listing_id"))) &
         (F.col("decoded.payload.observation.current_price").cast("decimal(38,6)") >= 0)
     )
+    # ignoreNullFields=false: to_json drops null fields by default, and the
+    # strict wire contract that re-reads event_json requires every key.
     valid = (parsed.filter(valid_condition)
-             .select("source_topic", "source_partition", "source_offset", "kafka_timestamp", F.to_json("decoded").alias("event_json"), F.col("decoded.marketplace").alias("marketplace"), F.col("decoded.payload.offer.offer_id").alias("offer_id"), F.col("decoded.payload.observation.observation_id").alias("observation_id"), F.to_timestamp("decoded.payload.observation.observed_at").alias("event_time")))
+             .select("source_topic", "source_partition", "source_offset", "kafka_timestamp", F.to_json("decoded", {"ignoreNullFields": "false"}).alias("event_json"), F.col("decoded.marketplace").alias("marketplace"), F.col("decoded.payload.offer.offer_id").alias("offer_id"), F.col("decoded.payload.observation.observation_id").alias("observation_id"), F.to_timestamp("decoded.payload.observation.observed_at").alias("event_time")))
     invalid = (parsed.filter(~valid_condition)
                .select("source_topic", "source_partition", "source_offset", F.lit("INVALID").alias("output_kind"), F.lit("OBSERVATION_CONTRACT").alias("error_type"), F.lit("invalid marketplace observation envelope, key, or lineage").alias("error_message")))
     return valid, invalid
@@ -105,6 +112,50 @@ def _process_group(rows: Iterable[dict], previous=None, config: ChangeRuleConfig
     return result
 
 
+def make_state_function(config: ChangeRuleConfig):
+    """The per-offer function ``applyInPandasWithState`` calls.
+
+    Spark passes an *iterator* of pandas frames for one key and expects an
+    iterator of frames back. All of a key's rows in a trigger are read before
+    any is processed, because ``_process_group`` orders them by event time.
+
+    With ``ProcessingTimeTimeout`` a key's timeout must be set on every call,
+    or Spark drops it. It is re-armed whenever the key holds a state, from
+    the latest observed instant, so an offer whose last call brought only a
+    duplicate or a late row can still go stale.
+    """
+    import pandas as pd
+    from config.marketplace_wire import canonical_json
+    from speed_layer.marketplace_change_rules import offer_state_from_json
+
+    def arm_timeout(state, observed_at) -> None:
+        due_ms = int((observed_at.timestamp() + config.stale_after_seconds) * 1000)
+        state.setTimeoutDuration(max(1, due_ms - state.getCurrentProcessingTimeMs()))
+
+    def state_fn(key, frames, state):
+        prior = offer_state_from_json(state.get[0]) if state.exists else None
+        if state.hasTimedOut and prior is not None:
+            stale_state, stale_change = detect_stale_change(prior, config)
+            state.update((offer_state_to_json(stale_state), stale_state.observed_at, stale_state.observation_id))
+            if stale_change is not None:
+                yield pd.DataFrame([SpeedOutput("CHANGE", stale_state.marketplace, stale_state.offer_id, stale_state.observation_id,
+                                                stale_change.event_id, stale_change.detected_at,
+                                                change_json=canonical_json(stale_change)).__dict__])
+            return
+        rows = [row for frame in frames for row in frame.to_dict("records")]
+        outputs = _process_group(rows, prior, config)
+        latest = next((o for o in reversed(outputs) if o.output_kind == "STATE"), None)
+        current = offer_state_from_json(latest.state_json) if latest else prior
+        if latest:
+            state.update((latest.state_json, current.observed_at, current.observation_id))
+        if current is not None:
+            arm_timeout(state, current.observed_at)
+        if outputs:
+            yield pd.DataFrame([o.__dict__ for o in outputs])
+
+    return state_fn
+
+
 def build_change_stream(valid: DataFrame, config: ChangeRuleConfig) -> DataFrame:
     """Build the deterministic grouped transform.
 
@@ -116,24 +167,7 @@ def build_change_stream(valid: DataFrame, config: ChangeRuleConfig) -> DataFrame
     if valid.isStreaming and hasattr(valid.groupBy("offer_id"), "applyInPandasWithState"):
         from pyspark.sql.types import StructType
         state_schema = StructType([StructField("state_json", StringType(), False), StructField("observed_at", TimestampType(), False), StructField("observation_id", StringType(), False)])
-        def state_fn(key, pdf, state):
-            prior = None
-            if state.exists: prior = __import__("speed_layer.marketplace_change_rules", fromlist=["offer_state_from_json"]).offer_state_from_json(state.get[0])
-            if state.hasTimedOut and prior is not None:
-                stale_state, stale_change = detect_stale_change(prior, config)
-                state.update((offer_state_to_json(stale_state), stale_state.observed_at, stale_state.observation_id))
-                if stale_change is None:
-                    return __import__("pandas").DataFrame([], columns=SPEED_OUTPUT_SCHEMA.names)
-                from config.marketplace_wire import canonical_json
-                return __import__("pandas").DataFrame([SpeedOutput("CHANGE", stale_state.marketplace, stale_state.offer_id, stale_state.observation_id, stale_change.event_id, stale_change.detected_at, change_json=canonical_json(stale_change)).__dict__])
-            outputs = _process_group(pdf.to_dict("records"), prior, config)
-            if outputs:
-                latest = next((o for o in reversed(outputs) if o.output_kind == "STATE"), None)
-                if latest:
-                    st = __import__("speed_layer.marketplace_change_rules", fromlist=["offer_state_from_json"]).offer_state_from_json(latest.state_json)
-                    state.update((latest.state_json, st.observed_at, st.observation_id))
-                    state.setTimeoutDuration(max(1, int((st.observed_at.timestamp() + config.stale_after_seconds) * 1000 - state.getCurrentProcessingTimeMs())))
-            return __import__("pandas").DataFrame([o.__dict__ for o in outputs])
+        state_fn = make_state_function(config)
         return valid.groupBy("offer_id").applyInPandasWithState(state_fn, outputStructType=SPEED_OUTPUT_SCHEMA, stateStructType=state_schema, outputMode="Append", timeoutConf="ProcessingTimeTimeout")
     # A finite DataFrame path deliberately avoids Arrow/pandas so unit tests
     # remain runnable on a plain local Spark installation. The streaming path
@@ -147,16 +181,32 @@ def build_change_stream(valid: DataFrame, config: ChangeRuleConfig) -> DataFrame
     return valid.sparkSession.createDataFrame(outputs, schema=SPEED_OUTPUT_SCHEMA)
 
 
-def write_marketplace_batch(batch_df: DataFrame, batch_id: int) -> None:
-    from speed_layer.marketplace_sinks import MarketplaceSpeedAudit, MarketplaceSpeedSinks
-    from config.settings import ES_HOST, POSTGRES_DB, POSTGRES_HOST, POSTGRES_PASSWORD, POSTGRES_PORT, POSTGRES_USER, REDIS_DB, REDIS_HOST, REDIS_PORT
+def _sink_clients():
+    from config.settings import ES_HOST, REDIS_DB, REDIS_HOST, REDIS_PORT
     from data_ingestion.marketplace_change_producer import create_change_producer
-    import psycopg2
-    from redis import Redis
     from elasticsearch import Elasticsearch
-    producer = create_change_producer()
-    es = Elasticsearch(ES_HOST)
-    redis = Redis(host=REDIS_HOST, port=REDIS_PORT, db=REDIS_DB)
-    audit = MarketplaceSpeedAudit(lambda: psycopg2.connect(host=POSTGRES_HOST, port=POSTGRES_PORT, user=POSTGRES_USER, password=POSTGRES_PASSWORD, dbname=POSTGRES_DB))
-    outputs = [SpeedOutput(**row.asDict()) for row in batch_df.collect()]
-    MarketplaceSpeedSinks(producer=producer, es=es, redis=redis, audit=audit).write_batch(outputs, batch_id)
+    from redis import Redis
+    return create_change_producer(), Elasticsearch(ES_HOST), Redis(host=REDIS_HOST, port=REDIS_PORT, db=REDIS_DB)
+
+
+def write_marketplace_batch(batch_df: DataFrame, batch_id: int) -> None:
+    from common import postgres
+    from speed_layer.marketplace_sinks import MarketplaceSpeedAudit, MarketplaceSpeedSinks
+    # Spark sets the query id, which lives in the checkpoint, as a local
+    # property of every micro-batch. Batch IDs are unique only within it.
+    query_id = batch_df.sparkSession.sparkContext.getLocalProperty("sql.streaming.queryId")
+    if not query_id: raise ValueError("micro-batch carries no streaming query id; refusing to audit it as another run's batch")
+    producer, es, redis = _sink_clients()
+    try:
+        # A closing factory: the query runs for days, one micro-batch every
+        # trigger, and a bare psycopg2 connection would leak on every audit call.
+        audit = MarketplaceSpeedAudit(postgres.postgres_connection_factory())
+        outputs = [SpeedOutput(**row.asDict()) for row in batch_df.collect()]
+        MarketplaceSpeedSinks(producer=producer, es=es, redis=redis, audit=audit).write_batch(outputs, batch_id, query_id=query_id)
+    finally:
+        # The same holds for the three sink clients: a producer left open per
+        # batch keeps its network thread and sockets alive. Closing an already
+        # closed client (the sink closes them on failure) is a no-op.
+        for client in (producer, es, redis):
+            try: client.close()
+            except Exception: pass

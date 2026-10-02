@@ -30,6 +30,9 @@ from speed_layer.marketplace_sinks import (
 from tests.test_marketplace_change_rules import CONFIG, _event, _later
 from tests.test_marketplace_producer import FakeProducer
 
+# The id Spark keeps in a query's checkpoint; batch IDs are unique only within it.
+QUERY_ID = "36f9e1c9-87cc-4f53-97a9-e9f1e14397ec"
+
 
 class FakeElasticsearch:
     def __init__(self, item_status=201, errors=False):
@@ -105,14 +108,15 @@ class RecordingAudit:
         self.begin = begin
         self.calls = []
 
-    def begin_batch(self, *, query_name, batch_id, started_at):
+    def begin_batch(self, *, query_name, query_id, batch_id, started_at):
         self.calls.append(("begin", query_name, batch_id))
+        self.query_ids = getattr(self, "query_ids", []) + [query_id]
         return self.begin
 
-    def mark_succeeded(self, *, query_name, batch_id, completed_at, counts):
+    def mark_succeeded(self, *, query_name, query_id, batch_id, completed_at, counts):
         self.calls.append(("succeeded", query_name, batch_id, counts))
 
-    def mark_failed(self, *, query_name, batch_id, completed_at, error):
+    def mark_failed(self, *, query_name, query_id, batch_id, completed_at, error):
         self.calls.append(("failed", query_name, batch_id, str(error)))
 
     def kinds(self):
@@ -204,7 +208,7 @@ def test_kafka_key_and_topic_are_exact():
     outputs, changes, _ = _batch()
     sinks, parts = _sinks()
 
-    sinks.write_batch(outputs, batch_id=1)
+    sinks.write_batch(outputs, batch_id=1, query_id=QUERY_ID)
 
     sent = parts["producer"].sent
     assert [row["topic"] for row in sent] == [MARKETPLACE_CHANGES.name] * len(changes)
@@ -218,7 +222,7 @@ def test_change_publish_failure_propagates_and_fails_the_audit():
     sinks, parts = _sinks(producer=FakeProducer(error=RuntimeError("broker down")))
 
     with pytest.raises(RuntimeError, match="broker down"):
-        sinks.write_batch(outputs, batch_id=1)
+        sinks.write_batch(outputs, batch_id=1, query_id=QUERY_ID)
 
     assert parts["audit"].kinds() == ["begin", "failed"]
 
@@ -228,7 +232,7 @@ def test_es_ids_are_event_id_and_offer_id_never_random():
     outputs, changes, state = _batch()
     sinks, parts = _sinks()
 
-    sinks.write_batch(outputs, batch_id=1)
+    sinks.write_batch(outputs, batch_id=1, query_id=QUERY_ID)
 
     operations = parts["es"].calls[0]
     headers = [op["index"] for op in operations if "index" in op and len(op) == 1]
@@ -243,7 +247,7 @@ def test_redis_uses_hashes_and_sorted_sets_with_deterministic_members():
     outputs, changes, state = _batch()
     sinks, parts = _sinks()
 
-    sinks.write_batch(outputs, batch_id=1)
+    sinks.write_batch(outputs, batch_id=1, query_id=QUERY_ID)
 
     commands = parts["redis"].commands
     verbs = {command[0] for command in commands}
@@ -268,8 +272,8 @@ def test_replaying_identical_outputs_produces_identical_sink_commands():
     first_sinks, first = _sinks()
     second_sinks, second = _sinks()
 
-    first_sinks.write_batch(outputs, batch_id=1)
-    second_sinks.write_batch(outputs, batch_id=1)
+    first_sinks.write_batch(outputs, batch_id=1, query_id=QUERY_ID)
+    second_sinks.write_batch(outputs, batch_id=1, query_id=QUERY_ID)
 
     assert first["redis"].commands == second["redis"].commands
     assert first["es"].calls == second["es"].calls
@@ -284,7 +288,7 @@ def test_es_item_failure_prevents_success_audit():
     sinks, parts = _sinks(es=FakeElasticsearch(item_status=409))
 
     with pytest.raises(RuntimeError, match="Elasticsearch item failure"):
-        sinks.write_batch(outputs, batch_id=1)
+        sinks.write_batch(outputs, batch_id=1, query_id=QUERY_ID)
 
     assert parts["audit"].kinds() == ["begin", "failed"]
     assert parts["redis"].executed == 0
@@ -295,7 +299,7 @@ def test_es_errors_flag_prevents_success_audit():
     sinks, parts = _sinks(es=FakeElasticsearch(errors=True))
 
     with pytest.raises(RuntimeError, match="Elasticsearch item failure"):
-        sinks.write_batch(outputs, batch_id=1)
+        sinks.write_batch(outputs, batch_id=1, query_id=QUERY_ID)
 
     assert parts["audit"].kinds() == ["begin", "failed"]
 
@@ -306,7 +310,7 @@ def test_redis_failure_prevents_success_audit():
     sinks, parts = _sinks(redis=FakeRedis(fail_on_execute=True))
 
     with pytest.raises(RuntimeError, match="redis pipeline failed"):
-        sinks.write_batch(outputs, batch_id=1)
+        sinks.write_batch(outputs, batch_id=1, query_id=QUERY_ID)
 
     assert parts["audit"].kinds() == ["begin", "failed"]
 
@@ -316,7 +320,7 @@ def test_a_failed_batch_closes_every_client():
     sinks, parts = _sinks(redis=FakeRedis(fail_on_execute=True))
 
     with pytest.raises(RuntimeError):
-        sinks.write_batch(outputs, batch_id=1)
+        sinks.write_batch(outputs, batch_id=1, query_id=QUERY_ID)
 
     assert parts["es"].closed == 1
     assert parts["redis"].closed == 1
@@ -327,7 +331,7 @@ def test_succeeded_batch_audit_causes_a_safe_skip():
     outputs, _, _ = _batch()
     sinks, parts = _sinks(audit=RecordingAudit(begin="SKIP"))
 
-    counts = sinks.write_batch(outputs, batch_id=1)
+    counts = sinks.write_batch(outputs, batch_id=1, query_id=QUERY_ID)
 
     assert counts == BatchCounts()
     assert parts["audit"].kinds() == ["begin"]
@@ -341,7 +345,7 @@ def test_audit_begin_skips_a_succeeded_batch():
     audit = MarketplaceSpeedAudit(factory)
 
     decision = audit.begin_batch(
-        query_name=MARKETPLACE_SPEED_QUERY_NAME, batch_id=7, started_at=None
+        query_name=MARKETPLACE_SPEED_QUERY_NAME, query_id=QUERY_ID, batch_id=7, started_at=None
     )
 
     assert decision == "SKIP"
@@ -355,12 +359,12 @@ def test_failed_or_running_audit_causes_an_idempotent_retry(row):
     audit = MarketplaceSpeedAudit(factory)
 
     decision = audit.begin_batch(
-        query_name=MARKETPLACE_SPEED_QUERY_NAME, batch_id=7, started_at=None
+        query_name=MARKETPLACE_SPEED_QUERY_NAME, query_id=QUERY_ID, batch_id=7, started_at=None
     )
 
     insert_sql = factory.connection.cur.executed[1][0]
     assert decision == "RUN"
-    assert "ON CONFLICT (query_name,batch_id) DO UPDATE" in insert_sql
+    assert "ON CONFLICT (query_name,query_id,batch_id) DO UPDATE" in insert_sql
     assert "status='RUNNING'" in insert_sql
 
 
@@ -372,7 +376,7 @@ def test_audit_errors_are_truncated_and_carry_no_event_body():
     audit = MarketplaceSpeedAudit(factory)
 
     audit.mark_failed(
-        query_name=MARKETPLACE_SPEED_QUERY_NAME,
+        query_name=MARKETPLACE_SPEED_QUERY_NAME, query_id=QUERY_ID,
         batch_id=7,
         completed_at=None,
         error=RuntimeError(body + "x" * 5000),
@@ -390,7 +394,7 @@ def test_audit_success_writes_the_batch_counts():
     counts = BatchCounts(input_rows=4, change_rows=2, es_rows=3, redis_rows=3)
 
     audit.mark_succeeded(
-        query_name=MARKETPLACE_SPEED_QUERY_NAME,
+        query_name=MARKETPLACE_SPEED_QUERY_NAME, query_id=QUERY_ID,
         batch_id=7,
         completed_at=None,
         counts=counts,
@@ -406,7 +410,7 @@ def test_successful_batch_counts_separate_inputs_from_derived_changes():
     outputs, changes, _ = _batch()
     sinks, parts = _sinks()
 
-    counts = sinks.write_batch(outputs, batch_id=1)
+    counts = sinks.write_batch(outputs, batch_id=1, query_id=QUERY_ID)
 
     assert counts.change_rows == len(changes)
     assert counts.kafka_rows == len(changes)
@@ -419,10 +423,133 @@ def test_successful_batch_counts_separate_inputs_from_derived_changes():
 
 
 def test_change_documents_reach_elasticsearch_as_canonical_wire():
+    # The projection may not drift from the Kafka event. The one exception,
+    # since Phase 8 WP2: an object-valued previous_value/current_value is
+    # stored as its canonical JSON string (see the tests below).
     outputs, changes, _ = _batch()
     sinks, parts = _sinks()
 
-    sinks.write_batch(outputs, batch_id=1)
+    sinks.write_batch(outputs, batch_id=1, query_id=QUERY_ID)
 
-    operations = parts["es"].calls[0]
-    assert operations[1] == json.loads(canonical_json(changes[0]))
+    documents = _change_documents(parts)
+    for change, doc in zip(changes, documents):
+        wire = json.loads(canonical_json(change))
+        expected = {key: canonical_json(value) if key in ("previous_value", "current_value") and isinstance(value, (dict, list)) else value
+                    for key, value in wire.items()}
+        assert doc == expected
+    # A scalar change is the wire, byte for byte.
+    assert documents[1] == json.loads(canonical_json(changes[1]))
+
+
+# ----------------------------------------------------------------------------
+# Found by the first real price change through the speed query (Phase 8 WP2,
+# 2026-10-02). A NEW_OFFER change carries the whole offer as current_value,
+# a PRICE_CHANGED carries a scalar. One Elasticsearch field cannot be both:
+# once the first NEW_OFFER mapped current_value as an object, every later
+# scalar change was refused and the query died. The fake above accepts any
+# document, so the conflict never showed. The Kafka contract keeps both
+# shapes; only the Elasticsearch projection changes.
+# ----------------------------------------------------------------------------
+def _change_documents(parts):
+    (operations,) = parts["es"].calls
+    pairs = list(zip(operations[::2], operations[1::2]))
+    return [doc for header, doc in pairs if header["index"]["_index"] == ES_INDEX_MARKETPLACE_CHANGES]
+
+
+def test_change_values_reach_elasticsearch_as_scalars_only():
+    outputs, changes, _ = _batch()
+    sinks, parts = _sinks()
+
+    sinks.write_batch(outputs, batch_id=1, query_id=QUERY_ID)
+
+    for doc in _change_documents(parts):
+        for field in ("previous_value", "current_value"):
+            assert not isinstance(doc[field], (dict, list)), (doc["change_type"], field)
+
+
+def test_an_object_value_is_kept_as_its_canonical_json():
+    outputs, changes, _ = _batch()
+    sinks, parts = _sinks()
+
+    sinks.write_batch(outputs, batch_id=1, query_id=QUERY_ID)
+
+    new_offer = next(doc for doc in _change_documents(parts) if doc["change_type"] == "NEW_OFFER")
+    original = json.loads(canonical_json(changes[0]))["current_value"]
+    assert isinstance(original, dict)
+    assert new_offer["current_value"] == canonical_json(original)
+    assert json.loads(new_offer["current_value"]) == original
+
+
+def test_an_elasticsearch_item_failure_names_its_reason():
+    class RefusingElasticsearch(FakeElasticsearch):
+        def bulk(self, operations=None):
+            self.calls.append(operations)
+            return {"errors": True, "items": [{"index": {"status": 400, "error": {
+                "type": "document_parsing_exception", "reason": "object mapping for [current_value]"}}}]}
+
+    outputs, _, _ = _batch()
+    sinks, parts = _sinks(es=RefusingElasticsearch())
+
+    with pytest.raises(RuntimeError, match="Elasticsearch item failure.*document_parsing_exception.*current_value"):
+        sinks.write_batch(outputs, batch_id=1, query_id=QUERY_ID)
+
+
+
+# ----------------------------------------------------------------------------
+# Found by replaying the speed query under a new checkpoint (Phase 8 WP2,
+# 2026-10-02). A new checkpoint numbers its batches from 0 again, but the
+# audit keyed on (query_name, batch_id) and skipped any SUCCEEDED pair. The
+# replay's batch 0 — all sixteen observations — was skipped, its offsets were
+# committed, and Elasticsearch, Redis and the change topic never saw it. The
+# streaming query id, kept in the checkpoint, is what makes a batch unique.
+# ----------------------------------------------------------------------------
+def test_the_audit_keys_a_batch_by_its_query_id_as_well_as_its_number():
+    factory = _connection_factory(row=None)
+    audit = MarketplaceSpeedAudit(factory)
+
+    audit.begin_batch(query_name=MARKETPLACE_SPEED_QUERY_NAME, query_id=QUERY_ID, batch_id=0, started_at=None)
+
+    select_sql, select_params = factory.connection.cur.executed[0]
+    assert "query_id=%s" in select_sql
+    assert select_params == (MARKETPLACE_SPEED_QUERY_NAME, QUERY_ID, 0)
+    insert_sql, insert_params = factory.connection.cur.executed[1]
+    assert insert_params[:3] == (MARKETPLACE_SPEED_QUERY_NAME, QUERY_ID, 0)
+
+
+def test_closing_a_batch_updates_only_that_query_s_row():
+    factory = _connection_factory(row=None)
+    audit = MarketplaceSpeedAudit(factory)
+
+    audit.mark_succeeded(query_name=MARKETPLACE_SPEED_QUERY_NAME, query_id=QUERY_ID, batch_id=0, completed_at=None, counts=BatchCounts())
+
+    sql, params = factory.connection.cur.executed[0]
+    assert "WHERE query_name=%s AND query_id=%s AND batch_id=%s" in sql
+    assert params[-3:] == (MARKETPLACE_SPEED_QUERY_NAME, QUERY_ID, 0)
+
+
+def test_the_sinks_hand_the_audit_the_query_id():
+    outputs, _, _ = _batch()
+    sinks, parts = _sinks()
+
+    sinks.write_batch(outputs, batch_id=0, query_id=QUERY_ID)
+
+    assert parts["audit"].query_ids == [QUERY_ID]
+
+
+@pytest.mark.parametrize("query_id", [None, "", "  "])
+def test_a_batch_without_a_query_id_is_refused_before_any_write(query_id):
+    outputs, _, _ = _batch()
+    sinks, parts = _sinks()
+
+    with pytest.raises(ValueError, match="query_id"):
+        sinks.write_batch(outputs, batch_id=0, query_id=query_id)
+    assert parts["audit"].calls == []
+
+
+def test_the_migration_puts_query_id_in_the_primary_key():
+    from pathlib import Path
+
+    sql = (Path(__file__).parent.parent / "scripts" / "init_postgres.sql").read_text(encoding="utf-8")
+    assert "ALTER TABLE audit.marketplace_speed_batch ADD COLUMN IF NOT EXISTS query_id" in sql
+    assert "ALTER TABLE audit.marketplace_speed_batch DROP CONSTRAINT IF EXISTS marketplace_speed_batch_pkey" in sql
+    assert "ADD CONSTRAINT marketplace_speed_batch_pkey PRIMARY KEY (query_name, query_id, batch_id)" in sql

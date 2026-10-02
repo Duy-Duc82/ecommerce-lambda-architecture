@@ -287,3 +287,124 @@ def test_a_key_that_disagrees_with_the_envelope_is_invalid(spark):
 
     assert valid.count() == 0
     assert invalid.count() == 1
+
+
+# ----------------------------------------------------------------------------
+# Found when Phase 8 assembled the query (2026-10-02). Spark's to_json drops
+# null fields by default, and the re-serialised event_json then fails the
+# strict wire contract, which requires every key. Tiki leaves brand and
+# seller_id null on many listings, so each such observation would crash its
+# micro-batch. The decode test above checks columns only; this one carries a
+# decoded row all the way through the change rules.
+# ----------------------------------------------------------------------------
+@requires_spark
+def test_a_decoded_observation_with_null_optional_fields_reaches_the_change_rules(spark):
+    event = _event()
+    wire = json.loads(canonical_json(event))
+    wire["payload"]["offer"]["brand"] = None
+    wire["payload"]["offer"]["seller_id"] = None
+    raw = spark.createDataFrame(
+        [("marketplace.observations.v1", 0, 3, event.partition_key, json.dumps(wire), None)],
+        "source_topic string, source_partition long, source_offset long, "
+        "source_key string, value string, kafka_timestamp timestamp",
+    )
+
+    valid, invalid = decode_observation_stream(raw)
+    (row,) = [r.asDict() for r in valid.collect()]
+
+    assert invalid.count() == 0
+    decoded = json.loads(row["event_json"])
+    assert decoded["payload"]["offer"]["brand"] is None
+    assert decoded["payload"]["offer"]["seller_id"] is None
+    outputs = _process_group([row], config=CONFIG)
+    assert _kinds(outputs)[0] == "STATE"
+
+
+# ----------------------------------------------------------------------------
+# Found by the first real run of the speed query (Phase 8 WP2, 2026-10-02).
+# applyInPandasWithState hands the function an *iterator* of pandas frames
+# and expects an iterator back. The function treated its argument as one
+# frame, so every micro-batch failed with
+# "'generator' object has no attribute 'to_dict'". Only the batch path had
+# ever been tested.
+# ----------------------------------------------------------------------------
+import pandas as pd
+
+from speed_layer.marketplace_change_rules import offer_state_to_json
+from speed_layer.marketplace_speed_layer import make_state_function
+
+
+class FakeGroupState:
+    """The slice of pyspark's GroupState the state function uses."""
+
+    def __init__(self, stored=None, *, timed_out=False, now_ms=0):
+        self.stored = stored
+        self.hasTimedOut = timed_out
+        self.now_ms = now_ms
+        self.timeouts = []
+
+    @property
+    def exists(self):
+        return self.stored is not None
+
+    @property
+    def get(self):
+        return self.stored
+
+    def update(self, value):
+        self.stored = value
+
+    def setTimeoutDuration(self, duration_ms):
+        self.timeouts.append(duration_ms)
+
+    def getCurrentProcessingTimeMs(self):
+        return self.now_ms
+
+
+def _frames(*groups):
+    return iter([pd.DataFrame(rows) for rows in groups])
+
+
+def _collect(result):
+    frames = list(result)
+    assert all(isinstance(frame, pd.DataFrame) for frame in frames)
+    return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
+
+
+def test_the_state_function_reads_every_frame_it_is_given_and_yields_frames():
+    first, second = _event(), _later(1, current_price=Decimal("150.00"))
+    state = FakeGroupState()
+
+    out = _collect(make_state_function(CONFIG)(("offer",), _frames([_row(first, 0)], [_row(second, 1)]), state))
+
+    # Both frames were read: two STATE rows plus the price change between them.
+    assert list(out["output_kind"]).count("STATE") == 2
+    assert "CHANGE" in set(out["output_kind"])
+    assert set(out.columns) <= set(SPEED_OUTPUT_SCHEMA.names)
+    assert state.exists
+
+
+def test_a_timed_out_key_yields_its_stale_change_as_a_frame():
+    prior = detect_observation_changes(None, _event(), CONFIG).next_state
+    stored = (offer_state_to_json(prior), prior.observed_at, prior.observation_id)
+    state = FakeGroupState(stored, timed_out=True)
+
+    out = _collect(make_state_function(CONFIG)(("offer",), iter([]), state))
+
+    assert list(out["output_kind"]) == ["CHANGE"]
+    assert json.loads(out["change_json"][0])["change_type"] == "OFFER_STALE"
+
+
+def test_a_call_with_only_a_duplicate_keeps_the_stale_timeout_armed():
+    # With ProcessingTimeTimeout a key's timeout must be set again on every
+    # call, or it is dropped. A call that applied nothing new used to leave it
+    # unset, so that offer could never go stale.
+    event = _event()
+    prior = detect_observation_changes(None, event, CONFIG).next_state
+    stored = (offer_state_to_json(prior), prior.observed_at, prior.observation_id)
+    state = FakeGroupState(stored, now_ms=int(prior.observed_at.timestamp() * 1000))
+
+    out = _collect(make_state_function(CONFIG)(("offer",), _frames([_row(event, 0)]), state))
+
+    assert list(out["output_kind"]) == ["DUPLICATE"]
+    assert state.timeouts == [CONFIG.stale_after_seconds * 1000]

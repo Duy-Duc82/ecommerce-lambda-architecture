@@ -53,39 +53,63 @@ def _epoch_micros(dt: datetime) -> int:
 class MarketplaceSpeedAudit:
     def __init__(self, connection_factory: Callable[[], Any]): self.connection_factory = connection_factory
 
-    def begin_batch(self, *, query_name: str, batch_id: int, started_at: datetime) -> str:
+    # A batch is (query_name, query_id, batch_id). Batch IDs restart at 0 under
+    # a new checkpoint, so without the query id Spark keeps in that checkpoint
+    # a replay's batches would be mistaken for the old run's and skipped.
+    def begin_batch(self, *, query_name: str, query_id: str, batch_id: int, started_at: datetime) -> str:
         with self.connection_factory() as conn, conn.cursor() as cur:
-            cur.execute("SELECT status FROM audit.marketplace_speed_batch WHERE query_name=%s AND batch_id=%s", (query_name, batch_id))
+            cur.execute("SELECT status FROM audit.marketplace_speed_batch WHERE query_name=%s AND query_id=%s AND batch_id=%s", (query_name, query_id, batch_id))
             row = cur.fetchone() if hasattr(cur, "fetchone") else None
             if row and row[0] == "SUCCEEDED": return "SKIP"
-            cur.execute("""INSERT INTO audit.marketplace_speed_batch(query_name,batch_id,status,started_at)
-                VALUES (%s,%s,'RUNNING',%s) ON CONFLICT (query_name,batch_id) DO UPDATE SET status='RUNNING',started_at=EXCLUDED.started_at,completed_at=NULL,error_message=NULL""", (query_name, batch_id, started_at))
+            cur.execute("""INSERT INTO audit.marketplace_speed_batch(query_name,query_id,batch_id,status,started_at)
+                VALUES (%s,%s,%s,'RUNNING',%s) ON CONFLICT (query_name,query_id,batch_id) DO UPDATE SET status='RUNNING',started_at=EXCLUDED.started_at,completed_at=NULL,error_message=NULL""", (query_name, query_id, batch_id, started_at))
         return "RUN"
 
-    def mark_succeeded(self, *, query_name: str, batch_id: int, completed_at: datetime, counts: BatchCounts) -> None:
-        self._update(query_name, batch_id, "SUCCEEDED", completed_at, counts, None)
+    def mark_succeeded(self, *, query_name: str, query_id: str, batch_id: int, completed_at: datetime, counts: BatchCounts) -> None:
+        self._update(query_name, query_id, batch_id, "SUCCEEDED", completed_at, counts, None)
 
-    def mark_failed(self, *, query_name: str, batch_id: int, completed_at: datetime, error: Exception) -> None:
-        self._update(query_name, batch_id, "FAILED", completed_at, None, str(error)[:2000])
+    def mark_failed(self, *, query_name: str, query_id: str, batch_id: int, completed_at: datetime, error: Exception) -> None:
+        self._update(query_name, query_id, batch_id, "FAILED", completed_at, None, str(error)[:2000])
 
-    def _update(self, query_name, batch_id, status, completed_at, counts, error):
+    def _update(self, query_name, query_id, batch_id, status, completed_at, counts, error):
         counts = counts or BatchCounts()
         with self.connection_factory() as conn, conn.cursor() as cur:
             cur.execute("""UPDATE audit.marketplace_speed_batch SET status=%s,completed_at=%s,
                 input_rows=%s,invalid_rows=%s,applied_rows=%s,duplicate_rows=%s,late_rows=%s,
                 change_rows=%s,kafka_rows=%s,es_rows=%s,redis_rows=%s,error_message=%s
-                WHERE query_name=%s AND batch_id=%s""", (status, completed_at, counts.input_rows, counts.invalid_rows, counts.applied_rows, counts.duplicate_rows, counts.late_rows, counts.change_rows, counts.kafka_rows, counts.es_rows, counts.redis_rows, error, query_name, batch_id))
+                WHERE query_name=%s AND query_id=%s AND batch_id=%s""", (status, completed_at, counts.input_rows, counts.invalid_rows, counts.applied_rows, counts.duplicate_rows, counts.late_rows, counts.change_rows, counts.kafka_rows, counts.es_rows, counts.redis_rows, error, query_name, query_id, batch_id))
+
+
+def _change_document(change: dict) -> dict:
+    """The Elasticsearch projection of one change event.
+
+    ``previous_value`` and ``current_value`` hold a scalar for most change
+    types but the whole offer for NEW_OFFER. One Elasticsearch field cannot be
+    an object and a scalar, so an object value is stored as its canonical
+    JSON string. The Kafka event keeps its own shape; only this projection
+    changes.
+    """
+    from config.marketplace_wire import canonical_json
+
+    doc = dict(change)
+    for field in ("previous_value", "current_value"):
+        if isinstance(doc.get(field), (dict, list)):
+            doc[field] = canonical_json(doc[field])
+    return doc
 
 
 class MarketplaceSpeedSinks:
     def __init__(self, *, producer: Any, es: Any, redis: Any, audit: Any):
         self.producer, self.es, self.redis, self.audit = producer, es, redis, audit
 
-    def write_batch(self, outputs: Iterable[SpeedOutput], batch_id: int) -> BatchCounts:
+    def write_batch(self, outputs: Iterable[SpeedOutput], batch_id: int, *, query_id: str) -> BatchCounts:
+        # Required, with no default: a missing id is exactly how a replay's
+        # batches were once taken for the old run's and skipped.
+        if not isinstance(query_id, str) or not query_id.strip(): raise ValueError("query_id is required to identify a micro-batch")
         rows = list(outputs)
         started = datetime.now(timezone.utc)
         query_name = MARKETPLACE_SPEED_QUERY_NAME
-        if self.audit.begin_batch(query_name=query_name, batch_id=batch_id, started_at=started) == "SKIP": return BatchCounts()
+        if self.audit.begin_batch(query_name=query_name, query_id=query_id, batch_id=batch_id, started_at=started) == "SKIP": return BatchCounts()
         counts = BatchCounts(input_rows=len(rows), invalid_rows=sum(r.output_kind == "INVALID" for r in rows), applied_rows=sum(r.output_kind == "STATE" for r in rows), duplicate_rows=sum(r.output_kind == "DUPLICATE" for r in rows), late_rows=sum(r.output_kind == "LATE" for r in rows))
         try:
             changes = [marketplace_change_from_wire(json.loads(r.change_json)) for r in rows if r.output_kind == "CHANGE" and r.change_json]
@@ -94,7 +118,7 @@ class MarketplaceSpeedSinks:
             es_actions = []
             change_rows = [r for r in rows if r.output_kind == "CHANGE" and r.change_json]
             for row, event in zip(change_rows, changes):
-                doc = json.loads(row.change_json)
+                doc = _change_document(json.loads(row.change_json))
                 es_actions.append({"index": {"_index": ES_INDEX_MARKETPLACE_CHANGES, "_id": event.event_id}})
                 es_actions.append(doc)
             state_rows = [r for r in rows if r.output_kind == "STATE" and r.state_json]
@@ -107,8 +131,13 @@ class MarketplaceSpeedSinks:
                     result = self.es.bulk(operations=es_actions) if hasattr(self.es, "bulk") else self.es.bulk(es_actions)
                 except TypeError:
                     result = self.es.bulk(es_actions)
-                if result.get("errors") or any((detail.get("error") or detail.get("status", 200) >= 300) for item in result.get("items", []) for detail in item.values()):
-                    raise RuntimeError("Elasticsearch item failure")
+                failed = [detail for item in result.get("items", []) for detail in item.values() if detail.get("error") or detail.get("status", 200) >= 300]
+                if result.get("errors") or failed:
+                    # The first reason is enough to tell a mapping conflict
+                    # from an outage in the audit row and the log.
+                    error = (failed[0].get("error") if failed else None) or {}
+                    reason = f"{error.get('type', '')}: {error.get('reason', '')}" if isinstance(error, dict) else str(error)
+                    raise RuntimeError(f"Elasticsearch item failure ({len(failed)} item(s)): {reason}"[:1000])
             pipe = self.redis.pipeline() if hasattr(self.redis, "pipeline") else self.redis
             for row, event in zip(change_rows, changes):
                 wire = json.loads(row.change_json)
@@ -126,10 +155,10 @@ class MarketplaceSpeedSinks:
             if changes: pipe.zremrangebyrank("rt:changes:recent", 0, -(REDIS_MARKETPLACE_RECENT_CHANGES_MAX + 1))
             if hasattr(pipe, "execute"): pipe.execute()
             counts = BatchCounts(**{**counts.__dict__, "input_rows": sum(r.output_kind != "CHANGE" for r in rows), "change_rows": len(changes), "kafka_rows": len(changes), "es_rows": len(changes) + len(states), "redis_rows": len(changes) + len(states)})
-            self.audit.mark_succeeded(query_name=query_name, batch_id=batch_id, completed_at=datetime.now(timezone.utc), counts=counts)
+            self.audit.mark_succeeded(query_name=query_name, query_id=query_id, batch_id=batch_id, completed_at=datetime.now(timezone.utc), counts=counts)
             return counts
         except Exception as exc:
-            try: self.audit.mark_failed(query_name=query_name, batch_id=batch_id, completed_at=datetime.now(timezone.utc), error=exc)
+            try: self.audit.mark_failed(query_name=query_name, query_id=query_id, batch_id=batch_id, completed_at=datetime.now(timezone.utc), error=exc)
             finally:
                 for client in (self.producer, self.es, self.redis):
                     if hasattr(client, "close"):
