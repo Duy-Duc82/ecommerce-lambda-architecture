@@ -116,6 +116,10 @@ CRAWL_USER_AGENT: str = os.getenv(
 # Pages requested per category before moving on. The adapter stops earlier when
 # the site reports its last page, so this is a safety ceiling, not a target.
 CRAWL_MAX_PAGES: int = int(os.getenv("CRAWL_MAX_PAGES", "50"))
+# The listing API endpoint. Overridable so the offline stub source can stand in
+# for the live site; robots.txt is then read from this URL's host (RFC 9309
+# scopes it to the host actually fetched), so there is no separate setting.
+TIKI_LISTING_URL: str = os.getenv("TIKI_LISTING_URL", "https://tiki.vn/api/personalish/v1/blocks/listings")
 # Comma-separated Tiki category ids, e.g. "1846,1789". The default nine were
 # each probed live (2026-08-16): all return 200; seven cap at total=2000
 # (50 pages), 1789 has 116 products and 17166 has 307.
@@ -171,6 +175,11 @@ CRAWL_CIRCUIT_FAILURE_THRESHOLD = int(os.getenv("CRAWL_CIRCUIT_FAILURE_THRESHOLD
 CRAWL_CIRCUIT_OPEN_SECONDS = int(os.getenv("CRAWL_CIRCUIT_OPEN_SECONDS", "900"))
 CRAWL_WORKER_POLL_SECONDS = int(os.getenv("CRAWL_WORKER_POLL_SECONDS", "5"))
 CRAWL_WORKER_BATCH_SIZE = int(os.getenv("CRAWL_WORKER_BATCH_SIZE", "10"))
+# Phase 8 crawl service. An empty worker ID means "<hostname>:<pid>". The idle
+# wait applies only after a cycle that leased nothing; a busy worker waits
+# CRAWL_WORKER_POLL_SECONDS.
+CRAWL_SERVICE_WORKER_ID = os.getenv("CRAWL_SERVICE_WORKER_ID", "").strip()
+CRAWL_SERVICE_IDLE_SECONDS = int(os.getenv("CRAWL_SERVICE_IDLE_SECONDS", "30"))
 
 KAFKA_CHANGE_ACK_TIMEOUT_SECONDS = int(os.getenv("KAFKA_CHANGE_ACK_TIMEOUT_SECONDS", "30"))
 ES_INDEX_MARKETPLACE_CHANGES = os.getenv("ES_INDEX_MARKETPLACE_CHANGES", "marketplace-changes-v1")
@@ -236,6 +245,7 @@ def validate_marketplace_settings() -> None:
     if not Decimal("0") <= MARKETPLACE_LARGE_DROP_RELATIVE <= Decimal("1"):
         raise ValueError("MARKETPLACE_LARGE_DROP_RELATIVE must be between 0 and 1")
     positive = {
+        "CRAWL_SERVICE_IDLE_SECONDS": CRAWL_SERVICE_IDLE_SECONDS,
         "MARKETPLACE_STALE_AFTER_SECONDS": MARKETPLACE_STALE_AFTER_SECONDS,
         "KAFKA_CHANGE_ACK_TIMEOUT_SECONDS": KAFKA_CHANGE_ACK_TIMEOUT_SECONDS,
         "REDIS_MARKETPLACE_OFFER_TTL_SECONDS": REDIS_MARKETPLACE_OFFER_TTL_SECONDS,

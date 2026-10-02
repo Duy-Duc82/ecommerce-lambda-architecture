@@ -298,7 +298,7 @@ CREATE TABLE IF NOT EXISTS audit.crawl_frontier (
     last_http_status INTEGER CHECK (last_http_status IS NULL OR last_http_status BETWEEN 100 AND 599),
     last_error_kind VARCHAR(32) CHECK (last_error_kind IS NULL OR last_error_kind IN (
         'RATE_LIMITED', 'TRANSIENT_NETWORK', 'SERVER_ERROR', 'CLIENT_ERROR',
-        'ROBOTS_DENIED', 'STORAGE_ERROR', 'PARSE_ERROR', 'VALIDATION_ERROR', 'UNKNOWN')),
+        'ROBOTS_DENIED', 'STORAGE_ERROR', 'PARSE_ERROR', 'VALIDATION_ERROR', 'PUBLISH_ERROR', 'UNKNOWN')),
     last_error TEXT CHECK (last_error IS NULL OR length(last_error) <= 2000),
     last_success_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -345,12 +345,27 @@ CREATE TABLE IF NOT EXISTS audit.crawl_request_attempt (
     rejected_count BIGINT NOT NULL DEFAULT 0 CHECK (rejected_count >= 0),
     error_kind VARCHAR(32) CHECK (error_kind IS NULL OR error_kind IN (
         'RATE_LIMITED', 'TRANSIENT_NETWORK', 'SERVER_ERROR', 'CLIENT_ERROR',
-        'ROBOTS_DENIED', 'STORAGE_ERROR', 'PARSE_ERROR', 'VALIDATION_ERROR', 'UNKNOWN')),
+        'ROBOTS_DENIED', 'STORAGE_ERROR', 'PARSE_ERROR', 'VALIDATION_ERROR', 'PUBLISH_ERROR', 'UNKNOWN')),
     error_message TEXT CHECK (error_message IS NULL OR length(error_message) <= 2000),
     CHECK (completed_at >= started_at)
 );
 CREATE INDEX IF NOT EXISTS idx_crawl_attempt_run ON audit.crawl_request_attempt (crawl_run_id, started_at);
 CREATE INDEX IF NOT EXISTS idx_crawl_attempt_task ON audit.crawl_request_attempt (task_id, started_at);
+
+-- Phase 8: PUBLISH_ERROR, a Kafka failure after a good fetch and parse. The
+-- inline lists above cover a fresh volume; these re-add the two constraints
+-- under the names PostgreSQL generated for them, so an existing volume ends
+-- in the same state. Safe to run twice.
+ALTER TABLE audit.crawl_frontier DROP CONSTRAINT IF EXISTS crawl_frontier_last_error_kind_check;
+ALTER TABLE audit.crawl_frontier
+    ADD CONSTRAINT crawl_frontier_last_error_kind_check CHECK (last_error_kind IS NULL OR last_error_kind IN (
+        'RATE_LIMITED', 'TRANSIENT_NETWORK', 'SERVER_ERROR', 'CLIENT_ERROR',
+        'ROBOTS_DENIED', 'STORAGE_ERROR', 'PARSE_ERROR', 'VALIDATION_ERROR', 'PUBLISH_ERROR', 'UNKNOWN'));
+ALTER TABLE audit.crawl_request_attempt DROP CONSTRAINT IF EXISTS crawl_request_attempt_error_kind_check;
+ALTER TABLE audit.crawl_request_attempt
+    ADD CONSTRAINT crawl_request_attempt_error_kind_check CHECK (error_kind IS NULL OR error_kind IN (
+        'RATE_LIMITED', 'TRANSIENT_NETWORK', 'SERVER_ERROR', 'CLIENT_ERROR',
+        'ROBOTS_DENIED', 'STORAGE_ERROR', 'PARSE_ERROR', 'VALIDATION_ERROR', 'PUBLISH_ERROR', 'UNKNOWN'));
 
 CREATE TABLE IF NOT EXISTS audit.crawl_source_state (
     marketplace_code VARCHAR(32) PRIMARY KEY CHECK (marketplace_code = lower(marketplace_code)),

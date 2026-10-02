@@ -17,7 +17,10 @@ def create_change_producer(bootstrap_servers: str = KAFKA_BOOTSTRAP_SERVERS) -> 
         bootstrap_servers=bootstrap_servers,
         key_serializer=lambda key: key.encode("utf-8") if key is not None else None,
         value_serializer=lambda value: canonical_json(value).encode("utf-8"),
-        acks="all", enable_idempotence=True, retries=5, max_in_flight_requests_per_connection=5,
+        # At-least-once, not idempotent: kafka-python-ng has no idempotent
+        # producer. Deterministic event IDs absorb a duplicate; one request in
+        # flight keeps a retry from reordering an offer's changes.
+        acks="all", retries=5, max_in_flight_requests_per_connection=1,
     )
 
 

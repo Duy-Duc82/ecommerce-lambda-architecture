@@ -379,3 +379,50 @@ def test_a_terminal_decision_cannot_carry_a_delay():
 def test_a_retryable_decision_must_carry_a_delay():
     with pytest.raises(ValueError, match="needs a delay"):
         RetryDecision(True, FailureKind.SERVER_ERROR, None, None)
+
+
+# ----------------------------------------------------------------------------
+# Phase 8 plan section 2.1 D6: PUBLISH_ERROR.
+# ----------------------------------------------------------------------------
+from types import SimpleNamespace
+
+from crawler.contracts import ObservationPublishError
+
+
+def _publish_error(acknowledged=0):
+    report = SimpleNamespace(observations=(1, 2))
+    return ObservationPublishError(report=report, acknowledged=acknowledged, cause=RuntimeError("broker down"))
+
+
+def test_a_publish_failure_is_its_own_kind_and_is_retryable():
+    error = _publish_error()
+
+    # The fetch itself succeeded, so its 200 must not decide the kind.
+    assert classify_failure(error, 200) is FailureKind.PUBLISH_ERROR
+    decision = _decide(error, http_status=200)
+    assert decision.retryable is True
+    assert decision.failure_kind is FailureKind.PUBLISH_ERROR
+
+
+def test_a_publish_failure_stops_retrying_once_attempts_run_out():
+    assert _decide(_publish_error(), http_status=200, attempts=POLICY.max_attempts).retryable is False
+
+
+def test_every_failure_kind_is_allowed_by_both_audit_constraints_and_their_migration():
+    # The enum and two CHECK constraints are three copies of one list. A kind
+    # the database rejects would make the worker fail while auditing a failure.
+    from pathlib import Path
+
+    sql = (Path(__file__).parent.parent / "scripts" / "init_postgres.sql").read_text(encoding="utf-8")
+    for constraint in ("crawl_frontier_last_error_kind_check", "crawl_request_attempt_error_kind_check"):
+        drop = f"DROP CONSTRAINT IF EXISTS {constraint}"
+        add = f"ADD CONSTRAINT {constraint}"
+        assert drop in sql, drop
+        assert add in sql, add
+        # The re-added constraint is what an existing database ends up with.
+        clause = sql[sql.index(add):sql.index(";", sql.index(add))]
+        for kind in FailureKind:
+            assert f"'{kind.value}'" in clause, (constraint, kind.value)
+    # A fresh database creates the tables first, so their inline lists must
+    # carry the new kind too, or the ALTER would be the only thing hiding drift.
+    assert sql.count("'PUBLISH_ERROR'") >= 4
