@@ -24,6 +24,8 @@ docker compose --profile serve up -d         # Kibana, Superset
 | `serve` | kibana, superset, superset-init |
 | `legacy` | spark, spark-worker, kibana, kibana-setup |
 | `jobs` | warehouse-job (legacy; `scripts/run_warehouse.ps1`) |
+| `ops` | ops (a `run --rm` tool container) |
+| `smoke` | stub-source, the offline Tiki stub |
 
 Operator batch run, for example a resume or a backfill:
 
@@ -39,6 +41,67 @@ the advisory lock; nothing was started.
 `docker-compose.override.yml` is no longer needed: host ports come from the
 `*_HOST_PORT` variables in `.env`. Delete an old override file, or it keeps
 applying its own `!override` ports and images.
+
+## `mp` — one command (plan section 9)
+
+```powershell
+.\scripts\mp.ps1 up -With crawl,ingest,speed,batch   # core plus the listed profiles
+.\scripts\mp.ps1 status                              # containers, then the last run of each component
+.\scripts\mp.ps1 migrate                             # re-apply scripts/init_postgres.sql (idempotent)
+.\scripts\mp.ps1 seed --category 1846 --pages 2      # crawler.seed_frontier
+.\scripts\mp.ps1 batch -AsOf 2026-10-02T00:00:00Z    # one-shot operator batch
+.\scripts\mp.ps1 validate -Json validate.json        # plan 9.2, exit 1 if any check fails
+.\scripts\mp.ps1 smoke                               # plan 9.1
+.\scripts\mp.ps1 down [-Volumes]                     # -Volumes asks before deleting data
+```
+
+Docker itself (up, down, the Spark batch) is driven from mp.ps1 on the host.
+Everything that reads or writes the stack runs as `python -m ops ...` in the
+`ops` container. mp.ps1 always passes `-f docker-compose.yml`, so an old
+override file never applies to it.
+
+### Smoke
+
+`mp smoke` never contacts Tiki. It starts `stub-source` and points the crawler
+at it. Then it:
+
+1. seeds its own universe: categories `9001`–`9003` × 2 pages, ACTIVE tier,
+   recrawled every minute;
+2. waits until every smoke target has been crawled successfully twice, Silver
+   holds exactly what those attempts parsed, and a speed micro-batch has
+   emitted changes;
+3. stops the crawler and waits for Silver lag 0;
+4. runs one batch with `as_of` at the first minute boundary one settle delay
+   (60 s in the smoke) after the last crawl run finished;
+5. runs `validate`, whose report lands in `data/ops/smoke-validate.json`.
+
+The plan asks for a **fresh stack**. To get one without touching the
+development data, run the smoke in its own Compose project and remove that
+project afterwards:
+
+```powershell
+docker compose -f docker-compose.yml --profile "*" down        # keeps the dev volumes
+$env:COMPOSE_PROJECT_NAME = "mp-smoke"; .\scripts\mp.ps1 smoke
+docker compose -f docker-compose.yml --profile "*" down --volumes; Remove-Item Env:COMPOSE_PROJECT_NAME
+docker compose -f docker-compose.yml up -d                      # the dev stack again
+```
+
+On a stack that also holds host-run crawls with a `local` lake,
+`bronze_present` fails: those attempts recorded `file:///D:/...` raw URIs that
+no container can read (`PROGRESS.md` §16.4).
+
+### Kafka lost its topics
+
+Kafka keeps its log on the `kafka_data` volume, so recreating the container
+keeps every topic. If the volume itself is lost, the speed query refuses to
+start (`Some data may have been lost`), because its checkpoint holds offsets
+the new topics never had. The changes it projected are rebuildable, so:
+
+```powershell
+docker compose -f docker-compose.yml --profile speed rm -sf speed
+docker volume rm ecommerce-lambda-architecture_speed_checkpoints
+.\scripts\mp.ps1 up -With speed
+```
 
 ## Image pins (plan section 5.3)
 
