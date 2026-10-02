@@ -7,7 +7,8 @@ lives here.
 
     migrate                       re-apply scripts/init_postgres.sql
     seed [seed_frontier args]     crawler.seed_frontier, unchanged
-    seed-smoke                    seed the smoke universe on the ACTIVE tier
+    seed-smoke                    seed the smoke universe on the ACTIVE tier, re-enabling parked tasks
+    park-smoke                    disable the smoke's pending tasks once it ends
     smoke-wait [--timeout S]      section 9.1 steps 2-3
     wait-quiet [--timeout S]      wait for Silver lag 0 once the crawler is stopped
     batch-plan [--settle S]       the as_of and run_id for a one-shot batch
@@ -44,11 +45,24 @@ def seed_smoke() -> int:
     from common.postgres import postgres_connection_factory
     from ops.smoke import SMOKE_CATEGORIES, SMOKE_PAGES
 
-    created = seed(PostgresCrawlFrontier(postgres_connection_factory()), marketplace_code="tiki",
+    from ops.smoke import activate
+
+    factory = postgres_connection_factory()
+    created = seed(PostgresCrawlFrontier(factory), marketplace_code="tiki",
                    marketplace_id=MARKETPLACE_IDS["tiki"], categories=SMOKE_CATEGORIES, pages=SMOKE_PAGES,
                    tier=CrawlTier.ACTIVE, priority=0, max_attempts=CRAWL_MAX_ATTEMPTS)
-    print(json.dumps({"event": "seeded_smoke", "created": created,
+    # A smoke run before this one parked its tasks; seeding alone is a no-op then.
+    reactivated = activate(factory)
+    print(json.dumps({"event": "seeded_smoke", "created": created, "reactivated": reactivated,
                       "tasks": len(SMOKE_CATEGORIES) * SMOKE_PAGES}))
+    return 0
+
+
+def park_smoke() -> int:
+    from common.postgres import postgres_connection_factory
+    from ops.smoke import park
+
+    print(json.dumps({"event": "parked_smoke", "disabled": park(postgres_connection_factory())}))
     return 0
 
 
@@ -139,6 +153,7 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("migrate")
     sub.add_parser("seed", help="crawler.seed_frontier arguments")
     sub.add_parser("seed-smoke")
+    sub.add_parser("park-smoke")
     wait_parser = sub.add_parser("smoke-wait")
     wait_parser.add_argument("--timeout", type=float, default=900)
     quiet_parser = sub.add_parser("wait-quiet")
@@ -154,6 +169,8 @@ def main(argv: list[str] | None = None) -> int:
         return migrate()
     if args.command == "seed-smoke":
         return seed_smoke()
+    if args.command == "park-smoke":
+        return park_smoke()
     if args.command == "smoke-wait":
         return smoke_wait(args.timeout)
     if args.command == "wait-quiet":

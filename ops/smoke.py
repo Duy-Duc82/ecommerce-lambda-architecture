@@ -39,6 +39,35 @@ def smoke_targets(categories=SMOKE_CATEGORIES, pages: int = SMOKE_PAGES) -> list
     return [encode_listing_page_task_target(category, page) for category in categories for page in range(1, pages + 1)]
 
 
+_PENDING = "('READY', 'RETRY_WAIT', 'LEASED')"
+
+
+def park(connection_factory) -> int:
+    """Disable every pending smoke task; return how many.
+
+    The smoke's categories are made up, and each success schedules the next
+    crawl. Left pending, a later `mp up` with the real TIKI_LISTING_URL would
+    send them to the live marketplace, and their runs would feed Silver and
+    Gold. mp.ps1 parks them whenever a smoke ends, passed or failed.
+    """
+    with connection_factory() as conn, conn.cursor() as cur:
+        cur.execute(
+            "UPDATE audit.crawl_frontier SET status = 'DISABLED', lease_owner = NULL, lease_expires_at = NULL, "
+            f"updated_at = now() WHERE marketplace_code = 'tiki' AND target = ANY(%s) AND status IN {_PENDING}",
+            (smoke_targets(),))
+        return cur.rowcount
+
+
+def activate(connection_factory) -> int:
+    """Re-enable parked smoke tasks, due now; return how many."""
+    with connection_factory() as conn, conn.cursor() as cur:
+        cur.execute(
+            "UPDATE audit.crawl_frontier SET status = 'READY', scheduled_for = now(), updated_at = now() "
+            "WHERE marketplace_code = 'tiki' AND target = ANY(%s) AND status = 'DISABLED'",
+            (smoke_targets(),))
+        return cur.rowcount
+
+
 @dataclass(frozen=True)
 class Condition:
     name: str
