@@ -35,6 +35,7 @@ PROMOTED = "PROMOTED"
 ALREADY_CURRENT = "ALREADY_CURRENT"
 QUALITY_FAILED = "QUALITY_FAILED"
 BACKFILL_REFUSED = "BACKFILL_REFUSED"
+PROMOTION_CONFLICT = "PROMOTION_CONFLICT"
 
 Writer = Callable[[str, str, bytes], str]
 Reader = Callable[[str, str], "bytes | None"]
@@ -86,7 +87,7 @@ class GoldManifest:
 class PromotionResult:
     promoted: bool
     reason: str
-    manifest_uri: str
+    manifest_uri: str | None
     previous_run_id: str | None
 
 
@@ -218,15 +219,25 @@ def promote_manifest(
     writer: Writer,
     reader: Reader,
     allow_backfill: bool = False,
+    expected_current_run_id: str | None,
 ) -> PromotionResult:
     """Advance the ``current`` pointer, but only when the run earned it.
 
-    The run manifest is written first and unconditionally. What follows decides
-    only whether the pointer moves.
+    ``expected_current_run_id`` is the pointer's run ID as the caller read it,
+    ``None`` for no pointer. It is required: if the pointer has moved since,
+    another run promoted in between, and moving it again would replace that
+    run's version with one judged against an older predecessor. Nothing is
+    written then, not even the run manifest. The batch lock should make this
+    unreachable; this is the guard for a caller outside the lock.
+
+    Otherwise the run manifest is written unconditionally, and what follows
+    decides only whether the pointer moves.
     """
-    manifest_uri = write_run_manifest(manifest, writer=writer)
     current = read_current_manifest(reader=reader)
     previous_run_id = current.run_id if current else None
+    if previous_run_id != expected_current_run_id:
+        return PromotionResult(False, PROMOTION_CONFLICT, None, previous_run_id)
+    manifest_uri = write_run_manifest(manifest, writer=writer)
 
     refusal = promotion_refusal(manifest, current, allow_backfill=allow_backfill)
     if refusal is not None:

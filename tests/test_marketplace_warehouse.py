@@ -1,6 +1,7 @@
 """Batch context and Gold layout tests, items 34 and 46 of the Phase 6 plan."""
 import subprocess
 import sys
+from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -317,9 +318,23 @@ def decision(*, passed=True, failures=0):
     )
 
 
-def wire_orchestration(monkeypatch, *, passed=True, publish_fails=False):
+def wire_orchestration(monkeypatch, *, passed=True, publish_fails=False, lock_refused=False):
     log = []
-    parts = {"log": log}
+    parts = {"log": log, "lock": []}
+
+    @contextmanager
+    def fake_lock():
+        # Kept out of ``log``: those assertions describe the run itself.
+        if lock_refused:
+            from batch_layer.marketplace_lock import BatchAlreadyRunning
+            raise BatchAlreadyRunning(820801)
+        parts["lock"].append("acquire")
+        try:
+            yield
+        finally:
+            parts["lock"].append("release")
+
+    monkeypatch.setattr(warehouse, "default_batch_lock", fake_lock)
 
     monkeypatch.setattr(warehouse, "build_spark", lambda: FakeSpark())
     monkeypatch.setattr(warehouse, "read_marketplace_silver", lambda spark, uri: "wire")
@@ -357,9 +372,10 @@ def wire_orchestration(monkeypatch, *, passed=True, publish_fails=False):
         log.append("manifest.write_run")
         return MANIFEST_URI
 
-    def fake_promote(manifest, *, writer, reader, allow_backfill=False):
+    def fake_promote(manifest, *, writer, reader, allow_backfill=False, expected_current_run_id):
         log.append("manifest.promote")
         parts["allow_backfill"] = allow_backfill
+        parts["expected_current_run_id"] = expected_current_run_id
         return PromotionResult(True, PROMOTED, MANIFEST_URI, None)
 
     monkeypatch.setattr(marketplace_manifest, "write_run_manifest", fake_write_run_manifest)
@@ -536,7 +552,7 @@ def serving_a_newer_run(monkeypatch):
         {name: GoldWriteResult(name, "file:///gold/" + name, 1) for name in DATASETS},
         verdict, newer, previous_run_id=None,
     )
-    marketplace_manifest.promote_manifest(serving, writer=store.write, reader=store.read)
+    marketplace_manifest.promote_manifest(serving, writer=store.write, reader=store.read, expected_current_run_id=None)
     return store
 
 
@@ -613,7 +629,7 @@ def serving_this_run(monkeypatch, *, previous_run_id):
         {name: GoldWriteResult(name, "file:///gold/" + name, 1) for name in DATASETS},
         decision(), batch_context(), previous_run_id=previous_run_id,
     )
-    marketplace_manifest.promote_manifest(served, writer=store.write, reader=store.read)
+    marketplace_manifest.promote_manifest(served, writer=store.write, reader=store.read, expected_current_run_id=None)
     return store
 
 
@@ -637,7 +653,7 @@ def test_rerunning_the_current_run_keeps_its_real_predecessor(monkeypatch):
 def test_a_pointer_write_failure_never_records_a_promotion(monkeypatch):
     parts = wire_orchestration(monkeypatch)
 
-    def broken_promote(manifest, *, writer, reader, allow_backfill=False):
+    def broken_promote(manifest, *, writer, reader, allow_backfill=False, expected_current_run_id):
         parts["log"].append("manifest.promote")
         raise ConnectionError("object store unreachable")
 
@@ -657,6 +673,64 @@ def test_a_pointer_that_already_names_the_run_counts_as_promoted(monkeypatch):
     run_marketplace_warehouse(batch_context(), resume=True, writer=store.write, reader=store.read)
 
     assert parts["audit"].promotion == {"run_id": "run-1", "promoted": True}
+
+
+# Phase 8 test 19, the orchestrator's side: it compares against the pointer it
+# read before publishing, and a conflict is not recorded as a promotion.
+def test_the_run_promotes_against_the_pointer_it_read(monkeypatch):
+    from types import SimpleNamespace
+    parts = wire_orchestration(monkeypatch)
+    monkeypatch.setattr(marketplace_manifest, "read_current_manifest",
+                        lambda **k: SimpleNamespace(run_id="run-0", previous_run_id=None))
+
+    run_marketplace_warehouse(batch_context(), writer=noop_writer, reader=empty_reader)
+
+    assert parts["expected_current_run_id"] == "run-0"
+
+
+def test_with_no_pointer_the_run_expects_none(monkeypatch):
+    parts = wire_orchestration(monkeypatch)
+
+    run_marketplace_warehouse(batch_context(), writer=noop_writer, reader=empty_reader)
+
+    assert parts["expected_current_run_id"] is None
+
+
+def test_a_promotion_conflict_is_recorded_as_not_promoted(monkeypatch):
+    parts = wire_orchestration(monkeypatch)
+    from batch_layer.marketplace_manifest import PROMOTION_CONFLICT, PromotionResult
+    monkeypatch.setattr(marketplace_manifest, "promote_manifest",
+                        lambda manifest, **k: PromotionResult(False, PROMOTION_CONFLICT, None, "run-9"))
+
+    result = run_marketplace_warehouse(batch_context(), writer=noop_writer, reader=empty_reader)
+
+    assert parts["audit"].promotion == {"run_id": "run-1", "promoted": False}
+    assert result.manifest_promoted is False
+    assert result.promotion_reason == PROMOTION_CONFLICT
+    # The run manifest the orchestrator wrote still names this run's evidence.
+    assert result.manifest_uri is not None
+
+
+# The Spark run takes minutes and the lock lives on an idle connection that
+# can drop. A pointer that moved meanwhile must stop the run before the cache
+# is published, or cache and pointer would serve different runs while the
+# audit row reads SUCCEEDED and the scheduler never looks at the window again.
+def test_a_pointer_that_moved_during_the_run_stops_it_before_publication(monkeypatch):
+    from types import SimpleNamespace
+
+    from batch_layer.marketplace_manifest import PROMOTION_CONFLICT
+    parts = wire_orchestration(monkeypatch)
+    reads = iter([None, SimpleNamespace(run_id="run-9", previous_run_id=None)])
+    monkeypatch.setattr(marketplace_manifest, "read_current_manifest", lambda **k: next(reads))
+
+    result = run_marketplace_warehouse(batch_context(), writer=noop_writer, reader=empty_reader)
+
+    assert "publisher.publish" not in parts["log"]
+    assert "manifest.promote" not in parts["log"]
+    assert parts["audit"].held["reason"] == PROMOTION_CONFLICT
+    assert result.status == "GOLD_WRITTEN"
+    assert result.manifest_promoted is False
+    assert result.promotion_reason == PROMOTION_CONFLICT
 
 
 # ----------------------------------------------------------------------------
@@ -852,3 +926,48 @@ def test_context_rejects_a_reconciliation_lookback_inside_the_settle_delay():
 def test_context_rejects_non_positive_reconciliation_windows(field):
     with pytest.raises(ValueError, match=field):
         MarketplaceBatchContext("run-1", AS_OF, "file:///silver", "file:///gold", **{field: 0})
+
+
+# Phase 8 test 20: the marketplace batch reaches s3a:// only if the profile's
+# S3A options reach its Spark builder.
+class RecordingBuilder:
+    def __init__(self):
+        self.options = {}
+
+    def appName(self, name):
+        return self
+
+    def config(self, key, value):
+        self.options[key] = value
+        return self
+
+    def getOrCreate(self):
+        return self.options
+
+
+@pytest.mark.parametrize("profile, expect_s3a", [("minio", True), ("local", False)])
+def test_build_spark_applies_s3a_options_only_for_a_remote_profile(monkeypatch, profile, expect_s3a):
+    from types import SimpleNamespace
+
+    from config import storage
+
+    for name in ("DATA_LAKE_PROFILE", "DATA_LAKE_MODE", "DATA_LAKE_ENDPOINT", "DATA_LAKE_REGION"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("DATA_LAKE_PROFILE", profile)
+    monkeypatch.setenv("MINIO_ENDPOINT", "minio:9000")
+    storage.active_profile.cache_clear()
+    monkeypatch.setattr(warehouse, "SparkSession", SimpleNamespace(builder=RecordingBuilder()))
+    try:
+        options = warehouse.build_spark()
+    finally:
+        storage.active_profile.cache_clear()
+
+    s3a = {key: value for key, value in options.items() if key.startswith("spark.hadoop.fs.s3a.")}
+    if expect_s3a:
+        assert s3a["spark.hadoop.fs.s3a.impl"] == "org.apache.hadoop.fs.s3a.S3AFileSystem"
+        assert s3a["spark.hadoop.fs.s3a.endpoint"] == "http://minio:9000"
+        assert s3a["spark.hadoop.fs.s3a.path.style.access"] == "true"
+        assert "spark.hadoop.fs.s3a.access.key" in s3a
+    else:
+        assert s3a == {}
+    assert options["spark.sql.session.timeZone"] == "UTC"
