@@ -192,9 +192,13 @@ def _sink_clients():
 def write_marketplace_batch(batch_df: DataFrame, batch_id: int) -> None:
     from common import postgres
     from speed_layer.marketplace_sinks import MarketplaceSpeedAudit, MarketplaceSpeedSinks
+    # Spark sets the query id, which lives in the checkpoint, as a local
+    # property of every micro-batch. Batch IDs are unique only within it.
+    query_id = batch_df.sparkSession.sparkContext.getLocalProperty("sql.streaming.queryId")
+    if not query_id: raise ValueError("micro-batch carries no streaming query id; refusing to audit it as another run's batch")
     producer, es, redis = _sink_clients()
     # A closing factory: the query runs for days, one micro-batch every
     # trigger, and a bare psycopg2 connection would leak on every audit call.
     audit = MarketplaceSpeedAudit(postgres.postgres_connection_factory())
     outputs = [SpeedOutput(**row.asDict()) for row in batch_df.collect()]
-    MarketplaceSpeedSinks(producer=producer, es=es, redis=redis, audit=audit).write_batch(outputs, batch_id)
+    MarketplaceSpeedSinks(producer=producer, es=es, redis=redis, audit=audit).write_batch(outputs, batch_id, query_id=query_id)
