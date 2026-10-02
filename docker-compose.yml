@@ -90,7 +90,12 @@ services:
       KAFKA_LOG_DIRS: /tmp/kraft-combined-logs
       CLUSTER_ID: 4L6g3nShT-eMCtK--X86sw
     healthcheck:
-      test: /opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 || exit 1
+      # Tools inside the container use the internal listener. The host one
+      # advertises localhost:${KAFKA_HOST_PORT}, which nothing serves in here
+      # once that port is not 9092; kafka-topics.sh, which follows metadata,
+      # hangs on it (checked 2026-10-02). This check happens not to, but stays
+      # on the same listener as the other in-container tools.
+      test: /opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server kafka:19092 || exit 1
       interval: 15s
       timeout: 10s
       retries: 5

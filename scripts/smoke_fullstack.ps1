@@ -61,12 +61,12 @@ function Assert-Service {
     }
 }
 
-Run-Cmd -Title "Start Docker stack" -Script { docker compose up -d }
+Run-Cmd -Title "Start Docker stack" -Script { docker compose --profile legacy --profile serve up -d }
 
 Run-Cmd -Title "Create Kafka topics" -Script {
-    docker exec kafka /opt/kafka/bin/kafka-topics.sh --create --bootstrap-server localhost:9092 --topic ecommerce_events --partitions 3 --replication-factor 1 --if-not-exists | Out-Null
-    docker exec kafka /opt/kafka/bin/kafka-topics.sh --create --bootstrap-server localhost:9092 --topic ecommerce_orders --partitions 3 --replication-factor 1 --if-not-exists | Out-Null
-    docker exec kafka /opt/kafka/bin/kafka-topics.sh --create --bootstrap-server localhost:9092 --topic ecommerce_prices --partitions 1 --replication-factor 1 --if-not-exists | Out-Null
+    docker exec kafka /opt/kafka/bin/kafka-topics.sh --create --bootstrap-server kafka:19092 --topic ecommerce_events --partitions 3 --replication-factor 1 --if-not-exists | Out-Null
+    docker exec kafka /opt/kafka/bin/kafka-topics.sh --create --bootstrap-server kafka:19092 --topic ecommerce_orders --partitions 3 --replication-factor 1 --if-not-exists | Out-Null
+    docker exec kafka /opt/kafka/bin/kafka-topics.sh --create --bootstrap-server kafka:19092 --topic ecommerce_prices --partitions 1 --replication-factor 1 --if-not-exists | Out-Null
 }
 
 if (-not $SkipRealtime) {

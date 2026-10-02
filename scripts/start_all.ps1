@@ -117,7 +117,7 @@ function Initialize-KafkaTopics {
         $topics = @("ecommerce_events", "marketplace.observations.v1", "marketplace.observations.v1.dlq", "marketplace.changes.v1")
         foreach ($topic in $topics) {
             docker exec kafka /opt/kafka/bin/kafka-topics.sh `
-                --create --bootstrap-server localhost:9092 `
+                --create --bootstrap-server kafka:19092 `
                 --topic $topic --partitions 3 --replication-factor 1 --if-not-exists | Out-Null
             Write-Host "  [OK] $topic" -ForegroundColor Green
         }
