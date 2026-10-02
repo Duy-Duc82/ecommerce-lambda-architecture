@@ -1435,3 +1435,85 @@ riêng (42 passed, 18m42s).
   đều nằm trong `requirements.txt`.
 - Trước khi pull image lớn hay chạy suite dài, kiểm dung lượng trống `C:`
   (`df -h /c`).
+
+---
+
+## 14. Session 2026-10-02 (chiều) — merge WP2, Phase 8 WP3: batch scheduler
+
+### 14.1 PR #8 trước khi merge
+
+Review PR #8 tìm thấy một bug thật: mỗi micro-batch speed mở mới Kafka
+producer, client ES và client Redis, nhưng chỉ đóng khi batch lỗi. Với trigger
+30 giây, mỗi ngày rò khoảng 2.880 producer, mỗi cái kèm một network thread.
+Bug có từ Phase 5, nhưng chỉ thành bug thật khi WP2 biến speed layer thành
+service chạy lâu. Test `b8b4844`, fix `b2b769f`, rồi merge (`4f82320`).
+
+Còn nợ, chưa sửa: nếu bước publish vào DLQ lỗi mãi với một record (ví dụ
+record gần giới hạn 1 MB của Kafka), Silver sink đứng ở **mọi** partition.
+Để lại cho drill WP6–WP7.
+
+### 14.2 Đã làm
+
+Nhánh `phase-8-wp3-batch-scheduler`, cắt từ `develop` sau khi PR #8 merge.
+
+| Thay đổi | Ở đâu |
+|---|---|
+| `python -m batch_layer.marketplace_scheduler [--max-ticks N]`: `as_of = floor(now − lag, interval)` theo epoch UTC, `run_id = mp-YYYYMMDDTHHMMZ`; `SUCCEEDED` → skip, không có → chạy, status khác → `resume=True`; không bao giờ truyền `allow_backfill`; lỗi của một cửa sổ được log, vòng lặp chạy tiếp | `batch_layer/marketplace_scheduler.py` |
+| `exclusive_batch`: `pg_try_advisory_lock` trên connection riêng, commit ngay để không idle-in-transaction suốt run, unlock trong `finally` | `batch_layer/marketplace_lock.py` |
+| `run_marketplace_warehouse(context, *, lock=None, **options)` lấy lock **trước** khi dựng Spark hay ghi audit; CLI in `ALREADY_RUNNING`, exit 75 | `batch_layer/marketplace_warehouse.py` |
+| `promote_manifest(..., expected_current_run_id)` bắt buộc; con trỏ đã đổi → `PROMOTION_CONFLICT`, không ghi gì, kể cả run manifest | `batch_layer/marketplace_manifest.py` |
+| `build_spark()` áp `spark_hadoop_options()` qua `spark.hadoop.*` | `batch_layer/marketplace_warehouse.py` |
+| `MARKETPLACE_BATCH_{INTERVAL,AS_OF_LAG}_SECONDS`, `MARKETPLACE_BATCH_LOCK_KEY`; từ chối lookback ≤ interval + settle | `config/settings.py` |
+
+Plan sửa hai chỗ trước khi viết code (commit `656d0a4`):
+
+- **§6.4:** scheduler thức tại boundary **+ lag**. Thức đúng boundary thì
+  `now − lag` vẫn rơi vào cửa sổ cũ, nên mỗi cửa sổ trễ cả một interval.
+- **§6.6:** `apache/spark:4.0.1` không có `hadoop-aws`. Chỉ có option thì
+  `s3a://` vẫn không chạy được.
+
+Lệch plan: lock là tham số `lock` (callable trả context manager) để test
+offline inject được. Scheduler tự query `audit.marketplace_batch_run`, vì
+`marketplace_postgres.py` không nằm trong danh sách file được sửa (§4).
+
+### 14.3 Kiểm chứng trên Postgres + MinIO thật (container `mp-e2e`)
+
+`s3a://` cần `hadoop-aws-3.4.1.jar` và `bundle-2.24.6.jar` (AWS SDK v2, bản
+mà Hadoop 3.4.1 khai báo). Cả hai đã tải vào `.localjars/` (gitignore, nằm
+trên `D:`), nạp qua `PYSPARK_SUBMIT_ARGS=--jars ...`.
+
+```text
+giữ lock 820801 từ process khác      CLI: ALREADY_RUNNING, exit 75; tick: ALREADY_RUNNING
+                                     → 0 audit row cho cả hai run
+kill -9 process giữ lock             pg_locks advisory = 0: Postgres tự nhả
+tick, interval 1 ngày, profile minio mp-20261002T0000Z SUCCEEDED, silver_rows 0, 13 gold rows,
+                                     Gold ghi qua s3a://ecommerce-gold, con trỏ PROMOTED
+tick, interval 1 giờ                 mp-20261002T0700Z SUCCEEDED, silver_rows 8 đọc qua s3a,
+                                     con trỏ previous_run_id = mp-20261002T0000Z
+đặt status = FAILED, tick lại        resumed=true, SUCCEEDED, ALREADY_CURRENT
+tick lại lần nữa                     SKIPPED_SUCCEEDED
+SIGTERM khi đang chờ                 dừng ngay, exit 0
+```
+
+`silver_rows 0` ở tick đầu là đúng: cả 8 observation trong MinIO được tạo
+sau 00:00Z, nên bị cắt bởi `as_of`. Tick thứ hai mới chứng minh đọc dòng
+thật qua `s3a://`.
+
+Hành vi cần biết: một cửa sổ `FAILED` (crash) chỉ được chạy lại khi scheduler
+restart trong cùng interval. Tick kế tiếp đã sang cửa sổ mới. Muốn chạy lại
+cửa sổ cũ thì dùng CLI với `--resume` (và `--allow-backfill` nếu nó cũ hơn
+con trỏ).
+
+### 14.4 Trạng thái test
+
+**791 passed, 0 failed, 0 skipped** (trước WP3: 749). Chạy thành hai lượt:
+phần còn lại của suite (749 passed, 3m51s) và `test_marketplace_quality.py`
+riêng (42 passed, 20m01s).
+
+### 14.5 Việc tiếp theo (resume ở đây)
+
+1. Review và merge PR WP3.
+2. **WP4** (image + Compose): `docker/spark-marketplace/Dockerfile` phải nhúng
+   `hadoop-aws-3.4.1` + `bundle-2.24.6` và JDBC Postgres; xử lý image
+   `elasticsearch:8.18.0` hỏng trên máy này (§13.4).
+3. Ổ `C:` còn khoảng 6,5 GB. Đồ tải lớn đặt trên `D:` (chủ dự án đã đồng ý).
