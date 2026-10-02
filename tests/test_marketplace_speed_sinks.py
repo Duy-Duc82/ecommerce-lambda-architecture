@@ -426,3 +426,56 @@ def test_change_documents_reach_elasticsearch_as_canonical_wire():
 
     operations = parts["es"].calls[0]
     assert operations[1] == json.loads(canonical_json(changes[0]))
+
+
+# ----------------------------------------------------------------------------
+# Found by the first real price change through the speed query (Phase 8 WP2,
+# 2026-10-02). A NEW_OFFER change carries the whole offer as current_value,
+# a PRICE_CHANGED carries a scalar. One Elasticsearch field cannot be both:
+# once the first NEW_OFFER mapped current_value as an object, every later
+# scalar change was refused and the query died. The fake above accepts any
+# document, so the conflict never showed. The Kafka contract keeps both
+# shapes; only the Elasticsearch projection changes.
+# ----------------------------------------------------------------------------
+def _change_documents(parts):
+    (operations,) = parts["es"].calls
+    pairs = list(zip(operations[::2], operations[1::2]))
+    return [doc for header, doc in pairs if header["index"]["_index"] == ES_INDEX_MARKETPLACE_CHANGES]
+
+
+def test_change_values_reach_elasticsearch_as_scalars_only():
+    outputs, changes, _ = _batch()
+    sinks, parts = _sinks()
+
+    sinks.write_batch(outputs, batch_id=1)
+
+    for doc in _change_documents(parts):
+        for field in ("previous_value", "current_value"):
+            assert not isinstance(doc[field], (dict, list)), (doc["change_type"], field)
+
+
+def test_an_object_value_is_kept_as_its_canonical_json():
+    outputs, changes, _ = _batch()
+    sinks, parts = _sinks()
+
+    sinks.write_batch(outputs, batch_id=1)
+
+    new_offer = next(doc for doc in _change_documents(parts) if doc["change_type"] == "NEW_OFFER")
+    original = json.loads(canonical_json(changes[0]))["current_value"]
+    assert isinstance(original, dict)
+    assert new_offer["current_value"] == canonical_json(original)
+    assert json.loads(new_offer["current_value"]) == original
+
+
+def test_an_elasticsearch_item_failure_names_its_reason():
+    class RefusingElasticsearch(FakeElasticsearch):
+        def bulk(self, operations=None):
+            self.calls.append(operations)
+            return {"errors": True, "items": [{"index": {"status": 400, "error": {
+                "type": "document_parsing_exception", "reason": "object mapping for [current_value]"}}}]}
+
+    outputs, _, _ = _batch()
+    sinks, parts = _sinks(es=RefusingElasticsearch())
+
+    with pytest.raises(RuntimeError, match="Elasticsearch item failure.*document_parsing_exception.*current_value"):
+        sinks.write_batch(outputs, batch_id=1)
