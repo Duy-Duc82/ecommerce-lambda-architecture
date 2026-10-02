@@ -106,10 +106,17 @@ class MarketplaceBatchResult:
 
 
 def build_spark() -> SparkSession:
-    return (SparkSession.builder.appName(MARKETPLACE_BATCH_APP_NAME)
-            .config("spark.sql.session.timeZone", "UTC")
-            .config("spark.sql.shuffle.partitions", str(MARKETPLACE_BATCH_SHUFFLE_PARTITIONS))
-            .config("spark.sql.sources.partitionOverwriteMode", "dynamic").getOrCreate())
+    from config.storage import spark_hadoop_options
+    builder = (SparkSession.builder.appName(MARKETPLACE_BATCH_APP_NAME)
+               .config("spark.sql.session.timeZone", "UTC")
+               .config("spark.sql.shuffle.partitions", str(MARKETPLACE_BATCH_SHUFFLE_PARTITIONS))
+               .config("spark.sql.sources.partitionOverwriteMode", "dynamic"))
+    # Empty for the local profile. For any other the S3A credentials and
+    # endpoint come from the profile, which is what lets this job read and
+    # write MinIO or a cloud bucket at all (Phase 8 plan section 6.6).
+    for key, value in spark_hadoop_options().items():
+        builder = builder.config(f"spark.hadoop.{key}", value)
+    return builder.getOrCreate()
 
 
 def read_marketplace_silver(spark: SparkSession, silver_uri: str) -> DataFrame:
