@@ -904,3 +904,48 @@ def test_context_rejects_a_reconciliation_lookback_inside_the_settle_delay():
 def test_context_rejects_non_positive_reconciliation_windows(field):
     with pytest.raises(ValueError, match=field):
         MarketplaceBatchContext("run-1", AS_OF, "file:///silver", "file:///gold", **{field: 0})
+
+
+# Phase 8 test 20: the marketplace batch reaches s3a:// only if the profile's
+# S3A options reach its Spark builder.
+class RecordingBuilder:
+    def __init__(self):
+        self.options = {}
+
+    def appName(self, name):
+        return self
+
+    def config(self, key, value):
+        self.options[key] = value
+        return self
+
+    def getOrCreate(self):
+        return self.options
+
+
+@pytest.mark.parametrize("profile, expect_s3a", [("minio", True), ("local", False)])
+def test_build_spark_applies_s3a_options_only_for_a_remote_profile(monkeypatch, profile, expect_s3a):
+    from types import SimpleNamespace
+
+    from config import storage
+
+    for name in ("DATA_LAKE_PROFILE", "DATA_LAKE_MODE", "DATA_LAKE_ENDPOINT", "DATA_LAKE_REGION"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("DATA_LAKE_PROFILE", profile)
+    monkeypatch.setenv("MINIO_ENDPOINT", "minio:9000")
+    storage.active_profile.cache_clear()
+    monkeypatch.setattr(warehouse, "SparkSession", SimpleNamespace(builder=RecordingBuilder()))
+    try:
+        options = warehouse.build_spark()
+    finally:
+        storage.active_profile.cache_clear()
+
+    s3a = {key: value for key, value in options.items() if key.startswith("spark.hadoop.fs.s3a.")}
+    if expect_s3a:
+        assert s3a["spark.hadoop.fs.s3a.impl"] == "org.apache.hadoop.fs.s3a.S3AFileSystem"
+        assert s3a["spark.hadoop.fs.s3a.endpoint"] == "http://minio:9000"
+        assert s3a["spark.hadoop.fs.s3a.path.style.access"] == "true"
+        assert "spark.hadoop.fs.s3a.access.key" in s3a
+    else:
+        assert s3a == {}
+    assert options["spark.sql.session.timeZone"] == "UTC"
