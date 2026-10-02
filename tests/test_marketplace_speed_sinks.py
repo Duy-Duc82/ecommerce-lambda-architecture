@@ -376,7 +376,7 @@ def test_audit_errors_are_truncated_and_carry_no_event_body():
     audit = MarketplaceSpeedAudit(factory)
 
     audit.mark_failed(
-        query_name=MARKETPLACE_SPEED_QUERY_NAME,
+        query_name=MARKETPLACE_SPEED_QUERY_NAME, query_id=QUERY_ID,
         batch_id=7,
         completed_at=None,
         error=RuntimeError(body + "x" * 5000),
@@ -394,7 +394,7 @@ def test_audit_success_writes_the_batch_counts():
     counts = BatchCounts(input_rows=4, change_rows=2, es_rows=3, redis_rows=3)
 
     audit.mark_succeeded(
-        query_name=MARKETPLACE_SPEED_QUERY_NAME,
+        query_name=MARKETPLACE_SPEED_QUERY_NAME, query_id=QUERY_ID,
         batch_id=7,
         completed_at=None,
         counts=counts,
