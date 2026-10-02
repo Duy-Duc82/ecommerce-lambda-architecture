@@ -363,7 +363,12 @@ class LiveSources:
         try:
             committed = {tp: meta.offset for tp, meta in admin.list_consumer_group_offsets(group).items() if tp.topic == topic}
             from kafka import TopicPartition
-            partitions = [TopicPartition(topic, p) for p in (consumer.partitions_for_topic(topic) or ())]
+            known = consumer.partitions_for_topic(topic)
+            if not known:
+                # Not "no lag": a missing topic, or metadata not loaded yet,
+                # says nothing about whether the sink has caught up.
+                raise RuntimeError(f"topic {topic} has no partitions in the cluster metadata")
+            partitions = [TopicPartition(topic, p) for p in known]
             ends = consumer.end_offsets(partitions)
             return sum(end - max(committed.get(tp, 0), 0) for tp, end in ends.items())
         finally:
