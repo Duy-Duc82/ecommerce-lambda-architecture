@@ -345,3 +345,41 @@ def test_a_topic_without_partitions_is_an_error_not_zero_lag(monkeypatch):
 
     with pytest.raises(RuntimeError, match="no partitions"):
         sources.consumer_lag("group", "marketplace.observations.v1")
+
+
+# ---------------------------------------------------------------------------
+# The drill harness (plan 10), offline: the drills themselves need the stack.
+# ---------------------------------------------------------------------------
+def test_wait_until_returns_the_observation_or_fails_with_it(monkeypatch):
+    from ops import drills
+
+    monkeypatch.setattr(drills.time, "sleep", lambda seconds: None)
+    values = iter([1, 2, 3])
+    assert drills.wait_until(lambda: ((n := next(values)) == 3, n), timeout=60, what="three") == 3
+
+    clock = iter(range(0, 1000, 30))
+    monkeypatch.setattr(drills.time, "monotonic", lambda: next(clock))
+    with pytest.raises(drills.DrillFailed, match="waiting for never; last observed 7"):
+        drills.wait_until(lambda: (False, 7), timeout=60, what="never")
+
+
+def test_a_drill_record_keeps_every_step_with_its_time(tmp_path, monkeypatch):
+    from ops import drills
+
+    monkeypatch.setattr(drills, "RECORDS", tmp_path)
+    record = drills.Record("d9")
+    record.step("inject", stopped="kafka")
+    record.step("verify", ok=True)
+    record.passed = True
+
+    written = json.loads(record.write().read_text(encoding="utf-8"))
+
+    assert written["drill"] == "d9" and written["passed"] is True
+    assert [step["step"] for step in written["steps"]] == ["inject", "verify"]
+    assert all("at" in step for step in written["steps"])
+
+
+def test_the_drills_cover_d1_to_d6():
+    from ops import drills
+
+    assert sorted(drills.DRILLS) == ["d1", "d2", "d3", "d4", "d5", "d6"]

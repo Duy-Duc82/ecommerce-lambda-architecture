@@ -111,7 +111,7 @@ Phase 5/6 chỉ nằm ở ngọn một nhánh feature, không có ở commit g�
 | 5 | 5 | ✅ trong `develop` | đủ 38/38 item |
 | 6 | 6 | ✅ trong `develop` | **47/47 item** |
 | 7 | 7 | ✅ trong `develop` (PR #4); bản sửa cắt `as_of` trên `phase-7-asof-cutoff` | **61/61 item** |
-| 8 | 8 | 🔵 WP1–WP4 trong `develop` (PR #7–#10); WP5 trên `phase-8-wp5-stub-ops-cli`; WP6–WP10 chưa làm | P1-12, Kibana (P1-11) |
+| 8 | 8 | 🔵 WP1–WP5 trong `develop` (PR #7–#11); WP6 đang dở trên `phase-8-wp6-drills-d1-d6` (chưa PR, `PROGRESS.md` §17); WP7–WP10 chưa làm | P1-12, Kibana (P1-11) |
 | 9 | 9 | ⏳ chưa bắt đầu | P2-* |
 
 **Phase 1–7 đã xong** và nằm trong `develop`. Phase 7 (P1-08 quality gates,
