@@ -381,10 +381,6 @@ def test_a_drill_record_keeps_every_step_with_its_time(tmp_path, monkeypatch):
     assert all("at" in step for step in written["steps"])
 
 
-def test_the_drills_cover_d1_to_d6():
-    from ops import drills
-
-    assert sorted(drills.DRILLS) == ["d1", "d2", "d3", "d4", "d5", "d6"]
 
 
 def test_a_stack_only_removes_volumes_of_its_own_compose_project(monkeypatch):
@@ -591,3 +587,114 @@ def test_a_query_that_never_goes_quiet_fails_with_how_long_it_waited(monkeypatch
 
     with pytest.raises(drills.DrillFailed, match="batches_with_rows"):
         stack.wait_speed_drained(AS_OF, quiet_seconds=75, timeout=300)
+
+
+# ---------------------------------------------------------------------------
+# The WP7 half of the harness: D7-D10, offline.
+# ---------------------------------------------------------------------------
+def test_the_drills_cover_d1_to_d10():
+    from ops import drills
+
+    assert sorted(drills.DRILLS, key=lambda name: int(name[1:])) == [f"d{n}" for n in range(1, 11)]
+
+
+def test_a_raw_uri_yields_the_five_components_reparse_needs():
+    from ops import drills
+
+    uri = ("s3a://ecommerce-bronze/marketplace/raw/marketplace=tiki/observed_date=2026-10-03/hour=14/"
+           "crawl_run_id=run-7/raw_artifact_id=art-9/body.bin")
+
+    assert drills._raw_artifact_ref(uri) == {"marketplace": "tiki", "observed_date": "2026-10-03", "hour": "14",
+                                             "crawl_run_id": "run-7", "raw_artifact_id": "art-9"}
+
+
+def test_a_raw_uri_missing_a_component_is_an_error_not_a_guess():
+    from ops import drills
+
+    with pytest.raises(drills.DrillFailed, match="raw_artifact_id"):
+        drills._raw_artifact_ref("s3a://b/marketplace=tiki/observed_date=2026-10-03/hour=14/crawl_run_id=r/body.bin")
+
+
+def test_the_planted_audit_row_is_recoverable_by_its_own_key():
+    """D8 deletes exactly the row it planted, by the key the insert returned."""
+    from ops import drills
+
+    captured = []
+    stack = drills.Stack.__new__(drills.Stack)
+    stack.query = lambda sql, params=(): captured.append((" ".join(sql.split()), params)) or [(4242,)]
+
+    attempt_id = stack.insert_mismatched_attempt("run-7", "task-1", AS_OF, parsed_count=7)
+    stack.delete_attempt(attempt_id)
+
+    insert, delete = captured
+    assert "INSERT INTO audit.crawl_request_attempt" in insert[0] and "RETURNING attempt_id" in insert[0]
+    assert insert[1][-1] == drills.DRILL_D8_MARKER
+    assert "DELETE FROM audit.crawl_request_attempt WHERE attempt_id = %s" in delete[0]
+    assert delete[1] == (4242,)
+
+
+def test_the_rejecting_constraint_is_not_valid_so_it_spares_the_served_rows():
+    """Validating it would reject the cache being served, which holds that offer."""
+    from ops import drills
+
+    captured = []
+    stack = drills.Stack.__new__(drills.Stack)
+    stack.query = lambda sql, params=(): captured.append((" ".join(sql.split()), params)) or [(0,)]
+
+    stack.add_rejecting_constraint("offer-1")
+    stack.drop_rejecting_constraint()
+
+    add, drop = captured
+    assert drills.DRILL_D9_CONSTRAINT in add[0] and add[0].rstrip().endswith("NOT VALID")
+    assert add[1] == ("offer-1",)
+    assert f"DROP CONSTRAINT IF EXISTS {drills.DRILL_D9_CONSTRAINT}" in drop[0]
+
+
+def test_a_baseline_refuses_to_start_on_a_leftover_mutation(monkeypatch):
+    """A killed drill has no `finally`; the next one must not measure its mess."""
+    from ops import drills
+
+    stack = drills.Stack.__new__(drills.Stack)
+    monkeypatch.setattr(stack, "validate", lambda: [], raising=False)
+    monkeypatch.setattr(stack, "planted_attempts", lambda: [(4242,)], raising=False)
+    monkeypatch.setattr(stack, "constraint_exists", lambda name: True, raising=False)
+    record = drills.Record("d8")
+
+    with pytest.raises(drills.DrillFailed, match="left the stack mutated"):
+        drills.baseline(stack, record)
+
+    (step,) = record.steps
+    assert step["leftovers"] == ["1 planted audit row(s) from D8", f"constraint {drills.DRILL_D9_CONSTRAINT} from D9"]
+
+
+def test_a_clean_baseline_records_no_leftovers(monkeypatch):
+    from ops import drills
+
+    stack = drills.Stack.__new__(drills.Stack)
+    monkeypatch.setattr(stack, "validate", lambda: [], raising=False)
+    monkeypatch.setattr(stack, "planted_attempts", lambda: [], raising=False)
+    monkeypatch.setattr(stack, "constraint_exists", lambda name: False, raising=False)
+    record = drills.Record("d9")
+
+    drills.baseline(stack, record)
+
+    assert record.steps[0] == {**record.steps[0], "failing": [], "leftovers": []}
+
+
+def test_the_two_concurrent_batches_carry_different_run_ids():
+    """With one id the loser's missing audit row is indistinguishable."""
+    from ops import drills
+
+    stack = drills.Stack.__new__(drills.Stack)
+    command = stack.batch_command("mp-20261003T1500Z-d10", "2026-10-03T15:00:00+00:00")
+
+    assert "--run-id" in command and command[command.index("--run-id") + 1] == "mp-20261003T1500Z-d10"
+    assert "batch-once" in command and "--resume" not in command
+
+
+def test_a_resume_passes_resume_through_to_the_batch():
+    from ops import drills
+
+    stack = drills.Stack.__new__(drills.Stack)
+
+    assert stack.batch_command("mp-1", "2026-10-03T15:00:00+00:00", "--resume")[-1] == "--resume"
