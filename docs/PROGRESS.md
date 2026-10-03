@@ -1875,3 +1875,105 @@ searchable. Commit `d3aa4d5`.
   hoặc `mp up --build`.
 - Chạy drill: `$env:COMPOSE_PROJECT_NAME = "mp-smoke"`, `mp smoke`, rồi
   `mp drill d1` … `d6`. D5 mất khoảng 20 phút vì phải dồn backlog.
+
+## 19. Session 2026-10-04 — Phase 8 WP8 (Kibana): XONG
+
+> **Trạng thái:** index template, projector và hai dashboard **đã cài và chạy
+> thật** trên stack `mp-smoke` đang sống, không phải chỉ viết ra. Thủ tục
+> §11.4 (dựng lại hai index `*-v1` map động) cũng đã chạy một lần có chủ ý.
+> Nhánh `phase-8-wp8-kibana`, rẽ từ `develop` (f8cb533) theo đúng luật không
+> xếp chồng nhánh ở `PHASE_INDEX.md` §3b.
+
+### 19.1 Những gì được thêm
+
+| File | Việc |
+|---|---|
+| `display/kibana/marketplace_index_templates.py` | Sáu composable index template. Tiền là `scaled_float` scaling 1000000 (đúng sáu chữ số thập phân như `decimal(38,6)`), định danh là `keyword`, bốn index của projector là `dynamic: strict` |
+| `ops/es_projector.py` | Loop service (profile `ops`). Bốn nguồn → bốn index, `_id` suy ra từ khóa của chính dòng dữ liệu, cửa sổ overlap, `--once`, `--rebuild` |
+| `display/kibana/marketplace_dashboards.py` | **Sinh** saved object thay vì viết tay JSON. 10 object: 6 data view, 2 saved search, 2 dashboard (5 + 10 panel) |
+| `display/kibana/saved_objects/marketplace_dashboards.ndjson` | Bản export đã commit; test fail nếu nó lệch với builder |
+| `display/kibana/setup_marketplace_kibana.py` | Cài template → tạo index rỗng → xoá vỏ Phase 5 → import `.ndjson` với `overwrite=true` |
+| `display/kibana/create_marketplace_speed_dashboard.py` | Còn lại một lời gọi mỏng vào importer trên (plan §11.3) |
+| `docker-compose.yml` | Thêm `es-projector` (profile `ops`) và `kibana-marketplace-setup` (profile `serve`) |
+
+### 19.2 Chạy thật trên stack `mp-smoke` (2026-10-04)
+
+| Bước | Kết quả |
+|---|---|
+| `kibana-marketplace-setup` | 6 template cài xong, `marketplace-dlq-v1` được tạo rỗng, **10 saved object import thành công**. Chạy lại lần hai: y hệt (idempotent) |
+| `es-projector --once --rebuild` | `source_health 1, crawl_attempts 464, speed_batches 599, dlq 0`. Ba index strict được tạo **từ template**: `dynamic=strict`, 10/18/17 field |
+| `_id` thật | source-health `tiki`; attempt `466`; batch `marketplace-speed-v1:0c9e79a1-…:493` — đúng khóa chính ba thành phần |
+| Loop service | Healthy. Mỗi 30 s một pass; pass nào cũng đọc lại ~30 speed batch trong cửa sổ overlap mà **tổng document không phồng lên** (599 → 609 đúng bằng số batch mới), tức ghi đè idempotent |
+| Đường DLQ | Bắn **một** record không phải JSON vào `marketplace.observations.v1` → silver-sink `QUARANTINE` (stage `DECODE`) → projector index nó với `_id = dlq_…`. `payload_text` **không** được project. Pass sau `dlq: 0`, count vẫn 1 → offset đã commit *sau* khi index |
+| Mười agg đúng bằng mười panel | Đều ra số thật: error_kind `{PARSE_ERROR 12, SERVER_ERROR 4, TRANSIENT_NETWORK 4, PUBLISH_ERROR 3, …}`, http `{200: 454, 500: 4, 429: 2}`, fetch latency p50/p95 = 2540/2996 ms, parsed/rejected = 878/442, micro-batch duration p50/p95 = 10/51 ms, freshness tiki = 8285 s |
+| `mp validate` | **11/11 PASS** sau tất cả những việc trên |
+
+### 19.3 Thủ tục §11.4 — dựng lại hai index `*-v1`, chạy một lần có chủ ý
+
+`marketplace-changes-v1` và `marketplace-offers-current-v1` có từ Phase 5,
+map động, nên `change_type` và `availability` là `text`. Hai panel dựng trên
+chúng **không chạy được**: `Fielddata is disabled`. Template chỉ áp cho index
+tạo *sau* nó, nên phải dựng lại.
+
+Stop `speed` → xoá hai index → `MARKETPLACE_STREAM_CHECKPOINT_VERSION=v2` →
+start `speed`.
+
+**Trước:** 1001 change, 12 offer, `change_type` là `text`.
+**Sau replay:** 1001 change, 12 offer — *đúng cùng bộ document, không thừa
+không thiếu*, nhờ `_id` tất định. `change_type`/`availability` nay là
+`keyword`; `current_value` là keyword kèm sub-field `numeric`
+(`scaled_float`, `ignore_malformed`), nên `avg(current_value.numeric)` trên
+`PRICE_CHANGED` ra 7.313.138 VND, còn giá trị JSON của `NEW_OFFER` bị bỏ qua
+chứ không làm hỏng document.
+
+Đây chính là biến thể replay của drill D5, chạy một lần có chủ ý, và nó chạy
+được là nhờ bản sửa WP2 (batch khóa theo `(query_name, query_id, batch_id)`).
+
+### 19.4 Hai chỗ lệch so với plan, đều có chủ ý
+
+1. **`_id` của speed batch.** Plan §11.2 ghi `query_name:batch_id`. Khóa chính
+   của bảng audit là `(query_name, query_id, batch_id)` từ WP2, vì batch id
+   quay về 0 mỗi khi đổi checkpoint. Bỏ `query_id` khỏi `_id` thì batch 0 của
+   lượt replay sẽ **ghi đè** batch 0 của lượt cũ — đúng con bug WP2 đã sửa,
+   dựng lại ở tầng trên. `_id` ở đây bám đúng khóa chính. (Thủ tục §19.3 bên
+   trên là bằng chứng sống: nếu dùng khóa hai thành phần thì 493 batch của
+   query mới đã xoá sổ lịch sử của query cũ.)
+2. **`payload_text` không được project.** Plan không nói rõ. Trường này giữ
+   tới 1 MiB thân response thô; thân response thuộc về Bronze và topic DLQ,
+   không thuộc một index vận hành (Brief §20, và cũng là luật các bảng audit
+   đang theo). Document vẫn mang đủ toạ độ để tìm lại nó.
+
+### 19.5 Một thứ phải đo mới biết: saved object cần dấu version
+
+Import `.ndjson` lần đầu trả **500**, log Kibana: `Error trying to transform
+document: Cannot read properties of undefined (reading 'layers')`. Nguyên
+nhân: object không mang `typeMigrationVersion`, nên Kibana kéo nó qua **mọi**
+migration từ 7.x, trong đó có migration Lens tiền-8.2 đi tìm
+`datasourceStates.indexpattern` trong khi 8.x dùng `formBased`.
+
+Không đoán số: tạo một object mỗi loại bằng chính API của Kibana 8.18.1 rồi
+export ra đọc ngược. `coreMigrationVersion` `8.8.0`;
+`typeMigrationVersion` `index-pattern` `8.0.0`, `search` `10.5.0`,
+`dashboard` `10.2.0`. Đóng dấu xong thì import 10/10.
+
+Hệ quả: bộ số này gắn với Kibana 8.18.1 mà `docker-compose.yml` đang pin.
+Đổi pin thì phải đo lại — comment trong `marketplace_dashboards.py` nói rõ.
+
+### 19.6 Trạng thái test
+
+- Suite mặc định (`-m "not drill"`, bỏ `test_marketplace_quality.py`):
+  **899 pass, 6 deselected**, 2m36s.
+- `tests/test_marketplace_quality.py` riêng: **42 pass**, 12m03s.
+- **Tổng 941.** Trên `develop` là 868; chênh 73 = 30 test
+  `tests/test_ops_projector.py` + 41 test `tests/test_kibana_marketplace.py`
+  + 2 test compose mới (`es-projector`, `kibana-marketplace-setup`).
+- Drill vẫn bị loại khỏi suite mặc định; nhánh này rẽ từ `develop` nên mới có
+  D1–D6 (6 deselected), D7–D10 về cùng PR WP7.
+
+### 19.7 Việc tiếp theo (resume ở đây)
+
+1. Merge PR WP7 vào `develop`, rồi rebase nhánh này lên `develop` và mở PR WP8.
+2. **WP9:** backup/restore và D11 (plan §12), test 24–26.
+3. **WP10:** viết lại ARCHITECTURE/DATA_MODEL và hoàn thiện RUNBOOK (plan §13).
+4. `.env` trên máy này nay có `MARKETPLACE_STREAM_CHECKPOINT_VERSION=v2` —
+   đừng hạ về `v1`, checkpoint cũ còn đó và sẽ tiếp tục từ offset cũ.
