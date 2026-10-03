@@ -242,6 +242,14 @@ class Stack:
     def query(self, sql: str, params: tuple = ()) -> list[tuple]:
         return self.src.query(sql, params)
 
+    def execute(self, sql: str, params: tuple = ()) -> None:
+        """A statement with no result set. `query` always fetches, and DDL
+        has nothing to fetch, which psycopg2 reports as "no results to fetch"."""
+        from common.postgres import postgres_connection_factory
+
+        with postgres_connection_factory()() as conn, conn.cursor() as cur:
+            cur.execute(sql, params)
+
     def db_now(self) -> datetime:
         (now,), = self.query("SELECT now()")
         return now
@@ -403,11 +411,11 @@ class Stack:
         reverse is ``drop_rejecting_constraint``, called from the drill's
         ``finally``.
         """
-        self.query(f"ALTER TABLE cache.marketplace_offer_current ADD CONSTRAINT {DRILL_D9_CONSTRAINT} "
-                   "CHECK (offer_id <> %s) NOT VALID", (offer_id,))
+        self.execute(f"ALTER TABLE cache.marketplace_offer_current ADD CONSTRAINT {DRILL_D9_CONSTRAINT} "
+                     "CHECK (offer_id <> %s) NOT VALID", (offer_id,))
 
     def drop_rejecting_constraint(self) -> None:
-        self.query(f"ALTER TABLE cache.marketplace_offer_current DROP CONSTRAINT IF EXISTS {DRILL_D9_CONSTRAINT}")
+        self.execute(f"ALTER TABLE cache.marketplace_offer_current DROP CONSTRAINT IF EXISTS {DRILL_D9_CONSTRAINT}")
 
     def constraint_exists(self, name: str) -> bool:
         (count,), = self.query("SELECT count(*) FROM pg_constraint WHERE conname = %s", (name,))
