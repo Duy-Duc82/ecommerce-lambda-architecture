@@ -24,7 +24,7 @@ docker compose --profile serve up -d         # Kibana, Superset
 | `serve` | kibana, superset, superset-init |
 | `legacy` | spark, spark-worker, kibana, kibana-setup |
 | `jobs` | warehouse-job (legacy; `scripts/run_warehouse.ps1`) |
-| `ops` | ops (a `run --rm` tool container) |
+| `ops` | ops (a `run --rm` tool container; `backup`, `restore`, `validate`) |
 | `smoke` | stub-source, the offline Tiki stub |
 
 Operator batch run, for example a resume or a backfill:
@@ -177,6 +177,119 @@ docker volume ls -q --filter "label=com.docker.compose.project=$(docker inspect 
 docker volume rm <the volume that printed>
 .\scripts\mp.ps1 up -With speed
 ```
+
+## Backup and restore (plan section 12)
+
+### What a backup holds, and what it does not
+
+| Store | In the backup | Why |
+|---|---|---|
+| Bronze, all of it | yes | raw truth; nothing can recreate it |
+| Silver, all of it | yes | recreatable only by replaying a Kafka topic whose retention does not keep it |
+| `current.json` and the Gold manifests | yes | the single definition of the serving version |
+| the Gold run `current.json` names | yes | a pointer that does not resolve after a restore is not a pointer |
+| other Gold runs | no | rebuildable from Silver |
+| PostgreSQL `audit` and `cache` | yes, `pg_dump -Fc` per schema | run history, quality evidence, crawl audit, frontier |
+| Kafka, Elasticsearch, Redis, speed checkpoints | **no** | derived or transient; they refill from new crawls |
+| adapter versions and fixtures | already in git | Brief section 20 |
+
+### Taking one
+
+```powershell
+.\scripts\mp.ps1 backup
+# or, inside the ops container:
+docker compose --profile ops run --rm --no-deps ops python -m ops backup
+docker compose --profile ops run --rm --no-deps ops python -m ops backups   # list
+```
+
+It lands in `data/ops/backups/bk-<UTC timestamp>/`, which both Compose
+projects can see because `./data/ops` is bind-mounted at `/reports`.
+
+The backup holds the **batch advisory lock** for its whole duration. Not to
+freeze Bronze and Silver — they are append-only, so a copy taken seconds early
+is older, never torn — but so no batch can promote a new pointer between
+reading `current.json` and dumping the cache that must agree with it. That is
+also why `pg_dump` runs inside the ops container rather than from the host: a
+session lock belongs to the session that took it.
+
+`pg_dump` and `pg_restore` are **pinned to major 18** in
+`docker/marketplace-python/Dockerfile`, matching the pinned `postgres:18.3`.
+pg_dump refuses a server newer than itself, and Debian's own client is 17.
+Change the two pins together.
+
+**A backup is refused, before anything is copied, when the pointer's `run_id`
+and `audit.marketplace_cache_version.run_id` differ.** A backup of the two
+disagreeing restores into a state `validate` rejects, so it is not worth the
+bytes. Both run IDs go into `backup-manifest.json`, with every copied object's
+path, size and SHA-256, the per-zone counts, and the tool versions.
+
+### Restoring
+
+Restore into a **separate Compose project with fresh volumes**. Never over the
+running stack: `mp restore` refuses the current project by name, and refuses
+to start at all while any project is up, because the fixed `container_name`s
+would collide.
+
+```powershell
+.\scripts\mp.ps1 down                       # the fixed container names are global
+.\scripts\mp.ps1 restore -BackupId bk-20261003T192610Z -Project mp-restore
+```
+
+What it does, in this order:
+
+1. brings up the core of `-Project` and migrates it;
+2. **verifies every SHA-256 before writing anything.** One changed byte, one
+   missing file, and nothing at all is written — a half-restored stack is
+   worse than an untouched one, because it looks restored;
+3. `pg_restore`s `audit` then `cache`;
+4. writes every lake object, with **`current.json` last**. A pointer that
+   arrives before the data it names is a window in which the stack is
+   confidently serving nothing;
+5. runs three checks: the restored pointer equals the restored cache version;
+   every dataset the pointer names exists with its manifest row count;
+   `crawler.reparse` on a deterministic sample of restored raw artifacts
+   returns `IDENTICAL`;
+6. runs a **quality-only batch** at the pointer's `as_of` under a new run ID,
+   over the restored Silver and audit. Its row counts are reported next to
+   the pointer's but **not asserted equal**: the `as_of` cut excludes
+   observations made after the pointer's window, yet a row observed inside it
+   that landed late in Silver legitimately changes a rebuild (`PHASE_7`
+   section 13). An exact-count check would fail on correct data;
+7. runs `ops validate --restored`.
+
+Then remove it:
+
+```powershell
+docker compose -f docker-compose.yml -p mp-restore --profile * down --volumes
+```
+
+### Why `validate --restored` exists
+
+Three `validate` checks must fail on a freshly restored stack, and only these
+three:
+
+| Check | Why it fails |
+|---|---|
+| `es_changes_unique` | Elasticsearch is not backed up; nothing has streamed yet |
+| `redis_offer_state_present` | Redis is not backed up, same reason |
+| `kafka_to_silver_lag` | the broker is new, so the Silver consumer group has never existed; asking for its offsets raises `GroupCoordinatorNotAvailableError` |
+
+`--restored` tolerates exactly those and fails on a fourth. Plain `validate`
+on a restored stack reports `passed: false`, correctly — the stack really is
+missing its derived stores until it crawls again.
+
+### Which raw artifacts the reparse check samples
+
+Only attempts with `error_kind IS NULL AND parsed_count > 0`.
+
+An attempt that parsed nothing into the pipeline has a raw body in Bronze and
+no Silver row **by design** — drill D2 makes exactly that, with Kafka down —
+so reparsing it reports `NEW_OBSERVATIONS`, correctly. And `parsed_count` is
+the *acknowledged* count, so a partial publish also leaves observations Silver
+will never have; the audit cannot tell a partial publish from a complete one
+by count alone, but a partial one is always `FAILED` with an `error_kind`.
+Sampling either would fail a perfectly faithful restore — which is how this
+was found, on 2026-10-04.
 
 ## Image pins (plan section 5.3)
 
