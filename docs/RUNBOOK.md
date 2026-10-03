@@ -94,7 +94,7 @@ On a stack that also holds host-run crawls with a `local` lake,
 `bronze_present` fails: those attempts recorded `file:///D:/...` raw URIs that
 no container can read (`PROGRESS.md` §16.4).
 
-### Drills D1-D6 (plan section 10)
+### Drills D1-D10 (plan section 10)
 
 A drill injects one fault into the **running** stack, asserts what the system
 does while faulted, removes the fault and checks the system came back. It runs
@@ -103,8 +103,8 @@ on the host, not in the `ops` container, because it drives Docker:
 ```powershell
 $env:COMPOSE_PROJECT_NAME = "mp-smoke"
 .\scripts\mp.ps1 smoke            # a drill starts from a passing validate
-.\scripts\mp.ps1 drill d1         # then d2 ... d6, one at a time
-.\scripts\mp.ps1 drill all        # or all six in order
+.\scripts\mp.ps1 drill d1         # then d2 ... d10, one at a time
+.\scripts\mp.ps1 drill all        # or all ten in order
 ```
 
 `mp drill` runs `.venv\Scripts\python.exe -m ops.drills` with
@@ -120,6 +120,16 @@ timestamp, the observations, and `passed`.
 | D4 | `compose stop elasticsearch`, then `redis` | `compose up -d <service>` |
 | D5 | SIGKILL the speed container inside a micro-batch; then delete this project's `speed_checkpoints` volume | the restart policy brings `speed` back; the second variant replays from `earliest` |
 | D6 | SIGKILL crawl-worker A while it holds leases | start worker B under a second `CRAWL_SERVICE_WORKER_ID` |
+| D7 | stub mode `drift` | stub mode `ok` |
+| D8 | one planted row in `audit.crawl_request_attempt` whose `parsed_count` Silver denies | delete that row by the `attempt_id` the insert returned, then resume the same run |
+| D9 | `CHECK` constraint `drill_d9_reject_one_cache_row` on `cache.marketplace_offer_current`, `NOT VALID` | `DROP CONSTRAINT`, then resume the same run |
+| D10 | two `batch-once` containers started at once under different run ids | none needed; the refused one did nothing |
+
+**D10 publishes under a run id ending `-d10`.** The two racing batches carry
+different run ids on purpose: with one id, "the refused run wrote no audit
+row" cannot be told from the winner's row. Whichever takes the lock publishes,
+so the pointer may afterwards name `mp-<stamp>Z-d10`. Nothing parses a run id,
+so this is cosmetic; the next scheduled batch moves the pointer on again.
 
 **D5 takes about twenty minutes**, and most of that is deliberate. A
 micro-batch's audit row is open only while the sinks are written — 10 ms for
@@ -135,7 +145,23 @@ Rules the drill code keeps, and so must anyone adding one:
 - **Inject only through Compose, the stub's mode endpoint, or one documented
   SQL statement whose reverse is in the same drill.** Never edit a data file
   by hand, and never leave a SQL mutation behind: it is undone in the same
-  drill, pass or fail.
+  drill, pass or fail. Only two drills mutate anything, and each undoes its
+  own in a `finally`, so a drill that fails mid-way still cleans up:
+
+  | Drill | Mutation | Reverse |
+  |---|---|---|
+  | D8 | one `INSERT` into `audit.crawl_request_attempt`, carrying the marker `drill-d8 planted mismatch` and returning its `attempt_id` | `DELETE ... WHERE attempt_id = <that id>` — never a `WHERE` that could match a real row |
+  | D9 | `ALTER TABLE cache.marketplace_offer_current ADD CONSTRAINT drill_d9_reject_one_cache_row ... NOT VALID` | `DROP CONSTRAINT IF EXISTS` the same name |
+
+  A killed process has no `finally`, so the **baseline refuses to start** when
+  it finds either leftover and names what to remove. To clear one by hand:
+
+  ```powershell
+  docker compose -f docker-compose.yml exec postgres-dw psql -U admin -d data_warehouse -c `
+    "DELETE FROM audit.crawl_request_attempt WHERE error_message LIKE 'drill-d8 planted mismatch%';"
+  docker compose -f docker-compose.yml exec postgres-dw psql -U admin -d data_warehouse -c `
+    "ALTER TABLE cache.marketplace_offer_current DROP CONSTRAINT IF EXISTS drill_d9_reject_one_cache_row;"
+  ```
 - **Everything removed is scoped to the current Compose project.** D5 filters
   volumes by `label=com.docker.compose.project=<project>`; a bare
   `--filter name=speed_checkpoints` would also match another project's stack
