@@ -318,7 +318,7 @@ def test_parking_disables_every_pending_smoke_task_and_only_those():
     assert parked == 6
 
 
-def test_activating_reenables_parked_smoke_tasks_now():
+def test_activating_reenables_parked_and_failed_smoke_tasks_now():
     log = []
 
     smoke.activate(lambda: RecordingConnection(log))
@@ -326,7 +326,8 @@ def test_activating_reenables_parked_smoke_tasks_now():
     (sql, params), = log
     assert sql.startswith("UPDATE audit.crawl_frontier SET status = 'READY'")
     assert "scheduled_for = now()" in sql
-    assert "status = 'DISABLED'" in sql
+    assert "attempts = 0" in sql
+    assert "status IN ('DISABLED', 'FAILED')" in sql
     assert params[0] == smoke.smoke_targets()
 
 
