@@ -94,6 +94,73 @@ On a stack that also holds host-run crawls with a `local` lake,
 `bronze_present` fails: those attempts recorded `file:///D:/...` raw URIs that
 no container can read (`PROGRESS.md` §16.4).
 
+### Drills D1-D6 (plan section 10)
+
+A drill injects one fault into the **running** stack, asserts what the system
+does while faulted, removes the fault and checks the system came back. It runs
+on the host, not in the `ops` container, because it drives Docker:
+
+```powershell
+$env:COMPOSE_PROJECT_NAME = "mp-smoke"
+.\scripts\mp.ps1 smoke            # a drill starts from a passing validate
+.\scripts\mp.ps1 drill d1         # then d2 ... d6, one at a time
+.\scripts\mp.ps1 drill all        # or all six in order
+```
+
+`mp drill` runs `.venv\Scripts\python.exe -m ops.drills` with
+`DATA_LAKE_PROFILE=minio`, so the host `.env` must publish the stack's ports.
+Each drill writes `data/ops/drills/<name>.json`: every step with its
+timestamp, the observations, and `passed`.
+
+| Drill | Inject | Recovery |
+|---|---|---|
+| D1 | stub mode `429`, `500`, `timeout` | stub mode `ok` |
+| D2 | `compose stop kafka` mid-crawl | `compose up -d kafka` |
+| D3 | `compose stop minio` under the Silver sink | `compose up -d minio` |
+| D4 | `compose stop elasticsearch`, then `redis` | `compose up -d <service>` |
+| D5 | SIGKILL the speed container inside a micro-batch; then delete this project's `speed_checkpoints` volume | the restart policy brings `speed` back; the second variant replays from `earliest` |
+| D6 | SIGKILL crawl-worker A while it holds leases | start worker B under a second `CRAWL_SERVICE_WORKER_ID` |
+
+**D5 takes about twenty minutes**, and most of that is deliberate. A
+micro-batch's audit row is open only while the sinks are written — 10 ms for
+an empty batch, 28-90 ms for one crawl cycle — and a `docker kill` needs
+~220 ms to land, so the drill stops the query and lets the crawler build a
+Kafka backlog first. The batch that drains it is long enough to be killed
+inside, and the proof that the kill landed there is the audit row left
+`RUNNING` with no `completed_at`. A terminal status there fails the drill
+rather than passing it quietly.
+
+Rules the drill code keeps, and so must anyone adding one:
+
+- **Inject only through Compose, the stub's mode endpoint, or one documented
+  SQL statement whose reverse is in the same drill.** Never edit a data file
+  by hand, and never leave a SQL mutation behind: it is undone in the same
+  drill, pass or fail.
+- **Everything removed is scoped to the current Compose project.** D5 filters
+  volumes by `label=com.docker.compose.project=<project>`; a bare
+  `--filter name=speed_checkpoints` would also match another project's stack
+  on the same machine.
+- **A drill that cannot reach its baseline fails.** It never "skips green".
+- D6 clears the container's restart policy (`docker update --restart no`)
+  before killing worker A, because the five long-running services carry
+  `restart: unless-stopped` and Docker would otherwise bring A straight back.
+
+**When a drill fails.** However it ends, `run()` restores the stack: it starts
+every service it stopped, puts the stub back in `ok`, parks the smoke tasks,
+waits for the Silver sink to catch up and then waits for `validate` to pass.
+A drill is only recorded as passed if that restore also passed, so `drill all`
+cannot cascade. If the restore itself fails, the record says
+`restore_failed` and the stack needs a look before the next drill:
+
+```powershell
+.\scripts\mp.ps1 status
+.\scripts\mp.ps1 validate -Json validate.json   # which check is red
+docker compose -f docker-compose.yml --profile "*" up -d
+```
+
+A drill that reveals a production bug gets a failing unit test and a fix, in
+two commits, before it is marked passing.
+
 ### Kafka lost its topics
 
 Kafka keeps its log on the `kafka_data` volume, so recreating the container
@@ -103,7 +170,11 @@ the new topics never had. The changes it projected are rebuildable, so:
 
 ```powershell
 docker compose -f docker-compose.yml --profile speed rm -sf speed
-docker volume rm ecommerce-lambda-architecture_speed_checkpoints
+# Compose prefixes the volume with the project name, which is the directory
+# unless COMPOSE_PROJECT_NAME says otherwise -- so ask Docker rather than
+# guessing, or another project's checkpoints are one typo away.
+docker volume ls -q --filter "label=com.docker.compose.project=$(docker inspect kafka -f '{{index .Config.Labels \"com.docker.compose.project\"}}')" --filter name=speed_checkpoints
+docker volume rm <the volume that printed>
 .\scripts\mp.ps1 up -With speed
 ```
 

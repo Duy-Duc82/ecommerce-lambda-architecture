@@ -59,11 +59,17 @@ def park(connection_factory) -> int:
 
 
 def activate(connection_factory) -> int:
-    """Re-enable parked smoke tasks, due now; return how many."""
+    """Re-enable parked or failed smoke tasks, due now and with fresh attempts; return how many.
+
+    FAILED too: a drill can exhaust a made-up task on purpose (or, as D1 once
+    did, through a bug), and a terminal smoke task would leave every later
+    smoke or drill with nothing to crawl. Only the smoke universe is touched.
+    """
     with connection_factory() as conn, conn.cursor() as cur:
         cur.execute(
-            "UPDATE audit.crawl_frontier SET status = 'READY', scheduled_for = now(), updated_at = now() "
-            "WHERE marketplace_code = 'tiki' AND target = ANY(%s) AND status = 'DISABLED'",
+            "UPDATE audit.crawl_frontier SET status = 'READY', scheduled_for = now(), attempts = 0, "
+            "last_error_kind = NULL, last_error = NULL, last_http_status = NULL, updated_at = now() "
+            "WHERE marketplace_code = 'tiki' AND target = ANY(%s) AND status IN ('DISABLED', 'FAILED')",
             (smoke_targets(),))
         return cur.rowcount
 

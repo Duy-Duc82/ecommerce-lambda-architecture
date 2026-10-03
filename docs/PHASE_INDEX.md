@@ -111,14 +111,17 @@ Phase 5/6 chỉ nằm ở ngọn một nhánh feature, không có ở commit g�
 | 5 | 5 | ✅ trong `develop` | đủ 38/38 item |
 | 6 | 6 | ✅ trong `develop` | **47/47 item** |
 | 7 | 7 | ✅ trong `develop` (PR #4); bản sửa cắt `as_of` trên `phase-7-asof-cutoff` | **61/61 item** |
-| 8 | 8 | 🔵 WP1–WP4 trong `develop` (PR #7–#10); WP5 trên `phase-8-wp5-stub-ops-cli`; WP6–WP10 chưa làm | P1-12, Kibana (P1-11) |
+| 8 | 8 | 🔵 WP1–WP5 trong `develop` (PR #7–#11); **WP6 xong** — D1–D6 chạy thật và pass hết, bằng chứng ở `data/ops/drills/`, PR #12 đang chờ review (`PROGRESS.md` §17); WP7–WP10 chưa làm | P1-12, Kibana (P1-11) |
 | 9 | 9 | ⏳ chưa bắt đầu | P2-* |
 
 **Phase 1–7 đã xong** và nằm trong `develop`. Phase 7 (P1-08 quality gates,
 P1-09 gold publish manifest) merge qua PR #4 ngày 2026-09-30. Bản sửa sau
 merge — run đọc Silver và audit *tại* `as_of`, gate 8 có cửa sổ đối soát — nằm
 trên `phase-7-asof-cutoff`, chi tiết ở `PROGRESS.md` §11.
-Suite: **841 pass, 0 fail, 0 skip** trên nhánh WP5 (`PROGRESS.md` §16.6; sau Phase 7 là 674, trước Phase 7 là 519).
+Suite: **868 pass, 0 fail, 0 skip** trên nhánh WP6, Python 3.12.13 + pyspark
+4.0.4 (`PROGRESS.md` §17.6; trên nhánh WP5 là 841, sau Phase 7 là 674, trước
+Phase 7 là 519). Sáu drill D1–D6 nằm ngoài con số đó: marker `drill` bị loại
+khỏi suite mặc định vì chúng cần stack đang chạy.
 `master` vẫn chưa nhận phase nào: chờ thầy hướng dẫn duyệt `develop`.
 
 **Phase 4/5 chưa từng chạy như dịch vụ.** Hai phase này ✅ ở mức code và test,
@@ -146,32 +149,41 @@ hai đã sửa trên nhánh Phase 7 (commit test riêng, commit fix riêng):
   plan Phase 7 tự mâu thuẫn — §13 đòi giữ con trỏ, §14 bước 11 bảo promote
   trước; §14 đã được sửa.
 
-## 5b. Ba hạn chế môi trường, để lại cho Phase 8
+## 5b. Ba hạn chế môi trường, để lại cho Phase 8 — kiểm lại 2026-10-03
 
-Phát hiện khi chạy thật, chưa sửa, đều nằm ngoài phạm vi Phase 7:
+Phát hiện khi chạy thật ở Phase 7, đều nằm ngoài phạm vi phase đó. Trạng thái
+sau khi Phase 8 WP1–WP6 chạy thật:
 
-1. **Spark không truy cập được filesystem trên Windows host** — thiếu
+1. **🔴 CÒN. Spark không truy cập được filesystem trên Windows host** — thiếu
    `winutils.exe`/`hadoop.dll`, ném `UnsatisfiedLinkError:
-   NativeIO$Windows.access0`. Mọi lần chạy thật phải trong container Linux.
-   Đây là lý do item 33–35 và 43 treo từ Phase 6; unit test không lộ vì chúng
-   chỉ dùng `createDataFrame` trong bộ nhớ.
-2. **`build_spark()` của marketplace job không gọi `spark_hadoop_options()`** —
-   chỉ `warehouse_job.py` legacy gọi. Job này do đó không có credential S3A và
-   **đường `s3a://` chưa từng được kiểm chứng lần nào**. Lần chạy 2026-10-01
-   dùng lake `file://`.
-3. **`docker/spark-warehouse/Dockerfile` pin `apache/spark:3.5.1`** — mâu thuẫn
-   với ràng buộc pyspark 4.x ở §6, và chỉ có entrypoint cho `warehouse_job.py`
-   legacy.
+   NativeIO$Windows.access0`. Kiểm lại 2026-10-03 trên Python 3.12.13 +
+   pyspark 4.0.4 + Java 21: ghi parquet ra ổ Windows **vẫn hỏng y nguyên**.
+   Điều *đã* đổi là DataFrame trong bộ nhớ chạy được (`createDataFrame` →
+   `collect`), nên test gắn `requires_spark` không còn skip; đó là lý do suite
+   nhảy từ 841 lên 868. Mọi job Spark có I/O vẫn phải chạy trong container
+   Linux. Đây vẫn là lý do item 33–35 và 43 treo từ Phase 6.
+2. **🟢 XONG. `build_spark()` của marketplace job nay có `spark_hadoop_options()`**
+   — `batch_layer/marketplace_warehouse.py:117`. Đường `s3a://` **đã được kiểm
+   chứng thật** trong Phase 8: cả WP6 (smoke + D1–D6) chạy với
+   `DATA_LAKE_PROFILE=minio`, Bronze/Silver/Gold trên MinIO, và check
+   `pointer_gold_exists` của `ops validate` đọc footer parquet Gold qua s3a để
+   đối chiếu row count. Không còn là đường chưa ai đi.
+3. **🟡 CÒN, nhưng là legacy có chủ ý. `docker/spark-warehouse/Dockerfile` pin
+   `apache/spark:3.5.1`** — image này chỉ phục vụ `warehouse_job.py` của demo
+   Kaggle cũ (profile `legacy`/`jobs`). Nhánh marketplace dùng image riêng
+   `ecommerce/spark-marketplace:4.0.1` (`docker/spark-marketplace/Dockerfile`,
+   khớp pyspark 4.0.4). Hai image tồn tại song song là đúng ý; chỉ cần nhớ
+   `3.5.1` không áp cho marketplace.
 
-Hệ quả: Compose profile và one-command smoke của Phase 8 phải dựng đường chạy
-Linux cho marketplace batch, và muốn dùng MinIO thì phải nối
-`spark_hadoop_options()` vào `build_spark()` trước.
-
-Điều này cũng giải thích **"offline smoke với `--skip-postgres`"** mà plan
-Phase 6 §16 và Phase 7 §18 mô tả: smoke đó không chạy được, vì
-`read_crawl_audit()` được gọi vô điều kiện (hai mart coverage/reliability bắt
-buộc cần bằng chứng audit qua JDBC) còn `--skip-postgres` chỉ bỏ qua publish.
-Sửa chỗ này thuộc Phase 8.
+**"Offline smoke với `--skip-postgres`"** mà plan Phase 6 §16 và Phase 7 §18
+mô tả: **vẫn chưa chạy được, và đã bị thay thế**. `read_crawl_audit()` vẫn
+được gọi vô điều kiện (`marketplace_warehouse.py:268`) vì hai mart
+coverage/reliability bắt buộc cần bằng chứng audit qua JDBC, còn
+`--skip-postgres` chỉ bỏ qua bước publish. Phase 8 không sửa chỗ này mà đi
+đường khác: `mp smoke` (WP5) chạy nguyên lát cắt trên stack thật với
+`stub-source` thay Tiki, nên không cần một smoke không-PostgreSQL nữa. Nếu
+sau này vẫn muốn nó, việc cần làm là cho hai mart đó đường đọc audit từ lake
+thay vì JDBC.
 
 Các nhánh cũ `phase-1-marketplace-foundation`, `phase-3-4-scheduler-kafka-silver`,
 `phase-5-6-speed-gold` có trước mô hình `develop`; giữ làm lịch sử, công việc

@@ -1,0 +1,742 @@
+"""Failure drills against the live stack — Phase 8 plan section 10 (P1-12).
+
+Every drill has the same shape:
+
+    baseline  validate passes
+    inject    one fault, through Compose (stop, kill, start) or the stub's mode
+    observe   the system's state while faulted, asserted
+    recover   remove the fault; no manual data repair
+    verify    validate passes again, plus the drill's own invariant
+
+A drill writes a JSON record of those steps, with timestamps, to
+``data/ops/drills/<name>.json``: Phase 9's evidence input. Whatever happens,
+it restores the stack to a passing ``validate`` before it returns, so
+``drill all`` cannot cascade, and a drill that cannot reach its baseline fails.
+
+Drills run on the host, not in the ``ops`` container: they need Docker. They
+reach the stack through its published ports, so ``DATA_LAKE_PROFILE=minio``
+and the host-side endpoints in ``.env`` must be in effect (``mp drill`` sets
+the profile). The crawl universe is the smoke's (``ops.smoke``): drills
+re-enable those made-up targets, point the crawler at the stub and park the
+targets again when done. Nothing here contacts the live marketplace.
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import subprocess
+import sys
+import time
+from dataclasses import dataclass, field
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+from typing import Any, Callable, Iterable
+
+ROOT = Path(__file__).resolve().parents[1]
+RECORDS = ROOT / "data" / "ops" / "drills"
+COMPOSE = ["docker", "compose", "-f", str(ROOT / "docker-compose.yml")]
+STUB_URL = "http://stub-source:8000/api/personalish/v1/blocks/listings"
+# The crawler under drill: the stub, a one-minute cadence, and short retry,
+# circuit and lease timings so a drill observes them in minutes, not hours.
+CRAWL_ENV = {
+    "TIKI_LISTING_URL": STUB_URL,
+    "CRAWL_ACTIVE_CADENCE_MINUTES": "1",
+    "CRAWL_RETRY_BASE_SECONDS": "2",
+    "CRAWL_RETRY_MAX_SECONDS": "10",
+    "CRAWL_CIRCUIT_OPEN_SECONDS": "30",
+    "CRAWL_LEASE_SECONDS": "30",
+    "CRAWL_SERVICE_WORKER_ID": "drill-a",
+}
+BATCH_SETTLE_SECONDS = 60
+SERVICES = ("stub-source", "silver-sink", "speed", "batch-scheduler")
+
+# D5 has to kill the speed container *inside* a micro-batch. The batch's
+# audit row is open only while the sinks are written, which on this stack is
+# 10 ms for an empty batch and 90 ms for one crawl cycle, while a host-side
+# `docker kill` needs about 220 ms to land. Killing inside a batch of that
+# size is therefore luck, and a drill decided by luck is not evidence.
+#
+# So the drill makes the window instead of hunting for it: it stops the query,
+# lets the crawler build a Kafka backlog, and kills inside the single batch
+# that drains it. There is no `maxOffsetsPerTrigger`, so that batch is the
+# whole backlog at once; 60 observations measured 268 ms, and the floor below
+# leaves room for a slower machine as well as for the kill.
+#
+# Killing from inside the container is not an option: PID 1 *is* the driver,
+# and Linux drops a default-action signal sent to a PID namespace's init from
+# within that namespace, so `os.kill(1, 9)` there is silently ignored.
+MID_BATCH_MIN_BACKLOG = 150
+MID_BATCH_BACKLOG_TIMEOUT = 1500
+MID_BATCH_POLL_SECONDS = 0.01
+
+
+class DrillFailed(AssertionError):
+    pass
+
+
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+@dataclass
+class Record:
+    name: str
+    steps: list[dict] = field(default_factory=list)
+    passed: bool = False
+    error: str | None = None
+
+    def step(self, kind: str, **detail: Any) -> None:
+        self.steps.append({"step": kind, "at": _now(), **detail})
+        print(json.dumps({"drill": self.name, "step": kind, **detail}, default=str), flush=True)
+
+    def write(self) -> Path:
+        RECORDS.mkdir(parents=True, exist_ok=True)
+        path = RECORDS / f"{self.name}.json"
+        path.write_text(json.dumps({"drill": self.name, "passed": self.passed, "error": self.error, "steps": self.steps},
+                                   indent=2, sort_keys=True, default=str) + "\n", encoding="utf-8")
+        return path
+
+
+def wait_until(check: Callable[[], tuple[bool, Any]], *, timeout: float, what: str, poll: float = 5) -> Any:
+    """Poll ``check`` until it reports success; return its observation, or raise."""
+    deadline = time.monotonic() + timeout
+    observed = None
+    while True:
+        ok, observed = check()
+        if ok:
+            return observed
+        if time.monotonic() >= deadline:
+            raise DrillFailed(f"timed out after {timeout:.0f}s waiting for {what}; last observed {observed}")
+        time.sleep(poll)
+
+
+class Stack:
+    """Compose, the stub's mode endpoint, and read-only queries; nothing else."""
+
+    def __init__(self) -> None:
+        from ops.validate import LiveSources
+
+        self.src = LiveSources()
+
+    # -- Docker --
+    @staticmethod
+    def run(args: list[str], *, env: dict | None = None, check: bool = True) -> subprocess.CompletedProcess:
+        result = subprocess.run(args, cwd=ROOT, capture_output=True, text=True,
+                                env={**os.environ, **(env or {})})
+        if check and result.returncode != 0:
+            raise DrillFailed(f"{' '.join(args)} failed ({result.returncode}): {result.stderr.strip()[-500:]}")
+        return result
+
+    def up(self, *services: str, env: dict | None = None) -> None:
+        self.run(COMPOSE + ["--profile", "*", "up", "-d", "--no-deps", *services], env=env)
+
+    def stop(self, *services: str) -> None:
+        self.run(COMPOSE + ["--profile", "*", "stop", *services])
+
+    def kill(self, container: str, *, stays_dead: bool = False) -> None:
+        """SIGKILL. The long-running services carry `restart: unless-stopped`,
+        so Docker brings a killed one straight back; ``stays_dead`` clears that
+        policy first, for a drill whose premise is a process that is gone."""
+        if stays_dead:
+            self.run(["docker", "update", "--restart", "no", container])
+        self.run(["docker", "kill", container])
+
+    def project(self) -> str:
+        """This Compose project's name. A drill never touches another project's
+        containers or volumes, so everything it removes is filtered by this."""
+        cached = getattr(self, "_project", None)
+        if cached:
+            return cached
+        label = '{{index .Config.Labels "com.docker.compose.project"}}'
+        for container in ("speed", "minio", "postgres-dw", "kafka"):
+            result = self.run(["docker", "inspect", "-f", label, container], check=False)
+            name = result.stdout.strip()
+            if result.returncode == 0 and name and name != "<no value>":
+                self._project = name
+                return name
+        # No container of this project is up: fall back to how Compose would
+        # name it — the environment override, else the directory.
+        self._project = os.environ.get("COMPOSE_PROJECT_NAME", "").strip() or ROOT.name.lower()
+        return self._project
+
+    def project_volumes(self, name_contains: str) -> list[str]:
+        return self.run(["docker", "volume", "ls", "-q",
+                         "--filter", f"label=com.docker.compose.project={self.project()}",
+                         "--filter", f"name={name_contains}"]).stdout.split()
+
+    def container_started_at(self, container: str) -> str:
+        result = self.run(["docker", "inspect", "-f", "{{.State.StartedAt}}", container], check=False)
+        return result.stdout.strip() if result.returncode == 0 else "absent"
+
+    def kill_when_batch_opens(self, since: datetime, *, timeout: float = 420) -> tuple[str, int]:
+        """Wait for a micro-batch to open, then SIGKILL the container inside it.
+
+        ``begin_batch`` inserts the row ``RUNNING`` before the sinks are
+        written and only updates it afterwards, so the row is open for exactly
+        as long as the batch's side effects take. The poll holds one
+        connection open — about 2 ms a turn against the 20 ms a fresh one
+        costs — because every millisecond here comes off the margin the kill
+        itself needs. Returns the batch it aimed at; whether the kill actually
+        landed inside it is decided afterwards, by the audit row.
+        """
+        from common.postgres import postgres_connection_factory
+
+        deadline = time.monotonic() + timeout
+        # One connection, held open for the whole poll: the factory hands out
+        # a context manager, and its transaction is what keeps each read from
+        # paying a fresh connection's 20 ms.
+        with postgres_connection_factory()() as connection, connection.cursor() as cur:
+            connection.autocommit = True
+            while True:
+                cur.execute("SELECT query_id, batch_id FROM audit.marketplace_speed_batch "
+                            "WHERE status = 'RUNNING' AND started_at >= %s ORDER BY started_at DESC LIMIT 1",
+                            (since,))
+                row = cur.fetchone()
+                if row:
+                    self.kill("speed")
+                    return row[0], row[1]
+                if time.monotonic() >= deadline:
+                    raise DrillFailed(f"no micro-batch opened within {timeout:.0f}s; there was nothing to kill inside")
+                time.sleep(MID_BATCH_POLL_SECONDS)
+
+    def observations_published_since(self, since: datetime) -> int:
+        """Observations the crawler acknowledged to Kafka — the speed backlog."""
+        from ops.smoke import smoke_targets
+
+        (total,), = self.query(
+            "SELECT coalesce(sum(a.parsed_count), 0) FROM audit.crawl_request_attempt a "
+            "JOIN audit.crawl_frontier f USING (task_id) "
+            "WHERE f.marketplace_code = 'tiki' AND f.target = ANY(%s) AND a.completed_at >= %s "
+            "AND a.status IN ('SUCCEEDED', 'PARTIAL')", (smoke_targets(), since))
+        return int(total)
+
+    def stranded_speed_batches(self, since: datetime, *, stale_seconds: int) -> list[tuple]:
+        """Micro-batches still RUNNING long after anything live would have settled."""
+        return self.query(
+            "SELECT query_id, batch_id, status, input_rows, change_rows, started_at FROM audit.marketplace_speed_batch "
+            "WHERE started_at >= %s AND status = 'RUNNING' AND started_at < now() - %s * interval '1 second' "
+            "ORDER BY started_at", (since, stale_seconds))
+
+    def status(self, container: str) -> str:
+        result = self.run(["docker", "inspect", "-f", "{{.State.Status}}/{{if .State.Health}}{{.State.Health.Status}}{{end}}", container],
+                          check=False)
+        return result.stdout.strip() if result.returncode == 0 else "absent"
+
+    def wait_healthy(self, container: str, timeout: float = 180) -> None:
+        wait_until(lambda: (self.status(container).endswith("/healthy"), self.status(container)),
+                   timeout=timeout, what=f"{container} healthy", poll=3)
+
+    def stub_mode(self, mode: str) -> None:
+        code = ("import urllib.request,sys; urllib.request.urlopen(urllib.request.Request("
+                "'http://localhost:8000/_stub/mode', data=sys.argv[1].encode()), timeout=10)")
+        self.run(["docker", "exec", "stub-source", "python", "-c", code, mode])
+
+    # -- PostgreSQL and the lake --
+    def query(self, sql: str, params: tuple = ()) -> list[tuple]:
+        return self.src.query(sql, params)
+
+    def db_now(self) -> datetime:
+        (now,), = self.query("SELECT now()")
+        return now
+
+    def activate(self) -> int:
+        from common.postgres import postgres_connection_factory
+        from ops.smoke import activate
+
+        return activate(postgres_connection_factory())
+
+    def park(self) -> int:
+        from common.postgres import postgres_connection_factory
+        from ops.smoke import park
+
+        return park(postgres_connection_factory())
+
+    def start_crawler(self, **overrides: str) -> None:
+        self.activate()
+        self.up("crawl-worker", env={**CRAWL_ENV, **overrides})
+
+    def stop_crawler(self) -> None:
+        self.stop("crawl-worker")
+        self.park()
+
+    def attempts_since(self, since: datetime) -> list[tuple]:
+        """(task_id, status, error_kind, parsed_count, raw_uri, started_at, completed_at, target) of smoke attempts."""
+        from ops.smoke import smoke_targets
+
+        return self.query(
+            "SELECT a.task_id, a.status, a.error_kind, a.parsed_count, a.raw_uri, a.started_at, a.completed_at, f.target "
+            "FROM audit.crawl_request_attempt a JOIN audit.crawl_frontier f USING (task_id) "
+            "WHERE f.marketplace_code = 'tiki' AND f.target = ANY(%s) AND a.started_at >= %s ORDER BY a.started_at",
+            (smoke_targets(), since))
+
+    def every_target_succeeded_since(self, since: datetime) -> tuple[bool, Any]:
+        from ops.smoke import smoke_targets
+
+        done = {row[7] for row in self.attempts_since(since) if row[1] in ("SUCCEEDED", "PARTIAL")}
+        return set(smoke_targets()) <= done, sorted(done)
+
+    def quiet(self, timeout: float = 240) -> None:
+        from ops.smoke import wait_for_quiet
+
+        if not wait_for_quiet(self.src, timeout_seconds=timeout, log=lambda line: None):
+            raise DrillFailed("the Silver sink did not catch up")
+
+    def speed_batches_since(self, since: datetime) -> list[tuple]:
+        return self.query("SELECT query_id, batch_id, status, input_rows, change_rows, started_at "
+                          "FROM audit.marketplace_speed_batch WHERE started_at >= %s ORDER BY started_at", (since,))
+
+    def speed_batch(self, query_id: str, batch_id: int) -> tuple | None:
+        """One micro-batch by its key. A retry updates this row in place, so
+        the same (query_id, batch_id) is how a drill proves the *same* batch
+        was retried rather than a later one quietly taking its place."""
+        rows = self.query("SELECT query_id, batch_id, status, input_rows, change_rows, started_at, completed_at, "
+                          "error_message FROM audit.marketplace_speed_batch WHERE query_id = %s AND batch_id = %s",
+                          (query_id, batch_id))
+        return rows[0] if rows else None
+
+    def redis_recent_changes(self) -> list[str]:
+        return self.src.redis_zset_members("rt:changes:recent")
+
+    def wait_speed_drained(self, since: datetime, *, quiet_seconds: int = 75, timeout: float = 900) -> int:
+        """Wait until the speed query has consumed everything Kafka holds.
+
+        Its offsets live in the query's own checkpoint, not in a Kafka
+        consumer group, so ``quiet()`` — which reads the Silver group's lag —
+        says nothing about it, and a snapshot taken on the strength of that
+        catches the query mid-topic. The one signal available is the audit:
+        once no micro-batch has carried a row for longer than the trigger,
+        there is nothing left to carry. Returns how many did.
+        """
+        def settled() -> tuple[bool, Any]:
+            carried = [r for r in self.speed_batches_since(since) if r[3] > 0 or r[4] > 0]
+            if not carried:
+                return False, {"batches_with_rows": 0}
+            idle = (datetime.now(timezone.utc) - carried[-1][5]).total_seconds()
+            return idle > quiet_seconds, {"batches_with_rows": len(carried), "idle_seconds": round(idle)}
+
+        observed = wait_until(settled, timeout=timeout, poll=15,
+                              what=f"the speed query to go {quiet_seconds}s without a batch carrying rows")
+        return observed["batches_with_rows"]
+
+    def batch_after_last_crawl(self) -> tuple[int, str]:
+        """One batch over everything crawled so far, as the smoke runs it."""
+        plan = self.run(COMPOSE + ["--profile", "ops", "run", "--rm", "--no-deps", "ops", "python", "-m", "ops",
+                                   "batch-plan", "--after-last-crawl"],
+                        env={"MARKETPLACE_QUALITY_RECONCILIATION_SETTLE_SECONDS": str(BATCH_SETTLE_SECONDS)})
+        plan = json.loads(plan.stdout.strip().splitlines()[-1])
+        result = self.run(COMPOSE + ["--profile", "batch", "run", "--rm", "--no-deps", "batch-once", "python3", "-m",
+                                     "batch_layer.marketplace_warehouse", "--run-id", plan["run_id"], "--as-of", plan["as_of"]],
+                          env={"MARKETPLACE_QUALITY_RECONCILIATION_SETTLE_SECONDS": str(BATCH_SETTLE_SECONDS)}, check=False)
+        return result.returncode, plan["run_id"]
+
+    def validate(self) -> list:
+        from ops.validate import default_limits, validate
+
+        return validate(self.src, default_limits())
+
+    def es_change_ids(self) -> list[str]:
+        from config.settings import ES_INDEX_MARKETPLACE_CHANGES
+
+        return [doc["event_id"] for doc in self.src.es_documents(ES_INDEX_MARKETPLACE_CHANGES)]
+
+    def es_changes_covering(self, members: Iterable[str], *, timeout: float = 60) -> list[str]:
+        """Change ids in Elasticsearch, once every one of ``members`` is searchable.
+
+        Elasticsearch is near-real-time: a bulk the sink has already committed
+        — and whose Redis write therefore already happened — is not visible to
+        a search until the next refresh, a second by default. Reading once the
+        moment a batch is audited SUCCEEDED races that refresh and reports
+        changes Redis holds and Elasticsearch "lost". The wait is bounded, so
+        a change that really never arrives still fails the drill, naming it.
+        """
+        wanted, seen = set(members), []
+
+        def searchable() -> tuple[bool, Any]:
+            seen[:] = self.es_change_ids()
+            missing = wanted - set(seen)
+            return not missing, {"es_changes": len(seen), "not_searchable": len(missing),
+                                 "examples": sorted(missing)[:3]}
+
+        wait_until(searchable, timeout=timeout, poll=2,
+                   what="Elasticsearch to make every change Redis holds searchable")
+        return list(seen)
+
+
+def _failing(results) -> list[str]:
+    return [r.check for r in results if r.status != "PASS"]
+
+
+def baseline(stack: Stack, rec: Record) -> None:
+    failing = _failing(stack.validate())
+    rec.step("baseline", failing=failing)
+    if failing:
+        raise DrillFailed(f"baseline validate fails: {failing}; a drill never starts from a broken stack")
+
+
+def restore(stack: Stack, rec: Record) -> list[str]:
+    """Back to a passing validate, whatever the drill left behind."""
+    stack.run(COMPOSE + ["up", "-d"])                 # any core service a drill stopped
+    stack.up(*SERVICES)                                # and the marketplace services
+    stack.wait_healthy("stub-source")
+    stack.stub_mode("ok")
+    stack.stop_crawler()
+    stack.quiet()
+    # The speed query may still be finishing the last micro-batch.
+    failing = wait_until(lambda: (not _failing(stack.validate()), _failing(stack.validate())),
+                         timeout=240, what="validate to pass after recovery", poll=15)
+    rec.step("restored", failing=failing or [])
+    return failing or []
+
+
+# ---------------------------------------------------------------------------
+# D1-D6
+# ---------------------------------------------------------------------------
+
+def d1_source_errors(stack: Stack, rec: Record) -> None:
+    """429, then 500, then a timeout: classified, retried, circuit opened, then recovered."""
+    from config.settings import CRAWL_CIRCUIT_FAILURE_THRESHOLD
+
+    since = stack.db_now()
+    expected = {"429": "RATE_LIMITED", "500": "SERVER_ERROR", "timeout": "TRANSIENT_NETWORK"}
+    stack.stub_mode("429")
+    stack.start_crawler()
+    for mode, kind in expected.items():
+        stack.stub_mode(mode)
+        rec.step("inject", stub_mode=mode)
+        mode_since = stack.db_now()
+        rows = wait_until(lambda: ((r := [a for a in stack.attempts_since(mode_since) if a[2] == kind]) != [], r),
+                          timeout=240, what=f"an attempt classified {kind}")
+        rec.step("observe", stub_mode=mode, error_kind=kind, attempts=len(rows))
+        if kind == "RATE_LIMITED":
+            # Retry-After: 1 s. The task is not due again before the header allows.
+            task_id, completed = rows[0][0], rows[0][6]
+            (scheduled,), = stack.query("SELECT scheduled_for FROM audit.crawl_frontier WHERE task_id = %s", (task_id,))
+            if scheduled < completed + timedelta(seconds=1):
+                raise DrillFailed(f"Retry-After ignored: due {scheduled} after a 429 at {completed}")
+            rec.step("observe", retry_after_honoured=True, scheduled_for=scheduled, completed_at=completed)
+    state = wait_until(
+        lambda: ((row := stack.query("SELECT consecutive_failures, opened_until FROM audit.crawl_source_state "
+                                     "WHERE marketplace_code = 'tiki'")) and row[0][1] is not None, row),
+        timeout=180, what="the circuit to open")
+    rec.step("observe", circuit=state, threshold=CRAWL_CIRCUIT_FAILURE_THRESHOLD)
+    stack.stub_mode("ok")
+    recovered_from = stack.db_now()
+    rec.step("recover", stub_mode="ok")
+    wait_until(lambda: stack.every_target_succeeded_since(recovered_from), timeout=300,
+               what="every target to succeed once the source recovers")
+    # No task gave up while it still had attempts left.
+    gave_up = stack.query("SELECT task_id, attempts, max_attempts FROM audit.crawl_frontier "
+                          "WHERE status = 'FAILED' AND attempts < max_attempts AND updated_at >= %s", (since,))
+    stack.stop_crawler()
+    rec.step("verify", failed_with_attempts_left=gave_up)
+    if gave_up:
+        raise DrillFailed(f"tasks FAILED with attempts left: {gave_up}")
+
+
+def d2_kafka_down_during_crawl(stack: Stack, rec: Record) -> None:
+    """Kafka stops mid-cycle: PUBLISH_ERROR, raw kept; afterwards check 8 still reconciles."""
+    since = stack.db_now()
+    stack.start_crawler()
+    wait_until(lambda: (bool(stack.attempts_since(since)), None), timeout=120, what="the crawl to start")
+    stack.stop("kafka")
+    rec.step("inject", stopped="kafka")
+    rows = wait_until(lambda: ((r := [a for a in stack.attempts_since(since) if a[2] == "PUBLISH_ERROR"]) != [], r),
+                      timeout=300, what="a PUBLISH_ERROR attempt")
+    for task_id, status, kind, parsed, raw_uri, *_ in rows:
+        if raw_uri is None or not stack.src.object_exists(raw_uri):
+            raise DrillFailed(f"PUBLISH_ERROR attempt of {task_id} lost its raw body: {raw_uri}")
+        if not 0 <= parsed <= 2:
+            raise DrillFailed(f"parsed_count {parsed} cannot be an acknowledged count for a 2-observation page")
+    rec.step("observe", publish_errors=len(rows), parsed_counts=sorted(r[3] for r in rows), raw_kept=True)
+    stack.run(COMPOSE + ["up", "-d", "kafka"])
+    stack.wait_healthy("kafka")
+    recovered_from = stack.db_now()
+    rec.step("recover", started="kafka")
+    wait_until(lambda: stack.every_target_succeeded_since(recovered_from), timeout=300,
+               what="every target to succeed after Kafka returns")
+    stack.stop_crawler()
+    stack.quiet()
+    code, run_id = stack.batch_after_last_crawl()
+    (status,), = stack.query("SELECT status FROM audit.marketplace_batch_run WHERE run_id = %s", (run_id,))
+    rec.step("verify", batch=run_id, exit_code=code, status=status)
+    if code != 0 or status != "SUCCEEDED":
+        raise DrillFailed(f"batch {run_id} after partial publishes: exit {code}, {status} (check 8 must reconcile)")
+
+
+def d3_minio_down_during_sink(stack: Stack, rec: Record) -> None:
+    """MinIO stops while the sink has work: no commit, lag grows, no DLQ; then it catches up."""
+    from config.settings import KAFKA_SILVER_CONSUMER_GROUP
+    from config.topics import MARKETPLACE_OBSERVATIONS
+    from ops.smoke import silver_condition, smoke_targets
+
+    lag_of = lambda: stack.src.consumer_lag(KAFKA_SILVER_CONSUMER_GROUP, MARKETPLACE_OBSERVATIONS.name)  # noqa: E731
+    dlq_before = len(stack.src.dlq_stages())
+    stack.stop("silver-sink")
+    since = stack.db_now()
+    stack.start_crawler()
+    wait_until(lambda: stack.every_target_succeeded_since(since), timeout=300, what="one crawl of every target")
+    stack.stop_crawler()
+    stack.stop("minio")
+    rec.step("inject", stopped="minio")
+    stack.up("silver-sink")
+    lag = wait_until(lambda: ((n := lag_of()) > 0, n), timeout=60, what="a backlog for the sink")
+    time.sleep(60)
+    lag_later = lag_of()
+    dlq_faulted = len(stack.src.dlq_stages())
+    rec.step("observe", lag=lag, lag_after_60s=lag_later, dlq_before=dlq_before, dlq_while_faulted=dlq_faulted)
+    if lag_later < lag:
+        raise DrillFailed(f"the sink committed while MinIO was down: lag {lag} -> {lag_later}")
+    if dlq_faulted != dlq_before:
+        raise DrillFailed(f"a storage outage reached the DLQ: {dlq_before} -> {dlq_faulted}")
+    stack.run(COMPOSE + ["up", "-d", "minio"])
+    stack.wait_healthy("minio")
+    rec.step("recover", started="minio")
+    stack.quiet()
+    silver = silver_condition(stack.src, targets=smoke_targets(), since=since)
+    dlq_after = len(stack.src.dlq_stages())
+    rec.step("verify", silver=silver.observed, dlq_after=dlq_after)
+    if not silver.met:
+        raise DrillFailed(f"Silver does not hold every acknowledged observation: {silver.observed}")
+    if dlq_after != dlq_before:
+        raise DrillFailed(f"DLQ changed: {dlq_before} -> {dlq_after}")
+
+
+def _crawl_once(stack: Stack) -> datetime:
+    since = stack.db_now()
+    stack.start_crawler()
+    wait_until(lambda: stack.every_target_succeeded_since(since), timeout=300, what="one crawl of every target")
+    stack.stop_crawler()
+    return since
+
+
+def d4_sinks_down_during_speed(stack: Stack, rec: Record) -> None:
+    """ES, then Redis, down under the speed query: one micro-batch fails, the
+    query retries *that* batch, and it succeeds once the sink is back.
+
+    The identity of the batch is the point. A later batch succeeding proves
+    nothing: the audit row is keyed ``(query_name, query_id, batch_id)`` and a
+    retry updates it in place, so the drill follows that one key from FAILED
+    through its retry to SUCCEEDED.
+    """
+    for service in ("elasticsearch", "redis"):
+        stack.stop(service)
+        faulted = stack.db_now()
+        rec.step("inject", stopped=service)
+        _crawl_once(stack)
+        failed = wait_until(lambda: ((b := [r for r in stack.speed_batches_since(faulted) if r[2] == "FAILED"]) != [], b),
+                            timeout=420, what=f"a FAILED speed batch with {service} down")
+        query_id, batch_id, first_attempt = failed[0][0], failed[0][1], failed[0][5]
+        # Still faulted: the same row must go back to RUNNING under a newer
+        # started_at. That is the query retrying this batch, not moving past it.
+        retried = wait_until(
+            lambda: ((row := stack.speed_batch(query_id, batch_id)) is not None and row[5] > first_attempt, row),
+            timeout=420, what=f"batch {batch_id} of {query_id} to be retried with {service} still down")
+        rec.step("observe", service=service, query_id=query_id, batch_id=batch_id,
+                 first_attempt_at=first_attempt, retry_started_at=retried[5], retry_status=retried[2],
+                 error=(retried[7] or "")[:300])
+        stack.run(COMPOSE + ["up", "-d", service])
+        stack.wait_healthy(service)
+        rec.step("recover", started=service)
+        ok = wait_until(lambda: ((row := stack.speed_batch(query_id, batch_id)) is not None and row[2] == "SUCCEEDED", row),
+                        timeout=600, what=f"batch {batch_id} of {query_id} to succeed after {service} returns",
+                        poll=10)
+        recent = stack.redis_recent_changes()
+        # Redis is written after the Elasticsearch bulk, so every recent change
+        # must have a document; a retry that minted new ids would not. The wait
+        # is for the search refresh, not for the write — see es_changes_covering.
+        ids = stack.es_changes_covering(recent)
+        rec.step("verify", service=service, query_id=query_id, batch_id=batch_id, completed_at=ok[6],
+                 input_rows=ok[3], change_rows=ok[4], es_changes=len(ids), es_distinct=len(set(ids)),
+                 redis_recent=len(recent), redis_distinct=len(set(recent)))
+        if len(ids) != len(set(ids)):
+            raise DrillFailed(f"duplicate change documents in Elasticsearch: {len(ids)} docs, {len(set(ids))} ids")
+        if len(recent) != len(set(recent)):
+            raise DrillFailed(f"duplicate members in rt:changes:recent: {len(recent)} members, {len(set(recent))} distinct")
+
+
+def d5_speed_restart(stack: Stack, rec: Record) -> None:
+    """Kill the query *inside* a micro-batch; then replay from a fresh checkpoint.
+
+    Variant 1 has to interrupt a batch, not merely an idle query: a kill
+    between triggers commits nothing and proves nothing. The window is made,
+    not hunted — see MID_BATCH_MIN_BACKLOG. The proof the kill landed inside
+    is the audit row left stranded in ``RUNNING`` with no ``completed_at``,
+    which no live batch holds for more than a fraction of a second.
+    """
+    # 1. Stop the query and let the crawler fill Kafka, so the batch that
+    #    drains the backlog is long enough to be killed inside.
+    stack.stop("speed")
+    since = stack.db_now()
+    stack.start_crawler()
+    backlog = wait_until(lambda: ((n := stack.observations_published_since(since)) >= MID_BATCH_MIN_BACKLOG, n),
+                         timeout=MID_BATCH_BACKLOG_TIMEOUT, poll=15,
+                         what=f"a backlog of {MID_BATCH_MIN_BACKLOG} observations for the speed query")
+    stack.stop_crawler()
+    before_kill = set(stack.es_change_ids())
+    started_at = stack.container_started_at("speed")
+
+    # 2. Start it again and kill it inside the batch that drains that backlog.
+    stack.up("speed")
+    query_id, batch_id = stack.kill_when_batch_opens(since)
+    rec.step("inject", killed="speed", backlog_observations=backlog,
+             mid_batch={"query_id": query_id, "batch_id": batch_id}, es_changes_before=len(before_kill))
+
+    def interrupted() -> tuple[bool, Any]:
+        row = stack.speed_batch(query_id, batch_id)
+        open_for = (datetime.now(timezone.utc) - row[5]).total_seconds() if row else 0
+        return bool(row and row[2] == "RUNNING" and open_for > 15), row
+
+    stranded = wait_until(interrupted, timeout=240, poll=2,
+                          what=f"batch {batch_id} to be left RUNNING by the kill; a terminal status here "
+                               "means the kill landed between batches and interrupted nothing")
+    rec.step("observe", stranded_batch={"query_id": query_id, "batch_id": batch_id,
+                                        "status": stranded[2], "completed_at": stranded[6]})
+
+    # 3. Recover. The interrupted batch is re-run under its own id, not skipped.
+    stack.up("speed")                                  # a no-op if the restart policy got there first
+    stack.wait_healthy("speed", timeout=300)
+    restarted = stack.db_now()
+    rec.step("recover", started="speed", container_started_at=stack.container_started_at("speed"), was=started_at)
+    resumed = wait_until(lambda: ((row := stack.speed_batch(query_id, batch_id)) is not None and row[2] == "SUCCEEDED", row),
+                         timeout=600, poll=5, what=f"the interrupted batch {batch_id} to be re-run and succeed")
+    stack.start_crawler()
+    wait_until(lambda: stack.every_target_succeeded_since(restarted), timeout=300, what="more crawls after the restart")
+    stack.stop_crawler()
+    stack.quiet()
+    wait_until(lambda: (not stack.stranded_speed_batches(since, stale_seconds=90), None),
+               timeout=420, poll=15, what="every micro-batch to reach a terminal status")
+    stack.wait_speed_drained(since)
+    recent = stack.redis_recent_changes()
+    ids = stack.es_changes_covering(recent)
+    lost = sorted(before_kill - set(ids))
+    rec.step("verify", variant="kill", resumed_batch={"query_id": query_id, "batch_id": batch_id,
+                                                      "input_rows": resumed[3], "change_rows": resumed[4]},
+             es_changes=len(ids), distinct=len(set(ids)), before=len(before_kill), lost=len(lost))
+    if len(ids) != len(set(ids)):
+        raise DrillFailed(f"the restart duplicated change documents: {len(ids)} docs, {len(set(ids))} ids")
+    if lost:
+        raise DrillFailed(f"the kill lost {len(lost)} change event(s): {lost[:5]}")
+
+    # Variant 2: no checkpoint at all. A full replay from earliest must yield
+    # the same change documents, since every _id is deterministic.
+    before = set(ids)
+    stack.run(COMPOSE + ["--profile", "speed", "rm", "-sf", "speed"])
+    # Scoped to this Compose project: another project's checkpoints are not
+    # this drill's to delete, and a stale global match would silently make the
+    # "replay" reuse a checkpoint that was never removed.
+    volume = stack.project_volumes("speed_checkpoints")
+    if not volume:
+        raise DrillFailed(f"no speed_checkpoints volume in Compose project {stack.project()!r}; "
+                          "a replay from a kept checkpoint would prove nothing")
+    for name in volume:
+        stack.run(["docker", "volume", "rm", name])
+    replay_from = stack.db_now()
+    stack.up("speed", env={"MARKETPLACE_STREAM_CHECKPOINT_VERSION": "drill-d5"})
+    rec.step("inject", variant="replay", project=stack.project(), removed_volumes=volume,
+             checkpoint_version="drill-d5")
+    wait_until(lambda: (any(r[2] == "SUCCEEDED" and r[3] > 0 for r in stack.speed_batches_since(replay_from)), None),
+               timeout=300, what="the replay's first batch")
+    batches = stack.wait_speed_drained(replay_from)
+    after = set(stack.es_changes_covering(stack.redis_recent_changes()))
+    rec.step("verify", variant="replay", batches=batches, before=len(before), after=len(after),
+             new=len(after - before), missing=len(before - after))
+    if after != before:
+        raise DrillFailed(f"replay changed the change set: {len(after - before)} new, {len(before - after)} missing")
+    # Leave the default checkpoint version in place for the next drill.
+    stack.up("speed")
+
+
+def d6_expired_lease(stack: Stack, rec: Record) -> None:
+    """Kill a worker holding leases; a second worker recovers them only after they expire."""
+    from ops.smoke import smoke_targets
+
+    stack.stub_mode("timeout")
+    stack.start_crawler(CRAWL_SERVICE_WORKER_ID="drill-a")
+    held = ("SELECT task_id, lease_expires_at FROM audit.crawl_frontier WHERE status = 'LEASED' "
+            "AND lease_owner = 'drill-a' AND target = ANY(%s)")
+    wait_until(lambda: (bool(stack.query(held, (smoke_targets(),))), None), timeout=120,
+               what="worker A to hold leases", poll=1)
+    # Worker A is gone for good: the premise is that B, not a restarted A,
+    # recovers the leases, so the restart policy is cleared before the kill.
+    # `up` below recreates the container, and with it the policy from Compose.
+    stack.kill("crawl-worker", stays_dead=True)
+    killed_at = stack.db_now()
+    # Read after the kill: A may have released one task (a timed-out fetch)
+    # between the first sight of its leases and its death.
+    leased = stack.query(held, (smoke_targets(),))
+    if not leased:
+        raise DrillFailed("worker A held no lease when it was killed")
+    rec.step("inject", killed="crawl-worker (drill-a)", leases=len(leased))
+    stack.stub_mode("ok")
+    stack.up("crawl-worker", env={**CRAWL_ENV, "CRAWL_SERVICE_WORKER_ID": "drill-b"})
+    rec.step("recover", started="crawl-worker (drill-b)")
+    earliest_expiry = min(expiry for _, expiry in leased)
+    if stack.db_now() < earliest_expiry:
+        still = stack.query("SELECT count(*) FROM audit.crawl_frontier WHERE task_id = ANY(%s) AND status = 'LEASED' "
+                            "AND lease_owner = 'drill-a'", ([t for t, _ in leased],))[0][0]
+        rec.step("observe", before_expiry=True, still_leased_by_a=still, of=len(leased))
+        if still != len(leased):
+            raise DrillFailed(f"worker B took {len(leased) - still} lease(s) before they expired")
+    wait_until(lambda: stack.every_target_succeeded_since(killed_at), timeout=300,
+               what="worker B to complete the recovered tasks")
+    stack.stop_crawler()
+    attempts = stack.attempts_since(killed_at - timedelta(minutes=5))
+    by_task: dict[str, list[tuple]] = {}
+    for row in attempts:
+        by_task.setdefault(row[0], []).append((row[5], row[6]))
+    overlaps = [task for task, spans in by_task.items()
+                if any(a_end > b_start for (a_start, a_end), (b_start, _) in zip(sorted(spans), sorted(spans)[1:]))]
+    recovered = [t for t, _ in leased if any(row[0] == t and row[1] in ("SUCCEEDED", "PARTIAL") for row in attempts)]
+    rec.step("verify", recovered=len(recovered), of=len(leased), concurrent_attempts=overlaps)
+    if overlaps:
+        raise DrillFailed(f"tasks processed twice at once: {overlaps}")
+    if len(recovered) != len(leased):
+        raise DrillFailed(f"only {len(recovered)} of {len(leased)} expired leases were recovered")
+
+
+DRILLS: dict[str, Callable[[Stack, Record], None]] = {
+    "d1": d1_source_errors,
+    "d2": d2_kafka_down_during_crawl,
+    "d3": d3_minio_down_during_sink,
+    "d4": d4_sinks_down_during_speed,
+    "d5": d5_speed_restart,
+    "d6": d6_expired_lease,
+}
+
+
+def run(name: str, stack: Stack | None = None) -> Record:
+    stack = stack or Stack()
+    rec = Record(name)
+    try:
+        baseline(stack, rec)
+        DRILLS[name](stack, rec)
+        rec.passed = True
+    except Exception as error:  # noqa: BLE001 - recorded, then the stack is restored
+        rec.error = f"{type(error).__name__}: {error}"[:2000]
+        rec.step("failed", error=rec.error)
+    finally:
+        try:
+            failing = restore(stack, rec)
+        except Exception as error:  # noqa: BLE001
+            failing = [f"restore: {type(error).__name__}: {error}"[:500]]
+            rec.step("restore_failed", error=failing[0])
+        if failing:
+            rec.passed = False
+            rec.error = rec.error or f"stack not restored: {failing}"
+        rec.write()
+    return rec
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="Phase 8 failure drills against the live stack")
+    parser.add_argument("drill", choices=[*DRILLS, "all"])
+    args = parser.parse_args(argv)
+    names = list(DRILLS) if args.drill == "all" else [args.drill]
+    results = {name: run(name).passed for name in names}
+    print(json.dumps({"drills": results}, sort_keys=True))
+    return 0 if all(results.values()) else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())
