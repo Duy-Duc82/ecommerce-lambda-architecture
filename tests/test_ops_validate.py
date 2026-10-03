@@ -449,8 +449,9 @@ def test_the_kill_waits_for_a_batch_to_open_and_reports_which(monkeypatch):
         autocommit = False
         cursor_ = FakeCursor()
 
+        def __enter__(self): return self
+        def __exit__(self, *exc): self.closed = True
         def cursor(self): return self.cursor_
-        def close(self): self.closed = True
 
     connection = FakeConnection()
     monkeypatch.setattr("common.postgres.postgres_connection_factory", lambda: lambda: connection)
@@ -480,8 +481,9 @@ def test_nothing_is_killed_when_no_batch_ever_opens(monkeypatch):
     class FakeConnection:
         autocommit = False
 
+        def __enter__(self): return self
+        def __exit__(self, *exc): return False
         def cursor(self): return FakeCursor()
-        def close(self): pass
 
     monkeypatch.setattr("common.postgres.postgres_connection_factory", lambda: FakeConnection)
     monkeypatch.setattr(drills.time, "sleep", lambda seconds: None)

@@ -182,24 +182,23 @@ class Stack:
         """
         from common.postgres import postgres_connection_factory
 
-        connection = postgres_connection_factory()()
-        connection.autocommit = True
         deadline = time.monotonic() + timeout
-        try:
-            with connection.cursor() as cur:
-                while True:
-                    cur.execute("SELECT query_id, batch_id FROM audit.marketplace_speed_batch "
-                                "WHERE status = 'RUNNING' AND started_at >= %s ORDER BY started_at DESC LIMIT 1",
-                                (since,))
-                    row = cur.fetchone()
-                    if row:
-                        self.kill("speed")
-                        return row[0], row[1]
-                    if time.monotonic() >= deadline:
-                        raise DrillFailed(f"no micro-batch opened within {timeout:.0f}s; there was nothing to kill inside")
-                    time.sleep(MID_BATCH_POLL_SECONDS)
-        finally:
-            connection.close()
+        # One connection, held open for the whole poll: the factory hands out
+        # a context manager, and its transaction is what keeps each read from
+        # paying a fresh connection's 20 ms.
+        with postgres_connection_factory()() as connection, connection.cursor() as cur:
+            connection.autocommit = True
+            while True:
+                cur.execute("SELECT query_id, batch_id FROM audit.marketplace_speed_batch "
+                            "WHERE status = 'RUNNING' AND started_at >= %s ORDER BY started_at DESC LIMIT 1",
+                            (since,))
+                row = cur.fetchone()
+                if row:
+                    self.kill("speed")
+                    return row[0], row[1]
+                if time.monotonic() >= deadline:
+                    raise DrillFailed(f"no micro-batch opened within {timeout:.0f}s; there was nothing to kill inside")
+                time.sleep(MID_BATCH_POLL_SECONDS)
 
     def observations_published_since(self, since: datetime) -> int:
         """Observations the crawler acknowledged to Kafka — the speed backlog."""
