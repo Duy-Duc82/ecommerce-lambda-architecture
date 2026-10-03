@@ -17,7 +17,7 @@ import json
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Callable, Mapping, Sequence
-from urllib.parse import quote
+from urllib.parse import quote, unquote
 
 from common.serialization import serialize_for_wire
 from config.marketplace_schema import ResourceType, create_raw_artifact
@@ -71,6 +71,29 @@ class RawArtifactRef:
     @property
     def metadata_path(self) -> str:
         return f"{self._base}/metadata.json"
+
+    @classmethod
+    def from_uri(cls, uri: str) -> "RawArtifactRef":
+        """The inverse of :attr:`body_path`, for a ``raw_uri`` out of the audit.
+
+        ``audit.crawl_request_attempt`` stores where the body landed, not the
+        five components that address it. They are all in the path, so this
+        reads them back rather than re-deriving them from a crawl the audit
+        no longer describes. A path missing one is an error, never a guess:
+        reparsing the wrong artifact would report a divergence that is really
+        a lookup bug.
+        """
+        parts = dict(
+            segment.split("=", 1)
+            for segment in unquote(uri).split("/")
+            if "=" in segment and not segment.startswith("=")
+        )
+        wanted = ("marketplace", "observed_date", "hour", "crawl_run_id", "raw_artifact_id")
+        missing = [name for name in wanted if name not in parts]
+        if missing:
+            raise ValueError(f"raw_uri is missing {', '.join(missing)}: {uri}")
+        return cls(parts["marketplace"], parts["observed_date"], parts["hour"],
+                   parts["crawl_run_id"], parts["raw_artifact_id"])
 
 
 @dataclass(frozen=True)
