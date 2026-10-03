@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 import time
@@ -49,6 +50,28 @@ CRAWL_ENV = {
 }
 BATCH_SETTLE_SECONDS = 60
 SERVICES = ("stub-source", "silver-sink", "speed", "batch-scheduler")
+
+# D5's in-container watcher. It reads one row in a tight loop and, the moment
+# a micro-batch is open, SIGKILLs the container's main process. Runs under
+# `docker exec -d` in the speed container, which already has psycopg2 and the
+# in-cluster PostgreSQL settings in its environment.
+MID_BATCH_WATCH_SECONDS = 180
+MID_BATCH_KILLER = """
+import os, time, psycopg2
+conn = psycopg2.connect(host=os.environ["POSTGRES_HOST"], port=os.environ["POSTGRES_PORT"],
+                        user=os.environ["POSTGRES_USER"], password=os.environ["POSTGRES_PASSWORD"],
+                        dbname=os.environ["POSTGRES_DB"])
+conn.autocommit = True
+deadline = time.monotonic() + float(os.environ["DRILL_WATCH_SECONDS"])
+while time.monotonic() < deadline:
+    with conn.cursor() as cur:
+        cur.execute("SELECT 1 FROM audit.marketplace_speed_batch "
+                    "WHERE status = 'RUNNING' AND started_at >= %s LIMIT 1", (os.environ["DRILL_SINCE"],))
+        if cur.fetchone():
+            os.kill(1, 9)
+            break
+    time.sleep(0.02)
+"""
 
 
 class DrillFailed(AssertionError):
@@ -102,8 +125,6 @@ class Stack:
     # -- Docker --
     @staticmethod
     def run(args: list[str], *, env: dict | None = None, check: bool = True) -> subprocess.CompletedProcess:
-        import os
-
         result = subprocess.run(args, cwd=ROOT, capture_output=True, text=True,
                                 env={**os.environ, **(env or {})})
         if check and result.returncode != 0:
@@ -116,8 +137,61 @@ class Stack:
     def stop(self, *services: str) -> None:
         self.run(COMPOSE + ["--profile", "*", "stop", *services])
 
-    def kill(self, container: str) -> None:
+    def kill(self, container: str, *, stays_dead: bool = False) -> None:
+        """SIGKILL. The long-running services carry `restart: unless-stopped`,
+        so Docker brings a killed one straight back; ``stays_dead`` clears that
+        policy first, for a drill whose premise is a process that is gone."""
+        if stays_dead:
+            self.run(["docker", "update", "--restart", "no", container])
         self.run(["docker", "kill", container])
+
+    def project(self) -> str:
+        """This Compose project's name. A drill never touches another project's
+        containers or volumes, so everything it removes is filtered by this."""
+        cached = getattr(self, "_project", None)
+        if cached:
+            return cached
+        label = '{{index .Config.Labels "com.docker.compose.project"}}'
+        for container in ("speed", "minio", "postgres-dw", "kafka"):
+            result = self.run(["docker", "inspect", "-f", label, container], check=False)
+            name = result.stdout.strip()
+            if result.returncode == 0 and name and name != "<no value>":
+                self._project = name
+                return name
+        # No container of this project is up: fall back to how Compose would
+        # name it — the environment override, else the directory.
+        self._project = os.environ.get("COMPOSE_PROJECT_NAME", "").strip() or ROOT.name.lower()
+        return self._project
+
+    def project_volumes(self, name_contains: str) -> list[str]:
+        return self.run(["docker", "volume", "ls", "-q",
+                         "--filter", f"label=com.docker.compose.project={self.project()}",
+                         "--filter", f"name={name_contains}"]).stdout.split()
+
+    def container_started_at(self, container: str) -> str:
+        result = self.run(["docker", "inspect", "-f", "{{.State.StartedAt}}", container], check=False)
+        return result.stdout.strip() if result.returncode == 0 else "absent"
+
+    def kill_inside_micro_batch(self, since: datetime) -> None:
+        """Kill the speed container while one of its micro-batches is in flight.
+
+        A kill issued from the host cannot hit the window: the sink writes
+        between ``begin_batch`` and the terminal status take a fraction of a
+        second, and a ``docker kill`` round trip takes longer than that. So
+        the watch happens inside the container, next to the database, and
+        kills PID 1 — the same SIGKILL ``docker kill`` sends — the moment the
+        audit row appears. Nothing is written: it only reads one row.
+        """
+        self.run(["docker", "exec", "-d",
+                  "-e", f"DRILL_SINCE={since.isoformat()}", "-e", f"DRILL_WATCH_SECONDS={MID_BATCH_WATCH_SECONDS}",
+                  "speed", "python3", "-c", MID_BATCH_KILLER])
+
+    def stranded_speed_batches(self, since: datetime, *, stale_seconds: int) -> list[tuple]:
+        """Micro-batches still RUNNING long after anything live would have settled."""
+        return self.query(
+            "SELECT query_id, batch_id, status, input_rows, change_rows, started_at FROM audit.marketplace_speed_batch "
+            "WHERE started_at >= %s AND status = 'RUNNING' AND started_at < now() - %s * interval '1 second' "
+            "ORDER BY started_at", (since, stale_seconds))
 
     def status(self, container: str) -> str:
         result = self.run(["docker", "inspect", "-f", "{{.State.Status}}/{{if .State.Health}}{{.State.Health.Status}}{{end}}", container],
@@ -186,6 +260,18 @@ class Stack:
     def speed_batches_since(self, since: datetime) -> list[tuple]:
         return self.query("SELECT query_id, batch_id, status, input_rows, change_rows, started_at "
                           "FROM audit.marketplace_speed_batch WHERE started_at >= %s ORDER BY started_at", (since,))
+
+    def speed_batch(self, query_id: str, batch_id: int) -> tuple | None:
+        """One micro-batch by its key. A retry updates this row in place, so
+        the same (query_id, batch_id) is how a drill proves the *same* batch
+        was retried rather than a later one quietly taking its place."""
+        rows = self.query("SELECT query_id, batch_id, status, input_rows, change_rows, started_at, completed_at, "
+                          "error_message FROM audit.marketplace_speed_batch WHERE query_id = %s AND batch_id = %s",
+                          (query_id, batch_id))
+        return rows[0] if rows else None
+
+    def redis_recent_changes(self) -> list[str]:
+        return self.src.redis_zset_members("rt:changes:recent")
 
     def batch_after_last_crawl(self) -> tuple[int, str]:
         """One batch over everything crawled so far, as the smoke runs it."""
@@ -357,60 +443,115 @@ def _crawl_once(stack: Stack) -> datetime:
 
 
 def d4_sinks_down_during_speed(stack: Stack, rec: Record) -> None:
-    """ES, then Redis, down under the speed query: the batch fails, then succeeds on recovery."""
+    """ES, then Redis, down under the speed query: one micro-batch fails, the
+    query retries *that* batch, and it succeeds once the sink is back.
+
+    The identity of the batch is the point. A later batch succeeding proves
+    nothing: the audit row is keyed ``(query_name, query_id, batch_id)`` and a
+    retry updates it in place, so the drill follows that one key from FAILED
+    through its retry to SUCCEEDED.
+    """
     for service in ("elasticsearch", "redis"):
         stack.stop(service)
         faulted = stack.db_now()
         rec.step("inject", stopped=service)
         _crawl_once(stack)
         failed = wait_until(lambda: ((b := [r for r in stack.speed_batches_since(faulted) if r[2] == "FAILED"]) != [], b),
-                            timeout=300, what=f"a FAILED speed batch with {service} down")
-        rec.step("observe", service=service, failed_batches=[(r[1], r[3]) for r in failed])
+                            timeout=420, what=f"a FAILED speed batch with {service} down")
+        query_id, batch_id, first_attempt = failed[0][0], failed[0][1], failed[0][5]
+        # Still faulted: the same row must go back to RUNNING under a newer
+        # started_at. That is the query retrying this batch, not moving past it.
+        retried = wait_until(
+            lambda: ((row := stack.speed_batch(query_id, batch_id)) is not None and row[5] > first_attempt, row),
+            timeout=420, what=f"batch {batch_id} of {query_id} to be retried with {service} still down")
+        rec.step("observe", service=service, query_id=query_id, batch_id=batch_id,
+                 first_attempt_at=first_attempt, retry_started_at=retried[5], retry_status=retried[2],
+                 error=(retried[7] or "")[:300])
         stack.run(COMPOSE + ["up", "-d", service])
         stack.wait_healthy(service)
-        recovered = stack.db_now()
         rec.step("recover", started=service)
-        ok = wait_until(lambda: ((b := [r for r in stack.speed_batches_since(recovered) if r[2] == "SUCCEEDED" and r[3] > 0]) != [], b),
-                        timeout=360, what=f"the failed batch to succeed after {service} returns")
+        ok = wait_until(lambda: ((row := stack.speed_batch(query_id, batch_id)) is not None and row[2] == "SUCCEEDED", row),
+                        timeout=600, what=f"batch {batch_id} of {query_id} to succeed after {service} returns",
+                        poll=10)
         ids = stack.es_change_ids()
-        rec.step("verify", service=service, succeeded_batches=[(r[1], r[3]) for r in ok],
-                 es_changes=len(ids), distinct=len(set(ids)))
+        recent = stack.redis_recent_changes()
+        rec.step("verify", service=service, query_id=query_id, batch_id=batch_id, completed_at=ok[6],
+                 input_rows=ok[3], change_rows=ok[4], es_changes=len(ids), es_distinct=len(set(ids)),
+                 redis_recent=len(recent), redis_distinct=len(set(recent)))
         if len(ids) != len(set(ids)):
-            raise DrillFailed("duplicate change documents in Elasticsearch")
+            raise DrillFailed(f"duplicate change documents in Elasticsearch: {len(ids)} docs, {len(set(ids))} ids")
+        if len(recent) != len(set(recent)):
+            raise DrillFailed(f"duplicate members in rt:changes:recent: {len(recent)} members, {len(set(recent))} distinct")
+        # Redis is written after the Elasticsearch bulk, so every recent change
+        # must have a document. A retry that minted new ids would show up here.
+        orphans = sorted(set(recent) - set(ids))
+        if orphans:
+            raise DrillFailed(f"{len(orphans)} change(s) in rt:changes:recent with no Elasticsearch document: {orphans[:5]}")
 
 
 def d5_speed_restart(stack: Stack, rec: Record) -> None:
-    """Kill the query mid-stream; then replay everything from a fresh checkpoint."""
+    """Kill the query *inside* a micro-batch; then replay from a fresh checkpoint.
+
+    Variant 1 has to interrupt a batch, not merely an idle query: a kill
+    between triggers proves nothing about recovery. The micro-batch's audit
+    row is opened ``RUNNING`` before the sinks are written and only reaches a
+    terminal status after them, so a watcher inside the container polls for
+    that row and kills PID 1 the instant it appears. The proof the window was
+    hit is the row left stranded in ``RUNNING`` with no ``completed_at``: in
+    normal operation nothing stays there for more than a second.
+    """
     since = stack.db_now()
     stack.start_crawler()
-    wait_until(lambda: (any(r[3] > 0 for r in stack.speed_batches_since(since)), None),
+    wait_until(lambda: (any(r[3] > 0 or r[4] > 0 for r in stack.speed_batches_since(since)), None),
                timeout=300, what="the speed query to be processing")
-    stack.kill("speed")
-    rec.step("inject", killed="speed")
-    stack.up("speed")
+    before_kill = set(stack.es_change_ids())
+    started_at = stack.container_started_at("speed")
+    stack.kill_inside_micro_batch(since)
+    stranded = wait_until(lambda: (bool(rows := stack.stranded_speed_batches(since, stale_seconds=15)), rows),
+                          timeout=240, what="a micro-batch left mid-flight by the kill", poll=2)
+    query_id, batch_id = stranded[-1][0], stranded[-1][1]
+    rec.step("inject", killed="speed", mid_batch={"query_id": query_id, "batch_id": batch_id},
+             batch_started_at=stranded[-1][5], es_changes_before=len(before_kill))
+    stack.up("speed")                                  # a no-op if the restart policy got there first
+    stack.wait_healthy("speed", timeout=300)
     restarted = stack.db_now()
-    rec.step("recover", started="speed")
+    rec.step("recover", started="speed", container_started_at=stack.container_started_at("speed"),
+             was=started_at)
+    # The interrupted batch is re-run under its own id, not skipped.
+    resumed = wait_until(lambda: ((row := stack.speed_batch(query_id, batch_id)) is not None and row[2] == "SUCCEEDED", row),
+                         timeout=600, what=f"the interrupted batch {batch_id} to be re-run and succeed", poll=10)
     wait_until(lambda: stack.every_target_succeeded_since(restarted), timeout=300, what="more crawls after the restart")
     stack.stop_crawler()
     stack.quiet()
-    wait_until(lambda: (any(r[2] == "SUCCEEDED" for r in stack.speed_batches_since(restarted)), None),
-               timeout=240, what="a speed batch after the restart")
-    time.sleep(60)   # the trigger is 30 s: let the last observations through
+    wait_until(lambda: (not stack.stranded_speed_batches(since, stale_seconds=90), None),
+               timeout=420, what="every micro-batch to reach a terminal status", poll=15)
     ids = stack.es_change_ids()
-    rec.step("verify", variant="kill", es_changes=len(ids), distinct=len(set(ids)))
+    lost = sorted(before_kill - set(ids))
+    rec.step("verify", variant="kill", resumed_batch={"query_id": query_id, "batch_id": batch_id,
+                                                      "input_rows": resumed[3], "change_rows": resumed[4]},
+             es_changes=len(ids), distinct=len(set(ids)), before=len(before_kill), lost=len(lost))
     if len(ids) != len(set(ids)):
-        raise DrillFailed("the restart duplicated change documents")
+        raise DrillFailed(f"the restart duplicated change documents: {len(ids)} docs, {len(set(ids))} ids")
+    if lost:
+        raise DrillFailed(f"the kill lost {len(lost)} change event(s): {lost[:5]}")
 
     # Variant 2: no checkpoint at all. A full replay from earliest must yield
     # the same change documents, since every _id is deterministic.
     before = set(ids)
     stack.run(COMPOSE + ["--profile", "speed", "rm", "-sf", "speed"])
-    volume = stack.run(["docker", "volume", "ls", "-q", "--filter", "name=speed_checkpoints"]).stdout.split()
+    # Scoped to this Compose project: another project's checkpoints are not
+    # this drill's to delete, and a stale global match would silently make the
+    # "replay" reuse a checkpoint that was never removed.
+    volume = stack.project_volumes("speed_checkpoints")
+    if not volume:
+        raise DrillFailed(f"no speed_checkpoints volume in Compose project {stack.project()!r}; "
+                          "a replay from a kept checkpoint would prove nothing")
     for name in volume:
         stack.run(["docker", "volume", "rm", name])
     replay_from = stack.db_now()
     stack.up("speed", env={"MARKETPLACE_STREAM_CHECKPOINT_VERSION": "drill-d5"})
-    rec.step("inject", variant="replay", removed_volumes=volume, checkpoint_version="drill-d5")
+    rec.step("inject", variant="replay", project=stack.project(), removed_volumes=volume,
+             checkpoint_version="drill-d5")
     wait_until(lambda: (any(r[2] == "SUCCEEDED" and r[3] > 0 for r in stack.speed_batches_since(replay_from)), None),
                timeout=300, what="the replay's first batch")
     def settled() -> tuple[bool, Any]:
@@ -436,7 +577,10 @@ def d6_expired_lease(stack: Stack, rec: Record) -> None:
             "AND lease_owner = 'drill-a' AND target = ANY(%s)")
     wait_until(lambda: (bool(stack.query(held, (smoke_targets(),))), None), timeout=120,
                what="worker A to hold leases", poll=1)
-    stack.kill("crawl-worker")
+    # Worker A is gone for good: the premise is that B, not a restarted A,
+    # recovers the leases, so the restart policy is cleared before the kill.
+    # `up` below recreates the container, and with it the policy from Compose.
+    stack.kill("crawl-worker", stays_dead=True)
     killed_at = stack.db_now()
     # Read after the kill: A may have released one task (a timed-out fetch)
     # between the first sight of its leases and its death.
