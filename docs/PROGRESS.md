@@ -1714,3 +1714,67 @@ File quality không đụng tới code nào WP5 sửa (42). Tổng: **841**.
 3. Stack dev đang chạy core. `speed_checkpoints` đã bị xoá vì topic Kafka
    được tạo lại (§16.3); bật lại `speed` sẽ dựng checkpoint mới.
 4. Ổ `C:` còn khoảng 5 GB.
+
+---
+
+## 17. Session 2026-10-03 — Phase 8 WP6 (drill D1–D6): ĐANG DỞ
+
+> **Trạng thái lúc push (2026-10-03):** code drill đã viết xong và đã có
+> test offline, nhưng **chưa drill nào chạy thật tới cùng**. Commit này chỉ để
+> mang việc sang máy khác. Chưa mở PR.
+
+### 17.1 Đã có trên nhánh `phase-8-wp6-drills-d1-d6`
+
+| Thay đổi | Ở đâu |
+|---|---|
+| Harness drill: `Stack` (Compose stop/kill/start, chế độ của stub, truy vấn chỉ đọc), `Record` (JSON từng bước kèm timestamp, ghi vào `data/ops/drills/<tên>.json`), `wait_until`; mỗi drill: baseline validate → inject → observe → recover → verify, rồi luôn khôi phục stack về trạng thái `validate` pass | `ops/drills.py` |
+| D1 nguồn trả 429/500/timeout · D2 Kafka dừng giữa lúc crawl · D3 MinIO dừng khi Silver sink đang chạy · D4 ES rồi Redis dừng khi speed đang chạy · D5 kill speed, rồi replay toàn bộ với checkpoint mới · D6 lease hết hạn với hai worker | như trên |
+| Marker `drill`, bị loại khỏi suite mặc định | `pytest.ini` |
+| Mỗi drill chạy trong subprocess với `DATA_LAKE_PROFILE=minio` | `tests/drills/test_drills.py` |
+| `mp drill d1..d6|all` (chạy trên host, vì drill cần Docker) | `scripts/mp.ps1` |
+| Compose cho phép override `CRAWL_SERVICE_WORKER_ID`, `CRAWL_LEASE_SECONDS`, `CRAWL_RETRY_*`, `CRAWL_CIRCUIT_OPEN_SECONDS` (crawl-worker) và `MARKETPLACE_STREAM_CHECKPOINT_VERSION` (speed); giá trị mặc định khớp `config/settings.py` | `docker-compose.yml` |
+| Test offline cho harness (`wait_until`, record, đủ D1–D6) | `tests/test_ops_validate.py` |
+
+### 17.2 Chưa làm / cần làm tiếp
+
+1. **Chạy thật từng drill**, trên stack trắng sau một smoke pass:
+   ```powershell
+   docker compose -f docker-compose.yml --profile "*" down      # giữ volume dev
+   $env:COMPOSE_PROJECT_NAME = "mp-smoke"
+   .\scripts\mp.ps1 smoke                                    # baseline
+   .\scripts\mp.ps1 drill d1                                  # rồi d2 ... d6
+   ```
+   Record nằm ở `data/ops/drills/`. Lần chạy smoke + D1 cuối cùng trên máy cũ
+   bị dừng giữa chừng (Docker Desktop tắt), nên **chưa có kết quả nào**.
+2. **Dự đoán: D4 (và có thể D2) sẽ lộ một bug thật.** Các service chạy lâu
+   trong Compose **không có `restart:` policy**. Khi ES/Redis/Kafka sập, speed
+   query chết hẳn (`foreachBatch` ném lỗi) và container nằm im; D4 đòi "batch
+   SUCCEEDED sau khi khôi phục" sẽ timeout. Theo quy tắc repo: viết một unit
+   test đọc `docker-compose.yml` và đòi `restart: unless-stopped` cho
+   crawl-worker, silver-sink, speed, batch-scheduler và stub-source (commit
+   test), rồi sửa (commit fix), rồi chạy lại drill.
+3. Sau khi D1–D6 đều pass: ghi kết quả vào mục này, chạy cả suite, mở PR vào
+   `develop`, review, merge. Kế tiếp là WP7 (D7–D10).
+
+### 17.3 Dựng môi trường trên máy khác
+
+- `git checkout phase-8-wp6-drills-d1-d6`.
+- `.env` không có trong git: copy `.env.example` thành `.env`. Nếu port bị
+  chiếm thì đổi các `*_HOST_PORT`, và để `POSTGRES_PORT`, `MINIO_ENDPOINT`,
+  `REDIS_PORT` khớp với chúng.
+- **MinIO:** Compose pin `minio/minio` và `minio/mc` theo digest, mà hai
+  image này **không pull được nữa** (`docs/RUNBOOK.md`, mục Image pins). Máy
+  mới cần chép image từ máy này: `docker save` / `docker load`. Nếu không có,
+  tạm dùng một image MinIO khác pull được, nhưng **đừng commit** thay đổi
+  pin đó.
+- Image của project build lần đầu bằng `docker compose build` hoặc
+  `mp up --build`. Image Spark khoảng 3,6 GB; các jar tải từ Maven Central
+  lúc build, không cần `.localjars/`.
+- Python trên host (để chạy test và drill) cần các gói trong
+  `requirements.txt`, nhất là kafka-python-ng, minio, psycopg2-binary, redis,
+  elasticsearch, pyarrow, và pyspark 4.x.
+- Spark không chạy được trên Windows host (thiếu winutils). Mọi job Spark
+  đều chạy trong container.
+- Suite mặc định: `python -m pytest tests -q --ignore=tests/test_marketplace_quality.py`
+  (khoảng 4 phút), rồi chạy riêng `tests/test_marketplace_quality.py`
+  (khoảng 20 phút). Lần chạy gần nhất trên nhánh này: 799 + 3 test harness.

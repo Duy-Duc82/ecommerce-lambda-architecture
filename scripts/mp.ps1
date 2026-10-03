@@ -12,12 +12,13 @@
 #   .\scripts\mp.ps1 seed --category 1846 --pages 2
 #   .\scripts\mp.ps1 smoke [-TimeoutSeconds 900]
 #   .\scripts\mp.ps1 validate [-Json path]
+#   .\scripts\mp.ps1 drill d1|d2|d3|d4|d5|d6|all   (after a passing smoke)
 #   .\scripts\mp.ps1 batch -AsOf 2026-10-02T00:00:00Z [-AllowBackfill] [-QualityOnly]
 # ============================================================
 
 param(
     [Parameter(Position = 0, Mandatory = $true)]
-    [ValidateSet("up", "down", "status", "migrate", "seed", "smoke", "validate", "batch")]
+    [ValidateSet("up", "down", "status", "migrate", "seed", "smoke", "validate", "batch", "drill")]
     [string]$Command,
     [string[]]$With = @("crawl", "ingest", "speed", "batch"),
     [switch]$Volumes,
@@ -182,6 +183,21 @@ try {
             $ExitCode = Invoke-Batch $runId $AsOf $extra
         }
         "smoke" { $ExitCode = Invoke-Smoke }
+        "drill" {
+            # Drills drive Docker, so they run on the host, against the
+            # published ports from .env, with the lake on MinIO.
+            $name = if ($Rest.Count -gt 0) { $Rest[0] } else { "all" }
+            $python = Join-Path $ProjectRoot ".venv\Scripts\python.exe"
+            if (-not (Test-Path $python)) { $python = "python" }
+            $savedProfile = $env:DATA_LAKE_PROFILE
+            $env:DATA_LAKE_PROFILE = "minio"
+            try {
+                & $python -m ops.drills $name | Write-Host
+                $ExitCode = $LASTEXITCODE
+            } finally {
+                $env:DATA_LAKE_PROFILE = $savedProfile
+            }
+        }
     }
 } catch {
     Write-Host $_ -ForegroundColor Red
