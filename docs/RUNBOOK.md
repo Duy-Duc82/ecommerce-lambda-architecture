@@ -21,10 +21,10 @@ docker compose --profile serve up -d         # Kibana, Superset
 | `ingest` | silver-sink |
 | `speed` | speed (checkpoints in volume `speed_checkpoints`) |
 | `batch` | batch-scheduler; `batch-once` for operator commands |
-| `serve` | kibana, superset, superset-init |
+| `serve` | kibana, superset, superset-init, kibana-marketplace-setup |
 | `legacy` | spark, spark-worker, kibana, kibana-setup |
 | `jobs` | warehouse-job (legacy; `scripts/run_warehouse.ps1`) |
-| `ops` | ops (a `run --rm` tool container) |
+| `ops` | ops (a `run --rm` tool container), es-projector (a loop service) |
 | `smoke` | stub-source, the offline Tiki stub |
 
 Operator batch run, for example a resume or a backfill:
@@ -177,6 +177,130 @@ docker volume ls -q --filter "label=com.docker.compose.project=$(docker inspect 
 docker volume rm <the volume that printed>
 .\scripts\mp.ps1 up -With speed
 ```
+
+## Kibana — index templates, dashboards and the projector (plan section 11)
+
+### What `serve` installs
+
+`kibana-marketplace-setup` runs once when the `serve` profile comes up. It is
+idempotent, so re-running it is the fix for most Kibana problems:
+
+```powershell
+docker compose --profile serve up -d kibana
+docker compose --profile serve run --rm --no-deps kibana-marketplace-setup
+# on the host instead of in a container:
+$env:LOCAL = "true"; python -m display.kibana.setup_marketplace_kibana
+```
+
+It installs six composable index templates, creates the four projector
+indices if they are absent (a Lens panel over a missing index is an error,
+not an empty chart), deletes the Phase 5 dashboard shell, and imports
+`display/kibana/saved_objects/marketplace_dashboards.ndjson` with
+`overwrite=true`.
+
+That `.ndjson` is **generated**, not hand-edited. Change
+`display/kibana/marketplace_dashboards.py` and regenerate:
+
+```powershell
+python -m display.kibana.marketplace_dashboards
+```
+
+`tests/test_kibana_marketplace.py` fails if the committed file and the
+builder disagree.
+
+### The projector
+
+```powershell
+docker compose --profile ops up -d es-projector     # the loop service
+docker compose --profile ops run --rm --no-deps es-projector `
+  python -m ops.es_projector --once                 # one pass, then exit
+docker compose --profile ops run --rm --no-deps es-projector `
+  python -m ops.es_projector --once --rebuild       # re-index everything
+```
+
+| Index | Source | `_id` |
+|---|---|---|
+| `marketplace-source-health-v1` | `audit.crawl_source_state` + Redis `rt:source:<mkt>:last_observation` | `marketplace_code` |
+| `marketplace-crawl-attempts-v1` | `audit.crawl_request_attempt` joined to the frontier | `attempt_id` |
+| `marketplace-speed-batches-v1` | `audit.marketplace_speed_batch` | `query_name:query_id:batch_id` |
+| `marketplace-dlq-v1` | the Kafka DLQ topic, group `marketplace-dlq-projector-v1` | `dlq_id` |
+
+Every pass re-reads the last `MARKETPLACE_OPS_PROJECT_OVERLAP_SECONDS`
+(900 by default) of settled rows. A row updated after it was first projected,
+and a pass that died halfway, are both repaired by the next pass, because
+every `_id` is derived from the row's own key. The watermark lives in the
+process only: a restart resumes from `now - overlap`.
+
+`--rebuild` drops the window for one pass and rewinds the DLQ consumer to the
+beginning. Use it after a long outage, or after deleting an index.
+
+A projection failure is logged and the loop carries on — an outage costs
+freshness, never a document. The container heartbeat beats once per pass,
+failed pass included, so a *hung* projector goes unhealthy while one waiting
+out an Elasticsearch restart does not.
+
+The projector is read-only towards the pipeline: no lock, no PostgreSQL
+write, and the only offsets it advances are its own, committed **after** the
+records are indexed.
+
+### What the panels actually measure
+
+- **"Speed micro-batch duration"** is `completed_at - started_at` for one
+  Spark micro-batch. It is **not** observation-to-change latency: the change
+  contract carries no processed time and Phase 8 does not add one. End-to-end
+  latency is a Phase 9 measurement (P2-01).
+- **"Fetch latency"** is `latency_ms` of one crawl request — the fetch alone.
+- **Freshness** on the source-health dashboard is `now - last observation`
+  measured when the projector last ran, so it is at most one interval stale.
+  Gold-level freshness and coverage stay in Superset
+  (`cache.marketplace_offer_freshness`,
+  `cache.marketplace_source_coverage_daily`).
+- A **public counter change** is a change in a number the marketplace
+  displays. It is not a sale and not a demand signal.
+
+### Recreating `marketplace-changes-v1` and `marketplace-offers-current-v1`
+
+An index template applies only to an index created after it. Both of these
+were mapped dynamically before Phase 8, which made `change_type` and
+`availability` `text` fields — so every terms aggregation over them failed
+with *"Fielddata is disabled"*, and the two dashboard panels built on them
+were empty. Recreating them is a deliberate, one-off replay:
+
+```powershell
+docker compose --profile speed stop speed
+docker exec elasticsearch curl -s -X DELETE `
+  'http://localhost:9200/marketplace-changes-v1,marketplace-offers-current-v1'
+# .env: MARKETPLACE_STREAM_CHECKPOINT_VERSION=v2  (any new value)
+docker compose --profile speed up -d speed
+```
+
+A new checkpoint version starts the query from `earliest`, and the
+deterministic `_id`s rebuild the same documents. Redis is rebuilt by the same
+replay. This is drill D5's replay variant, run once on purpose.
+
+It works only because a speed batch is keyed by
+`(query_name, query_id, batch_id)` — batch IDs restart at 0 under a new
+checkpoint, and the old `(query_name, batch_id)` key made the audit skip every
+replayed batch as already `SUCCEEDED` (fixed in WP2).
+
+**Run for real on 2026-10-04.** Before: 1001 changes, 12 offers, `change_type`
+mapped as `text`. After the replay: 1001 changes, 12 offers — the same
+documents, not more and not fewer — with `change_type` and `availability` as
+`keyword`, and `current_value` a keyword carrying a `numeric` sub-field
+(`scaled_float`, `ignore_malformed`) so the price charts aggregate and the
+`NEW_OFFER` JSON-text value is skipped rather than rejected.
+
+### When Kibana shows "no data"
+
+1. Is the index there at all?
+   `docker exec elasticsearch curl -s 'http://localhost:9200/_cat/indices/marketplace-*?v'`
+2. Is the projector running and recent?
+   `docker logs es-projector --tail 5` — one `{"event": "projected", ...}` per
+   interval.
+3. Each dashboard has its own stored time range (24 hours for realtime, 7 days
+   for source health). A stack idle for longer shows nothing, correctly.
+4. A terms aggregation failing with *"Fielddata is disabled"* means the index
+   predates its template. Recreate it, above.
 
 ## Image pins (plan section 5.3)
 
