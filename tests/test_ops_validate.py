@@ -477,3 +477,28 @@ def test_a_speed_batch_is_looked_up_by_query_id_and_batch_id():
 
     assert captured == [("q1", 7)]
     assert row[2] == "SUCCEEDED" and row[7] is None
+
+
+def test_the_change_check_waits_out_the_elasticsearch_refresh(monkeypatch):
+    """A bulk the sink committed is not searchable for up to a refresh interval."""
+    from ops import drills
+
+    monkeypatch.setattr(drills.time, "sleep", lambda seconds: None)
+    views = iter([["e1"], ["e1"], ["e1", "e2"]])
+    stack = drills.Stack.__new__(drills.Stack)
+    stack.es_change_ids = lambda: next(views)
+
+    assert stack.es_changes_covering(["e1", "e2"], timeout=60) == ["e1", "e2"]
+
+
+def test_a_change_that_never_arrives_still_fails_the_drill(monkeypatch):
+    from ops import drills
+
+    monkeypatch.setattr(drills.time, "sleep", lambda seconds: None)
+    clock = iter(range(0, 1000, 30))
+    monkeypatch.setattr(drills.time, "monotonic", lambda: next(clock))
+    stack = drills.Stack.__new__(drills.Stack)
+    stack.es_change_ids = lambda: ["e1"]
+
+    with pytest.raises(drills.DrillFailed, match="'not_searchable': 1"):
+        stack.es_changes_covering(["e1", "e2"], timeout=60)
