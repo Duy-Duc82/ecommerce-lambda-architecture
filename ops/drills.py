@@ -31,7 +31,7 @@ import time
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Iterable
 
 ROOT = Path(__file__).resolve().parents[1]
 RECORDS = ROOT / "data" / "ops" / "drills"
@@ -294,6 +294,28 @@ class Stack:
 
         return [doc["event_id"] for doc in self.src.es_documents(ES_INDEX_MARKETPLACE_CHANGES)]
 
+    def es_changes_covering(self, members: Iterable[str], *, timeout: float = 60) -> list[str]:
+        """Change ids in Elasticsearch, once every one of ``members`` is searchable.
+
+        Elasticsearch is near-real-time: a bulk the sink has already committed
+        — and whose Redis write therefore already happened — is not visible to
+        a search until the next refresh, a second by default. Reading once the
+        moment a batch is audited SUCCEEDED races that refresh and reports
+        changes Redis holds and Elasticsearch "lost". The wait is bounded, so
+        a change that really never arrives still fails the drill, naming it.
+        """
+        wanted, seen = set(members), []
+
+        def searchable() -> tuple[bool, Any]:
+            seen[:] = self.es_change_ids()
+            missing = wanted - set(seen)
+            return not missing, {"es_changes": len(seen), "not_searchable": len(missing),
+                                 "examples": sorted(missing)[:3]}
+
+        wait_until(searchable, timeout=timeout, poll=2,
+                   what="Elasticsearch to make every change Redis holds searchable")
+        return list(seen)
+
 
 def _failing(results) -> list[str]:
     return [r.check for r in results if r.status != "PASS"]
@@ -473,8 +495,11 @@ def d4_sinks_down_during_speed(stack: Stack, rec: Record) -> None:
         ok = wait_until(lambda: ((row := stack.speed_batch(query_id, batch_id)) is not None and row[2] == "SUCCEEDED", row),
                         timeout=600, what=f"batch {batch_id} of {query_id} to succeed after {service} returns",
                         poll=10)
-        ids = stack.es_change_ids()
         recent = stack.redis_recent_changes()
+        # Redis is written after the Elasticsearch bulk, so every recent change
+        # must have a document; a retry that minted new ids would not. The wait
+        # is for the search refresh, not for the write — see es_changes_covering.
+        ids = stack.es_changes_covering(recent)
         rec.step("verify", service=service, query_id=query_id, batch_id=batch_id, completed_at=ok[6],
                  input_rows=ok[3], change_rows=ok[4], es_changes=len(ids), es_distinct=len(set(ids)),
                  redis_recent=len(recent), redis_distinct=len(set(recent)))
@@ -482,11 +507,6 @@ def d4_sinks_down_during_speed(stack: Stack, rec: Record) -> None:
             raise DrillFailed(f"duplicate change documents in Elasticsearch: {len(ids)} docs, {len(set(ids))} ids")
         if len(recent) != len(set(recent)):
             raise DrillFailed(f"duplicate members in rt:changes:recent: {len(recent)} members, {len(set(recent))} distinct")
-        # Redis is written after the Elasticsearch bulk, so every recent change
-        # must have a document. A retry that minted new ids would show up here.
-        orphans = sorted(set(recent) - set(ids))
-        if orphans:
-            raise DrillFailed(f"{len(orphans)} change(s) in rt:changes:recent with no Elasticsearch document: {orphans[:5]}")
 
 
 def d5_speed_restart(stack: Stack, rec: Record) -> None:
