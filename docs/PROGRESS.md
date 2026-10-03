@@ -1735,9 +1735,13 @@ File quality không đụng tới code nào WP5 sửa (42). Tổng: **841**.
 
 Hai điều khác với §16/§17.3 của máy cũ:
 
-- **Spark *chạy được* trên host này** (Java 21 + pyspark 4.0.4), nên những
-  test trước đây skip vì `requires_spark` nay chạy thật. Suite mặc định do
-  đó lâu hơn (4m41s) nhưng phủ nhiều hơn.
+- **Spark chạy được trên host này *trong bộ nhớ*** (Java 21 + pyspark 4.0.4):
+  `createDataFrame` → `collect` round-trip OK, nên những test trước đây skip
+  vì `requires_spark` nay chạy thật, suite mặc định lâu hơn (3–5 phút) nhưng
+  phủ nhiều hơn. **Filesystem thì vẫn không**: ghi parquet ra ổ Windows vẫn
+  ném `UnsatisfiedLinkError: NativeIO$Windows.access0` vì thiếu `winutils.exe`
+  (kiểm lại 2026-10-03, xem `PHASE_INDEX.md` §5b mục 1). Mọi job Spark có I/O
+  vẫn phải chạy trong container.
 - `docker compose build` nhiều service cùng dùng một image name thì báo
   `image "…": already exists` và **vẫn thoát 0**; phải build riêng
   (`compose build speed`) mới ra `ecommerce/spark-marketplace:4.0.1`.

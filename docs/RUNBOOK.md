@@ -170,7 +170,11 @@ the new topics never had. The changes it projected are rebuildable, so:
 
 ```powershell
 docker compose -f docker-compose.yml --profile speed rm -sf speed
-docker volume rm ecommerce-lambda-architecture_speed_checkpoints
+# Compose prefixes the volume with the project name, which is the directory
+# unless COMPOSE_PROJECT_NAME says otherwise -- so ask Docker rather than
+# guessing, or another project's checkpoints are one typo away.
+docker volume ls -q --filter "label=com.docker.compose.project=$(docker inspect kafka -f '{{index .Config.Labels \"com.docker.compose.project\"}}')" --filter name=speed_checkpoints
+docker volume rm <the volume that printed>
 .\scripts\mp.ps1 up -With speed
 ```
 
