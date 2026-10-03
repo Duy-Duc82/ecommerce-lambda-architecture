@@ -298,6 +298,27 @@ class Stack:
     def redis_recent_changes(self) -> list[str]:
         return self.src.redis_zset_members("rt:changes:recent")
 
+    def wait_speed_drained(self, since: datetime, *, quiet_seconds: int = 75, timeout: float = 900) -> int:
+        """Wait until the speed query has consumed everything Kafka holds.
+
+        Its offsets live in the query's own checkpoint, not in a Kafka
+        consumer group, so ``quiet()`` — which reads the Silver group's lag —
+        says nothing about it, and a snapshot taken on the strength of that
+        catches the query mid-topic. The one signal available is the audit:
+        once no micro-batch has carried a row for longer than the trigger,
+        there is nothing left to carry. Returns how many did.
+        """
+        def settled() -> tuple[bool, Any]:
+            carried = [r for r in self.speed_batches_since(since) if r[3] > 0 or r[4] > 0]
+            if not carried:
+                return False, {"batches_with_rows": 0}
+            idle = (datetime.now(timezone.utc) - carried[-1][5]).total_seconds()
+            return idle > quiet_seconds, {"batches_with_rows": len(carried), "idle_seconds": round(idle)}
+
+        observed = wait_until(settled, timeout=timeout, poll=15,
+                              what=f"the speed query to go {quiet_seconds}s without a batch carrying rows")
+        return observed["batches_with_rows"]
+
     def batch_after_last_crawl(self) -> tuple[int, str]:
         """One batch over everything crawled so far, as the smoke runs it."""
         plan = self.run(COMPOSE + ["--profile", "ops", "run", "--rm", "--no-deps", "ops", "python", "-m", "ops",
@@ -585,6 +606,7 @@ def d5_speed_restart(stack: Stack, rec: Record) -> None:
     stack.quiet()
     wait_until(lambda: (not stack.stranded_speed_batches(since, stale_seconds=90), None),
                timeout=420, poll=15, what="every micro-batch to reach a terminal status")
+    stack.wait_speed_drained(since)
     recent = stack.redis_recent_changes()
     ids = stack.es_changes_covering(recent)
     lost = sorted(before_kill - set(ids))
@@ -615,12 +637,9 @@ def d5_speed_restart(stack: Stack, rec: Record) -> None:
              checkpoint_version="drill-d5")
     wait_until(lambda: (any(r[2] == "SUCCEEDED" and r[3] > 0 for r in stack.speed_batches_since(replay_from)), None),
                timeout=300, what="the replay's first batch")
-    def settled() -> tuple[bool, Any]:
-        recent = [r for r in stack.speed_batches_since(replay_from) if r[3] > 0]
-        return bool(recent) and (datetime.now(timezone.utc) - recent[-1][5]).total_seconds() > 60, len(recent)
-    wait_until(settled, timeout=600, what="the replay to drain", poll=15)
-    after = set(stack.es_change_ids())
-    rec.step("verify", variant="replay", before=len(before), after=len(after),
+    batches = stack.wait_speed_drained(replay_from)
+    after = set(stack.es_changes_covering(stack.redis_recent_changes()))
+    rec.step("verify", variant="replay", batches=batches, before=len(before), after=len(after),
              new=len(after - before), missing=len(before - after))
     if after != before:
         raise DrillFailed(f"replay changed the change set: {len(after - before)} new, {len(before - after)} missing")
