@@ -1721,8 +1721,8 @@ File quality không đụng tới code nào WP5 sửa (42). Tổng: **841**.
 
 > **Trạng thái:** D1–D6 **đã chạy thật và pass hết** trên stack Compose sạch
 > (`COMPOSE_PROJECT_NAME=mp-smoke`), sau một `mp smoke` pass. Sáu record bằng
-> chứng nằm ở `data/ops/drills/`. Nhánh `phase-8-wp6-drills-d1-d6`, sẵn sàng
-> mở PR vào `develop`.
+> chứng nằm ở `data/ops/drills/`. Nhánh `phase-8-wp6-drills-d1-d6`, đã mở
+> **PR #12** vào `develop` (đang chờ review).
 
 ### 17.1 Môi trường đã chuẩn hóa (máy mới)
 
@@ -1750,8 +1750,8 @@ khôi phục" nên chỉ có thể timeout.
 
 | Bước | Commit |
 |---|---|
-| Test đọc `docker-compose.yml`, đòi `restart: unless-stopped` cho 5 service dài hạn và `restart: "no"` cho 2 service one-shot — fail đúng 5/8 vì đúng lý do | `cb91d88` `tests/test_compose_services.py` |
-| Fix: thêm `restart: unless-stopped` cho crawl-worker, silver-sink, speed, batch-scheduler, stub-source | `c136c77` |
+| Test đọc `docker-compose.yml`, đòi `restart: unless-stopped` cho 5 service dài hạn và `restart: "no"` cho 2 service one-shot — fail đúng 5/8 vì đúng lý do | `aca5050` `tests/test_compose_services.py` |
+| Fix: thêm `restart: unless-stopped` cho crawl-worker, silver-sink, speed, batch-scheduler, stub-source | `7231b8b` |
 
 `unless-stopped` chứ không `always`: service nào drill chủ động `stop` thì
 phải nằm yên. Hệ quả: D6 phải `docker update --restart no` trước khi kill
@@ -1774,7 +1774,7 @@ không tìm thấy volume nào** — bản cũ lọc `name=speed_checkpoints` tr
 máy (máy này còn project `invoice-gateway`) và im lặng không xóa gì nếu
 trượt, biến "replay" thành no-op.
 
-Commit: `02e3657` (siết D4 + D5 + D6 `stays_dead`, kèm test offline).
+Commit: `bf3de65` (siết D4 + D5 + D6 `stays_dead`, kèm test offline).
 
 ### 17.4 Kết quả D1–D6 (thật, 2026-10-03)
 
@@ -1806,7 +1806,7 @@ siết đi qua *mọi* assertion của plan rồi fail ở chỗ "mỗi change t
 searchable cho tới lần refresh sau (mặc định 1 s), còn drill đọc ngay lúc
 batch được audit SUCCEEDED. Đọc lại một phút sau: 109 và 109, 0 orphan.
 `es_changes_covering` chờ có giới hạn cho tới khi mọi id Redis giữ đã
-searchable. Commit `2497301`.
+searchable. Commit `cb61184`.
 
 **(b) D5 không kill được gì, rồi chụp ảnh quá sớm.**
 
@@ -1823,7 +1823,7 @@ searchable. Commit `2497301`.
    backlog vào một batch). 60 quan sát đo được 268 ms; sàn đặt ở 150 quan
    sát. Poll giữ một connection (2 ms/lượt thay vì 20 ms). Trúng hay không
    **không được giả định**: batch phải còn `RUNNING` sau 15 s, trạng thái
-   terminal ở đó là drill fail. Commit `53603f7`, và `67c06b8` vì
+   terminal ở đó là drill fail. Commit `db89914`, và `257f227` vì
    `postgres_connection_factory()` trả context manager chứ không phải
    connection.
 3. Lần sau variant 1 pass nhưng replay báo **19 doc mới, 0 thiếu**. Không
@@ -1834,7 +1834,7 @@ searchable. Commit `2497301`.
    offset trong checkpoint riêng nên lag đó không nhìn thấy; 12 quan sát
    của lần crawl cuối chưa được đọc. `wait_speed_drained` chờ theo audit:
    khi không micro-batch nào mang row lâu hơn một trigger thì không còn gì
-   để mang. Commit `3356925`.
+   để mang. Commit `9e18cf2`.
 
 ### 17.6 Trạng thái test (Python 3.12.13, pyspark 4.0.4)
 
@@ -1849,7 +1849,7 @@ searchable. Commit `2497301`.
 
 ### 17.7 Việc tiếp theo (resume ở đây)
 
-1. Mở PR WP6 vào `develop`, review, merge.
+1. Review và merge **PR #12** (WP6) vào `develop`.
 2. **WP7:** D7–D10 (drift, quality failure, publish failure, concurrent
    batch), plan §10. Không bắt đầu trước khi WP6 merge.
 3. WP8 (Kibana), WP9 (backup/restore, D11), WP10 (tài liệu tổng thể
