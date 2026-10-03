@@ -1714,3 +1714,164 @@ File quality không đụng tới code nào WP5 sửa (42). Tổng: **841**.
 3. Stack dev đang chạy core. `speed_checkpoints` đã bị xoá vì topic Kafka
    được tạo lại (§16.3); bật lại `speed` sẽ dựng checkpoint mới.
 4. Ổ `C:` còn khoảng 5 GB.
+
+---
+
+## 17. Session 2026-10-03 — Phase 8 WP6 (drill D1–D6): XONG
+
+> **Trạng thái:** D1–D6 **đã chạy thật và pass hết** trên stack Compose sạch
+> (`COMPOSE_PROJECT_NAME=mp-smoke`), sau một `mp smoke` pass. Sáu record bằng
+> chứng nằm ở `data/ops/drills/`. Nhánh `phase-8-wp6-drills-d1-d6`, đã mở
+> **PR #12** vào `develop` (đang chờ review).
+
+### 17.1 Môi trường đã chuẩn hóa (máy mới)
+
+| Hạng mục | Trước | Sau |
+|---|---|---|
+| Python host | 3.11.9, pyspark **3.5.1** | **3.12.13** (`uv python install 3.12`), `.venv` dựng lại, cài `requirements.txt` → **pyspark 4.0.4** |
+| `.env` | bản tháng 7, còn `SPARK_KAFKA_PACKAGE=…_2.12:3.5.1` | copy từ `.env.example`; biến đó **đã bỏ**, mặc định trong `config/settings.py` là `…_2.13:4.0.1` |
+| Docker | chưa chạy | Docker Desktop 28.3.2; hai image MinIO đã pin **có sẵn** trên máy này (`minio/minio@sha256:14cea493…`, `minio/mc@sha256:a7fe349e…`), không phải `docker load` từ máy khác |
+| Image khác | thiếu | pull `apache/spark:4.0.1`, `python:3.12.11-slim`, ES/Kibana `8.18.1`; build `ecommerce/spark-marketplace:4.0.1` (3,6 GB) và `ecommerce/marketplace-python:1` |
+
+Hai điều khác với §16/§17.3 của máy cũ:
+
+- **Spark chạy được trên host này *trong bộ nhớ*** (Java 21 + pyspark 4.0.4):
+  `createDataFrame` → `collect` round-trip OK, nên những test trước đây skip
+  vì `requires_spark` nay chạy thật, suite mặc định lâu hơn (3–5 phút) nhưng
+  phủ nhiều hơn. **Filesystem thì vẫn không**: ghi parquet ra ổ Windows vẫn
+  ném `UnsatisfiedLinkError: NativeIO$Windows.access0` vì thiếu `winutils.exe`
+  (kiểm lại 2026-10-03, xem `PHASE_INDEX.md` §5b mục 1). Mọi job Spark có I/O
+  vẫn phải chạy trong container.
+- `docker compose build` nhiều service cùng dùng một image name thì báo
+  `image "…": already exists` và **vẫn thoát 0**; phải build riêng
+  (`compose build speed`) mới ra `ecommerce/spark-marketplace:4.0.1`.
+
+### 17.2 Bug production tìm được: không service dài hạn nào có `restart:`
+
+Đúng như dự đoán ở bản §17.2 cũ. `foreachBatch` ném lỗi → `awaitTermination`
+ném → `main()` thoát → container nằm im. D4 đòi "batch SUCCEEDED sau khi
+khôi phục" nên chỉ có thể timeout.
+
+| Bước | Commit |
+|---|---|
+| Test đọc `docker-compose.yml`, đòi `restart: unless-stopped` cho 5 service dài hạn và `restart: "no"` cho 2 service one-shot — fail đúng 5/8 vì đúng lý do | `634a307` `tests/test_compose_services.py` |
+| Fix: thêm `restart: unless-stopped` cho crawl-worker, silver-sink, speed, batch-scheduler, stub-source | `f03e0d3` |
+
+`unless-stopped` chứ không `always`: service nào drill chủ động `stop` thì
+phải nằm yên. Hệ quả: D6 phải `docker update --restart no` trước khi kill
+worker A, nếu không Docker dựng A dậy ngay và B không bao giờ nhận lease.
+
+### 17.3 Siết D4 và D5 (yêu cầu của session này)
+
+**D4 — đúng cùng một batch.** Bản cũ chờ "một batch FAILED" rồi "một batch
+SUCCEEDED có row"; hai cái đó không bắt buộc là một, nên một query bỏ batch
+hỏng rồi đi tiếp vẫn pass. Bản mới bám khóa audit `(query_id, batch_id)`:
+FAILED → **retry dưới `started_at` mới trong lúc sink vẫn chết** → SUCCEEDED.
+Thêm kiểm tra Redis: `rt:changes:recent` không có member trùng, và không
+change nào trong Redis mà Elasticsearch không có.
+
+**D5 — kill thật giữa micro-batch, xóa volume đúng project.** Chi tiết ở
+§17.5; tóm tắt: dựng backlog Kafka để batch đủ dài mà kill vào giữa, chứng
+minh bằng audit row kẹt `RUNNING`, rồi đòi đúng batch đó chạy lại thành
+công. Volume lọc theo `label=com.docker.compose.project` và **fail nếu
+không tìm thấy volume nào** — bản cũ lọc `name=speed_checkpoints` trên toàn
+máy (máy này còn project `invoice-gateway`) và im lặng không xóa gì nếu
+trượt, biến "replay" thành no-op.
+
+Commit: `55270bd` (siết D4 + D5 + D6 `stays_dead`, kèm test offline).
+
+### 17.4 Kết quả D1–D6 (thật, 2026-10-03)
+
+Stack: project `mp-smoke`, `mp smoke` **PASSED** trước khi bắt đầu.
+Mỗi drill tự `restore` về `validate` xanh; cả sáu record đều `"passed": true`.
+
+| Drill | Thời gian | Invariant đã chứng minh |
+|---|---|---|
+| D1 | 1m43s | 429/500/timeout → `RATE_LIMITED`/`SERVER_ERROR`/`TRANSIENT_NETWORK`; `Retry-After` được tôn trọng (due 14:29:09 sau khi xong 14:29:08); circuit mở đúng ngưỡng 5; stub về `ok` thì mọi target xong, **không task nào FAILED khi còn lượt** |
+| D2 | 4m59s | Kafka dừng giữa crawl → `PUBLISH_ERROR`, `parsed_count = 0` = số đã ack, raw vẫn trong Bronze; Kafka lên lại, batch `mp-20261003T1435Z` **SUCCEEDED** → check 8 đối soát sạch |
+| D3 | 1m43s | MinIO dừng → sink **không commit** (lag 12 → 12 sau 60 s), **DLQ không đổi** (0 → 0 → 0); MinIO lên lại, Silver đủ 12/12 quan sát đã ack |
+| D4 | 3m12s | ES: batch 36 của query `396ae430…` FAILED 12:57:31 → retry 12:58:04 (vẫn RUNNING, ES còn chết) → SUCCEEDED 12:58:23. Redis: batch 38, cùng hình. ES 131 doc / 131 id, Redis 131/131, không orphan |
+| D5 | 21m01s | Kill **trong** batch 8 (backlog 152 quan sát): audit row kẹt `RUNNING`, `completed_at` null; container 14:02:21 → 14:22:52; **đúng batch 8** chạy lại SUCCEEDED với 156 row / 184 change; ES 811 doc / 811 id, **0 event mất**. Replay: xóa `mp-smoke_speed_checkpoints`, `MARKETPLACE_STREAM_CHECKPOINT_VERSION=drill-d5`, đọc lại từ `earliest` → **811 → 811, 0 mới, 0 thiếu** |
+| D6 | 1m02s | Giết worker A khi đang giữ 6 lease → B **không** lấy lease nào trước khi hết hạn (6/6 vẫn thuộc A); hết hạn thì B nhận và hoàn thành đủ 6; không task nào chạy song song |
+
+D4 và D5 chạy lại sau khi sửa (§17.5). D1–D3 được **chạy lại liên tiếp** trên
+bản code cuối cùng để chắc không rò state giữa các drill: cả ba pass.
+
+### 17.5 Hai bug trong chính drill, tìm được khi chạy thật
+
+Cả hai là bug của harness, **không phải** của production code — ghi lại vì
+mỗi cái đều suýt bị đọc nhầm thành bug sản phẩm.
+
+**(a) D4 đọc Elasticsearch trước khi nó refresh.** Lần chạy đầu của D4 bản
+siết đi qua *mọi* assertion của plan rồi fail ở chỗ "mỗi change trong
+`rt:changes:recent` phải có document": 109 member / 99 document, thiếu đúng
+10 = `change_rows` của batch đó. Sink ghi ES **trước** Redis nên phép so là
+đúng — nhưng Elasticsearch là near-real-time: bulk đã commit vẫn chưa
+searchable cho tới lần refresh sau (mặc định 1 s), còn drill đọc ngay lúc
+batch được audit SUCCEEDED. Đọc lại một phút sau: 109 và 109, 0 orphan.
+`es_changes_covering` chờ có giới hạn cho tới khi mọi id Redis giữ đã
+searchable. Commit `d3aa4d5`.
+
+**(b) D5 không kill được gì, rồi chụp ảnh quá sớm.**
+
+1. Cách đầu là cho watcher chạy **trong** container và gọi `os.kill(1, 9)`.
+   Bị **bỏ qua im lặng**: PID 1 *chính là* driver, và Linux không giao tín
+   hiệu default-action cho init của một PID namespace khi tín hiệu đến từ
+   trong chính namespace đó. Đo trên stack: watch 90 s, mọi micro-batch đều
+   khớp, `RestartCount` không đổi.
+2. Kill từ host thì không trúng cửa sổ: audit row chỉ mở trong lúc ghi sink
+   — đo được **10 ms** (batch rỗng) và **28–90 ms** (một chu kỳ crawl) —
+   trong khi `docker kill` mất **~220 ms** mới tới nơi.
+   → Drill **tự tạo cửa sổ**: dừng query, để crawler dồn backlog Kafka, rồi
+   kill vào đúng batch xả backlog (không có `maxOffsetsPerTrigger` nên cả
+   backlog vào một batch). 60 quan sát đo được 268 ms; sàn đặt ở 150 quan
+   sát. Poll giữ một connection (2 ms/lượt thay vì 20 ms). Trúng hay không
+   **không được giả định**: batch phải còn `RUNNING` sau 15 s, trạng thái
+   terminal ở đó là drill fail. Commit `9c27b9c`, và `bc87c6d` vì
+   `postgres_connection_factory()` trả context manager chứ không phải
+   connection.
+3. Lần sau variant 1 pass nhưng replay báo **19 doc mới, 0 thiếu**. Không
+   phải bất định: hai lần replay mà lần chạy đó tình cờ tạo ra (hai
+   `checkpoint_version` khác nhau) **khớp nhau tuyệt đối** — 540 input row,
+   617 change — còn query live mới tới 528/598. Ảnh "before" chụp quá sớm:
+   `quiet()` chờ lag của **consumer group Silver**, mà speed query giữ
+   offset trong checkpoint riêng nên lag đó không nhìn thấy; 12 quan sát
+   của lần crawl cuối chưa được đọc. `wait_speed_drained` chờ theo audit:
+   khi không micro-batch nào mang row lâu hơn một trigger thì không còn gì
+   để mang. Commit `83a987c`.
+
+### 17.6 Trạng thái test (Python 3.12.13, pyspark 4.0.4)
+
+- Suite mặc định (`-m "not drill"`, bỏ `test_marketplace_quality.py`):
+  **826 pass, 6 deselected**, 4m41s.
+- `tests/test_marketplace_quality.py` riêng: **42 pass**, 16m19s.
+- **Tổng 868.** Trước WP6 là 841 trên máy cũ; chênh lệch gồm 8 test
+  `tests/test_compose_services.py`, 12 test harness mới trong
+  `tests/test_ops_validate.py`, và những test Spark trước đây skip nay chạy
+  thật trên host này.
+- Sáu drill vẫn nằm ngoài suite mặc định (marker `drill`).
+
+### 17.7 Việc tiếp theo (resume ở đây)
+
+1. Review và merge **PR #12** (WP6) vào `develop`.
+2. **WP7:** D7–D10 (drift, quality failure, publish failure, concurrent
+   batch), plan §10. Không bắt đầu trước khi WP6 merge.
+3. WP8 (Kibana), WP9 (backup/restore, D11), WP10 (tài liệu tổng thể
+   ARCHITECTURE/DATA_MODEL/RUNBOOK) vẫn chưa làm.
+4. Ổ `C:` còn khoảng 150 GB trên máy này.
+
+### 17.8 Dựng môi trường trên máy khác
+
+- `git checkout phase-8-wp6-drills-d1-d6`.
+- `.env` không có trong git: copy `.env.example` thành `.env`. Nếu port bị
+  chiếm thì đổi các `*_HOST_PORT`, và để `POSTGRES_PORT`, `MINIO_ENDPOINT`,
+  `REDIS_PORT` khớp với chúng. **Đừng** mang lại
+  `SPARK_KAFKA_PACKAGE=…_2.12:3.5.1`.
+- Python 3.12 + `pip install -r requirements.txt` (pyspark 4.0.4).
+- **MinIO:** Compose pin `minio/minio` và `minio/mc` theo digest, mà hai
+  image này **không pull được nữa** (`docs/RUNBOOK.md`, mục Image pins).
+  Máy không có thì chép sang bằng `docker save` / `docker load`.
+- Image của project: build **từng service một** cho nhánh Spark (§17.1),
+  hoặc `mp up --build`.
+- Chạy drill: `$env:COMPOSE_PROJECT_NAME = "mp-smoke"`, `mp smoke`, rồi
+  `mp drill d1` … `d6`. D5 mất khoảng 20 phút vì phải dồn backlog.

@@ -138,14 +138,22 @@ services:
     <<: *marketplace-python
     profiles: ["crawl"]
     container_name: crawl-worker
+    restart: unless-stopped
     command: ["python", "-m", "crawler.service"]
     environment:
       <<: *marketplace-env
-      CRAWL_SERVICE_WORKER_ID: crawl-worker
+      # A drill starts a second worker under another ID; two workers sharing
+      # one would complete each other's leases.
+      CRAWL_SERVICE_WORKER_ID: ${CRAWL_SERVICE_WORKER_ID:-crawl-worker}
       # Overridable so a smoke or drill can point the crawler at a stub.
       TIKI_LISTING_URL: ${TIKI_LISTING_URL:-https://tiki.vn/api/personalish/v1/blocks/listings}
       # The smoke recrawls its ACTIVE tasks every minute instead of every hour.
       CRAWL_ACTIVE_CADENCE_MINUTES: ${CRAWL_ACTIVE_CADENCE_MINUTES:-60}
+      # The drills shorten these; the defaults match config/settings.py.
+      CRAWL_LEASE_SECONDS: ${CRAWL_LEASE_SECONDS:-300}
+      CRAWL_RETRY_BASE_SECONDS: ${CRAWL_RETRY_BASE_SECONDS:-30}
+      CRAWL_RETRY_MAX_SECONDS: ${CRAWL_RETRY_MAX_SECONDS:-1800}
+      CRAWL_CIRCUIT_OPEN_SECONDS: ${CRAWL_CIRCUIT_OPEN_SECONDS:-900}
       SERVICE_HEARTBEAT_FILE: /tmp/heartbeat
     # SIGTERM finishes the cycle in hand: up to CRAWL_WORKER_BATCH_SIZE pages
     # at CRAWL_REQUEST_DELAY_SECONDS each, plus their fetches.
@@ -163,6 +171,7 @@ services:
     <<: *marketplace-python
     profiles: ["ingest"]
     container_name: silver-sink
+    restart: unless-stopped
     command: ["python", "-m", "data_ingestion.marketplace_silver_service"]
     environment:
       <<: *marketplace-env
@@ -180,10 +189,13 @@ services:
     <<: *spark-marketplace
     profiles: ["speed"]
     container_name: speed
+    restart: unless-stopped
     command: ["python3", "-m", "speed_layer.marketplace_speed_service"]
     environment:
       <<: *marketplace-env
       MARKETPLACE_SPEED_CHECKPOINT_ROOT: /data/checkpoints
+      # Bumped by drill D5 to force a full replay from a fresh checkpoint.
+      MARKETPLACE_STREAM_CHECKPOINT_VERSION: ${MARKETPLACE_STREAM_CHECKPOINT_VERSION:-v1}
     volumes:
       - ./:/app:ro
       - speed_checkpoints:/data/checkpoints
@@ -205,6 +217,7 @@ services:
     <<: *spark-marketplace
     profiles: ["batch"]
     container_name: batch-scheduler
+    restart: unless-stopped
     command: ["python3", "-m", "batch_layer.marketplace_scheduler"]
     environment:
       <<: *marketplace-env
@@ -254,6 +267,7 @@ services:
     <<: *marketplace-python
     profiles: ["smoke"]
     container_name: stub-source
+    restart: unless-stopped
     command: ["python", "-m", "ops.stub_source", "--port", "8000"]
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/robots.txt', timeout=5)"]

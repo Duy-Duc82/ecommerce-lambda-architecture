@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -318,7 +319,7 @@ def test_parking_disables_every_pending_smoke_task_and_only_those():
     assert parked == 6
 
 
-def test_activating_reenables_parked_smoke_tasks_now():
+def test_activating_reenables_parked_and_failed_smoke_tasks_now():
     log = []
 
     smoke.activate(lambda: RecordingConnection(log))
@@ -326,7 +327,8 @@ def test_activating_reenables_parked_smoke_tasks_now():
     (sql, params), = log
     assert sql.startswith("UPDATE audit.crawl_frontier SET status = 'READY'")
     assert "scheduled_for = now()" in sql
-    assert "status = 'DISABLED'" in sql
+    assert "attempts = 0" in sql
+    assert "status IN ('DISABLED', 'FAILED')" in sql
     assert params[0] == smoke.smoke_targets()
 
 
@@ -345,3 +347,247 @@ def test_a_topic_without_partitions_is_an_error_not_zero_lag(monkeypatch):
 
     with pytest.raises(RuntimeError, match="no partitions"):
         sources.consumer_lag("group", "marketplace.observations.v1")
+
+
+# ---------------------------------------------------------------------------
+# The drill harness (plan 10), offline: the drills themselves need the stack.
+# ---------------------------------------------------------------------------
+def test_wait_until_returns_the_observation_or_fails_with_it(monkeypatch):
+    from ops import drills
+
+    monkeypatch.setattr(drills.time, "sleep", lambda seconds: None)
+    values = iter([1, 2, 3])
+    assert drills.wait_until(lambda: ((n := next(values)) == 3, n), timeout=60, what="three") == 3
+
+    clock = iter(range(0, 1000, 30))
+    monkeypatch.setattr(drills.time, "monotonic", lambda: next(clock))
+    with pytest.raises(drills.DrillFailed, match="waiting for never; last observed 7"):
+        drills.wait_until(lambda: (False, 7), timeout=60, what="never")
+
+
+def test_a_drill_record_keeps_every_step_with_its_time(tmp_path, monkeypatch):
+    from ops import drills
+
+    monkeypatch.setattr(drills, "RECORDS", tmp_path)
+    record = drills.Record("d9")
+    record.step("inject", stopped="kafka")
+    record.step("verify", ok=True)
+    record.passed = True
+
+    written = json.loads(record.write().read_text(encoding="utf-8"))
+
+    assert written["drill"] == "d9" and written["passed"] is True
+    assert [step["step"] for step in written["steps"]] == ["inject", "verify"]
+    assert all("at" in step for step in written["steps"])
+
+
+def test_the_drills_cover_d1_to_d6():
+    from ops import drills
+
+    assert sorted(drills.DRILLS) == ["d1", "d2", "d3", "d4", "d5", "d6"]
+
+
+def test_a_stack_only_removes_volumes_of_its_own_compose_project(monkeypatch):
+    """A drill shares the machine with other projects' stacks."""
+    from ops import drills
+
+    calls = []
+
+    def fake_run(args, *, env=None, check=True):
+        calls.append(args)
+        if args[:3] == ["docker", "inspect", "-f"]:
+            return subprocess.CompletedProcess(args, 0, "mp-smoke\n", "")
+        return subprocess.CompletedProcess(args, 0, "mp-smoke_speed_checkpoints\n", "")
+
+    stack = drills.Stack.__new__(drills.Stack)
+    monkeypatch.setattr(stack, "run", fake_run)
+
+    assert stack.project_volumes("speed_checkpoints") == ["mp-smoke_speed_checkpoints"]
+    assert "label=com.docker.compose.project=mp-smoke" in calls[-1]
+    assert "name=speed_checkpoints" in calls[-1]
+
+
+def test_the_project_name_falls_back_to_the_environment_when_nothing_is_up(monkeypatch):
+    from ops import drills
+
+    monkeypatch.setenv("COMPOSE_PROJECT_NAME", "mp-smoke")
+    stack = drills.Stack.__new__(drills.Stack)
+    monkeypatch.setattr(stack, "run", lambda args, **kw: subprocess.CompletedProcess(args, 1, "", "no such object"))
+
+    assert stack.project() == "mp-smoke"
+
+
+def test_a_worker_killed_for_a_lease_drill_is_not_restarted_by_docker(monkeypatch):
+    """D6's premise is a worker that is gone, so the policy goes first."""
+    from ops import drills
+
+    calls = []
+    stack = drills.Stack.__new__(drills.Stack)
+    monkeypatch.setattr(stack, "run", lambda args, **kw: calls.append(args) or subprocess.CompletedProcess(args, 0, "", ""))
+
+    stack.kill("crawl-worker", stays_dead=True)
+    stack.kill("speed")
+
+    assert calls == [["docker", "update", "--restart", "no", "crawl-worker"],
+                     ["docker", "kill", "crawl-worker"],
+                     ["docker", "kill", "speed"]]
+
+
+def test_the_kill_waits_for_a_batch_to_open_and_reports_which(monkeypatch):
+    """D5 kills inside a micro-batch, so it polls for the open audit row first."""
+    from ops import drills
+
+    class FakeCursor:
+        rows = [None, None, ("q1", 7)]
+
+        def __enter__(self): return self
+        def __exit__(self, *exc): return False
+        def execute(self, sql, params=()): self.sql, self.params = sql, params
+        def fetchone(self): return self.rows.pop(0)
+
+    class FakeConnection:
+        autocommit = False
+        cursor_ = FakeCursor()
+
+        def __enter__(self): return self
+        def __exit__(self, *exc): self.closed = True
+        def cursor(self): return self.cursor_
+
+    connection = FakeConnection()
+    monkeypatch.setattr("common.postgres.postgres_connection_factory", lambda: lambda: connection)
+    monkeypatch.setattr(drills.time, "sleep", lambda seconds: None)
+    killed = []
+    stack = drills.Stack.__new__(drills.Stack)
+    monkeypatch.setattr(stack, "kill", lambda container, **kw: killed.append(container))
+    since = datetime(2026, 10, 3, 9, tzinfo=timezone.utc)
+
+    assert stack.kill_when_batch_opens(since) == ("q1", 7)
+
+    assert killed == ["speed"]
+    assert "status = 'RUNNING'" in connection.cursor_.sql
+    assert connection.cursor_.params == (since,)
+    assert connection.closed is True
+
+
+def test_nothing_is_killed_when_no_batch_ever_opens(monkeypatch):
+    from ops import drills
+
+    class FakeCursor:
+        def __enter__(self): return self
+        def __exit__(self, *exc): return False
+        def execute(self, sql, params=()): pass
+        def fetchone(self): return None
+
+    class FakeConnection:
+        autocommit = False
+
+        def __enter__(self): return self
+        def __exit__(self, *exc): return False
+        def cursor(self): return FakeCursor()
+
+    monkeypatch.setattr("common.postgres.postgres_connection_factory", lambda: FakeConnection)
+    monkeypatch.setattr(drills.time, "sleep", lambda seconds: None)
+    clock = iter(range(0, 10000, 30))
+    monkeypatch.setattr(drills.time, "monotonic", lambda: next(clock))
+    stack = drills.Stack.__new__(drills.Stack)
+    monkeypatch.setattr(stack, "kill", lambda *a, **kw: pytest.fail("killed with no batch open"))
+
+    with pytest.raises(drills.DrillFailed, match="nothing to kill inside"):
+        stack.kill_when_batch_opens(AS_OF, timeout=60)
+
+
+def test_the_speed_backlog_counts_only_settled_smoke_observations():
+    from ops import drills
+
+    captured = []
+    stack = drills.Stack.__new__(drills.Stack)
+    stack.query = lambda sql, params=(): captured.append((" ".join(sql.split()), params)) or [(150,)]
+
+    assert stack.observations_published_since(AS_OF) == 150
+
+    (sql, params), = captured
+    assert "sum(a.parsed_count)" in sql
+    assert "a.status IN ('SUCCEEDED', 'PARTIAL')" in sql
+    assert params[1] == AS_OF
+
+
+def test_a_stranded_batch_is_one_still_running_long_after_it_opened():
+    from ops import drills
+
+    captured = []
+    stack = drills.Stack.__new__(drills.Stack)
+    stack.query = lambda sql, params=(): captured.append((" ".join(sql.split()), params)) or []
+
+    stack.stranded_speed_batches(AS_OF, stale_seconds=15)
+
+    (sql, params), = captured
+    assert "status = 'RUNNING'" in sql
+    assert "started_at < now() - %s * interval '1 second'" in sql
+    assert params == (AS_OF, 15)
+
+
+def test_a_speed_batch_is_looked_up_by_query_id_and_batch_id():
+    """D4 follows one batch through its retry; a later batch is not that batch."""
+    from ops import drills
+
+    captured = []
+    stack = drills.Stack.__new__(drills.Stack)
+    stack.query = lambda sql, params=(): captured.append(params) or [("q1", 7, "SUCCEEDED", 3, 1, AS_OF, AS_OF, None)]
+
+    row = stack.speed_batch("q1", 7)
+
+    assert captured == [("q1", 7)]
+    assert row[2] == "SUCCEEDED" and row[7] is None
+
+
+def test_the_change_check_waits_out_the_elasticsearch_refresh(monkeypatch):
+    """A bulk the sink committed is not searchable for up to a refresh interval."""
+    from ops import drills
+
+    monkeypatch.setattr(drills.time, "sleep", lambda seconds: None)
+    views = iter([["e1"], ["e1"], ["e1", "e2"]])
+    stack = drills.Stack.__new__(drills.Stack)
+    stack.es_change_ids = lambda: next(views)
+
+    assert stack.es_changes_covering(["e1", "e2"], timeout=60) == ["e1", "e2"]
+
+
+def test_a_change_that_never_arrives_still_fails_the_drill(monkeypatch):
+    from ops import drills
+
+    monkeypatch.setattr(drills.time, "sleep", lambda seconds: None)
+    clock = iter(range(0, 1000, 30))
+    monkeypatch.setattr(drills.time, "monotonic", lambda: next(clock))
+    stack = drills.Stack.__new__(drills.Stack)
+    stack.es_change_ids = lambda: ["e1"]
+
+    with pytest.raises(drills.DrillFailed, match="'not_searchable': 1"):
+        stack.es_changes_covering(["e1", "e2"], timeout=60)
+
+
+def test_draining_waits_on_the_speed_query_not_the_silver_group(monkeypatch):
+    """The query's offsets live in its checkpoint, so consumer lag says nothing."""
+    from ops import drills
+
+    monkeypatch.setattr(drills.time, "sleep", lambda seconds: None)
+    now = datetime.now(timezone.utc)
+    busy = [("q1", 1, "SUCCEEDED", 12, 19, now - timedelta(seconds=10))]
+    idle = [("q1", 1, "SUCCEEDED", 12, 19, now - timedelta(seconds=120))]
+    views = iter([busy, busy, idle])
+    stack = drills.Stack.__new__(drills.Stack)
+    stack.speed_batches_since = lambda since: next(views)
+
+    assert stack.wait_speed_drained(AS_OF, quiet_seconds=75) == 1
+
+
+def test_a_query_that_never_goes_quiet_fails_with_how_long_it_waited(monkeypatch):
+    from ops import drills
+
+    monkeypatch.setattr(drills.time, "sleep", lambda seconds: None)
+    clock = iter(range(0, 100000, 100))
+    monkeypatch.setattr(drills.time, "monotonic", lambda: next(clock))
+    stack = drills.Stack.__new__(drills.Stack)
+    stack.speed_batches_since = lambda since: [("q1", 1, "SUCCEEDED", 12, 19, datetime.now(timezone.utc))]
+
+    with pytest.raises(drills.DrillFailed, match="batches_with_rows"):
+        stack.wait_speed_drained(AS_OF, quiet_seconds=75, timeout=300)
