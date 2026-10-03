@@ -14,10 +14,12 @@ import pytest
 COMPOSE = Path(__file__).resolve().parents[1] / "docker-compose.yml"
 
 # Started by `up` and expected to stay up: a dependency outage must not end them.
-LONG_RUNNING = ("crawl-worker", "silver-sink", "speed", "batch-scheduler", "stub-source")
-# `run --rm` tools. Docker restarts nothing started by `run`, but an inherited
-# policy would still be wrong, and `restart: "no"` says so.
-ONE_SHOT = ("batch-once", "ops")
+LONG_RUNNING = ("crawl-worker", "silver-sink", "speed", "batch-scheduler", "stub-source", "es-projector")
+# `run --rm` tools and init containers. Docker restarts nothing started by
+# `run`, but an inherited policy would still be wrong, and `restart: "no"`
+# says so. The Kibana importer must not loop either: it is idempotent, but a
+# restart loop would hide a Kibana that never came up.
+ONE_SHOT = ("batch-once", "ops", "kibana-marketplace-setup")
 
 
 def _service_blocks() -> dict[str, list[str]]:
