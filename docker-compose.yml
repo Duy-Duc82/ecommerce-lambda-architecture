@@ -138,6 +138,7 @@ services:
     <<: *marketplace-python
     profiles: ["crawl"]
     container_name: crawl-worker
+    restart: unless-stopped
     command: ["python", "-m", "crawler.service"]
     environment:
       <<: *marketplace-env
@@ -170,6 +171,7 @@ services:
     <<: *marketplace-python
     profiles: ["ingest"]
     container_name: silver-sink
+    restart: unless-stopped
     command: ["python", "-m", "data_ingestion.marketplace_silver_service"]
     environment:
       <<: *marketplace-env
@@ -187,6 +189,7 @@ services:
     <<: *spark-marketplace
     profiles: ["speed"]
     container_name: speed
+    restart: unless-stopped
     command: ["python3", "-m", "speed_layer.marketplace_speed_service"]
     environment:
       <<: *marketplace-env
@@ -214,6 +217,7 @@ services:
     <<: *spark-marketplace
     profiles: ["batch"]
     container_name: batch-scheduler
+    restart: unless-stopped
     command: ["python3", "-m", "batch_layer.marketplace_scheduler"]
     environment:
       <<: *marketplace-env
@@ -263,6 +267,7 @@ services:
     <<: *marketplace-python
     profiles: ["smoke"]
     container_name: stub-source
+    restart: unless-stopped
     command: ["python", "-m", "ops.stub_source", "--port", "8000"]
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/robots.txt', timeout=5)"]
