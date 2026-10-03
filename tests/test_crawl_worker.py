@@ -537,3 +537,42 @@ def test_a_publish_failure_is_retried_and_never_opens_the_source_circuit():
     assert retry[2] is FailureKind.PUBLISH_ERROR
     assert "source_failure" not in audit.kinds()
     assert "source_success" not in audit.kinds()
+
+
+# Found by Phase 8 drill D1: an acquisition that *returns* a FAILED report
+# (rather than raising) carries its real exception in report.failure. With no
+# HTTP status to fall back on, discarding it classified a timeout, a reset
+# connection, a refused Bronze write or a drifted payload as UNKNOWN, which
+# is terminal: one slow response failed the task for good.
+@pytest.mark.parametrize(
+    "stage, error, kind, retried",
+    [
+        ("FETCH", "transport", FailureKind.TRANSIENT_NETWORK, True),
+        ("STORAGE", "storage", FailureKind.STORAGE_ERROR, True),
+        ("PARSE", "parse", FailureKind.PARSE_ERROR, False),
+        ("ROBOTS", "robots", FailureKind.ROBOTS_DENIED, False),
+    ],
+)
+def test_a_returned_failure_is_classified_by_its_own_exception(stage, error, kind, retried):
+    from crawler.contracts import (
+        AcquisitionFailure, AcquisitionStage, FetchTransportError, ListingPageParseError,
+        RawPersistenceError, RobotsDeniedError,
+    )
+
+    exception = {
+        "transport": FetchTransportError("fetch failed: Read timed out. (read timeout=10)"),
+        "storage": RawPersistenceError("MinIO unreachable", write_stage="BODY"),
+        "parse": ListingPageParseError("Tiki response data must be a list"),
+        "robots": RobotsDeniedError("robots.txt disallows the path"),
+    }[error]
+    frontier = FakeFrontier(tasks=[_task()])
+    audit = FakeAudit()
+    report = FakeReport(status=AcquisitionStatus.FAILED, http_status=None,
+                        failure=AcquisitionFailure(AcquisitionStage(stage), exception))
+
+    result = _run(frontier, audit, lambda *, task, crawl_run_id: report)
+
+    call = next(c for c in frontier.calls if c[0] in ("retry", "failed"))
+    assert call[2] is kind
+    assert (result.retried, result.failed) == ((1, 0) if retried else (0, 1))
+    assert audit.attempts[0].error_kind == kind.value
