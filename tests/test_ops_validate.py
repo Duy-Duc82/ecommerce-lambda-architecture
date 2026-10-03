@@ -563,3 +563,31 @@ def test_a_change_that_never_arrives_still_fails_the_drill(monkeypatch):
 
     with pytest.raises(drills.DrillFailed, match="'not_searchable': 1"):
         stack.es_changes_covering(["e1", "e2"], timeout=60)
+
+
+def test_draining_waits_on_the_speed_query_not_the_silver_group(monkeypatch):
+    """The query's offsets live in its checkpoint, so consumer lag says nothing."""
+    from ops import drills
+
+    monkeypatch.setattr(drills.time, "sleep", lambda seconds: None)
+    now = datetime.now(timezone.utc)
+    busy = [("q1", 1, "SUCCEEDED", 12, 19, now - timedelta(seconds=10))]
+    idle = [("q1", 1, "SUCCEEDED", 12, 19, now - timedelta(seconds=120))]
+    views = iter([busy, busy, idle])
+    stack = drills.Stack.__new__(drills.Stack)
+    stack.speed_batches_since = lambda since: next(views)
+
+    assert stack.wait_speed_drained(AS_OF, quiet_seconds=75) == 1
+
+
+def test_a_query_that_never_goes_quiet_fails_with_how_long_it_waited(monkeypatch):
+    from ops import drills
+
+    monkeypatch.setattr(drills.time, "sleep", lambda seconds: None)
+    clock = iter(range(0, 100000, 100))
+    monkeypatch.setattr(drills.time, "monotonic", lambda: next(clock))
+    stack = drills.Stack.__new__(drills.Stack)
+    stack.speed_batches_since = lambda since: [("q1", 1, "SUCCEEDED", 12, 19, datetime.now(timezone.utc))]
+
+    with pytest.raises(drills.DrillFailed, match="batches_with_rows"):
+        stack.wait_speed_drained(AS_OF, quiet_seconds=75, timeout=300)
