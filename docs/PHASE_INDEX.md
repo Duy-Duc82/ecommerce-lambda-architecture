@@ -100,7 +100,7 @@ Phase 5/6 chỉ nằm ở ngọn một nhánh feature, không có ở commit g�
    thiếu plan, dừng lại và hỏi — không tự viết plan mới.
 4. Đổi ranh giới phase phải sửa file này trước, theo Brief §27 change-control.
 
-## 5. Trạng thái hiện tại (2026-10-01)
+## 5. Trạng thái hiện tại (2026-10-04)
 
 | Phase | Tuần | Trạng thái | Test |
 |---|---|---|---|
@@ -111,17 +111,19 @@ Phase 5/6 chỉ nằm ở ngọn một nhánh feature, không có ở commit g�
 | 5 | 5 | ✅ trong `develop` | đủ 38/38 item |
 | 6 | 6 | ✅ trong `develop` | **47/47 item** |
 | 7 | 7 | ✅ trong `develop` (PR #4); bản sửa cắt `as_of` trên `phase-7-asof-cutoff` | **61/61 item** |
-| 8 | 8 | 🔵 WP1–WP5 trong `develop` (PR #7–#11); **WP6 xong** — D1–D6 chạy thật và pass hết, bằng chứng ở `data/ops/drills/`, PR #12 đang chờ review (`PROGRESS.md` §17); WP7–WP10 chưa làm | P1-12, Kibana (P1-11) |
+| 8 | 8 | 🔵 WP1–WP6 trong `develop` (PR #7–#12); **WP7 xong** — D7–D10 chạy thật, trên `phase-8-wp7-drills-d7-d10` chờ PR (`PROGRESS.md` §18); **WP8 xong** — index template, projector và hai Kibana dashboard chạy thật, trên `phase-8-wp8-kibana` chờ PR (§19); **WP9 xong phần §12** — `mp backup`/`mp restore` chạy thật end-to-end vào một project mới, bốn check §12.3 pass, trên `phase-8-wp9-backup-restore` chờ PR (§20); **D11 chờ WP7 merge** (§20.6); WP10 chưa làm | P1-12, Kibana (P1-11) |
 | 9 | 9 | ⏳ chưa bắt đầu | P2-* |
 
 **Phase 1–7 đã xong** và nằm trong `develop`. Phase 7 (P1-08 quality gates,
 P1-09 gold publish manifest) merge qua PR #4 ngày 2026-09-30. Bản sửa sau
 merge — run đọc Silver và audit *tại* `as_of`, gate 8 có cửa sổ đối soát — nằm
 trên `phase-7-asof-cutoff`, chi tiết ở `PROGRESS.md` §11.
-Suite: **868 pass, 0 fail, 0 skip** trên nhánh WP6, Python 3.12.13 + pyspark
-4.0.4 (`PROGRESS.md` §17.6; trên nhánh WP5 là 841, sau Phase 7 là 674, trước
-Phase 7 là 519). Sáu drill D1–D6 nằm ngoài con số đó: marker `drill` bị loại
-khỏi suite mặc định vì chúng cần stack đang chạy.
+Suite: Python 3.12.13 + pyspark 4.0.4, mỗi nhánh WP8/WP9 đo riêng vì cả hai
+rẽ từ cùng một `develop`: **941** trên nhánh WP8 (`PROGRESS.md` §19.6),
+**913** trên nhánh WP9 (§20.7), **876** trên nhánh WP7 (§18.5), 868 sau WP6,
+841 trên nhánh WP5, 674 sau Phase 7, 519 trước Phase 7. Mười drill D1–D10 nằm
+ngoài những con số đó: marker `drill` bị loại khỏi suite mặc định vì chúng
+cần stack đang chạy.
 `master` vẫn chưa nhận phase nào: chờ thầy hướng dẫn duyệt `develop`.
 
 **Phase 4/5 chưa từng chạy như dịch vụ.** Hai phase này ✅ ở mức code và test,

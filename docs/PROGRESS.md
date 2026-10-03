@@ -1875,3 +1875,122 @@ searchable. Commit `cb61184`.
   hoặc `mp up --build`.
 - Chạy drill: `$env:COMPOSE_PROJECT_NAME = "mp-smoke"`, `mp smoke`, rồi
   `mp drill d1` … `d6`. D5 mất khoảng 20 phút vì phải dồn backlog.
+
+## 20. Session 2026-10-04 — Phase 8 WP9 (backup/restore): phần §12 XONG, D11 chờ WP7
+
+> **Trạng thái:** `mp backup` và `mp restore` **đã chạy thật end-to-end**:
+> backup 1832 file từ stack `mp-smoke`, restore vào project `mp-restore` mới
+> tinh với volume trắng, cả bốn check của plan §12.3 pass. **D11 chưa làm** —
+> nó phải thêm vào `ops/drills.py`, mà file đó trên `develop` mới có D1–D6;
+> bản D1–D10 nằm ở nhánh WP7 chưa merge. Luật §3b cấm xếp chồng nhánh, nên
+> D11 làm ngay sau khi PR WP7 vào `develop`.
+> Nhánh `phase-8-wp9-backup-restore`, rẽ từ `develop` (54e7e80).
+
+### 20.1 Những gì được thêm
+
+| File | Việc |
+|---|---|
+| `ops/backup.py` | Toàn bộ §12: `backup()`, `restore()`, ba restore check, `LiveLake`/`LivePostgres`, manifest `marketplace-backup.v1` |
+| `ops/__main__.py` | `ops backup`, `ops restore --from`, `ops backups`, và `ops validate --restored` |
+| `scripts/mp.ps1` | `mp backup`, `mp restore -BackupId … -Project …` |
+| `crawler/reparse.py` | `RawArtifactRef.from_uri()` — nghịch đảo của `body_path`, để restore check dựng lại ref từ `raw_uri` trong audit |
+| `docker/marketplace-python/Dockerfile` | `postgresql-client-18` từ PGDG |
+
+### 20.2 Vì sao pg_dump phải nằm trong image ops
+
+Backup giữ **batch advisory lock** suốt thời gian chạy — không phải để đóng
+băng Bronze/Silver (hai zone chỉ append, bản copy sớm vài giây là cũ hơn chứ
+không rách), mà để không batch nào promote con trỏ mới giữa lúc đọc
+`current.json` và lúc dump cache phải khớp với nó. Lock thuộc về session đã
+lấy nó, nên dump **không thể** tách sang container thứ hai như cách mp.ps1
+vẫn lái job Spark.
+
+Server pin `postgres:18.3`; pg_dump từ chối server mới hơn chính nó, mà
+Debian trixie chỉ có client 17. Thêm repo PGDG, pin `postgresql-client-18`
+(đo được: 18.6). Đổi một pin thì phải đổi pin kia.
+
+### 20.3 Chạy thật (2026-10-04)
+
+| Bước | Kết quả |
+|---|---|
+| `ops backup` trên `mp-smoke` | 1832 file, 13 MB: gold 31, bronze 920, silver 879, postgres 2 (audit 172 KB, cache 38 KB). `pointer_run_id` = `cache_run_id` = `mp-20261003T1617Z-d10` |
+| `mp restore` vào `mp-restore` (volume trắng) | verify **1832/1832** sha256 trước khi ghi; `pg_restore` audit rồi cache; 1829 lake object; con trỏ ghi **sau cùng** |
+| Check 1 pointer == cache | PASS, cả hai `mp-20261003T1617Z-d10` |
+| Check 2 datasets | PASS, cả **10** dataset khớp đúng row count trong manifest |
+| Check 3 reparse | PASS, **5/5 IDENTICAL** |
+| Check 4 quality-only batch | `quality_status: PASS`, `mandatory_failure_count: 0`, 878 silver row, `manifest_promoted: false` (`QUALITY_ONLY` — không đụng con trỏ). Dataset count trùng khít con trỏ |
+| `ops validate --restored` | passed, nới đúng ba check, không có check lạ |
+| Dọn | `mp-restore` xoá kèm volume; `mp-smoke` dựng lại, `validate` **11/11 PASS** |
+
+### 20.4 Ba bug tìm được, đều do chạy thật
+
+Không có bug production nào. Cả ba đều nằm trong code WP9 vừa viết, và cả ba
+đều **chỉ lộ ra khi chạy**, không unit test nào ban đầu bắt được.
+
+1. **Restore check lấy mẫu sai tập.** Lượt restore đầu tiên FAIL:
+   `NEW_OBSERVATIONS` trên 1 trong 5 artifact. Tra ra attempt 380,
+   `FAILED`/`PUBLISH_ERROR`, `parsed_count = 0` — đúng sản phẩm **có chủ ý**
+   của drill D2: fetch và parse xong, raw vào Bronze, Kafka chết nên không gì
+   vào Silver. Reparse nó ra `NEW_OBSERVATIONS` là **đúng**. Sửa: chỉ lấy mẫu
+   `error_kind IS NULL AND parsed_count > 0`. `parsed_count` là số đã
+   acknowledge, nên publish *một phần* cũng để lại observation Silver không
+   bao giờ có; audit không phân biệt được bằng số, nhưng publish một phần
+   luôn là `FAILED` có `error_kind`, và cái đó thì phân biệt được. Test chốt
+   hai trường hợp đó viết **trước** bản sửa.
+2. **Hai ký tự backspace trong `mp.ps1`.** Một lần sửa file bằng script đã
+   đọc `\b` trong `"data\backups"` thành escape. PowerShell parse sạch rồi đi
+   tìm một đường dẫn không tồn tại, nên lỗi hiện ra muộn mấy phút dưới dạng
+   *"RESTORE FAILED: the quality gate refused the restored Silver"* — hoàn
+   toàn không phải chuyện đã xảy ra. Sửa ba việc: bỏ hẳn việc đọc manifest từ
+   host (lấy cửa sổ batch từ chính output của `ops restore`), sửa câu báo lỗi
+   để nó nói đúng bước nào hỏng, và thêm một test chặn ký tự điều khiển trong
+   `mp.ps1`.
+3. **`validate` trên stack vừa restore không thể xanh hết.** Đúng ba check
+   fail, và chỉ ba: `es_changes_unique`, `redis_offer_state_present` (ES và
+   Redis không được backup), và `kafka_to_silver_lag` — broker mới tinh chưa
+   từng có consumer group Silver nên hỏi offset của nó ném
+   `GroupCoordinatorNotAvailableError`. Cả ba đúng bằng hàng "không backup"
+   của plan §12.1. Thêm `ops validate --restored` nới **đúng ba cái đó** và
+   fail ở cái thứ tư; danh sách được một test chốt cứng.
+
+### 20.5 Một chỗ lệch so với plan
+
+Plan §12.2 bước 5 đặt việc đối chiếu hai run_id ở bước ghi manifest, tức là
+**sau** khi đã copy xong. Ở đây nó chạy ngay sau khi lấy lock, **trước** khi
+copy byte nào: một backup không thể restore vào trạng thái `validate` chấp
+nhận thì không đáng tốn bytes, và lock làm cho "ở bước 1" và "ở bước 5" là
+cùng một giá trị. Assertion không yếu đi, chỉ fail sớm hơn.
+
+### 20.6 D11 còn thiếu, và vì sao
+
+D11 ("`mp backup`, rồi `mp restore` vào một Compose project mới; mọi check
+§12.3 pass") phải vào `ops/drills.py` và `tests/drills/test_drills.py`.
+Trên `develop` hai file đó mới có D1–D6; bản D1–D10 nằm trên
+`phase-8-wp7-drills-d7-d10` chưa merge. Rẽ nhánh WP9 từ WP7 là xếp chồng,
+`PHASE_INDEX.md` §3b cấm. Nên: merge PR WP7 → rebase nhánh này lên `develop`
+→ thêm D11 vào đúng registry D1–D10.
+
+Phần việc D11 sẽ phải làm đã chạy tay trọn vẹn ở §20.3, nên D11 chỉ còn là
+gói nó vào harness drill (baseline xanh trước, khôi phục stack sau, ghi
+record JSON).
+
+**Lưu ý khi viết D11:** nó phải hạ stack chính xuống rồi dựng project thứ hai
+— `container_name` là global. Đây là drill duy nhất làm thế, nên nó phải chạy
+**cuối cùng** trong `drill all`, và phải dựng lại stack chính trước khi thoát.
+
+### 20.7 Trạng thái test
+
+- Suite mặc định (`-m "not drill"`, bỏ `test_marketplace_quality.py`):
+  **871 pass, 6 deselected**, 2m17s.
+- `tests/test_marketplace_quality.py` riêng: **42 pass**.
+- **Tổng 913.** Trên `develop` là 868; chênh 45 = 42 test
+  `tests/test_ops_backup.py` + 3 test `RawArtifactRef.from_uri`.
+
+### 20.8 Việc tiếp theo (resume ở đây)
+
+1. Merge PR WP7, rồi PR WP8, rồi rebase nhánh này và mở PR WP9.
+2. **D11** ngay sau khi WP7 vào `develop` (§20.6).
+3. **WP10:** viết lại ARCHITECTURE/DATA_MODEL và hoàn thiện RUNBOOK (plan §13).
+4. `RawArtifactRef.from_uri` ở đây trùng chức năng với helper tách `raw_uri`
+   mà WP7 đặt trong `ops/drills.py`. Khi rebase thì cho drills dùng bản trong
+   `crawler/reparse.py` và xoá bản kia — một chỗ duy nhất biết layout Bronze.
