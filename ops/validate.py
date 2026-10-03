@@ -411,7 +411,7 @@ class LiveSources:
         finally:
             es.close()
 
-    def redis_exists(self, key: str) -> bool:
+    def _redis_client(self):
         from redis import Redis
 
         from config.settings import REDIS_DB, REDIS_HOST, REDIS_PORT
@@ -419,4 +419,13 @@ class LiveSources:
         client = getattr(self, "_redis", None)
         if client is None:
             client = self._redis = Redis(host=REDIS_HOST, port=REDIS_PORT, db=REDIS_DB)
-        return bool(client.exists(key))
+        return client
+
+    def redis_exists(self, key: str) -> bool:
+        return bool(self._redis_client().exists(key))
+
+    def redis_zset_members(self, key: str) -> list[str]:
+        """Members of a sorted set, in rank order — a list, so drill D4 can see
+        a duplicate if Redis ever returned one."""
+        return [m.decode("utf-8") if isinstance(m, bytes) else str(m)
+                for m in self._redis_client().zrange(key, 0, -1)]

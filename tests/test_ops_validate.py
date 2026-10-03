@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -384,3 +385,95 @@ def test_the_drills_cover_d1_to_d6():
     from ops import drills
 
     assert sorted(drills.DRILLS) == ["d1", "d2", "d3", "d4", "d5", "d6"]
+
+
+def test_a_stack_only_removes_volumes_of_its_own_compose_project(monkeypatch):
+    """A drill shares the machine with other projects' stacks."""
+    from ops import drills
+
+    calls = []
+
+    def fake_run(args, *, env=None, check=True):
+        calls.append(args)
+        if args[:3] == ["docker", "inspect", "-f"]:
+            return subprocess.CompletedProcess(args, 0, "mp-smoke\n", "")
+        return subprocess.CompletedProcess(args, 0, "mp-smoke_speed_checkpoints\n", "")
+
+    stack = drills.Stack.__new__(drills.Stack)
+    monkeypatch.setattr(stack, "run", fake_run)
+
+    assert stack.project_volumes("speed_checkpoints") == ["mp-smoke_speed_checkpoints"]
+    assert "label=com.docker.compose.project=mp-smoke" in calls[-1]
+    assert "name=speed_checkpoints" in calls[-1]
+
+
+def test_the_project_name_falls_back_to_the_environment_when_nothing_is_up(monkeypatch):
+    from ops import drills
+
+    monkeypatch.setenv("COMPOSE_PROJECT_NAME", "mp-smoke")
+    stack = drills.Stack.__new__(drills.Stack)
+    monkeypatch.setattr(stack, "run", lambda args, **kw: subprocess.CompletedProcess(args, 1, "", "no such object"))
+
+    assert stack.project() == "mp-smoke"
+
+
+def test_a_worker_killed_for_a_lease_drill_is_not_restarted_by_docker(monkeypatch):
+    """D6's premise is a worker that is gone, so the policy goes first."""
+    from ops import drills
+
+    calls = []
+    stack = drills.Stack.__new__(drills.Stack)
+    monkeypatch.setattr(stack, "run", lambda args, **kw: calls.append(args) or subprocess.CompletedProcess(args, 0, "", ""))
+
+    stack.kill("crawl-worker", stays_dead=True)
+    stack.kill("speed")
+
+    assert calls == [["docker", "update", "--restart", "no", "crawl-worker"],
+                     ["docker", "kill", "crawl-worker"],
+                     ["docker", "kill", "speed"]]
+
+
+def test_the_mid_batch_kill_watches_from_inside_the_container(monkeypatch):
+    """A host-side kill cannot hit the window between RUNNING and terminal."""
+    from ops import drills
+
+    calls = []
+    stack = drills.Stack.__new__(drills.Stack)
+    monkeypatch.setattr(stack, "run", lambda args, **kw: calls.append(args) or subprocess.CompletedProcess(args, 0, "", ""))
+    since = datetime(2026, 10, 3, 9, tzinfo=timezone.utc)
+
+    stack.kill_inside_micro_batch(since)
+
+    (args,) = calls
+    assert args[:3] == ["docker", "exec", "-d"] and "speed" in args
+    assert f"DRILL_SINCE={since.isoformat()}" in args
+    assert "status = 'RUNNING'" in args[-1] and "os.kill(1, 9)" in args[-1]
+
+
+def test_a_stranded_batch_is_one_still_running_long_after_it_opened():
+    from ops import drills
+
+    captured = []
+    stack = drills.Stack.__new__(drills.Stack)
+    stack.query = lambda sql, params=(): captured.append((" ".join(sql.split()), params)) or []
+
+    stack.stranded_speed_batches(AS_OF, stale_seconds=15)
+
+    (sql, params), = captured
+    assert "status = 'RUNNING'" in sql
+    assert "started_at < now() - %s * interval '1 second'" in sql
+    assert params == (AS_OF, 15)
+
+
+def test_a_speed_batch_is_looked_up_by_query_id_and_batch_id():
+    """D4 follows one batch through its retry; a later batch is not that batch."""
+    from ops import drills
+
+    captured = []
+    stack = drills.Stack.__new__(drills.Stack)
+    stack.query = lambda sql, params=(): captured.append(params) or [("q1", 7, "SUCCEEDED", 3, 1, AS_OF, AS_OF, None)]
+
+    row = stack.speed_batch("q1", 7)
+
+    assert captured == [("q1", 7)]
+    assert row[2] == "SUCCEEDED" and row[7] is None
