@@ -1875,3 +1875,76 @@ searchable. Commit `d3aa4d5`.
   hoặc `mp up --build`.
 - Chạy drill: `$env:COMPOSE_PROJECT_NAME = "mp-smoke"`, `mp smoke`, rồi
   `mp drill d1` … `d6`. D5 mất khoảng 20 phút vì phải dồn backlog.
+
+---
+
+## 18. Session 2026-10-03 (tiếp) — Phase 8 WP7 (drill D7–D10): XONG
+
+> **Trạng thái:** D7–D10 **đã chạy thật và pass hết**, rồi **chạy lại liên tiếp
+> cả bốn** trên cùng stack để bắt rò state — cũng pass hết. Mười record bằng
+> chứng (D1–D10) nằm ở `data/ops/drills/`. Nhánh
+> `phase-8-wp7-drills-d7-d10`, rẽ từ `develop` sau khi PR #12 merge. Chưa mở PR.
+
+### 18.1 Tồn đọng đã đóng trước khi bắt đầu
+
+| Việc | Kết quả |
+|---|---|
+| PR #12 (WP6) | Merge vào `develop` bằng merge commit `f8cb533`; `develop` giờ chứa toàn bộ WP6 |
+| Trailer `Co-Authored-By: Claude` | Bỏ khỏi 12 commit WP6 (`git filter-branch --msg-filter`), force-push; PR #12 còn đúng tên tác giả. ~137 commit cũ đã merge trong `develop`/`master` **cố ý để nguyên** (viết lại sẽ phải force-push nhánh chung và làm hỏng liên kết của PR #1–#11) |
+| 8 nhánh phase-7/phase-8 đã merge | Xoá cả local lẫn remote. Giữ `phase-3-4-scheduler-kafka-silver` và `phase-5-6-speed-gold` làm lịch sử theo `PHASE_INDEX.md` §3b |
+| `PHASE_INDEX.md` §5b | Kiểm lại cả ba hạn chế: mục 2 (s3a chưa kiểm chứng) **đã xong**, mục 1 (winutils) **vẫn còn** — đo lại và vẫn ném `UnsatisfiedLinkError`, mục 3 là legacy có chủ ý. Ghi chú "Spark chạy được trên host" ở §17.1 nói quá, đã sửa thành "chỉ trong bộ nhớ" |
+| `RUNBOOK.md` | Lệnh khôi phục Kafka hardcode tên volume của project khác; nay hỏi Docker |
+
+### 18.2 Kết quả D7–D10 (thật, 2026-10-03)
+
+Stack `mp-smoke`, nối tiếp WP6, baseline `validate` xanh trước mỗi drill.
+
+| Drill | Thời gian | Invariant đã chứng minh |
+|---|---|---|
+| D7 | 0m53s | Stub mode `drift` → attempt `PARSE_ERROR`; raw **vẫn trong Bronze**; task terminal (không còn schedulable); **circuit không nhúc nhích** (`[0, null]` → `[0, null]`). `crawler.reparse` trên đúng artifact đó: exit 1, `{"PARSE_FAILED": 1}`, và **không ghi gì**: Kafka end offset `{0:192, 1:322, 2:256}`, Silver 770 object, 404 attempt, pointer và cache version — tất cả giống hệt trước/sau |
+| D8 | 2m54s | Chèn **một** attempt đã settle (`attempt_id=417`, `parsed_count=7`) vào trong lookback → run `mp-20261003T1555Z` **QUALITY_FAILED** trên `silver_parse_attempt_reconciliation`, `cache_published=false`, **17 quality result vẫn được lưu**; pointer/cache/12 dòng cache **y nguyên**. Xoá đúng row đó → resume cùng run → **SUCCEEDED**, pointer **mới** nhảy sang `mp-20261003T1555Z` |
+| D9 | 2m47s | CHECK constraint `drill_d9_reject_one_cache_row` (`NOT VALID`) từ chối đúng một offer → run `mp-20261003T1603Z` **FAILED tại publish**, error nêu đúng tên constraint, `cache_published=false`; pointer, cache version và cả 12 dòng đang phục vụ **nguyên vẹn** (publish truncate rồi refill trong một transaction, nên refusal kéo cả truncate theo). Drop constraint trong `finally` → resume → **SUCCEEDED**, pointer và cache cùng trỏ run mới |
+| D10 | 2m35s | Hai batch chạy gần như đồng thời, **khác run_id có chủ ý**: `mp-20261003T1607Z` exit **75** với `{"lock_key": 820801, "status": "ALREADY_RUNNING"}`, `mp-20261003T1607Z-d10` exit 0. Đối chiếu audit: run bị từ chối **không có dòng nào** trong `audit.marketplace_batch_run` (`loser_audit_row: null`); `marketplace_cache_version` đúng **1 dòng**; pointer và cache cùng trỏ run thắng |
+
+**Chạy lại liên tiếp D7 → D8 → D9 → D10** trên cùng stack: cả bốn pass
+(record hiện tại là của lượt này, 16:08–16:17). Sau cùng: không còn row D8
+nào mang marker, không còn constraint D9, `validate` xanh.
+
+### 18.3 Vì sao D10 dùng hai run_id khác nhau
+
+Plan §10 viết "start two `mp batch` at once". Nếu cả hai cùng `run_id` thì
+"run bị từ chối không ghi audit row" **không kiểm được**: chỉ có một dòng và
+nó là của run thắng, nên thiếu dòng của run thua trông y hệt. Dùng hai id
+(`<planned>` và `<planned>-d10`, cùng `as_of`) làm điều kiện đó kiểm được
+thẳng: id bị từ chối phải **không có dòng nào**. Đây là deviation có chủ ý so
+với cách đọc hẹp nhất của plan, và nó làm assertion mạnh hơn chứ không yếu
+đi. Hệ quả: pointer có thể mang hậu tố `-d10`; không check nào của `validate`
+phân tích run_id nên vô hại.
+
+### 18.4 Một bug trong harness, tìm được khi chạy thật
+
+Không có bug production nào trong WP7.
+
+**D9 chết trước khi tới inject:** `ProgrammingError: no results to fetch`.
+`Stack.query` luôn gọi `fetchall`, mà `ALTER TABLE` không có result set, nên
+cả `ADD CONSTRAINT` lẫn lệnh đảo của nó đều hỏng. Thêm `Stack.execute` chạy
+statement không fetch; test offline nay fail nếu DDL quay lại đi qua
+`query()`. Commit `b013000`.
+
+### 18.5 Trạng thái test
+
+- Suite mặc định (`-m "not drill"`, bỏ `test_marketplace_quality.py`):
+  **834 pass, 10 deselected**, 2m17s.
+- `tests/test_marketplace_quality.py` riêng: **42 pass**.
+- **Tổng 876.** Sau WP6 là 868; chênh lệch là 9 test offline mới cho harness
+  WP7 trừ đi 1 test `test_the_drills_cover_d1_to_d6` bị thay bằng bản D1–D10.
+- `tests/drills/test_drills.py` parametrize **D1–D10**, marker `drill` vẫn bị
+  loại khỏi suite mặc định (10 deselected).
+
+### 18.6 Việc tiếp theo (resume ở đây)
+
+1. Mở PR WP7 vào `develop`, review, merge.
+2. **WP8:** Kibana — index template, `ops/es_projector.py`, saved object
+   `.ndjson`, test 27–30 (plan §11).
+3. **WP9:** backup/restore và D11 (plan §12), test 24–26.
+4. **WP10:** viết lại ARCHITECTURE/DATA_MODEL và hoàn thiện RUNBOOK (plan §13).
