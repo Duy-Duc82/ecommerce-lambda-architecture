@@ -222,9 +222,12 @@ class CrawlWorker:
         return "SUCCEEDED"
 
     def _on_failure(self, task, run, report, error, started_at, completed_at) -> str:
-        error = error or RuntimeError(
-            getattr(getattr(report, "failure", None), "message", "acquisition failed")
-        )
+        # A FAILED report carries the real exception in report.failure. With no
+        # HTTP status to fall back on, a stand-in error classified a timeout,
+        # a refused Bronze write or a drifted payload as UNKNOWN, which is
+        # terminal (found by Phase 8 drill D1).
+        failure = getattr(report, "failure", None)
+        error = error or getattr(failure, "error", None) or RuntimeError("acquisition failed")
         parsed_count = len(report.observations) if report else 0
         if isinstance(error, ObservationPublishError):
             # The fetch, raw write and parse all happened; only publication
