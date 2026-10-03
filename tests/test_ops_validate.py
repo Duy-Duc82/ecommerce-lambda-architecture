@@ -639,7 +639,9 @@ def test_the_rejecting_constraint_is_not_valid_so_it_spares_the_served_rows():
 
     captured = []
     stack = drills.Stack.__new__(drills.Stack)
-    stack.query = lambda sql, params=(): captured.append((" ".join(sql.split()), params)) or [(0,)]
+    # DDL through `execute`, never `query`: ALTER TABLE has nothing to fetch.
+    stack.execute = lambda sql, params=(): captured.append((" ".join(sql.split()), params))
+    stack.query = lambda sql, params=(): pytest.fail("DDL must not go through query(), which fetches")
 
     stack.add_rejecting_constraint("offer-1")
     stack.drop_rejecting_constraint()
