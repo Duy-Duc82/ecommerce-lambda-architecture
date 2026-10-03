@@ -51,27 +51,24 @@ CRAWL_ENV = {
 BATCH_SETTLE_SECONDS = 60
 SERVICES = ("stub-source", "silver-sink", "speed", "batch-scheduler")
 
-# D5's in-container watcher. It reads one row in a tight loop and, the moment
-# a micro-batch is open, SIGKILLs the container's main process. Runs under
-# `docker exec -d` in the speed container, which already has psycopg2 and the
-# in-cluster PostgreSQL settings in its environment.
-MID_BATCH_WATCH_SECONDS = 180
-MID_BATCH_KILLER = """
-import os, time, psycopg2
-conn = psycopg2.connect(host=os.environ["POSTGRES_HOST"], port=os.environ["POSTGRES_PORT"],
-                        user=os.environ["POSTGRES_USER"], password=os.environ["POSTGRES_PASSWORD"],
-                        dbname=os.environ["POSTGRES_DB"])
-conn.autocommit = True
-deadline = time.monotonic() + float(os.environ["DRILL_WATCH_SECONDS"])
-while time.monotonic() < deadline:
-    with conn.cursor() as cur:
-        cur.execute("SELECT 1 FROM audit.marketplace_speed_batch "
-                    "WHERE status = 'RUNNING' AND started_at >= %s LIMIT 1", (os.environ["DRILL_SINCE"],))
-        if cur.fetchone():
-            os.kill(1, 9)
-            break
-    time.sleep(0.02)
-"""
+# D5 has to kill the speed container *inside* a micro-batch. The batch's
+# audit row is open only while the sinks are written, which on this stack is
+# 10 ms for an empty batch and 90 ms for one crawl cycle, while a host-side
+# `docker kill` needs about 220 ms to land. Killing inside a batch of that
+# size is therefore luck, and a drill decided by luck is not evidence.
+#
+# So the drill makes the window instead of hunting for it: it stops the query,
+# lets the crawler build a Kafka backlog, and kills inside the single batch
+# that drains it. There is no `maxOffsetsPerTrigger`, so that batch is the
+# whole backlog at once; 60 observations measured 268 ms, and the floor below
+# leaves room for a slower machine as well as for the kill.
+#
+# Killing from inside the container is not an option: PID 1 *is* the driver,
+# and Linux drops a default-action signal sent to a PID namespace's init from
+# within that namespace, so `os.kill(1, 9)` there is silently ignored.
+MID_BATCH_MIN_BACKLOG = 150
+MID_BATCH_BACKLOG_TIMEOUT = 1500
+MID_BATCH_POLL_SECONDS = 0.01
 
 
 class DrillFailed(AssertionError):
@@ -172,19 +169,48 @@ class Stack:
         result = self.run(["docker", "inspect", "-f", "{{.State.StartedAt}}", container], check=False)
         return result.stdout.strip() if result.returncode == 0 else "absent"
 
-    def kill_inside_micro_batch(self, since: datetime) -> None:
-        """Kill the speed container while one of its micro-batches is in flight.
+    def kill_when_batch_opens(self, since: datetime, *, timeout: float = 420) -> tuple[str, int]:
+        """Wait for a micro-batch to open, then SIGKILL the container inside it.
 
-        A kill issued from the host cannot hit the window: the sink writes
-        between ``begin_batch`` and the terminal status take a fraction of a
-        second, and a ``docker kill`` round trip takes longer than that. So
-        the watch happens inside the container, next to the database, and
-        kills PID 1 — the same SIGKILL ``docker kill`` sends — the moment the
-        audit row appears. Nothing is written: it only reads one row.
+        ``begin_batch`` inserts the row ``RUNNING`` before the sinks are
+        written and only updates it afterwards, so the row is open for exactly
+        as long as the batch's side effects take. The poll holds one
+        connection open — about 2 ms a turn against the 20 ms a fresh one
+        costs — because every millisecond here comes off the margin the kill
+        itself needs. Returns the batch it aimed at; whether the kill actually
+        landed inside it is decided afterwards, by the audit row.
         """
-        self.run(["docker", "exec", "-d",
-                  "-e", f"DRILL_SINCE={since.isoformat()}", "-e", f"DRILL_WATCH_SECONDS={MID_BATCH_WATCH_SECONDS}",
-                  "speed", "python3", "-c", MID_BATCH_KILLER])
+        from common.postgres import postgres_connection_factory
+
+        connection = postgres_connection_factory()()
+        connection.autocommit = True
+        deadline = time.monotonic() + timeout
+        try:
+            with connection.cursor() as cur:
+                while True:
+                    cur.execute("SELECT query_id, batch_id FROM audit.marketplace_speed_batch "
+                                "WHERE status = 'RUNNING' AND started_at >= %s ORDER BY started_at DESC LIMIT 1",
+                                (since,))
+                    row = cur.fetchone()
+                    if row:
+                        self.kill("speed")
+                        return row[0], row[1]
+                    if time.monotonic() >= deadline:
+                        raise DrillFailed(f"no micro-batch opened within {timeout:.0f}s; there was nothing to kill inside")
+                    time.sleep(MID_BATCH_POLL_SECONDS)
+        finally:
+            connection.close()
+
+    def observations_published_since(self, since: datetime) -> int:
+        """Observations the crawler acknowledged to Kafka — the speed backlog."""
+        from ops.smoke import smoke_targets
+
+        (total,), = self.query(
+            "SELECT coalesce(sum(a.parsed_count), 0) FROM audit.crawl_request_attempt a "
+            "JOIN audit.crawl_frontier f USING (task_id) "
+            "WHERE f.marketplace_code = 'tiki' AND f.target = ANY(%s) AND a.completed_at >= %s "
+            "AND a.status IN ('SUCCEEDED', 'PARTIAL')", (smoke_targets(), since))
+        return int(total)
 
     def stranded_speed_batches(self, since: datetime, *, stale_seconds: int) -> list[tuple]:
         """Micro-batches still RUNNING long after anything live would have settled."""
@@ -513,39 +539,55 @@ def d5_speed_restart(stack: Stack, rec: Record) -> None:
     """Kill the query *inside* a micro-batch; then replay from a fresh checkpoint.
 
     Variant 1 has to interrupt a batch, not merely an idle query: a kill
-    between triggers proves nothing about recovery. The micro-batch's audit
-    row is opened ``RUNNING`` before the sinks are written and only reaches a
-    terminal status after them, so a watcher inside the container polls for
-    that row and kills PID 1 the instant it appears. The proof the window was
-    hit is the row left stranded in ``RUNNING`` with no ``completed_at``: in
-    normal operation nothing stays there for more than a second.
+    between triggers commits nothing and proves nothing. The window is made,
+    not hunted — see MID_BATCH_MIN_BACKLOG. The proof the kill landed inside
+    is the audit row left stranded in ``RUNNING`` with no ``completed_at``,
+    which no live batch holds for more than a fraction of a second.
     """
+    # 1. Stop the query and let the crawler fill Kafka, so the batch that
+    #    drains the backlog is long enough to be killed inside.
+    stack.stop("speed")
     since = stack.db_now()
     stack.start_crawler()
-    wait_until(lambda: (any(r[3] > 0 or r[4] > 0 for r in stack.speed_batches_since(since)), None),
-               timeout=300, what="the speed query to be processing")
+    backlog = wait_until(lambda: ((n := stack.observations_published_since(since)) >= MID_BATCH_MIN_BACKLOG, n),
+                         timeout=MID_BATCH_BACKLOG_TIMEOUT, poll=15,
+                         what=f"a backlog of {MID_BATCH_MIN_BACKLOG} observations for the speed query")
+    stack.stop_crawler()
     before_kill = set(stack.es_change_ids())
     started_at = stack.container_started_at("speed")
-    stack.kill_inside_micro_batch(since)
-    stranded = wait_until(lambda: (bool(rows := stack.stranded_speed_batches(since, stale_seconds=15)), rows),
-                          timeout=240, what="a micro-batch left mid-flight by the kill", poll=2)
-    query_id, batch_id = stranded[-1][0], stranded[-1][1]
-    rec.step("inject", killed="speed", mid_batch={"query_id": query_id, "batch_id": batch_id},
-             batch_started_at=stranded[-1][5], es_changes_before=len(before_kill))
+
+    # 2. Start it again and kill it inside the batch that drains that backlog.
+    stack.up("speed")
+    query_id, batch_id = stack.kill_when_batch_opens(since)
+    rec.step("inject", killed="speed", backlog_observations=backlog,
+             mid_batch={"query_id": query_id, "batch_id": batch_id}, es_changes_before=len(before_kill))
+
+    def interrupted() -> tuple[bool, Any]:
+        row = stack.speed_batch(query_id, batch_id)
+        open_for = (datetime.now(timezone.utc) - row[5]).total_seconds() if row else 0
+        return bool(row and row[2] == "RUNNING" and open_for > 15), row
+
+    stranded = wait_until(interrupted, timeout=240, poll=2,
+                          what=f"batch {batch_id} to be left RUNNING by the kill; a terminal status here "
+                               "means the kill landed between batches and interrupted nothing")
+    rec.step("observe", stranded_batch={"query_id": query_id, "batch_id": batch_id,
+                                        "status": stranded[2], "completed_at": stranded[6]})
+
+    # 3. Recover. The interrupted batch is re-run under its own id, not skipped.
     stack.up("speed")                                  # a no-op if the restart policy got there first
     stack.wait_healthy("speed", timeout=300)
     restarted = stack.db_now()
-    rec.step("recover", started="speed", container_started_at=stack.container_started_at("speed"),
-             was=started_at)
-    # The interrupted batch is re-run under its own id, not skipped.
+    rec.step("recover", started="speed", container_started_at=stack.container_started_at("speed"), was=started_at)
     resumed = wait_until(lambda: ((row := stack.speed_batch(query_id, batch_id)) is not None and row[2] == "SUCCEEDED", row),
-                         timeout=600, what=f"the interrupted batch {batch_id} to be re-run and succeed", poll=10)
+                         timeout=600, poll=5, what=f"the interrupted batch {batch_id} to be re-run and succeed")
+    stack.start_crawler()
     wait_until(lambda: stack.every_target_succeeded_since(restarted), timeout=300, what="more crawls after the restart")
     stack.stop_crawler()
     stack.quiet()
     wait_until(lambda: (not stack.stranded_speed_batches(since, stale_seconds=90), None),
-               timeout=420, what="every micro-batch to reach a terminal status", poll=15)
-    ids = stack.es_change_ids()
+               timeout=420, poll=15, what="every micro-batch to reach a terminal status")
+    recent = stack.redis_recent_changes()
+    ids = stack.es_changes_covering(recent)
     lost = sorted(before_kill - set(ids))
     rec.step("verify", variant="kill", resumed_batch={"query_id": query_id, "batch_id": batch_id,
                                                       "input_rows": resumed[3], "change_rows": resumed[4]},

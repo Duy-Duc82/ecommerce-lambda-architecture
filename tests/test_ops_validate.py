@@ -433,21 +433,80 @@ def test_a_worker_killed_for_a_lease_drill_is_not_restarted_by_docker(monkeypatc
                      ["docker", "kill", "speed"]]
 
 
-def test_the_mid_batch_kill_watches_from_inside_the_container(monkeypatch):
-    """A host-side kill cannot hit the window between RUNNING and terminal."""
+def test_the_kill_waits_for_a_batch_to_open_and_reports_which(monkeypatch):
+    """D5 kills inside a micro-batch, so it polls for the open audit row first."""
     from ops import drills
 
-    calls = []
+    class FakeCursor:
+        rows = [None, None, ("q1", 7)]
+
+        def __enter__(self): return self
+        def __exit__(self, *exc): return False
+        def execute(self, sql, params=()): self.sql, self.params = sql, params
+        def fetchone(self): return self.rows.pop(0)
+
+    class FakeConnection:
+        autocommit = False
+        cursor_ = FakeCursor()
+
+        def cursor(self): return self.cursor_
+        def close(self): self.closed = True
+
+    connection = FakeConnection()
+    monkeypatch.setattr("common.postgres.postgres_connection_factory", lambda: lambda: connection)
+    monkeypatch.setattr(drills.time, "sleep", lambda seconds: None)
+    killed = []
     stack = drills.Stack.__new__(drills.Stack)
-    monkeypatch.setattr(stack, "run", lambda args, **kw: calls.append(args) or subprocess.CompletedProcess(args, 0, "", ""))
+    monkeypatch.setattr(stack, "kill", lambda container, **kw: killed.append(container))
     since = datetime(2026, 10, 3, 9, tzinfo=timezone.utc)
 
-    stack.kill_inside_micro_batch(since)
+    assert stack.kill_when_batch_opens(since) == ("q1", 7)
 
-    (args,) = calls
-    assert args[:3] == ["docker", "exec", "-d"] and "speed" in args
-    assert f"DRILL_SINCE={since.isoformat()}" in args
-    assert "status = 'RUNNING'" in args[-1] and "os.kill(1, 9)" in args[-1]
+    assert killed == ["speed"]
+    assert "status = 'RUNNING'" in connection.cursor_.sql
+    assert connection.cursor_.params == (since,)
+    assert connection.closed is True
+
+
+def test_nothing_is_killed_when_no_batch_ever_opens(monkeypatch):
+    from ops import drills
+
+    class FakeCursor:
+        def __enter__(self): return self
+        def __exit__(self, *exc): return False
+        def execute(self, sql, params=()): pass
+        def fetchone(self): return None
+
+    class FakeConnection:
+        autocommit = False
+
+        def cursor(self): return FakeCursor()
+        def close(self): pass
+
+    monkeypatch.setattr("common.postgres.postgres_connection_factory", lambda: FakeConnection)
+    monkeypatch.setattr(drills.time, "sleep", lambda seconds: None)
+    clock = iter(range(0, 10000, 30))
+    monkeypatch.setattr(drills.time, "monotonic", lambda: next(clock))
+    stack = drills.Stack.__new__(drills.Stack)
+    monkeypatch.setattr(stack, "kill", lambda *a, **kw: pytest.fail("killed with no batch open"))
+
+    with pytest.raises(drills.DrillFailed, match="nothing to kill inside"):
+        stack.kill_when_batch_opens(AS_OF, timeout=60)
+
+
+def test_the_speed_backlog_counts_only_settled_smoke_observations():
+    from ops import drills
+
+    captured = []
+    stack = drills.Stack.__new__(drills.Stack)
+    stack.query = lambda sql, params=(): captured.append((" ".join(sql.split()), params)) or [(150,)]
+
+    assert stack.observations_published_since(AS_OF) == 150
+
+    (sql, params), = captured
+    assert "sum(a.parsed_count)" in sql
+    assert "a.status IN ('SUCCEEDED', 'PARTIAL')" in sql
+    assert params[1] == AS_OF
 
 
 def test_a_stranded_batch_is_one_still_running_long_after_it_opened():
