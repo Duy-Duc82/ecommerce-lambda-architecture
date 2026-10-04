@@ -73,6 +73,7 @@ services:
   kafka:
     image: apache/kafka:4.2.0
     container_name: kafka
+    restart: unless-stopped
     hostname: kafka
     ports:
       - "${KAFKA_HOST_PORT:-9092}:9092"
@@ -398,6 +399,7 @@ services:
     image: minio/minio@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e
     pull_policy: missing
     container_name: minio
+    restart: unless-stopped
     hostname: minio
     command: server /data --console-address ":9001"
     environment:
@@ -443,6 +445,7 @@ services:
   redis:
     image: redis:8.6.2
     container_name: redis
+    restart: unless-stopped
     ports:
       - "${REDIS_HOST_PORT:-6379}:6379"
     volumes:
@@ -458,6 +461,7 @@ services:
   postgres-dw:
     image: postgres:18.3
     container_name: postgres-dw
+    restart: unless-stopped
     environment:
       - POSTGRES_USER=${POSTGRES_USER:-admin}
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-admin123}
@@ -483,6 +487,7 @@ services:
     # re-pulls (PROGRESS.md section 13.4). Kibana is pinned to the same patch.
     image: docker.elastic.co/elasticsearch/elasticsearch:8.18.1
     container_name: elasticsearch
+    restart: unless-stopped
     environment:
       - discovery.type=single-node
       - xpack.security.enabled=false
