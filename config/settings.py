@@ -203,6 +203,21 @@ REDIS_MARKETPLACE_OFFER_TTL_SECONDS = int(os.getenv("REDIS_MARKETPLACE_OFFER_TTL
 REDIS_MARKETPLACE_RECENT_CHANGES_MAX = int(os.getenv("REDIS_MARKETPLACE_RECENT_CHANGES_MAX", "5000"))
 MARKETPLACE_SPEED_QUERY_NAME = os.getenv("MARKETPLACE_SPEED_QUERY_NAME", "marketplace-speed-v1")
 
+# Phase 8 WP8. Four operational indices, written by ops/es_projector.py, and
+# read by the Kibana source-health dashboard. They hold operational state
+# only: no raw body, no cookie, no header — the same rule as the audit tables.
+ES_INDEX_MARKETPLACE_SOURCE_HEALTH = os.getenv("ES_INDEX_MARKETPLACE_SOURCE_HEALTH", "marketplace-source-health-v1")
+ES_INDEX_MARKETPLACE_CRAWL_ATTEMPTS = os.getenv("ES_INDEX_MARKETPLACE_CRAWL_ATTEMPTS", "marketplace-crawl-attempts-v1")
+ES_INDEX_MARKETPLACE_SPEED_BATCHES = os.getenv("ES_INDEX_MARKETPLACE_SPEED_BATCHES", "marketplace-speed-batches-v1")
+ES_INDEX_MARKETPLACE_DLQ = os.getenv("ES_INDEX_MARKETPLACE_DLQ", "marketplace-dlq-v1")
+# The projector re-reads the last OVERLAP seconds of settled rows every pass,
+# so a row that was UPDATEd after it was first projected, or a pass that died
+# halfway, is repaired by the next pass. The overlap must exceed the interval,
+# or a gap opens between two passes that nothing ever re-reads.
+MARKETPLACE_OPS_PROJECT_INTERVAL_SECONDS = int(os.getenv("MARKETPLACE_OPS_PROJECT_INTERVAL_SECONDS", "30"))
+MARKETPLACE_OPS_PROJECT_OVERLAP_SECONDS = int(os.getenv("MARKETPLACE_OPS_PROJECT_OVERLAP_SECONDS", "900"))
+KAFKA_DLQ_PROJECTOR_GROUP = os.getenv("KAFKA_DLQ_PROJECTOR_GROUP", "marketplace-dlq-projector-v1")
+
 MARKETPLACE_SILVER_DATASET = os.getenv("MARKETPLACE_SILVER_DATASET", "marketplace/offer_observations")
 MARKETPLACE_GOLD_DATASET = os.getenv("MARKETPLACE_GOLD_DATASET", "marketplace")
 MARKETPLACE_FRESHNESS_SECONDS = int(os.getenv("MARKETPLACE_FRESHNESS_SECONDS", "21600"))
@@ -276,6 +291,8 @@ def validate_marketplace_settings() -> None:
         "MARKETPLACE_SILVER_POLL_TIMEOUT_MS": MARKETPLACE_SILVER_POLL_TIMEOUT_MS,
         "MARKETPLACE_SILVER_RETRY_BASE_SECONDS": MARKETPLACE_SILVER_RETRY_BASE_SECONDS,
         "MARKETPLACE_SILVER_RETRY_MAX_SECONDS": MARKETPLACE_SILVER_RETRY_MAX_SECONDS,
+        "MARKETPLACE_OPS_PROJECT_INTERVAL_SECONDS": MARKETPLACE_OPS_PROJECT_INTERVAL_SECONDS,
+        "MARKETPLACE_OPS_PROJECT_OVERLAP_SECONDS": MARKETPLACE_OPS_PROJECT_OVERLAP_SECONDS,
         "MARKETPLACE_STALE_AFTER_SECONDS": MARKETPLACE_STALE_AFTER_SECONDS,
         "KAFKA_CHANGE_ACK_TIMEOUT_SECONDS": KAFKA_CHANGE_ACK_TIMEOUT_SECONDS,
         "REDIS_MARKETPLACE_OFFER_TTL_SECONDS": REDIS_MARKETPLACE_OFFER_TTL_SECONDS,
@@ -311,6 +328,9 @@ def validate_marketplace_settings() -> None:
         # A crawl run could otherwise settle and age out between two scheduled
         # batches without ever being reconciled.
         raise ValueError("MARKETPLACE_QUALITY_RECONCILIATION_LOOKBACK_SECONDS must exceed MARKETPLACE_BATCH_INTERVAL_SECONDS plus MARKETPLACE_QUALITY_RECONCILIATION_SETTLE_SECONDS")
+    if MARKETPLACE_OPS_PROJECT_OVERLAP_SECONDS <= MARKETPLACE_OPS_PROJECT_INTERVAL_SECONDS:
+        # The pass after an outage must re-read everything the outage hid.
+        raise ValueError("MARKETPLACE_OPS_PROJECT_OVERLAP_SECONDS must exceed MARKETPLACE_OPS_PROJECT_INTERVAL_SECONDS")
     if MARKETPLACE_ANOMALY_MAD_THRESHOLD <= 0:
         raise ValueError("MARKETPLACE_ANOMALY_MAD_THRESHOLD must be positive")
     if MARKETPLACE_ANOMALY_IQR_MULTIPLIER <= 0:
@@ -321,7 +341,9 @@ def validate_marketplace_settings() -> None:
         "MARKETPLACE_COUNTER_RULE_VERSION", "MARKETPLACE_SILVER_DATASET",
         "MARKETPLACE_GOLD_DATASET", "MARKETPLACE_BATCH_APP_NAME",
         "MARKETPLACE_ANOMALY_RULE_VERSION", "MARKETPLACE_QUALITY_RULE_VERSION",
-        "MARKETPLACE_MANIFEST_SCHEMA_VERSION",
+        "MARKETPLACE_MANIFEST_SCHEMA_VERSION", "KAFKA_DLQ_PROJECTOR_GROUP",
+        "ES_INDEX_MARKETPLACE_SOURCE_HEALTH", "ES_INDEX_MARKETPLACE_CRAWL_ATTEMPTS",
+        "ES_INDEX_MARKETPLACE_SPEED_BATCHES", "ES_INDEX_MARKETPLACE_DLQ",
     ):
         if not globals()[name].strip():
             raise ValueError(f"{name} must be non-empty")
