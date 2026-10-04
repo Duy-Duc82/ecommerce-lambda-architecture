@@ -266,6 +266,9 @@ services:
       - ./:/app:ro
       # validate --json writes its report here, the one writable path.
       - ./data/ops:/reports
+      # Read-only, for the storage snapshot (Phase 9 plan section 6.3): Kafka
+      # 4 no longer answers the DescribeLogDirs versions kafka-python speaks.
+      - kafka_data:/kafka-data:ro
     depends_on: *core-ready
 
   # Projects audit and the DLQ into the four marketplace-* operational indices
@@ -283,6 +286,10 @@ services:
       SERVICE_HEARTBEAT_FILE: /tmp/heartbeat
       MARKETPLACE_OPS_PROJECT_INTERVAL_SECONDS: ${MARKETPLACE_OPS_PROJECT_INTERVAL_SECONDS:-30}
       MARKETPLACE_OPS_PROJECT_OVERLAP_SECONDS: ${MARKETPLACE_OPS_PROJECT_OVERLAP_SECONDS:-900}
+    volumes:
+      - ./:/app:ro
+      # Read-only: the daily storage snapshot sizes Kafka's partition logs.
+      - kafka_data:/kafka-data:ro
     healthcheck:
       # Beats once per pass, failed pass included; three intervals' grace,
       # plus the DLQ drain poll.
