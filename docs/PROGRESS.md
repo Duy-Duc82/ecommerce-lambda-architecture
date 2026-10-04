@@ -1960,6 +1960,7 @@ statement không fetch; test offline nay fail nếu DDL quay lại đi qua
    `.ndjson`, test 27–30 (plan §11).
 3. **WP9:** backup/restore và D11 (plan §12), test 24–26.
 4. **WP10:** viết lại ARCHITECTURE/DATA_MODEL và hoàn thiện RUNBOOK (plan §13).
+
 ## 19. Session 2026-10-04 — Phase 8 WP8 (Kibana): XONG
 
 > **Trạng thái:** index template, projector và hai dashboard **đã cài và chạy
@@ -2061,6 +2062,7 @@ Hệ quả: bộ số này gắn với Kibana 8.18.1 mà `docker-compose.yml` đ
 3. **WP10:** viết lại ARCHITECTURE/DATA_MODEL và hoàn thiện RUNBOOK (plan §13).
 4. `.env` trên máy này nay có `MARKETPLACE_STREAM_CHECKPOINT_VERSION=v2` —
    đừng hạ về `v1`, checkpoint cũ còn đó và sẽ tiếp tục từ offset cũ.
+
 ## 20. Session 2026-10-04 — Phase 8 WP9 (backup/restore): phần §12 XONG, D11 chờ WP7
 
 > **Trạng thái:** `mp backup` và `mp restore` **đã chạy thật end-to-end**:
@@ -2179,6 +2181,7 @@ record JSON).
 4. `RawArtifactRef.from_uri` ở đây trùng chức năng với helper tách `raw_uri`
    mà WP7 đặt trong `ops/drills.py`. Khi rebase thì cho drills dùng bản trong
    `crawler/reparse.py` và xoá bản kia — một chỗ duy nhất biết layout Bronze.
+
 ## 21. Session 2026-10-04 (tiếp) — Phase 8 WP10 (tài liệu): XONG
 
 > **Trạng thái:** `ARCHITECTURE.md` và `DATA_MODEL.md` **viết lại hoàn toàn**
@@ -2244,3 +2247,65 @@ ngược từ code chứ không chép từ plan. Ba chỗ plan và code lệch n
 3. Gộp `RawArtifactRef.from_uri` với helper tách `raw_uri` của WP7 (§20.8).
 4. Sau đó Phase 8 đạt đủ Definition of Done (plan §17), và mở được PR
    `develop` → `master` để thầy hướng dẫn duyệt.
+
+## 22. Session 2026-10-04 (tiếp) — merge WP7–WP10 vào `develop`
+
+> **Trạng thái:** cả bốn nhánh đã vào `develop`. Phase 8 còn **đúng drill
+> D11**. Nhánh WP7–WP10 giữ nguyên trên remote làm lịch sử; không xoá vội,
+> vì chúng là bằng chứng cho bốn PR chưa bao giờ tồn tại.
+
+### 22.1 Merge tại chỗ, không qua PR
+
+Máy này **không có `gh` CLI**, nên không mở được PR. Bốn nhánh được merge
+bằng `git merge --no-ff` ngay trên `develop` rồi push. Kết quả history giống
+hệt merge qua PR, chỉ khác là không có số PR; commit merge nói thẳng điều đó
+thay vì bịa `Merge PR #13`.
+
+| # | Merge commit | Nhánh |
+|---|---|---|
+| 1 | `253982d` | `phase-8-wp7-drills-d7-d10` |
+| 2 | `2c3200e` | `phase-8-wp8-kibana` |
+| 3 | `6e2fef8` | `phase-8-wp9-backup-restore` |
+| 4 | `17ba23a` | `phase-8-wp10-docs` |
+
+Đúng thứ tự WP7 → WP8 → WP9 → WP10, vì WP9 và WP10 đều tham chiếu tới thứ
+WP7/WP8 mang vào.
+
+### 22.2 Conflict và cách gỡ
+
+Bốn nhánh rẽ từ cùng một `develop` (54e7e80) nên không nhánh nào thấy diff
+của nhánh khác — đúng ý luật §3b. Giá phải trả là conflict ở ba file tài
+liệu, tất cả đều là **"cả hai bên cùng thêm"**, không bên nào sửa chữ của
+bên kia:
+
+| File | Conflict | Gỡ bằng |
+|---|---|---|
+| `PROGRESS.md` | 3 lần, mỗi nhánh append một §ở cuối file | Giữ **cả hai**, theo thứ tự §18 → §19 → §20 → §21 |
+| `PHASE_INDEX.md` | 6 lần, đều ở dòng Phase 8 trong bảng §5 và đoạn số liệu suite | Giữ bản **mới nhất**, rồi viết lại một lần cuối ở §22.3 |
+| `RUNBOOK.md` | 2 lần ở merge WP9 | Mục Kibana (WP8) và mục Backup (WP9) **giữ cả hai**; riêng ô `ops` trong bảng profile thì ghép tay, vì hai nhánh cùng sửa đúng một ô |
+
+Một lỗi nhỏ do merge: ba chỗ nối §18/§19, §19/§20, §20/§21 mất dòng trống
+trước heading, nên markdown không render heading. Đã sửa trong commit dọn.
+
+### 22.3 Trạng thái sau merge
+
+- Suite mặc định: **952 pass, 10 deselected**, 2m41s. Mười deselected là
+  drill D1–D10 (marker `drill`, cần stack đang chạy).
+- `tests/test_marketplace_quality.py`: **42 pass**.
+- **Tổng 994.** Phép cộng khớp: 826 (`develop` cũ) + 8 (WP7) + 73 (WP8)
+  + 45 (WP9) + 0 (WP10, chỉ tài liệu) = 952.
+- `git diff --check` sạch.
+
+### 22.4 Việc tiếp theo (resume ở đây)
+
+1. **Drill D11** — việc duy nhất Phase 8 còn thiếu so với plan (§10 bảng
+   drill, §12.3). Nay đã hết bị chặn: `ops/drills.py` trong `develop` đã có
+   đủ harness D1–D10. Toàn bộ việc D11 phải chứng minh đã chạy tay ở §20.3;
+   còn lại là gói vào harness. **Lưu ý:** D11 phải hạ stack chính xuống rồi
+   dựng project thứ hai (`container_name` là global), nên nó chạy **cuối
+   cùng** trong `drill all` và phải dựng lại stack chính trước khi thoát.
+2. Gộp `RawArtifactRef.from_uri` (WP9, `crawler/reparse.py`) với helper tách
+   `raw_uri` của WP7 trong `ops/drills.py` — một chỗ duy nhất biết layout
+   Bronze.
+3. Xong hai việc đó thì Phase 8 đạt Definition of Done (plan §17) và mở được
+   PR `develop` → `master` để thầy hướng dẫn duyệt.
