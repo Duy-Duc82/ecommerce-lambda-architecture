@@ -127,3 +127,20 @@ def test_the_wait_loop_records_progress_on_every_poll():
                         on_poll=lambda: calls.append("poll"))
 
     assert calls == ["poll"] * 3
+
+
+def test_an_idle_progress_event_is_not_stored_as_the_batch_it_names():
+    """Found on mp-live, 2026-10-04: while no data arrives, Spark reports an
+    idle progress every ten seconds carrying the batch id it will run *next*,
+    with no addBatch. Stored, it took that id's place, and the real batch's
+    numbers were then refused by the primary key."""
+    cursor = Cursor()
+    recorder = service.ProgressRecorder(_factory(cursor), clock=lambda: NOW)
+    idle = _progress(238, numInputRows=0, stateOperators=[],
+                     durationMs={"latestOffset": 4, "triggerExecution": 4})
+
+    assert recorder.record([idle]) == 0
+    assert recorder.record([idle, _progress(238)]) == 1
+
+    (_, params), = cursor.executed
+    assert params[service.PROGRESS_COLUMNS.index("num_input_rows")] == 15
