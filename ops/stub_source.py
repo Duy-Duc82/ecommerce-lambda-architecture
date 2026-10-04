@@ -13,9 +13,9 @@ What it serves:
   ``drift``, which switches every later listing response;
 - ``GET /_stub/state``: the mode and the serve counters, for drills.
 
-Determinism. Each ``(category, page)`` gets its own listing IDs, derived from
-the fixture IDs, the category and the page, so every page holds distinct
-offers. Each successful serve of a page advances that page's counter, and the
+Determinism. Each ``(category, page)`` gets its own listing IDs, a hash of
+the fixture ID, the category and the page, so every page holds distinct
+offers at any scale. Each successful serve of a page advances that page's counter, and the
 served price is the fixture price scaled by ``PRICE_STEPS[counter % 4]``.
 The second serve is a small cut (``PRICE_CHANGED``), the third a cut deep
 enough for ``LARGE_PRICE_DROP``, the fourth a return to the fixture price.
@@ -25,10 +25,10 @@ new observations.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import threading
 import time
-import zlib
 from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -45,8 +45,14 @@ RETRY_AFTER_SECONDS = 1
 
 
 def listing_id(fixture_id: int, category: str, page: int) -> int:
-    """Distinct per (fixture row, category, page), and stable across runs."""
-    return fixture_id * 10_000 + (zlib.crc32(category.encode("utf-8")) % 100) * 100 + page
+    """Distinct per (fixture row, category, page), and stable across runs.
+
+    A 60-bit slice of a SHA-256. The Phase 8 arithmetic packed the category
+    into ``crc32 % 100``, so two categories in one bucket, or a page past 99,
+    shared IDs once a load run went beyond the smoke's universe.
+    """
+    digest = hashlib.sha256(f"{fixture_id}:{category}:{page}".encode("utf-8")).hexdigest()
+    return int(digest[:15], 16)
 
 
 @dataclass
