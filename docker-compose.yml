@@ -310,7 +310,12 @@ services:
     profiles: ["smoke"]
     container_name: ${MP_CONTAINER_PREFIX:-}stub-source
     restart: unless-stopped
-    command: ["python", "-m", "ops.stub_source", "--port", "8000"]
+    # Phase 9 plan section 7: a benchmark widens the stub. The defaults are
+    # the Phase 8 smoke's universe; an empty STUB_ROWS_PER_PAGE serves the
+    # fixture once per page.
+    command: ["sh", "-c", "exec python -m ops.stub_source --port 8000 --last-page ${STUB_LAST_PAGE:-2} $${STUB_ROWS_PER_PAGE:+--rows-per-page $$STUB_ROWS_PER_PAGE}"]
+    environment:
+      STUB_ROWS_PER_PAGE: ${STUB_ROWS_PER_PAGE:-}
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/robots.txt', timeout=5)"]
       interval: 10s

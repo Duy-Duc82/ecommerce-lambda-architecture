@@ -44,14 +44,18 @@ PRICE_STEPS = (100, 95, 60, 100)
 RETRY_AFTER_SECONDS = 1
 
 
-def listing_id(fixture_id: int, category: str, page: int) -> int:
-    """Distinct per (fixture row, category, page), and stable across runs.
+def listing_id(fixture_id: int, category: str, page: int, copy: int = 0) -> int:
+    """Distinct per (fixture row, category, page, copy), and stable across runs.
+
+    ``copy`` numbers the repetitions of a fixture row on a page wider than the
+    fixture (``rows_per_page``). Copy 0 keeps the ID it always had.
 
     A 60-bit slice of a SHA-256. The Phase 8 arithmetic packed the category
     into ``crc32 % 100``, so two categories in one bucket, or a page past 99,
     shared IDs once a load run went beyond the smoke's universe.
     """
-    digest = hashlib.sha256(f"{fixture_id}:{category}:{page}".encode("utf-8")).hexdigest()
+    key = f"{fixture_id}:{category}:{page}" + (f":{copy}" if copy else "")
+    digest = hashlib.sha256(key.encode("utf-8")).hexdigest()
     return int(digest[:15], 16)
 
 
@@ -59,6 +63,9 @@ def listing_id(fixture_id: int, category: str, page: int) -> int:
 class StubState:
     rows: list[dict[str, Any]]
     last_page: int = 2
+    # Rows per listing page; None serves the fixture once, as Phase 8 did.
+    # Wider pages repeat the fixture, the invalid row included, with new IDs.
+    rows_per_page: int | None = None
     timeout_seconds: float = 0.0
     mode: str = "ok"
     served: dict[str, int] = field(default_factory=dict)
@@ -75,11 +82,14 @@ class StubState:
             return {"mode": self.mode, "served": dict(sorted(self.served.items()))}
 
 
-def load_state(path: Path = FIXTURE, *, last_page: int = 2, timeout_seconds: float = 0.0) -> StubState:
+def load_state(path: Path = FIXTURE, *, last_page: int = 2, timeout_seconds: float = 0.0,
+               rows_per_page: int | None = None) -> StubState:
     rows = json.loads(path.read_text(encoding="utf-8"))["data"]
     if not rows:
         raise ValueError(f"{path} holds no listing rows")
-    return StubState(rows=rows, last_page=last_page, timeout_seconds=timeout_seconds)
+    if rows_per_page is not None and rows_per_page < 1:
+        raise ValueError("rows_per_page must be at least 1")
+    return StubState(rows=rows, last_page=last_page, timeout_seconds=timeout_seconds, rows_per_page=rows_per_page)
 
 
 def _scaled(value: Any, percent: int) -> Any:
@@ -111,15 +121,17 @@ def listing_page(state: StubState, category: str, page: int) -> tuple[int, dict[
         state.served[key] = counter + 1
     percent = PRICE_STEPS[counter % len(PRICE_STEPS)]
     rows = []
+    width = state.rows_per_page or len(state.rows)
     if 1 <= page <= state.last_page:
-        for row in state.rows:
+        for index in range(width):
+            row = state.rows[index % len(state.rows)]
             served = dict(row)
             # The fixture's deliberately invalid row has no id; it stays invalid.
             if isinstance(row.get("id"), int):
-                served["id"] = listing_id(row["id"], category, page)
+                served["id"] = listing_id(row["id"], category, page, index // len(state.rows))
             served["price"] = _scaled(row.get("price"), percent)
             rows.append(served)
-    body = {"data": rows, "paging": {"current_page": page, "last_page": state.last_page, "per_page": len(state.rows)}}
+    body = {"data": rows, "paging": {"current_page": page, "last_page": state.last_page, "per_page": width}}
     return 200, {"Content-Type": "application/json"}, json.dumps(body, ensure_ascii=False, sort_keys=True).encode("utf-8")
 
 
@@ -177,8 +189,11 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Offline Tiki listing stub for the smoke and the drills")
     parser.add_argument("--port", type=int, default=8000)
     parser.add_argument("--last-page", type=int, default=2)
+    parser.add_argument("--rows-per-page", type=int, default=None,
+                        help="repeat the fixture to this many rows per page (default: the fixture once)")
     args = parser.parse_args()
-    state = load_state(last_page=args.last_page, timeout_seconds=CRAWL_HTTP_TIMEOUT_SECONDS + 2)
+    state = load_state(last_page=args.last_page, timeout_seconds=CRAWL_HTTP_TIMEOUT_SECONDS + 2,
+                       rows_per_page=args.rows_per_page)
     server = serve(state, port=args.port)
     print(json.dumps({"event": "stub_listening", "port": args.port}), flush=True)
     server.serve_forever()
