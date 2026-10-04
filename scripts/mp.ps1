@@ -14,11 +14,14 @@
 #   .\scripts\mp.ps1 validate [-Json path]
 #   .\scripts\mp.ps1 drill d1..d10|all              (after a passing smoke)
 #   .\scripts\mp.ps1 batch -AsOf 2026-10-02T00:00:00Z [-AllowBackfill] [-QualityOnly]
+#   .\scripts\mp.ps1 backup
+#   .\scripts\mp.ps1 restore -BackupId bk-... -Project mp-restore
 # ============================================================
 
 param(
     [Parameter(Position = 0, Mandatory = $true)]
-    [ValidateSet("up", "down", "status", "migrate", "seed", "smoke", "validate", "batch", "drill")]
+    [ValidateSet("up", "down", "status", "migrate", "seed", "smoke", "validate", "batch", "drill",
+                 "backup", "restore")]
     [string]$Command,
     [string[]]$With = @("crawl", "ingest", "speed", "batch"),
     [switch]$Volumes,
@@ -27,6 +30,8 @@ param(
     [string]$AsOf,
     [switch]$AllowBackfill,
     [switch]$QualityOnly,
+    [string]$BackupId,
+    [string]$Project,
     [Parameter(ValueFromRemainingArguments = $true)]
     [string[]]$Rest = @()
 )
@@ -138,6 +143,68 @@ function Invoke-Smoke {
     }
 }
 
+function Invoke-Restore([string]$Id, [string]$Target) {
+    # Plan 12.3: restore into a SEPARATE project with fresh volumes, never
+    # over the running stack. The project name is the only thing keeping the
+    # two apart, so it is required and checked rather than defaulted.
+    if (-not $Id) { throw "restore needs -BackupId <bk-...>" }
+    if (-not $Target) { throw "restore needs -Project <name>, a project that is not the running one" }
+    $current = $env:COMPOSE_PROJECT_NAME
+    if (-not $current) { $current = (Split-Path -Leaf $ProjectRoot) }
+    if ($Target -eq $current) {
+        throw "refusing to restore over the running project '$current'; pass a different -Project"
+    }
+    # container_name is global, so the two projects cannot both be up.
+    $running = & docker @($Compose + @("--profile", "*", "ps", "-q"))
+    if ($LASTEXITCODE -eq 0 -and $running) {
+        throw "the '$current' stack is up; `mp down` it first, or its fixed container names collide with '$Target'"
+    }
+
+    $restoreCompose = @("compose", "-f", "docker-compose.yml", "-p", $Target)
+    $restoreOps = $restoreCompose + @("--profile", "ops", "run", "--rm", "--no-deps", "ops")
+    try {
+        Invoke-Docker ($restoreCompose + @("up", "-d"))
+        # The core's healthchecks gate everything else; `up` already waited on
+        # the init containers, so this only needs PostgreSQL to answer.
+        & docker @($restoreOps + @("python", "-m", "ops", "migrate")) | Write-Host
+        if ($LASTEXITCODE -ne 0) { Write-Host "RESTORE FAILED: migrate" -ForegroundColor Red; return 1 }
+        # Keep the output: its last line names the window the quality-only
+        # batch must judge, so the host never has to find the backup manifest
+        # on disk and guess where the backup root is mounted.
+        $restoreOut = & docker @($restoreOps + @("python", "-m", "ops", "restore", "--from", $Id))
+        $restoreOut | Write-Host
+        if ($LASTEXITCODE -ne 0) { Write-Host "RESTORE FAILED: the restore checks did not pass" -ForegroundColor Red; return 1 }
+        $planLine = $restoreOut | Where-Object { $_ -match '"event": "quality_only_batch_next"' } | Select-Object -Last 1
+        if (-not $planLine) { Write-Host "RESTORE FAILED: the restore printed no batch window" -ForegroundColor Red; return 1 }
+        $plan = $planLine | ConvertFrom-Json
+
+        # The fourth check of plan 12.3 needs Spark, so it runs here, as every
+        # other Spark job does: a quality-only batch at the pointer's as_of,
+        # under a new run id, over the restored Silver and audit.
+        $runId = "$($plan.pointer_run_id)-restorecheck"
+        $batch = $restoreCompose + @("--profile", "batch", "run", "--rm", "--no-deps", "batch-once",
+            "python3", "-m", "batch_layer.marketplace_warehouse", "--run-id", $runId, "--as-of", $plan.as_of, "--quality-only")
+        & docker @($batch) | Write-Host
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host "RESTORE FAILED: the quality-only batch $runId did not succeed" -ForegroundColor Red
+            return 1
+        }
+
+        # --restored tolerates exactly the checks that must fail here: Kafka,
+        # Elasticsearch and Redis are not backed up (plan 12.1), so a stack
+        # that has not crawled yet has all three empty and its broker has
+        # never seen the Silver consumer group. Anything else is real.
+        & docker @($restoreOps + @("python", "-m", "ops", "validate", "--restored")) | Write-Host
+        if ($LASTEXITCODE -ne 0) { Write-Host "RESTORE FAILED: validate" -ForegroundColor Red; return 1 }
+        Write-Host "RESTORE PASSED into project '$Target'" -ForegroundColor Green
+        Write-Host "Kafka, Elasticsearch and Redis are empty by design; they refill from new crawls." -ForegroundColor Yellow
+        return 0
+    } finally {
+        Write-Host "The restored stack is still up as project '$Target'. Remove it with:" -ForegroundColor Yellow
+        Write-Host "  docker compose -f docker-compose.yml -p $Target --profile * down --volumes" -ForegroundColor Yellow
+    }
+}
+
 $ExitCode = 0
 try {
     switch ($Command) {
@@ -183,6 +250,11 @@ try {
             $ExitCode = Invoke-Batch $runId $AsOf $extra
         }
         "smoke" { $ExitCode = Invoke-Smoke }
+        "backup" {
+            New-Item -ItemType Directory -Force -Path (Join-Path $ProjectRoot "data/ops/backups") | Out-Null
+            $ExitCode = Invoke-Ops @("backup")
+        }
+        "restore" { $ExitCode = Invoke-Restore $BackupId $Project }
         "drill" {
             # Drills drive Docker, so they run on the host, against the
             # published ports from .env, with the lake on MinIO.
