@@ -118,18 +118,17 @@ Phase 5/6 chỉ nằm ở ngọn một nhánh feature, không có ở commit g�
 | 5 | 5 | ✅ trong `develop` | đủ 38/38 item |
 | 6 | 6 | ✅ trong `develop` | **47/47 item** |
 | 7 | 7 | ✅ trong `develop` (PR #4); bản sửa cắt `as_of` trên `phase-7-asof-cutoff` | **61/61 item** |
-| 8 | 8 | 🔵 WP1–WP6 trong `develop` (PR #7–#12). Bốn nhánh chờ PR, đều rẽ từ cùng `develop`: **WP7** D7–D10 (`PROGRESS.md` §18), **WP8** Kibana — index template, projector, hai dashboard (§19), **WP9** backup/restore (§20, **D11 chờ WP7 merge**), **WP10** ARCHITECTURE/DATA_MODEL/RUNBOOK (§21). Merge theo thứ tự WP7 → WP8 → WP9 → WP10 | P1-12, Kibana (P1-11) |
+| 8 | 8 | 🔵 **WP1–WP10 đều trong `develop`** (WP1–WP6 qua PR #7–#12; WP7–WP10 merge `--no-ff` tại chỗ ngày 2026-10-04, xem `PROGRESS.md` §22). Còn **đúng drill D11** (backup/restore) là hết Phase 8 | P1-12, Kibana (P1-11) |
 | 9 | 9 | ⏳ chưa bắt đầu | P2-* |
 
 **Phase 1–7 đã xong** và nằm trong `develop`. Phase 7 (P1-08 quality gates,
 P1-09 gold publish manifest) merge qua PR #4 ngày 2026-09-30. Bản sửa sau
 merge — run đọc Silver và audit *tại* `as_of`, gate 8 có cửa sổ đối soát — nằm
 trên `phase-7-asof-cutoff`, chi tiết ở `PROGRESS.md` §11.
-Suite: Python 3.12.13 + pyspark 4.0.4. Bốn nhánh WP7–WP10 rẽ từ cùng một
-`develop` nên mỗi nhánh đo riêng: **876** trên WP7 (`PROGRESS.md` §18.5),
-**941** trên WP8 (§19.6), **913** trên WP9 (§20.7), **868** trên WP10 (chỉ
-sửa tài liệu, §21). Trước đó: 868 sau WP6, 841 trên nhánh WP5, 674 sau
-Phase 7, 519 trước Phase 7. Mười drill D1–D10 nằm ngoài những con số đó:
+Suite trên `develop` sau khi merge cả bốn: **994 pass, 0 fail, 0 skip**
+(952 mặc định + 42 `test_marketplace_quality.py`), Python 3.12.13 + pyspark
+4.0.4 — `PROGRESS.md` §22. Trước đó: 868 sau WP6, 841 trên nhánh WP5, 674
+sau Phase 7, 519 trước Phase 7. Mười drill D1–D10 nằm ngoài con số đó:
 marker `drill` bị loại khỏi suite mặc định vì chúng cần stack đang chạy.
 `master` vẫn chưa nhận phase nào: chờ thầy hướng dẫn duyệt `develop`.
 
