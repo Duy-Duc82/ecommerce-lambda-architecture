@@ -2648,3 +2648,102 @@ Suite mặc định trên `e12a45c`: **1140 pass**, 11 deselected (D1–D11),
      (gitignored, chỉ có trên máy này). Nó viết trước Phase 9, nên phải bổ
      sung Phase 9 trước khi mở PR.
 4. **2026-11-03:** đủ 30 ngày thu thập. Chạy lại `evaluate` và `evidence`.
+
+## 27. 2026-10-05 (job tự động, sáng sớm) — `bench all --repeat 3` đã chạy xong
+
+Job chạy không người trông lúc 2026-10-04 22:43 UTC. Không sửa code, không
+đụng `mp-live`.
+
+### 27.1 Run kết thúc ra sao
+
+- Bắt đầu 2026-10-04 14:48 UTC. File kết quả cuối (`batch-n-200000`) ghi lúc
+  khoảng 21:12 UTC. Tổng khoảng **6 giờ 25 phút**.
+- Đủ **36/36 lượt** (4 kịch bản × 3 biến thể × 3 lần), 11 file trong
+  `data/ops/bench/`. Không có `bench_failed`.
+- **Log không có dòng `exit=`.** Lúc kiểm, không còn process `ops.bench`, và
+  không còn container `bench-*` nào, nên stack `mp-bench` đã tự xuống. Dòng
+  `exit=` do lệnh bọc ngoài ghi, sau khi `mp.ps1` trả về. `mp.ps1` kết thúc bằng
+  `exit $ExitCode`, nên nhiều khả năng lệnh bọc bị thoát cùng và không chạy tới
+  dòng đó. Python chỉ trả mã khác 0 khi có `bench_failed`, nên coi như exit 0.
+  Không có sleep/restart máy quanh lúc đó (System event log). Lần sau nên bọc
+  `mp.ps1` trong `powershell -File` riêng, rồi ghi `exit=` ở process cha.
+- Mọi file đều có `live_stack_running_containers = 10`, tức là **đo khi
+  `mp-live` chạy cùng**. `git_dirty = false`. Crawl đo ở `faace6c`, các kịch bản
+  khác ở `f8f32c2`. Giữa hai commit chỉ khác `docs/PROGRESS.md`. Image
+  `marketplace-python` có digest khác nhau giữa các kịch bản (build lại mỗi
+  project), code bên trong như nhau.
+- Máy: Windows 11, Docker Desktop 28.3.2 (WSL2), VM 8 CPU, 16 GB. Mọi số là
+  `dataset = replayed_fixture` (stub source), không phải số đo trên Tiki.
+
+### 27.2 Số chính (trung vị của 3 lần, kèm min–max)
+
+Crawl, 120 request, 3.240 dòng parse, mỗi lần:
+
+| delay | thời gian (s) | request/s | parse/s | latency p50 (ms) | p95 (ms) | failed |
+|---|---:|---:|---:|---:|---:|---:|
+| 2 s | 365 (358–372) | 0,329 | 8,88 | 2.527 (2.480–2.589) | 3.025 | 0 |
+| 0 s | 128 (122–134) | 0,939 | 25,4 | 562 (487–619) | 1.036 | 0 |
+
+120/120 là `PARTIAL`, đúng thiết kế của trang stub (§26.5).
+
+Ingest (load generator → Kafka → Silver):
+
+| n | produce (rec/s) | Silver xả (rec/s) | tổng (s) | Silver latency p50 (s) | p95 (s) |
+|---|---:|---:|---:|---:|---:|
+| 10.000 | 483 | 80,0 (78,2–80,6) | 125 | 51 | 100 |
+| 50.000 | 493 | 94,2 (93,5–95,2) | 531 | 209 | 403 |
+| 200.000 | 537 | 116 (104–128) | 1.724 (1.567–1.917) | 659 | 1.290 |
+
+Silver xả chậm hơn produce khoảng 4–6 lần, và latency tăng gần tuyến tính theo
+n: record xếp hàng sau sink. Khớp với nhận xét §26.2 (sink ghi từng object lên
+MinIO là nút thắt). Mức 200.000 dao động nhiều nhất (±10 % quanh trung vị).
+
+Speed (300 s mỗi mức):
+
+| rate yêu cầu | rate thực phát | xử lý (row/s) | kịp? | batch p50 (s) | latency batch p50 (s) | latency max (s) |
+|---|---:|---:|---|---:|---:|---:|
+| 50/s | 50 | 50,2 | có, xả 26 s | 4,3 | 19,3 | 35,2 |
+| 200/s | 200 | 200,6 | có, xả 20 s | 13,5 | 28,6 | 48,1 |
+| 1000/s | **548** | 432 (387–445) | không | 43,5 | 66,6 | 164 |
+
+Ở mức 1000/s, generator chỉ phát được khoảng 548/s (cùng trần với produce của
+ingest), nên mức này thực chất là "khoảng 550/s". Ngưỡng chịu được của speed
+nằm giữa 200 và 550 row/s trên máy này. Báo cáo phải ghi rõ trần của generator.
+
+Batch (trên dữ liệu phát lại):
+
+| n Silver | thời gian (s) | Silver row/s | Gold rows |
+|---|---:|---:|---:|
+| 10.000 | 37,9 (37,8–38,4) | 264 | 8.011 |
+| 50.000 | 105,8 (105,6–105,9) | 473 | 8.011 |
+| 200.000 | 374,3 (373,0–374,8) | 534 | 8.011 |
+
+Cả 9 lượt là `QUALITY_FAILED`, đúng như dự kiến: crawl run giả không có trong
+audit nên rule đối soát fail. Thời gian chạy vẫn là số đo hợp lệ. Batch ổn định
+nhất trong 4 kịch bản (chênh dưới 2 %). Gold luôn 8.011 dòng vì universe của
+fixture cố định.
+
+### 27.3 Một phát hiện trên `mp-live` trong lúc kiểm
+
+Trang `{"page":3,"target":"1882"}` **không được crawl lại từ 2026-10-04
+15:18 UTC**. Từ 16:00 UTC mỗi giờ chỉ còn 14/15 trang.
+
+- Attempt duy nhất bị `FAILED`, `error_kind = UNKNOWN`, thông điệp
+  `raw artifact fetched_at must lie between started_at and completed_at`
+  (`crawler/contracts.py:397`). Tức là hai mốc thời gian đọc từ hai đồng hồ
+  lệch nhau.
+- Lúc đó benchmark vừa chuyển từ crawl sang ingest (15:17 UTC), máy đang tải
+  nặng. Có thể đồng hồ WSL bị chỉnh lùi. Chưa xác minh.
+- Frontier: `status = FAILED`, `attempts = 1`/`max_attempts = 5`, và không
+  có occurrence tiếp theo. Trang này đã rơi khỏi lịch hẳn.
+- 187 attempt khác đều `SUCCEEDED` (p50 2.901 ms, p95 3.713 ms).
+
+Chưa sửa gì (job tự động không được sửa code hay dữ liệu live). Cần user quyết:
+lỗi này nên được retry hay không, và có đưa trang về lịch không. Nếu để vậy,
+30 ngày thu thập sẽ thiếu 1/15 trang từ ngày đầu.
+
+### 27.4 Việc tiếp theo
+
+Vẫn theo §26.6, trừ mục "khi benchmark xong" đã làm phần `bench report` và
+mục này. Còn lại: chạy `mp -EnvFile env/live.env evidence`, nghiệm thu batch
+`mp-20261005T0000Z` (job 07:47 sáng nay), và xử lý §27.3.
