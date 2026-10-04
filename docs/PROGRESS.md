@@ -2525,3 +2525,77 @@ Suite mặc định: **1038 pass**, 11 deselected (D1–D11), 16m28s. Chạy ch�
 1. 2026-10-05: nghiệm thu WP0, tức batch theo lịch đầu tiên của `mp-live`.
 2. WP2: `audit.marketplace_stream_progress`, ba cột latency,
    `audit.storage_snapshot`.
+
+## 26. Session 2026-10-04 (chiều) — Phase 9 WP2–WP8: viết xong và chạy thật
+
+User đi vắng khoảng 2 tiếng và bảo làm tiếp. Mỗi WP đều có test offline và
+một lần chạy thật trên stack cô lập cạnh `mp-live`.
+
+| WP | Commit | Chạy thật |
+|---|---|---|
+| WP2 progress, latency, snapshot | `b6360de`, test `1b9c233` + fix `99bd092` | bench smoke; rồi triển khai lên `mp-live` (migrate, restart `speed`, tạo lại `es-projector`) |
+| WP3 stub ID + load generator | test `fe6656f` + fix `78e0b15`, `ba4578b` | qua bench ingest |
+| WP4 benchmark runner | `475902e` | `bench ingest --repeat 1 --sizes 10000` |
+| WP5 reliability + freshness | `b0360eb` | `evaluate reliability\|freshness` trên `mp-live` |
+| WP6 storage growth | `5c5f93f` | trên `mp-live` bị từ chối đúng (mới 1 ngày snapshot) |
+| WP7 demo | `1886457` | `demo --without-serve --auto --snapshot`: 7/7 bước PASS, cả D3 và D8 |
+| WP8 evidence | `e12a45c` | `evidence --skip-tests`: còn MISSING đúng những mục chưa có |
+
+### 26.1 Sáu chỗ chỉ lộ ra khi chạy thật
+
+1. **Spark phát idle progress mang batchId của batch sắp chạy.** Khi lưu
+   event đó, recorder chiếm chỗ batch thật, và số liệu thật bị primary key từ
+   chối. Tìm được trên `mp-live` (batch 238). Đã sửa: chỉ lưu event có
+   `durationMs.addBatch`. Test và fix ở hai commit riêng. Dòng sai đã xoá.
+2. **Kafka 4 bỏ `DescribeLogDirs` v0/v1 (KIP-896).** kafka-python không đo
+   được log dir nữa. Đã đổi sang mount read-only volume `kafka_data` và cộng
+   dung lượng thư mục partition.
+3. **File index của Kafka là sparse, tạo trước 10 MiB.** Đo theo kích thước
+   logic, `__consumer_offsets` hiện thành 1 GB, trong khi thực dùng 400 KB.
+   Đã đổi sang đo theo `st_blocks`.
+4. **`reltuples` bằng 0 khi bảng chưa ANALYZE.** Postgres chuyển sang dùng
+   `n_live_tup`.
+5. **Occurrence seed có `scheduled_for = 1970-01-01` (có chủ ý).** Đo độ trễ
+   lịch theo cột này cho ra 1,79 tỷ giây. Đã loại occurrence seed, và thêm
+   phép đo khoảng cách giữa hai lần crawl thành công của cùng một trang.
+6. **Latency đo từ `produced_at`, không từ Kafka timestamp.** Giữ
+   `kafka_timestamp` qua operator có state sẽ làm đổi schema output mà
+   checkpoint `v2` của `mp-live` đang dùng. Hai mốc này trùng nhau tới vài ms
+   (CreateTime). Plan §6.1 đã ghi lại thay đổi này.
+
+### 26.2 Số đo đầu tiên trên `mp-live` (cửa sổ 0,13 ngày, chưa là kết quả)
+
+- Crawl: 60/60 attempt thành công. Latency p50 3.060 ms, p95 3.910 ms.
+  Khoảng cách giữa hai lần crawl một trang có p50 3.624 s, 100 % trong 110 %
+  cadence. Độ trễ lịch p50 21 s, tối đa 32 s.
+- Từ crawl tới Kafka (`produced_at − fetched_at`): p50 29 ms, p95 445 ms.
+- Latency speed (tới khi sink ghi xong): p50 8–24 s, p95 tới khoảng 30 s.
+  Con số này chủ yếu là trigger 30 s.
+- Bench ingest 10.000 (replayed_fixture, 1 lần, máy đang bận): Silver xả
+  khoảng **100 record/s**. Sink ghi mỗi observation một object JSON lên MinIO,
+  có thể là nút thắt. Cần `--repeat 3` lúc máy rảnh mới thành kết quả.
+
+### 26.3 Batch theo lịch đầu tiên của `mp-live`
+
+`mp-20261004T0000Z` chạy lúc 10:21 cho cửa sổ trước khi thu thập bắt đầu.
+Silver có 0 dòng, nên `silver_parse_attempt_reconciliation` (MANDATORY) bị
+SKIPPED, và theo thiết kế Phase 7 điều đó tính là fail. Kết quả
+`QUALITY_FAILED`, không publish. Đúng hành vi. Run có dữ liệu đầu tiên là
+`mp-20261005T0000Z`, sau 00:30 UTC ngày 2026-10-05.
+
+### 26.4 Trạng thái test
+
+Suite mặc định trên `e12a45c`: **1140 pass**, 11 deselected (D1–D11),
+12m30s, chạy khi `mp-live` đang hoạt động. Tăng 102 so với 1038 sau WP1.
+
+### 26.5 Còn mở
+
+1. **Chưa có `docs/SOURCE_FEASIBILITY.md`** (Brief §3, P0-01). Bằng chứng
+   nằm rải ở §4a. Evidence bundle báo MISSING cho tới khi có file này.
+2. **Chưa có kết quả benchmark thật**, cần `bench all --repeat 3`, mất vài
+   giờ.
+3. **Demo đầy đủ (có Kibana và Superset)** mới chỉ chạy `--without-serve`, vì
+   RAM dùng chung với `mp-live`. Cần chạy khi có người theo dõi.
+4. **Integration run (plan §12.2) và tag `feature-freeze-w9`**: chờ user.
+5. Ngày 2026-11-03 mới đủ 30 ngày thu thập. Sau đó chạy lại `evaluate` và
+   `evidence`.
