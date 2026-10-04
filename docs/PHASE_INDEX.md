@@ -118,19 +118,21 @@ Phase 5/6 chỉ nằm ở ngọn một nhánh feature, không có ở commit g�
 | 5 | 5 | ✅ trong `develop` | đủ 38/38 item |
 | 6 | 6 | ✅ trong `develop` | **47/47 item** |
 | 7 | 7 | ✅ trong `develop` (PR #4); bản sửa cắt `as_of` trên `phase-7-asof-cutoff` | **61/61 item** |
-| 8 | 8 | 🔵 **WP1–WP10 đều trong `develop`** (WP1–WP6 qua PR #7–#12; WP7–WP10 merge `--no-ff` tại chỗ ngày 2026-10-04, xem `PROGRESS.md` §22). Còn **đúng drill D11** (backup/restore) là hết Phase 8 | P1-12, Kibana (P1-11) |
+| 8 | 8 | ✅ **XONG** — WP1–WP10 và drill D11 đều trong `develop`; Definition of Done (plan §17) đối chiếu đủ ở `PROGRESS.md` §23.6. Mười một drill chạy thật, `validate` 11/11 | P1-12, Kibana (P1-11) |
 | 9 | 9 | ⏳ chưa bắt đầu | P2-* |
 
 **Phase 1–7 đã xong** và nằm trong `develop`. Phase 7 (P1-08 quality gates,
 P1-09 gold publish manifest) merge qua PR #4 ngày 2026-09-30. Bản sửa sau
 merge — run đọc Silver và audit *tại* `as_of`, gate 8 có cửa sổ đối soát — nằm
 trên `phase-7-asof-cutoff`, chi tiết ở `PROGRESS.md` §11.
-Suite trên `develop` sau khi merge cả bốn: **994 pass, 0 fail, 0 skip**
-(952 mặc định + 42 `test_marketplace_quality.py`), Python 3.12.13 + pyspark
-4.0.4 — `PROGRESS.md` §22. Trước đó: 868 sau WP6, 841 trên nhánh WP5, 674
-sau Phase 7, 519 trước Phase 7. Mười drill D1–D10 nằm ngoài con số đó:
-marker `drill` bị loại khỏi suite mặc định vì chúng cần stack đang chạy.
-`master` vẫn chưa nhận phase nào: chờ thầy hướng dẫn duyệt `develop`.
+Suite trên `develop` khi Phase 8 đóng: **1006 pass, 0 fail, 0 skip**
+(964 mặc định + 42 `test_marketplace_quality.py`), Python 3.12.13 + pyspark
+4.0.4 — `PROGRESS.md` §23.5. Trước đó: 994 sau khi merge WP7–WP10, 868 sau
+WP6, 841 trên nhánh WP5, 674 sau Phase 7, 519 trước Phase 7. Mười một drill
+D1–D11 nằm ngoài con số đó: marker `drill` bị loại khỏi suite mặc định vì
+chúng cần stack đang chạy.
+`master` vẫn chưa nhận phase nào. Phase 8 đã đóng, nên `develop` → `master`
+mở được ngay khi thầy hướng dẫn duyệt.
 
 **Phần nối dịch vụ của Phase 4/5 do Phase 8 làm, và nay đã xong.** Hai phase
 đó ✅ ở mức code và test, nhưng crawler chưa publish vào Kafka, Silver sink
