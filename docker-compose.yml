@@ -9,8 +9,10 @@
 #
 #   crawl   crawl-worker           ingest  silver-sink
 #   speed   speed                  batch   batch-scheduler, batch-once
-#   serve   kibana, superset       legacy  the Kaggle demo (Spark 3.5.1)
-#   ops     ops (run --rm tool)    smoke   stub-source, the offline Tiki stub
+#   serve   kibana, superset,      legacy  the Kaggle demo (Spark 3.5.1)
+#           kibana-marketplace-setup
+#   ops     ops (run --rm tool),   smoke   stub-source, the offline Tiki stub
+#           es-projector
 #
 # scripts/mp.ps1 wraps all of this; see docs/RUNBOOK.md.
 #
@@ -261,6 +263,34 @@ services:
       - ./data/ops:/reports
     depends_on: *core-ready
 
+  # Projects audit and the DLQ into the four marketplace-* operational indices
+  # (plan section 11.2). Read-only towards the pipeline: no lock, no
+  # PostgreSQL write, and the only offsets it advances are its own, committed
+  # after the records are indexed.
+  es-projector:
+    <<: *marketplace-python
+    profiles: ["ops"]
+    container_name: es-projector
+    restart: unless-stopped
+    command: ["python", "-m", "ops.es_projector"]
+    environment:
+      <<: *marketplace-env
+      SERVICE_HEARTBEAT_FILE: /tmp/heartbeat
+      MARKETPLACE_OPS_PROJECT_INTERVAL_SECONDS: ${MARKETPLACE_OPS_PROJECT_INTERVAL_SECONDS:-30}
+      MARKETPLACE_OPS_PROJECT_OVERLAP_SECONDS: ${MARKETPLACE_OPS_PROJECT_OVERLAP_SECONDS:-900}
+    healthcheck:
+      # Beats once per pass, failed pass included; three intervals' grace,
+      # plus the DLQ drain poll.
+      test: ["CMD", "python", "-m", "common.heartbeat", "--check", "/tmp/heartbeat", "--max-age", "180"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    depends_on:
+      <<: *core-ready
+      elasticsearch:
+        condition: service_healthy
+
   # Offline stand-in for the Tiki listing API (plan section 8). The smoke and
   # the drills set TIKI_LISTING_URL to http://stub-source:8000/...
   stub-source:
@@ -497,6 +527,22 @@ services:
       start_period: 60s
     networks:
       - bigdata
+
+  # Install the marketplace index templates and import the two dashboards
+  # (plan section 11.3). Idempotent: templates are PUT by name, saved objects
+  # imported with overwrite=true.
+  kibana-marketplace-setup:
+    <<: *marketplace-python
+    profiles: ["serve"]
+    container_name: kibana-marketplace-setup
+    restart: "no"
+    command: ["python", "-m", "display.kibana.setup_marketplace_kibana"]
+    environment:
+      <<: *marketplace-env
+      KIBANA_HOST: http://kibana:5601
+    depends_on:
+      kibana:
+        condition: service_healthy
 
   # Auto-import the legacy Kaggle dashboards.
   kibana-setup:
