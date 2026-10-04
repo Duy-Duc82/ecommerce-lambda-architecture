@@ -50,6 +50,10 @@ CRAWL_ENV = {
 }
 BATCH_SETTLE_SECONDS = 60
 SERVICES = ("stub-source", "silver-sink", "speed", "batch-scheduler")
+# The live collection stack (Phase 9 plan section 4, decision D1). A drill
+# injects faults and stub traffic, and either would contaminate the audit the
+# reliability evaluation reads, so no drill ever runs against it.
+LIVE_PROJECT = "mp-live"
 
 # D8 plants one audit row and D9 one constraint. Both carry a name no part of
 # the pipeline writes, so a leftover is recognisable as this drill's and the
@@ -79,6 +83,20 @@ MID_BATCH_POLL_SECONDS = 0.01
 
 class DrillFailed(AssertionError):
     pass
+
+
+class LiveStackRefused(RuntimeError):
+    """The containers a drill would touch belong to the live collection stack."""
+
+
+def container(service: str) -> str:
+    """The container Compose runs ``service`` in.
+
+    ``container_name`` carries ``${MP_CONTAINER_PREFIX}`` so that a bench or
+    demo project can run beside the live one. Compose commands take service
+    names; only the plain ``docker`` commands need this.
+    """
+    return os.environ.get("MP_CONTAINER_PREFIX", "") + service
 
 
 def _now() -> str:
@@ -140,13 +158,13 @@ class Stack:
     def stop(self, *services: str) -> None:
         self.run(COMPOSE + ["--profile", "*", "stop", *services])
 
-    def kill(self, container: str, *, stays_dead: bool = False) -> None:
+    def kill(self, service: str, *, stays_dead: bool = False) -> None:
         """SIGKILL. The long-running services carry `restart: unless-stopped`,
         so Docker brings a killed one straight back; ``stays_dead`` clears that
         policy first, for a drill whose premise is a process that is gone."""
         if stays_dead:
-            self.run(["docker", "update", "--restart", "no", container])
-        self.run(["docker", "kill", container])
+            self.run(["docker", "update", "--restart", "no", container(service)])
+        self.run(["docker", "kill", container(service)])
 
     def project(self) -> str:
         """This Compose project's name. A drill never touches another project's
@@ -155,8 +173,8 @@ class Stack:
         if cached:
             return cached
         label = '{{index .Config.Labels "com.docker.compose.project"}}'
-        for container in ("speed", "minio", "postgres-dw", "kafka"):
-            result = self.run(["docker", "inspect", "-f", label, container], check=False)
+        for service in ("speed", "minio", "postgres-dw", "kafka"):
+            result = self.run(["docker", "inspect", "-f", label, container(service)], check=False)
             name = result.stdout.strip()
             if result.returncode == 0 and name and name != "<no value>":
                 self._project = name
@@ -171,8 +189,8 @@ class Stack:
                          "--filter", f"label=com.docker.compose.project={self.project()}",
                          "--filter", f"name={name_contains}"]).stdout.split()
 
-    def container_started_at(self, container: str) -> str:
-        result = self.run(["docker", "inspect", "-f", "{{.State.StartedAt}}", container], check=False)
+    def container_started_at(self, service: str) -> str:
+        result = self.run(["docker", "inspect", "-f", "{{.State.StartedAt}}", container(service)], check=False)
         return result.stdout.strip() if result.returncode == 0 else "absent"
 
     def kill_when_batch_opens(self, since: datetime, *, timeout: float = 420) -> tuple[str, int]:
@@ -224,19 +242,19 @@ class Stack:
             "WHERE started_at >= %s AND status = 'RUNNING' AND started_at < now() - %s * interval '1 second' "
             "ORDER BY started_at", (since, stale_seconds))
 
-    def status(self, container: str) -> str:
-        result = self.run(["docker", "inspect", "-f", "{{.State.Status}}/{{if .State.Health}}{{.State.Health.Status}}{{end}}", container],
-                          check=False)
+    def status(self, service: str) -> str:
+        result = self.run(["docker", "inspect", "-f", "{{.State.Status}}/{{if .State.Health}}{{.State.Health.Status}}{{end}}",
+                           container(service)], check=False)
         return result.stdout.strip() if result.returncode == 0 else "absent"
 
-    def wait_healthy(self, container: str, timeout: float = 180) -> None:
-        wait_until(lambda: (self.status(container).endswith("/healthy"), self.status(container)),
-                   timeout=timeout, what=f"{container} healthy", poll=3)
+    def wait_healthy(self, service: str, timeout: float = 180) -> None:
+        wait_until(lambda: (self.status(service).endswith("/healthy"), self.status(service)),
+                   timeout=timeout, what=f"{service} healthy", poll=3)
 
     def stub_mode(self, mode: str) -> None:
         code = ("import urllib.request,sys; urllib.request.urlopen(urllib.request.Request("
                 "'http://localhost:8000/_stub/mode', data=sys.argv[1].encode()), timeout=10)")
-        self.run(["docker", "exec", "stub-source", "python", "-c", code, mode])
+        self.run(["docker", "exec", container("stub-source"), "python", "-c", code, mode])
 
     # -- PostgreSQL and the lake --
     def query(self, sql: str, params: tuple = ()) -> list[tuple]:
@@ -1252,8 +1270,20 @@ DRILLS: dict[str, Callable[[Stack, Record], None]] = {
 }
 
 
+def refuse_live(stack: Stack) -> None:
+    """Refuse before anything is touched -- the baseline, the drill *and* the
+    restore in ``run``'s ``finally`` all act on the stack. Decided by the
+    project label of the containers themselves, not by an environment variable
+    someone might have forgotten to load."""
+    if stack.project() == LIVE_PROJECT:
+        raise LiveStackRefused(
+            f"the containers under prefix '{os.environ.get('MP_CONTAINER_PREFIX', '')}' belong to "
+            f"'{LIVE_PROJECT}', the live collection stack; run drills with -EnvFile env/bench.env")
+
+
 def run(name: str, stack: Stack | None = None) -> Record:
     stack = stack or Stack()
+    refuse_live(stack)
     rec = Record(name)
     try:
         baseline(stack, rec)
@@ -1280,6 +1310,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("drill", choices=[*DRILLS, "all"])
     args = parser.parse_args(argv)
     names = list(DRILLS) if args.drill == "all" else [args.drill]
+    try:
+        refuse_live(Stack())
+    except LiveStackRefused as error:
+        print(json.dumps({"event": "drill_refused", "reason": str(error)}), flush=True)
+        return 2
     results = {name: run(name).passed for name in names}
     print(json.dumps({"drills": results}, sort_keys=True))
     return 0 if all(results.values()) else 1

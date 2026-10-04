@@ -17,7 +17,11 @@
 # scripts/mp.ps1 wraps all of this; see docs/RUNBOOK.md.
 #
 # Host ports come from .env (see .env.example), so a machine whose ports are
-# taken needs no override file. Container-side values stay literal: a
+# taken needs no override file.
+#
+# Every container_name carries ${MP_CONTAINER_PREFIX} (empty by default), so a
+# second project -- env/bench.env, env/demo.env -- can run beside the live
+# collection stack instead of stopping it (Phase 9 plan section 5). Container-side values stay literal: a
 # developer's .env holds host-side addresses such as localhost:9010, which
 # must never reach a container.
 
@@ -72,7 +76,7 @@ services:
   # ── INGESTION LAYER ─────────────────────────────────────────
   kafka:
     image: apache/kafka:4.2.0
-    container_name: kafka
+    container_name: ${MP_CONTAINER_PREFIX:-}kafka
     restart: unless-stopped
     hostname: kafka
     ports:
@@ -120,7 +124,7 @@ services:
   # idempotently. The legacy ecommerce_events topic stays with start_all.ps1.
   kafka-init:
     image: apache/kafka:4.2.0
-    container_name: kafka-init
+    container_name: ${MP_CONTAINER_PREFIX:-}kafka-init
     depends_on:
       kafka:
         condition: service_healthy
@@ -140,7 +144,7 @@ services:
   crawl-worker:
     <<: *marketplace-python
     profiles: ["crawl"]
-    container_name: crawl-worker
+    container_name: ${MP_CONTAINER_PREFIX:-}crawl-worker
     restart: unless-stopped
     command: ["python", "-m", "crawler.service"]
     environment:
@@ -173,7 +177,7 @@ services:
   silver-sink:
     <<: *marketplace-python
     profiles: ["ingest"]
-    container_name: silver-sink
+    container_name: ${MP_CONTAINER_PREFIX:-}silver-sink
     restart: unless-stopped
     command: ["python", "-m", "data_ingestion.marketplace_silver_service"]
     environment:
@@ -191,7 +195,7 @@ services:
   speed:
     <<: *spark-marketplace
     profiles: ["speed"]
-    container_name: speed
+    container_name: ${MP_CONTAINER_PREFIX:-}speed
     restart: unless-stopped
     command: ["python3", "-m", "speed_layer.marketplace_speed_service"]
     environment:
@@ -219,7 +223,7 @@ services:
   batch-scheduler:
     <<: *spark-marketplace
     profiles: ["batch"]
-    container_name: batch-scheduler
+    container_name: ${MP_CONTAINER_PREFIX:-}batch-scheduler
     restart: unless-stopped
     command: ["python3", "-m", "batch_layer.marketplace_scheduler"]
     environment:
@@ -271,7 +275,7 @@ services:
   es-projector:
     <<: *marketplace-python
     profiles: ["ops"]
-    container_name: es-projector
+    container_name: ${MP_CONTAINER_PREFIX:-}es-projector
     restart: unless-stopped
     command: ["python", "-m", "ops.es_projector"]
     environment:
@@ -297,7 +301,7 @@ services:
   stub-source:
     <<: *marketplace-python
     profiles: ["smoke"]
-    container_name: stub-source
+    container_name: ${MP_CONTAINER_PREFIX:-}stub-source
     restart: unless-stopped
     command: ["python", "-m", "ops.stub_source", "--port", "8000"]
     healthcheck:
@@ -311,7 +315,7 @@ services:
   spark:
     profiles: ["legacy"]
     image: apache/spark:3.5.1
-    container_name: spark
+    container_name: ${MP_CONTAINER_PREFIX:-}spark
     hostname: spark
     command:
       - /opt/spark/bin/spark-class
@@ -333,7 +337,7 @@ services:
   spark-worker:
     profiles: ["legacy"]
     image: apache/spark:3.5.1
-    container_name: spark-worker
+    container_name: ${MP_CONTAINER_PREFIX:-}spark-worker
     hostname: spark-worker
     command:
       - /opt/spark/bin/spark-class
@@ -363,7 +367,7 @@ services:
       context: .
       dockerfile: docker/spark-warehouse/Dockerfile
     image: ecommerce/spark-warehouse:3.5.1
-    container_name: warehouse-job
+    container_name: ${MP_CONTAINER_PREFIX:-}warehouse-job
     environment:
       DATA_LAKE_MODE: s3a
       MINIO_ENDPOINT: minio:9000
@@ -398,7 +402,7 @@ services:
     # copy already cached here; see docs/RUNBOOK.md for how to get one.
     image: minio/minio@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e
     pull_policy: missing
-    container_name: minio
+    container_name: ${MP_CONTAINER_PREFIX:-}minio
     restart: unless-stopped
     hostname: minio
     command: server /data --console-address ":9001"
@@ -423,7 +427,7 @@ services:
   minio-init:
     image: minio/mc@sha256:a7fe349ef4bd8521fb8497f55c6042871b2ae640607cf99d9bede5e9bdf11727
     pull_policy: missing
-    container_name: minio-init
+    container_name: ${MP_CONTAINER_PREFIX:-}minio-init
     depends_on:
       minio:
         condition: service_healthy
@@ -444,7 +448,7 @@ services:
   # ── SERVING LAYER STORAGE ──────────────────────────────────
   redis:
     image: redis:8.6.2
-    container_name: redis
+    container_name: ${MP_CONTAINER_PREFIX:-}redis
     restart: unless-stopped
     ports:
       - "${REDIS_HOST_PORT:-6379}:6379"
@@ -460,7 +464,7 @@ services:
 
   postgres-dw:
     image: postgres:18.3
-    container_name: postgres-dw
+    container_name: ${MP_CONTAINER_PREFIX:-}postgres-dw
     restart: unless-stopped
     environment:
       - POSTGRES_USER=${POSTGRES_USER:-admin}
@@ -486,7 +490,7 @@ services:
     # pulled while the disk was full and its snapshot stayed corrupt across
     # re-pulls (PROGRESS.md section 13.4). Kibana is pinned to the same patch.
     image: docker.elastic.co/elasticsearch/elasticsearch:8.18.1
-    container_name: elasticsearch
+    container_name: ${MP_CONTAINER_PREFIX:-}elasticsearch
     restart: unless-stopped
     environment:
       - discovery.type=single-node
@@ -511,7 +515,7 @@ services:
     # Also under `legacy`, whose dashboard importer depends on it.
     profiles: ["serve", "legacy"]
     image: docker.elastic.co/kibana/kibana:8.18.1
-    container_name: kibana
+    container_name: ${MP_CONTAINER_PREFIX:-}kibana
     environment:
       - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
       - XPACK_SECURITY_ENABLED=false
@@ -539,7 +543,7 @@ services:
   kibana-marketplace-setup:
     <<: *marketplace-python
     profiles: ["serve"]
-    container_name: kibana-marketplace-setup
+    container_name: ${MP_CONTAINER_PREFIX:-}kibana-marketplace-setup
     restart: "no"
     command: ["python", "-m", "display.kibana.setup_marketplace_kibana"]
     environment:
@@ -553,7 +557,7 @@ services:
   kibana-setup:
     profiles: ["legacy"]
     image: python:3.12-slim
-    container_name: kibana-setup
+    container_name: ${MP_CONTAINER_PREFIX:-}kibana-setup
     depends_on:
       kibana:
         condition: service_healthy
@@ -573,7 +577,7 @@ services:
   superset:
     profiles: ["serve"]
     image: apache/superset:4.1.1
-    container_name: superset
+    container_name: ${MP_CONTAINER_PREFIX:-}superset
     command: >
       /bin/sh -c "
       pip install psycopg2-binary --quiet;
@@ -598,7 +602,7 @@ services:
   superset-init:
     profiles: ["serve"]
     image: apache/superset:4.1.1
-    container_name: superset-init
+    container_name: ${MP_CONTAINER_PREFIX:-}superset-init
     user: root
     environment:
       - SUPERSET_CONFIG_PATH=/app/custom_config/superset_config.py
