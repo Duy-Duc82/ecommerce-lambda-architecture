@@ -2606,3 +2606,44 @@ Suite mặc định trên `e12a45c`: **1140 pass**, 11 deselected (D1–D11),
 4. **Integration run (plan §12.2) và tag `feature-freeze-w9`**: chờ user.
 5. Ngày 2026-11-03 mới đủ 30 ngày thu thập. Sau đó chạy lại `evaluate` và
    `evidence`.
+
+### 26.6 Việc tiếp theo (resume ở đây)
+
+**Đang chạy, không phụ thuộc session Claude nào:**
+
+- `mp-live`: thu thập Tiki thật từ 2026-10-04 10:16 UTC. Kiểm bằng
+  `.\scripts\mp.ps1 -EnvFile env/live.env status`.
+- `bench all --repeat 3`: khởi động lại lúc 2026-10-04 khoảng 14:50 UTC, dưới
+  dạng tiến trình PowerShell tách rời (`Start-Process`, ẩn cửa sổ). Lý do:
+  tác vụ nền của session sẽ chết khi đóng Claude Code. Ước tính xong khoảng
+  22:00 UTC.
+  - Tiến độ: `Select-String '"bench_run"|bench_failed|exit=' data\opsench-all.log`.
+  - Xong khi log có dòng `exit=0 finished=...`.
+  - Kết quả ở `data/ops/bench/*.json`; bảng xem bằng
+    `.\scripts\mp.ps1 -EnvFile env/bench.env bench report`.
+  - Dừng giữa chừng: kill các process có `ops.bench` trong command line, rồi
+    `docker compose -f docker-compose.yml -p mp-bench --profile "*" down --volumes`
+    (đặt `$env:MP_CONTAINER_PREFIX="bench-"` trước).
+
+**Thứ tự việc tiếp theo:**
+
+1. **2026-10-05, sau 00:30 UTC:** nghiệm thu WP0.
+   - Batch `mp-20261005T0000Z` phải `SUCCEEDED`, con trỏ có giá trị, và
+     `mp -EnvFile env/live.env validate` pass.
+   - Nếu batch `QUALITY_FAILED`, đọc `audit.marketplace_quality_result`
+     trước, đừng sửa gì vội.
+   - Từ ngày này `evaluate storage` cũng chạy được (đủ 2 ngày snapshot).
+2. **Khi benchmark xong:**
+   - Kiểm `bench report`, và ghi các số chính cùng điều kiện đo vào một mục
+     PROGRESS mới. Mỗi file có `live_stack_running_containers = 10`, tức là đo
+     khi `mp-live` chạy cùng.
+   - Chạy `mp -EnvFile env/live.env evidence`. Mục còn MISSING khi đó chỉ nên
+     là những gì chưa tới hạn.
+3. **Chờ user hoặc thầy:**
+   - Duyệt `docs/SOURCE_FEASIBILITY.md` (bản nháp).
+   - Chạy demo đầy đủ có Kibana/Superset khi có người theo dõi RAM.
+   - Integration run (plan §12.2), rồi tag `feature-freeze-w9`.
+   - Merge `phase-9-evaluation-plan` vào `develop`, rồi mở PR `develop` →
+     `master`. Nội dung PR đã soạn trong session 2026-10-04: lấy bản trong
+     PROGRESS §23.7, kèm mục "Giới hạn đã biết".
+4. **2026-11-03:** đủ 30 ngày thu thập. Chạy lại `evaluate` và `evidence`.
