@@ -119,7 +119,7 @@ Phase 5/6 chỉ nằm ở ngọn một nhánh feature, không có ở commit g�
 | 6 | 6 | ✅ trong `develop` | **47/47 item** |
 | 7 | 7 | ✅ trong `develop` (PR #4); bản sửa cắt `as_of` trên `phase-7-asof-cutoff` | **61/61 item** |
 | 8 | 8 | ✅ **XONG** — WP1–WP10 và drill D11 đều trong `develop`; Definition of Done (plan §17) đối chiếu đủ ở `PROGRESS.md` §23.6. Mười một drill chạy thật, `validate` 11/11 | P1-12, Kibana (P1-11) |
-| 9 | 9 | ⏳ chưa bắt đầu | P2-* |
+| 9 | 9 | 📝 plan nháp chờ duyệt — `docs/PHASE_9_EVALUATION_FEATURE_FREEZE_IMPLEMENTATION_PLAN.md`, nhánh `phase-9-evaluation-plan`; sáu quyết định §2.1 chưa duyệt | P2-* |
 
 **Phase 1–7 đã xong** và nằm trong `develop`. Phase 7 (P1-08 quality gates,
 P1-09 gold publish manifest) merge qua PR #4 ngày 2026-09-30. Bản sửa sau
