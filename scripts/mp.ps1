@@ -31,7 +31,7 @@
 param(
     [Parameter(Position = 0, Mandatory = $true)]
     [ValidateSet("up", "down", "status", "migrate", "seed", "smoke", "validate", "batch", "drill",
-                 "backup", "restore", "bench")]
+                 "backup", "restore", "bench", "evaluate")]
     [string]$Command,
     [string[]]$With = @("crawl", "ingest", "speed", "batch"),
     [switch]$Volumes,
@@ -310,6 +310,13 @@ try {
             $ExitCode = Invoke-Ops @("backup")
         }
         "restore" { $ExitCode = Invoke-Restore $BackupId $Project }
+        "evaluate" {
+            # Phase 9 plan section 9: read-only, meant for the live stack. The
+            # frozen universe comes from the env file, so stub traffic in the
+            # audit is refused rather than evaluated.
+            New-Item -ItemType Directory -Force -Path (Join-Path $ProjectRoot "data\ops\evaluation") | Out-Null
+            $ExitCode = Invoke-Ops (@("evaluate") + $Rest + @("--universe", "$env:TIKI_CATEGORIES"))
+        }
         "bench" {
             # Phase 9 plan section 8. Like the drills: on the host, through the
             # isolated project's published ports, with the lake on MinIO.

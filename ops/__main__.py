@@ -210,6 +210,10 @@ def main(argv: list[str] | None = None) -> int:
         sys.argv = ["crawler.seed_frontier", *argv[1:]]
         seed_frontier.main()
         return 0
+    if argv[:1] == ["evaluate"]:
+        # Phase 9 plan section 9: its own arguments, like seed.
+        from ops.evaluate import main as evaluate
+        return evaluate(argv[1:])
     parser = argparse.ArgumentParser(prog="python -m ops", description="Marketplace operations commands")
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("migrate")
