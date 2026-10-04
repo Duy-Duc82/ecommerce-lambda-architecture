@@ -818,9 +818,17 @@ git diff --check
 git diff --stat
 ```
 
-Also run an offline local-file smoke using the frozen Silver fixture and
-`--skip-postgres`. Verify all nine run-scoped Parquet datasets exist and their
-reported counts equal Spark reads.
+> **Superseded by Phase 8 (2026-10-04).** This step used to ask for an offline
+> local-file smoke with the frozen Silver fixture and `--skip-postgres`. That
+> smoke cannot run: `read_crawl_audit()` is called unconditionally
+> (`marketplace_warehouse.py`), because the coverage and reliability marts need
+> crawl evidence over JDBC, and `--skip-postgres` only skips the *publish*.
+> Use **`.\scripts\mp.ps1 smoke`** instead — it runs the whole slice on a real
+> stack with `ops/stub_source.py` standing in for the marketplace, so nothing
+> contacts a live site. Verify there that all nine run-scoped Parquet datasets
+> exist and that their reported counts equal Spark reads. Giving the two marts
+> a way to read the audit from the lake would make a PostgreSQL-free smoke
+> possible again; nobody has needed it.
 
 ## 17. Commit/work-package sequence
 

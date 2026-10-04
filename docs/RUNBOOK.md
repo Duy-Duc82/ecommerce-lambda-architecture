@@ -1,7 +1,12 @@
 # Runbook — marketplace stack
 
-> Phase 8. This file grows with each work package; WP10 completes it
-> (plan section 13). Until then it holds what a WP had to record.
+> Phase 8, plan section 13. Written for an operator who has the stack and a
+> problem, not for a reader learning the system — that is
+> [ARCHITECTURE.md](ARCHITECTURE.md), and the tables are in
+> [DATA_MODEL.md](DATA_MODEL.md).
+>
+> Every procedure here was run on a real stack; where a number is quoted, the
+> run that produced it is named.
 
 ## Starting the stack
 
@@ -59,6 +64,93 @@ Docker itself (up, down, the Spark batch) is driven from mp.ps1 on the host.
 Everything that reads or writes the stack runs as `python -m ops ...` in the
 `ops` container. mp.ps1 always passes `-f docker-compose.yml`, so an old
 override file never applies to it.
+
+### Seeding the frontier
+
+Nothing is crawled until the frontier has tasks.
+
+```powershell
+.\scripts\mp.ps1 migrate                              # idempotent; safe to re-run
+.\scripts\mp.ps1 seed --category 1846 --pages 2       # real Tiki categories
+```
+
+`seed_frontier` is idempotent: seeding the same targets for the same schedule
+enqueues nothing the second time, because `(marketplace_code, resource_type,
+target, scheduled_for)` is unique.
+
+**The smoke seeds its own universe** — categories `9001`–`9003`, which do not
+exist on Tiki — and *parks* them when it ends. Never leave them `READY`: a
+later `mp up` with the real `TIKI_LISTING_URL` would send the crawler at the
+live site looking for them. If a smoke was interrupted, park them by hand:
+
+```powershell
+docker compose --profile ops run --rm --no-deps ops python -m ops park-smoke
+```
+
+### Daily operational check (Brief section 20)
+
+One command answers all of it:
+
+```powershell
+.\scripts\mp.ps1 validate -Json validate.json      # exit 1 if any check fails
+.\scripts\mp.ps1 status                            # the last run of each component
+```
+
+Every check is derived from data the stack recorded itself, never from a wall
+clock — windows are anchored on the newest crawl attempt, the pointer's
+`as_of`, or the newest offer state.
+
+| What Brief section 20 asks | The check |
+|---|---|
+| is the raw evidence still there | `bronze_present` — every recent attempt's `raw_uri` resolves |
+| did anything get stuck between Kafka and Silver | `kafka_to_silver_lag` |
+| does Silver agree with what the crawler says it published | `silver_reconciles_with_audit` |
+| is anything valid being quarantined | `dlq_only_bad_records` — only `DECODE` and `CONTRACT_VALIDATION` |
+| did the last batch end cleanly | `batch_latest_terminal` |
+| is the quality evidence complete | `quality_results_complete` — one row per rule |
+| is the serving version coherent | `pointer_matches_cache`, `pointer_gold_exists` |
+| is the realtime path alive and not duplicating | `es_changes_unique`, `redis_offer_state_present`, `speed_last_batch_succeeded` |
+
+A failing check prints what it observed next to what it expected. Start there,
+not in the logs.
+
+### Backfill
+
+The scheduler never backfills. It skips a `SUCCEEDED` window, starts an absent
+one, resumes any other status, and never passes `--allow-backfill` — so an old
+window is always a deliberate operator action:
+
+```powershell
+.\scripts\mp.ps1 batch -AsOf 2026-09-28T00:00:00Z -AllowBackfill
+```
+
+Without `-AllowBackfill`, promoting a manifest older than the live pointer is
+refused with `BACKFILL_REFUSED`: the run still writes its Gold and its
+manifest, it simply does not become the serving version. That is usually what
+you want — a backfill is for filling a hole in history, not for rolling the
+pointer backwards.
+
+`-QualityOnly` runs the gate without publishing, which is how a restored stack
+is checked.
+
+### Two constraints that bite
+
+**`--skip-postgres` can advance the pointer past the cache.** It skips the
+publish but not the promotion, so the pointer ends up naming a run whose rows
+never reached `cache`, and `validate`'s `pointer_matches_cache` fails. Use it
+only to inspect Gold, never on a stack anyone is serving from
+(`PROGRESS.md` section 10.6). The offline smoke that Phase 6 section 16 and
+Phase 7 section 18 once described around this flag does not exist: the crawl
+audit is read over JDBC unconditionally, so `mp smoke` replaced it.
+
+**The reconciliation lookback must exceed the batch interval plus the settle
+delay.** A crawl run is reconciled against Silver only once it has been
+finished for `MARKETPLACE_QUALITY_RECONCILIATION_SETTLE_SECONDS`, and only
+while it is inside `MARKETPLACE_QUALITY_RECONCILIATION_LOOKBACK_SECONDS`. If
+the lookback is too short, a run can settle and age out between two scheduled
+batches without ever being reconciled — the gate would then pass runs it had
+never looked at. `validate_marketplace_settings()` refuses such a
+configuration at import, so this fails at startup rather than silently.
 
 ### Smoke
 

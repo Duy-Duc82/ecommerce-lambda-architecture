@@ -33,6 +33,13 @@ backlog ID của phase khác.
   Tuần 6 chỉ có *PostgreSQL cache DDL/publish*, là P1-10.
 - **P1-12 Recovery and failure tests là Tuần 8**, không phải Tuần 6.
 - **P1-07 Temporal Gold marts là Tuần 6**, không được kéo lên Tuần 5.
+- **P2-05 Compose application profiles và P2-06 One-command demo là Tuần 9**,
+  nhưng Tuần 8 vẫn có "Compose profiles" và "one-command start/smoke/validate"
+  (Brief §21). Ranh giới (Phase 8 plan §2.1 D5): Phase 8 làm **profile vận
+  hành** và các lệnh `mp up/smoke/validate/drill/backup` mà P1-12 cần để chạy
+  drill; Phase 9 giữ phần **đóng gói demo** — demo có kịch bản cho luận văn,
+  bản demo quay sẵn phòng khi mất mạng (Brief §24), và profile đánh giá cho
+  benchmark.
 
 ## 2. Vertical slice bắt buộc mỗi phase
 
@@ -111,27 +118,31 @@ Phase 5/6 chỉ nằm ở ngọn một nhánh feature, không có ở commit g�
 | 5 | 5 | ✅ trong `develop` | đủ 38/38 item |
 | 6 | 6 | ✅ trong `develop` | **47/47 item** |
 | 7 | 7 | ✅ trong `develop` (PR #4); bản sửa cắt `as_of` trên `phase-7-asof-cutoff` | **61/61 item** |
-| 8 | 8 | 🔵 WP1–WP6 trong `develop` (PR #7–#12); **WP7 xong** — D7–D10 chạy thật, trên `phase-8-wp7-drills-d7-d10` chờ PR (`PROGRESS.md` §18); **WP8 xong** — index template, projector và hai Kibana dashboard chạy thật, trên `phase-8-wp8-kibana` chờ PR (§19); **WP9 xong phần §12** — `mp backup`/`mp restore` chạy thật end-to-end vào một project mới, bốn check §12.3 pass, trên `phase-8-wp9-backup-restore` chờ PR (§20); **D11 chờ WP7 merge** (§20.6); WP10 chưa làm | P1-12, Kibana (P1-11) |
+| 8 | 8 | 🔵 WP1–WP6 trong `develop` (PR #7–#12). Bốn nhánh chờ PR, đều rẽ từ cùng `develop`: **WP7** D7–D10 (`PROGRESS.md` §18), **WP8** Kibana — index template, projector, hai dashboard (§19), **WP9** backup/restore (§20, **D11 chờ WP7 merge**), **WP10** ARCHITECTURE/DATA_MODEL/RUNBOOK (§21). Merge theo thứ tự WP7 → WP8 → WP9 → WP10 | P1-12, Kibana (P1-11) |
 | 9 | 9 | ⏳ chưa bắt đầu | P2-* |
 
 **Phase 1–7 đã xong** và nằm trong `develop`. Phase 7 (P1-08 quality gates,
 P1-09 gold publish manifest) merge qua PR #4 ngày 2026-09-30. Bản sửa sau
 merge — run đọc Silver và audit *tại* `as_of`, gate 8 có cửa sổ đối soát — nằm
 trên `phase-7-asof-cutoff`, chi tiết ở `PROGRESS.md` §11.
-Suite: Python 3.12.13 + pyspark 4.0.4, mỗi nhánh WP8/WP9 đo riêng vì cả hai
-rẽ từ cùng một `develop`: **941** trên nhánh WP8 (`PROGRESS.md` §19.6),
-**913** trên nhánh WP9 (§20.7), **876** trên nhánh WP7 (§18.5), 868 sau WP6,
-841 trên nhánh WP5, 674 sau Phase 7, 519 trước Phase 7. Mười drill D1–D10 nằm
-ngoài những con số đó: marker `drill` bị loại khỏi suite mặc định vì chúng
-cần stack đang chạy.
+Suite: Python 3.12.13 + pyspark 4.0.4. Bốn nhánh WP7–WP10 rẽ từ cùng một
+`develop` nên mỗi nhánh đo riêng: **876** trên WP7 (`PROGRESS.md` §18.5),
+**941** trên WP8 (§19.6), **913** trên WP9 (§20.7), **868** trên WP10 (chỉ
+sửa tài liệu, §21). Trước đó: 868 sau WP6, 841 trên nhánh WP5, 674 sau
+Phase 7, 519 trước Phase 7. Mười drill D1–D10 nằm ngoài những con số đó:
+marker `drill` bị loại khỏi suite mặc định vì chúng cần stack đang chạy.
 `master` vẫn chưa nhận phase nào: chờ thầy hướng dẫn duyệt `develop`.
 
-**Phase 4/5 chưa từng chạy như dịch vụ.** Hai phase này ✅ ở mức code và test,
-nhưng crawler chưa publish vào Kafka, Silver sink không có consumer loop, và
-speed layer marketplace không có entrypoint. Phase 8 hoàn thiện phần nối này
-(plan Phase 8 §2.1 D1). Đoạn `crawl -> Bronze -> Kafka` chạy thật lần đầu ở
-WP1 (2026-10-01), và lộ ra hai bug Phase 3/4: producer không tạo được, lease
-không chạy (`PROGRESS.md` §12.2).
+**Phần nối dịch vụ của Phase 4/5 do Phase 8 làm, và nay đã xong.** Hai phase
+đó ✅ ở mức code và test, nhưng crawler chưa publish vào Kafka, Silver sink
+không có consumer loop, và speed layer marketplace không có entrypoint — ba
+chỗ đó là *wiring*, không phải logic, và Phase 8 WP1–WP3 viết chúng (plan
+Phase 8 §2.1 D1). Từ WP6 trở đi cả bốn dịch vụ chạy không người trông dưới
+Compose, dừng sạch bằng SIGTERM, và mười drill D1–D10 chạy qua chúng.
+
+Đoạn `crawl -> Bronze -> Kafka` chạy thật lần đầu ở WP1 (2026-10-01), và lộ
+ra hai bug Phase 3/4 mà không unit test nào bắt được: producer không tạo
+được, lease không chạy (`PROGRESS.md` §12.2).
 
 **Nợ cũ đã đóng bằng chạy thật (2026-10-01).** Bốn item Phase 6 (33–35, 43) và
 hai item Phase 7 (56, 58) đều được kiểm bằng `run_marketplace_warehouse` chạy
