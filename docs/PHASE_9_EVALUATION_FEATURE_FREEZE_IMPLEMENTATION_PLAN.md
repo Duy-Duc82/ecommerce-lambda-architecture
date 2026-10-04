@@ -261,6 +261,26 @@ on this machine**.
 Acceptance: with `mp-live` running, `mp -Env env/bench.env smoke` passes, and
 the `mp-live` containers report the same `StartedAt` before and after.
 
+*Amended in WP1:*
+- The flag is `-EnvFile`, not `-Env`: `$Env` collides with PowerShell's
+  `env:` drive in a reader's eye, and nothing is gained by the shorter name.
+- The refusal checks the `com.docker.compose.project` label of the `kafka`
+  container the call would reach, as well as the project name. Without
+  `-EnvFile`, the unprefixed names *are* the live stack's, so a check on the
+  project name alone would let a forgotten flag through.
+  - `ops.drills` repeats the check before anything is touched, including the
+    restore in its `finally`.
+  - `down -Volumes` is refused too: it is the one command that destroys the
+    collected days.
+- Windows PowerShell 5.1 strips the inner double quotes of a native argument.
+  A `docker inspect -f '{{index .Config.Labels "..."}}'` template therefore
+  never reaches docker intact, and the guard first passed silently because
+  of it. The labels are read as JSON instead.
+- Each isolated env file also sets the host-side client addresses
+  (`POSTGRES_PORT`, `KAFKA_BOOTSTRAP_SERVERS`, ...). Drills run on the host,
+  and with only the `*_HOST_PORT` values moved, they would have queried the
+  live stack's PostgreSQL.
+
 ## 6. Instrumentation — WP2 (D3)
 
 ### 6.1 Speed progress and latency

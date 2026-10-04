@@ -21,7 +21,7 @@ backlog ID của phase khác.
 | 6 | 6 | Batch temporal warehouse | **P1-07, P1-10**, Superset draft (P1-11) |
 | 7 | 7 | Quality, anomaly và replay | P1-08, P1-09 |
 | 8 | 8 | Reliability và operations | P1-12, Kibana/dashboard (P1-11) |
-| 9 | 9 | 🔶 plan duyệt 2026-10-04 (`docs/PHASE_9_EVALUATION_FEATURE_FREEZE_IMPLEMENTATION_PLAN.md`); **WP0 xong — thu thập Tiki thật chạy từ 2026-10-04 10:16 UTC** trong project `mp-live`; WP1–WP8 chưa làm | P2-* |
+| 9 | 9 | 🔶 plan duyệt 2026-10-04 (`docs/PHASE_9_EVALUATION_FEATURE_FREEZE_IMPLEMENTATION_PLAN.md`); **WP0 xong — thu thập Tiki thật chạy từ 2026-10-04 10:16 UTC** trong project `mp-live`; WP1 xong (stack cô lập `mp-bench`/`mp-demo` chạy cạnh `mp-live`); WP2–WP8 chưa làm | P2-* |
 | — | 10 | Buffer hoặc optional comparison | P3-01 … P3-04 (chỉ khi P0–P2 đạt DoD) |
 | — | 11 | Report review | — |
 | — | 12 | Finalization | — |

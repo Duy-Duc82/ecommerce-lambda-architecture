@@ -2469,3 +2469,59 @@ P2-02 như mọi khoảng trống khác, và không được làm sạch đi.
    có giá trị, `validate` pass. Đó là tiêu chí nghiệm thu WP0 (plan §4).
 2. WP1: tiền tố `container_name`, `env/bench.env`, `env/demo.env`,
    `mp.ps1 -Env`, chặn smoke/drill/demo trong `mp-live`.
+
+## 25. Session 2026-10-04 (tiếp) — Phase 9 WP1: stack cô lập chạy cạnh `mp-live`
+
+### 25.1 Những gì được thêm
+
+- `container_name: ${MP_CONTAINER_PREFIX:-}<service>` cho cả 21 service. Mặc
+  định rỗng, nên tên cũ và stack `mp-live` không đổi.
+- `env/bench.env` (`mp-bench`, `bench-`) và `env/demo.env` (`mp-demo`,
+  `demo-`). Mỗi file có bộ port riêng, không trùng nhau, và đặt cả địa chỉ
+  client phía host mà drill dùng.
+- `mp.ps1 -EnvFile <file>`: nạp biến cho đúng một lệnh, rồi trả lại môi
+  trường cũ của shell gọi.
+- `smoke`, `drill` và `down -Volumes` từ chối `mp-live` với exit 2.
+  `ops.drills` có thêm `container()` và `refuse_live()`.
+- `tests/test_compose_isolation.py`: 27 test offline.
+- RUNBOOK có thêm mục "Four stacks on one machine".
+
+### 25.2 Ba chỗ chỉ lộ ra khi chạy thật
+
+1. **Chặn theo tên project là không đủ.** Không có `-EnvFile` thì tên không
+   tiền tố *chính là* container của `mp-live`, và drill kết nối qua port 5433
+   của nó. Vì vậy lớp chặn đọc nhãn `com.docker.compose.project` của container
+   `kafka` mà lệnh sẽ chạm vào. `ops.drills` kiểm lại trước baseline, trước
+   drill và trước bước restore trong `finally`.
+2. **PowerShell 5.1 làm mất dấu `"` bên trong tham số truyền cho chương trình
+   ngoài.** Template `{{index .Config.Labels "com.docker.compose.project"}}`
+   bị hỏng, nên lần thử đầu lớp chặn trong `mp.ps1` để lọt. Drill vẫn bị chặn,
+   nhưng là nhờ lớp Python. Đã đổi sang đọc nhãn dạng JSON. Đây cũng là nguyên
+   nhân lỗi `function "com" not defined` gặp ở WP0.
+3. Nếu env file chỉ đổi `*_HOST_PORT`, drill trên host vẫn truy vấn PostgreSQL
+   của `mp-live`. Vì vậy mỗi file đặt cả `POSTGRES_PORT`,
+   `KAFKA_BOOTSTRAP_SERVERS`, `MINIO_ENDPOINT`, `REDIS_PORT` và `ES_HOST`.
+
+### 25.3 Nghiệm thu (plan §5), chạy thật 2026-10-04
+
+- `mp -EnvFile env/live.env smoke`, `mp smoke` không env, `mp drill d1` không
+  env, `mp -EnvFile env/live.env down -Volumes`: cả bốn exit 2 và không chạm
+  vào gì.
+- `mp -EnvFile env/bench.env smoke`: **SMOKE PASSED**, `validate` 11/11, batch
+  `mp-20261004T1205Z` `SUCCEEDED`, trong khi `mp-live` vẫn chạy.
+- `StartedAt` của 10 container `mp-live` trước và sau giống hệt nhau
+  (`data/ops/live/startedat-{before,after}-wp1.txt`). Audit live không có
+  attempt nào của task smoke. Chu kỳ live lúc 12:17 vẫn chạy đúng lịch:
+  45/45 attempt, 1.800 parsed.
+- Sau đó `mp-bench` được `down --volumes`.
+
+### 25.4 Trạng thái test
+
+Suite mặc định: **1038 pass**, 11 deselected (D1–D11), 16m28s. Chạy chậm vì
+`mp-live` dùng chung CPU (lúc máy rảnh là 2m25s). Tăng 27 so với 1011.
+
+### 25.5 Việc tiếp theo
+
+1. 2026-10-05: nghiệm thu WP0, tức batch theo lịch đầu tiên của `mp-live`.
+2. WP2: `audit.marketplace_stream_progress`, ba cột latency,
+   `audit.storage_snapshot`.

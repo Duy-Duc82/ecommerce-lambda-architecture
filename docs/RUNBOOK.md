@@ -47,6 +47,39 @@ the advisory lock; nothing was started.
 `*_HOST_PORT` variables in `.env`. Delete an old override file, or it keeps
 applying its own `!override` ports and images.
 
+## Four stacks on one machine (Phase 9 plan section 5)
+
+Live collection runs for 30 days and must never stop for a test. Every other
+use of the stack therefore runs in a Compose project of its own, beside it:
+
+| Stack | Env file | Project | Container names | What may run in it |
+|---|---|---|---|---|
+| live | `env/live.env` | `mp-live` | unprefixed (`kafka`, `speed`, ...) | live collection only: `up`, `status`, `validate`, `batch`, `backup` |
+| bench | `env/bench.env` | `mp-bench` | `bench-kafka`, ... | `smoke`, `drill`, benchmarks |
+| demo | `env/demo.env` | `mp-demo` | `demo-kafka`, ... | the offline demo |
+| *(none)* | `.env` only | the directory name | unprefixed | nothing while `mp-live` is up: its names are taken |
+
+```powershell
+.\scripts\mp.ps1 -EnvFile env/live.env status
+.\scripts\mp.ps1 -EnvFile env/live.env validate -Json data/ops/live/validate-2026-10-05.json
+.\scripts\mp.ps1 -EnvFile env/bench.env smoke
+.\scripts\mp.ps1 -EnvFile env/bench.env drill d3
+```
+
+`-EnvFile` sets the file's variables for that one call and puts the caller's
+environment back afterwards. Each isolated file sets its own project name,
+`MP_CONTAINER_PREFIX`, every published port, and the host-side client
+addresses that drills use. Without those addresses, a drill would reach the
+live stack's PostgreSQL on 5433.
+
+**`smoke`, `drill` and `down -Volumes` refuse the live stack, with exit
+code 2.** Two checks decide it: the project this call targets, and the
+`com.docker.compose.project` label of the `kafka` container the call would
+reach. So the checks still hold when `-EnvFile` is forgotten. `ops.drills`
+repeats the label check before the baseline, the drill and its restore.
+Never point an isolated stack at the live site: its stub categories `9001`–`9003`
+do not exist on Tiki.
+
 ## `mp` — one command (plan section 9)
 
 ```powershell
