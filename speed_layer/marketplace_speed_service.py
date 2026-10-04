@@ -117,6 +117,16 @@ def progress_row(progress: Any, *, query_name: str, recorded_at: datetime) -> di
     }
 
 
+def ran_a_batch(progress: Any) -> bool:
+    """Whether this progress reports a micro-batch that ran.
+
+    While no data arrives, Spark reports an idle progress every ten seconds,
+    under the batch id it will run *next* and without ``addBatch``. Stored,
+    it would take that id's place and the real batch would be refused.
+    """
+    return "addBatch" in (_as_mapping(progress).get("durationMs") or {})
+
+
 class ProgressRecorder:
     """Stores each micro-batch's progress once.
 
@@ -135,6 +145,8 @@ class ProgressRecorder:
         now = self.clock()
         rows = []
         for progress in progresses:
+            if not ran_a_batch(progress):
+                continue
             row = progress_row(progress, query_name=self.query_name, recorded_at=now)
             key = (row["query_id"], row["batch_id"])
             if key not in self.seen:
