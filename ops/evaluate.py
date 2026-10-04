@@ -308,7 +308,7 @@ def live_freshness(cadence_seconds: int, universe: Sequence[str]) -> dict[str, A
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python -m ops evaluate")
-    parser.add_argument("kind", choices=("reliability", "freshness"))
+    parser.add_argument("kind", choices=("reliability", "freshness", "storage"))
     parser.add_argument("--cadence-seconds", type=int, default=None, help="default: CRAWL_ACTIVE_CADENCE_MINUTES")
     parser.add_argument("--out", default=str(REPORTS))
     parser.add_argument("--universe", default="", help="comma-separated frozen categories (mp passes TIKI_CATEGORIES)")
@@ -316,6 +316,10 @@ def main(argv: list[str] | None = None) -> int:
     from config.settings import CRAWL_ACTIVE_CADENCE_MINUTES
 
     cadence = args.cadence_seconds or CRAWL_ACTIVE_CADENCE_MINUTES * 60
+    if args.kind == "storage":
+        # P2-04, plan section 10: from audit.storage_snapshot only.
+        from ops.storage import run_growth_report
+        return run_growth_report(args.out)
     try:
         universe = args.universe.split(",")
         report = (live_reliability(cadence, universe) if args.kind == "reliability"
