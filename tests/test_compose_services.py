@@ -19,6 +19,12 @@ LONG_RUNNING = ("crawl-worker", "silver-sink", "speed", "batch-scheduler", "stub
 # `run`, but an inherited policy would still be wrong, and `restart: "no"`
 # says so. The Kibana importer must not loop either: it is idempotent, but a
 # restart loop would hide a Kibana that never came up.
+# The core every service depends on. Live collection (Phase 9 plan section 4)
+# runs for 30 days on one host: after a host or Docker restart the services
+# above come back on their own, and without the same policy here they would
+# come back to nothing and collection would stop silently. Drills only ever
+# `stop` these, which `unless-stopped` honours.
+CORE = ("kafka", "minio", "redis", "postgres-dw", "elasticsearch")
 ONE_SHOT = ("batch-once", "ops", "kibana-marketplace-setup")
 
 
@@ -52,10 +58,10 @@ def _restart_policy(lines: list[str]) -> str | None:
 def test_the_compose_file_defines_every_service_the_drills_drive():
     blocks = _service_blocks()
 
-    assert set(LONG_RUNNING + ONE_SHOT) <= set(blocks)
+    assert set(LONG_RUNNING + CORE + ONE_SHOT) <= set(blocks)
 
 
-@pytest.mark.parametrize("service", LONG_RUNNING)
+@pytest.mark.parametrize("service", LONG_RUNNING + CORE)
 def test_a_long_running_service_restarts_unless_it_was_stopped(service):
     """`unless-stopped`, not `always`: a drill's `stop` must stay stopped."""
     assert _restart_policy(_service_blocks()[service]) == "unless-stopped"
