@@ -483,3 +483,32 @@ def test_the_sink_lands_silver_where_the_reparse_looks_for_it():
         "marketplace/offer_observations/marketplace=tiki/observed_date=2026-09-20/"
         f"observation_id={event.payload.observation.observation_id}.json"
     )
+
+
+# --- a raw_uri out of the audit, back into the five components it addresses --
+
+def test_a_raw_uri_round_trips_through_the_reference_that_built_it():
+    from crawler.reparse import RawArtifactRef
+
+    ref = RawArtifactRef("tiki", "2026-10-04", "06", "crawl_run_abc", "raw_1")
+
+    assert RawArtifactRef.from_uri(f"s3a://ecommerce-bronze/{ref.body_path}") == ref
+    assert RawArtifactRef.from_uri(f"s3a://ecommerce-bronze/{ref.metadata_path}") == ref
+
+
+def test_a_percent_escaped_component_comes_back_unescaped():
+    from crawler.reparse import RawArtifactRef
+
+    ref = RawArtifactRef("tiki", "2026-10-04", "06", "crawl run/1", "raw 1")
+
+    assert RawArtifactRef.from_uri(f"s3a://ecommerce-bronze/{ref.body_path}").raw_artifact_id == "raw 1"
+
+
+def test_a_raw_uri_missing_a_component_is_an_error_not_a_guess():
+    from crawler.reparse import RawArtifactRef
+
+    # Reparsing the wrong artifact would report a divergence that is really a
+    # lookup bug, so a path that does not address one is refused.
+    with pytest.raises(ValueError, match="missing hour, crawl_run_id, raw_artifact_id"):
+        RawArtifactRef.from_uri("s3a://ecommerce-bronze/marketplace/raw/marketplace=tiki/"
+                                "observed_date=2026-10-04/body.bin")
