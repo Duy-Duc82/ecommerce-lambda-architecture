@@ -23,7 +23,7 @@
 # (project name, container prefix, ports) and restores the caller's
 # environment afterwards. Phase 9 plan section 5:
 #   env/live.env    live collection; smoke, drill and `down -Volumes` refuse it;
-#                   `evaluate reliability|freshness|storage` reads it
+#                   `evaluate reliability|freshness|storage` and `evidence` read it
 #   env/bench.env   benchmarks (`bench crawl|ingest|speed|batch|all|report`),
 #                   smoke and drills, beside the live stack
 #   env/demo.env    the offline demo: `demo [--auto] [--snapshot] [--skip-faults] [--without-serve]`
@@ -32,7 +32,7 @@
 param(
     [Parameter(Position = 0, Mandatory = $true)]
     [ValidateSet("up", "down", "status", "migrate", "seed", "smoke", "validate", "batch", "drill",
-                 "backup", "restore", "bench", "evaluate", "demo")]
+                 "backup", "restore", "bench", "evaluate", "demo", "evidence")]
     [string]$Command,
     [string[]]$With = @("crawl", "ingest", "speed", "batch"),
     [switch]$Volumes,
@@ -311,6 +311,15 @@ try {
             $ExitCode = Invoke-Ops @("backup")
         }
         "restore" { $ExitCode = Invoke-Restore $BackupId $Project }
+        "evidence" {
+            # Phase 9 plan section 12.1: collects, never measures anew. On the
+            # host: it runs git, docker and the test suite, and reads the
+            # live stack through its published ports.
+            $python = Join-Path $ProjectRoot ".venv\Scripts\python.exe"
+            if (-not (Test-Path $python)) { $python = "python" }
+            & $python -m ops.evidence @Rest | Write-Host
+            $ExitCode = $LASTEXITCODE
+        }
         "demo" {
             # Phase 9 plan section 11.2: the smoke brings the pipeline up and
             # publishes one batch, then ops.demo narrates what it proves.

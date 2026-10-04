@@ -80,6 +80,45 @@ repeats the label check before the baseline, the drill and its restore.
 Never point an isolated stack at the live site: its stub categories `9001`–`9003`
 do not exist on Tiki.
 
+## Measuring and showing (Phase 9 plan sections 6-12)
+
+| Command | Stack | What it writes |
+|---|---|---|
+| `mp -EnvFile env/bench.env bench crawl\|ingest\|speed\|batch\|all [--repeat 3]` | bench, rebuilt per run | `data/ops/bench/<scenario>-<variant>-<stamp>.json` |
+| `mp -EnvFile env/bench.env bench report` | none, it reads files | Markdown tables to stdout |
+| `mp -EnvFile env/live.env evaluate reliability\|freshness\|storage` | live, read-only | `data/ops/evaluation/<kind>-<stamp>.{json,md}` |
+| `mp -EnvFile env/demo.env demo [--auto] [--snapshot] [--skip-faults] [--without-serve]` | demo | the demo, plus `data/ops/demo-backup/latest.json` with `--snapshot` |
+| `mp -EnvFile env/live.env evidence [--skip-tests]` | live, read-only | `data/ops/evidence/<stamp>/` with `INDEX.md` |
+| `python -m ops storage-snapshot` (in the `ops` container) | any | one row per store into `audit.storage_snapshot` |
+
+**Every benchmark number is a replayed fixture.** `ops.bench_load` reshapes
+the frozen Tiki fixture into many offers and sends them straight to Kafka.
+Each result file and every row of `bench report` carries
+`dataset: replayed_fixture`, and the report refuses to mix two labels in one
+table. Only `evaluate` measures live data.
+
+**What "latency" means in the speed audit.** `latency_p50_ms`,
+`latency_p95_ms` and `latency_max_ms` on `audit.marketplace_speed_batch` are
+the batch's completion, with every sink written, minus each applied
+observation's `produced_at`: the instant the crawler sent the observation to
+Kafka, which kafka-python also stamps as the record's CreateTime. The value
+includes the time the record waited for the next trigger. With the 30 s
+trigger, a p50 of 10–25 s is the trigger and not a slow pipeline.
+`audit.marketplace_stream_progress` holds Spark's own per-batch numbers; join
+it to the batch audit on `(query_name, query_id, batch_id)`.
+
+**The storage snapshot sizes Kafka from its files.** Kafka 4 no longer
+answers the `DescribeLogDirs` versions kafka-python speaks. The broker's
+volume is therefore mounted read-only into `ops` and `es-projector`, and
+partitions are sized by allocated blocks. The sparse, preallocated index
+files would otherwise count 20 MiB per partition that the disk does not hold.
+
+**The demo shares memory with the live stack.** A full demo adds Kibana,
+Superset and a second Elasticsearch, about 7–8 GB, to the live stack's ~5 GB.
+On a 16 GB Docker VM that is close to the limit, and an OOM kill can land on
+the *live* Elasticsearch. Check `docker stats` first. When memory is short,
+use `--without-serve`.
+
 ## `mp` — one command (plan section 9)
 
 ```powershell
