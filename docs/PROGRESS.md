@@ -63,7 +63,7 @@ Chi tiết đầy đủ + audit gốc: `C:\Users\Admin\.claude\plans\shimmering-
 | 3 | Speed layer hardening | ⏳ Chưa bắt đầu | |
 | 4 | Lakehouse (Delta Lake) + incremental + `price_warehouse_job.py` | ⏳ Chưa bắt đầu | |
 | 5 | ML maturity (MLflow, prediction history, price-anomaly) | ⏳ Chưa bắt đầu | |
-| 6 | Orchestration (Airflow) | ⏳ Chưa bắt đầu | |
+| 6 | ~~Orchestration (Airflow)~~ → scheduler vòng lặp + advisory lock | ✅ Xong ở Phase 8 WP3 | Airflow bị bỏ, xem §5 (Phase 8 plan §2.1 D2) |
 | 7 | Serving API (FastAPI) | ⏳ Chưa bắt đầu | |
 | 8 | Dashboards + thesis polish | ⏳ Chưa bắt đầu | |
 
@@ -560,8 +560,20 @@ Ghi chú thêm: tiki.vn **trả robots.txt rỗng** nếu request không gửi h
   incremental logic tay) — vì là thư viện Spark (`delta-spark`), không cần
   thêm service.
 - **ML tracking**: MLflow với sqlite backend (không cần container mới).
-- **Orchestration**: Airflow 1 container LocalExecutor, tái dùng `postgres-dw`
-  làm metadata DB — không Celery cluster.
+- ~~**Orchestration**: Airflow 1 container LocalExecutor, tái dùng
+  `postgres-dw` làm metadata DB — không Celery cluster.~~
+  **ĐẢO NGƯỢC 2026-10-04 (Phase 8 plan §2.1 D2). Không có Airflow.**
+  Thay bằng `batch_layer/marketplace_scheduler.py`: một vòng lặp dịch vụ
+  thường, cắt cửa sổ theo mốc interval, chạy batch dưới một PostgreSQL
+  advisory lock. Lý do: Brief §27 không cho thêm hạ tầng nào không phục vụ
+  một tiêu chí nghiệm thu, và tiêu chí duy nhất ở đây — "hai batch không bao
+  giờ chồng nhau, một cửa sổ đã `SUCCEEDED` thì không chạy lại" — vòng lặp
+  cộng advisory lock đáp ứng đủ. Một container Airflow sẽ thêm một metadata
+  DB, một scheduler, một webserver và một mô hình DAG để lái đúng **một** job
+  định kỳ. Hệ quả kiểm được: scheduler bỏ qua cửa sổ `SUCCEEDED`, khởi động
+  cửa sổ chưa có, resume mọi trạng thái khác, và **không bao giờ** tự truyền
+  `--allow-backfill` (test 15); run bị lock từ chối exit 75 và không ghi dòng
+  audit nào (test 18, drill D10 chạy thật).
 - **Serving**: FastAPI nhỏ (3-4 endpoint), không phải microservice đầy đủ.
 - **Schema**: hành vi (view/cart/purchase) và giá crawl (price snapshot) là
   **hai contract riêng**, không gộp — vì bản chất dữ liệu khác nhau (crawler
@@ -1875,3 +1887,69 @@ searchable. Commit `cb61184`.
   hoặc `mp up --build`.
 - Chạy drill: `$env:COMPOSE_PROJECT_NAME = "mp-smoke"`, `mp smoke`, rồi
   `mp drill d1` … `d6`. D5 mất khoảng 20 phút vì phải dồn backlog.
+
+## 21. Session 2026-10-04 (tiếp) — Phase 8 WP10 (tài liệu): XONG
+
+> **Trạng thái:** `ARCHITECTURE.md` và `DATA_MODEL.md` **viết lại hoàn toàn**
+> quanh pipeline marketplace, `RUNBOOK.md` thêm những mục còn thiếu, và ba
+> việc dọn mà plan §13 chỉ đích danh. Chỉ sửa tài liệu — không một dòng code,
+> suite đúng bằng `develop`. Nhánh `phase-8-wp10-docs`, rẽ từ `develop`
+> (54e7e80).
+
+### 21.1 Những gì được viết
+
+| File | Việc |
+|---|---|
+| `docs/ARCHITECTURE.md` | Viết lại: luồng dữ liệu, 10 profile và service, cắt `as_of`, quality gate + con trỏ manifest, **bảng ranh giới hỏng** (mỗi component mất dependency thì sao, restart sửa gì, drill nào chứng minh), vai trò từng kho, pattern, vận hành, và một mục cuối nói rõ Phase 8 **không** chứng minh điều gì. Kaggle còn lại một mục "legacy demo" |
+| `docs/DATA_MODEL.md` | Viết lại: ba contract đóng băng (observation / change / DLQ), layout bốn zone, manifest + con trỏ, **mười** bảng `cache.marketplace_*` kèm ba chỗ dễ đọc nhầm, toàn bộ bảng `audit.*`, sáu index Elasticsearch với luật `_id`, bốn khoá Redis, và mô hình Kaggle dồn vào §9 |
+| `docs/RUNBOOK.md` | Thêm: seeding (kèm cảnh báo park task của smoke), **kiểm tra vận hành hằng ngày** ánh xạ Brief §20 sang 11 check của `validate`, backfill, và hai ràng buộc hay cắn (`--skip-postgres`, lookback vs interval) |
+| `docs/PHASE_6_…md` §16, `docs/PHASE_7_…md` §18 | Thay câu "offline smoke với `--skip-postgres`" bằng ghi chú **Superseded by Phase 8** chỉ sang `mp smoke`, kèm lý do smoke đó không chạy được |
+| `docs/PHASE_INDEX.md` | §1 thêm ranh giới **D5** (Phase 8 làm profile *vận hành*; Phase 9 giữ đóng gói *demo*); §5 đổi đoạn "Phase 4/5 chưa từng chạy như dịch vụ" thành phần nối đã xong ở WP1–WP3 (**D1**) |
+| `docs/PROGRESS.md` §5 | Ghi **đảo ngược quyết định Airflow** (**D2**): không Airflow, thay bằng scheduler vòng lặp + advisory lock, kèm lý do và hệ quả kiểm được. Dòng Phase 6 trong bảng §3 cũng sửa theo |
+
+### 21.2 Những gì cố ý KHÔNG viết ở đây
+
+Plan §13 liệt kê cho RUNBOOK cả "recovery steps của từng drill", "recreating
+the ES indices" và "backup and restore". Ba mục đó **đã có**, trên nhánh
+khác, nên viết lại ở đây chỉ tạo conflict:
+
+- D1–D6 ở WP6 (đã trong `develop`), D7–D10 ở nhánh WP7;
+- dựng lại index `*-v1` ở nhánh WP8;
+- backup/restore ở nhánh WP9.
+
+Vì vậy **`RUNBOOK.md` chỉ trọn vẹn sau khi WP7, WP8 và WP9 merge.** Mục mới
+của WP10 được chèn ngay dưới phần `mp`, cách xa chỗ WP8/WP9 chèn (ngay trên
+"Image pins"), để ba nhánh không giẫm lên nhau.
+
+### 21.3 Vài chỗ phải tra lại mới dám viết
+
+Tài liệu mô tả "hệ thống như đã dựng", nên mọi con số và tên trường đều đọc
+ngược từ code chứ không chép từ plan. Ba chỗ plan và code lệch nhau:
+
+1. **Envelope của observation** không phải `{schema_version, crawl_run_id,
+   produced_at, payload}` như trí nhớ, mà có 10 trường, trong đó bốn trường
+   bị ràng buộc phải khớp payload (`event_id` = `observation_id`,
+   `occurred_at` = `observed_at`, `crawl_run_id` và `raw_uri` cũng vậy).
+   Đã viết đúng, và nói rõ vì sao ràng buộc đó tồn tại.
+2. **17 quality rule** = 13 mandatory + 4 advisory (đếm trong
+   `config/quality_rules.py`), không phải "12 là gate" như bản nháp đầu.
+3. **`OfferObservation`** còn `discount_amount`, `discount_percent`,
+   `promotion` mà bảng cũ bỏ sót; và nó mang `raw_uri`/`raw_sha256`/
+   `adapter_version`/`crawl_run_id` chứ không mang `raw_artifact_id`.
+
+### 21.4 Trạng thái test
+
+- Suite mặc định: **826 pass, 6 deselected**, 2m07s.
+- `tests/test_marketplace_quality.py`: **42 pass**.
+- **Tổng 868** — đúng bằng `develop`, vì nhánh này không đụng code.
+
+### 21.5 Việc tiếp theo (resume ở đây)
+
+1. Merge theo thứ tự **WP7 → WP8 → WP9 → WP10**. Mỗi lần merge sau sẽ cần gỡ
+   một conflict nhỏ ở `PROGRESS.md`/`PHASE_INDEX.md` (bốn nhánh cùng ghi vào
+   §5 và bảng trạng thái), và WP9/WP10 thêm một chỗ ở `RUNBOOK.md`.
+2. **D11** ngay sau khi WP7 vào `develop` (§20.6) — đây là việc duy nhất còn
+   thiếu của Phase 8 so với plan.
+3. Gộp `RawArtifactRef.from_uri` với helper tách `raw_uri` của WP7 (§20.8).
+4. Sau đó Phase 8 đạt đủ Definition of Done (plan §17), và mở được PR
+   `develop` → `master` để thầy hướng dẫn duyệt.
