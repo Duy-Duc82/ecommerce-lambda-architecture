@@ -1199,9 +1199,13 @@ Select-String -Pattern 'scam|fraud|fake price|incorrect price|mispric' `
         display/superset/create_marketplace_quality_dashboard.py, scripts/init_postgres.sql
 ```
 
-Also run an offline local-file smoke with the frozen Silver fixture and
-`--skip-postgres`, then rerun the identical command and diff the two manifest
-files; they must be byte-identical.
+> **Superseded by Phase 8 (2026-10-04).** The offline local-file smoke with
+> `--skip-postgres` this step asked for cannot run — the crawl audit is read
+> over JDBC unconditionally, and the flag only skips the publish (Phase 6
+> section 16 carries the same note). Run **`.\scripts\mp.ps1 smoke`**, then
+> repeat the identical `mp batch` command and diff the two manifest files;
+> they must still be byte-identical, because nothing in a manifest reads a
+> wall clock.
 
 ## 19. Commit/work-package sequence
 
