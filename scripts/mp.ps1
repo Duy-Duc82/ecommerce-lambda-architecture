@@ -22,16 +22,17 @@
 # -EnvFile env/<stack>.env loads that stack's variables for this one call
 # (project name, container prefix, ports) and restores the caller's
 # environment afterwards. Phase 9 plan section 5:
-#   env/live.env    live collection; smoke, drill and `down -Volumes` refuse it
+#   env/live.env    live collection; smoke, drill and `down -Volumes` refuse it;
+#                   `evaluate reliability|freshness|storage` reads it
 #   env/bench.env   benchmarks (`bench crawl|ingest|speed|batch|all|report`),
 #                   smoke and drills, beside the live stack
-#   env/demo.env    the offline demo
+#   env/demo.env    the offline demo: `demo [--auto] [--snapshot] [--skip-faults] [--without-serve]`
 # ============================================================
 
 param(
     [Parameter(Position = 0, Mandatory = $true)]
     [ValidateSet("up", "down", "status", "migrate", "seed", "smoke", "validate", "batch", "drill",
-                 "backup", "restore", "bench", "evaluate")]
+                 "backup", "restore", "bench", "evaluate", "demo")]
     [string]$Command,
     [string[]]$With = @("crawl", "ingest", "speed", "batch"),
     [switch]$Volumes,
@@ -310,6 +311,31 @@ try {
             $ExitCode = Invoke-Ops @("backup")
         }
         "restore" { $ExitCode = Invoke-Restore $BackupId $Project }
+        "demo" {
+            # Phase 9 plan section 11.2: the smoke brings the pipeline up and
+            # publishes one batch, then ops.demo narrates what it proves.
+            # --without-serve leaves Kibana and Superset out, for a machine
+            # whose memory is already shared with the live stack.
+            Assert-NotLive "demo"
+            $demoArgs = @($Rest | Where-Object { $_ -ne "--without-serve" })
+            if (-not ($Rest -contains "--without-serve")) {
+                Invoke-Docker ($Compose + @("--profile", "demo", "up", "-d", "--build",
+                    "es-projector", "kibana", "kibana-marketplace-setup", "superset", "superset-init"))
+            }
+            $ExitCode = Invoke-Smoke
+            if ($ExitCode -eq 0) {
+                $python = Join-Path $ProjectRoot ".venv\Scripts\python.exe"
+                if (-not (Test-Path $python)) { $python = "python" }
+                $savedProfile = $env:DATA_LAKE_PROFILE
+                $env:DATA_LAKE_PROFILE = "minio"
+                try {
+                    & $python -m ops.demo @demoArgs
+                    $ExitCode = $LASTEXITCODE
+                } finally {
+                    $env:DATA_LAKE_PROFILE = $savedProfile
+                }
+            }
+        }
         "evaluate" {
             # Phase 9 plan section 9: read-only, meant for the live stack. The
             # frozen universe comes from the env file, so stub traffic in the

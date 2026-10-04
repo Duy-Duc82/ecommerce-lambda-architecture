@@ -143,7 +143,7 @@ services:
   # ── MARKETPLACE SERVICES ───────────────────────────────────
   crawl-worker:
     <<: *marketplace-python
-    profiles: ["crawl"]
+    profiles: ["crawl", "demo", "bench"]
     container_name: ${MP_CONTAINER_PREFIX:-}crawl-worker
     restart: unless-stopped
     command: ["python", "-m", "crawler.service"]
@@ -179,7 +179,7 @@ services:
 
   silver-sink:
     <<: *marketplace-python
-    profiles: ["ingest"]
+    profiles: ["ingest", "demo", "bench"]
     container_name: ${MP_CONTAINER_PREFIX:-}silver-sink
     restart: unless-stopped
     command: ["python", "-m", "data_ingestion.marketplace_silver_service"]
@@ -197,7 +197,7 @@ services:
 
   speed:
     <<: *spark-marketplace
-    profiles: ["speed"]
+    profiles: ["speed", "demo", "bench"]
     container_name: ${MP_CONTAINER_PREFIX:-}speed
     restart: unless-stopped
     command: ["python3", "-m", "speed_layer.marketplace_speed_service"]
@@ -225,7 +225,7 @@ services:
 
   batch-scheduler:
     <<: *spark-marketplace
-    profiles: ["batch"]
+    profiles: ["batch", "demo"]
     container_name: ${MP_CONTAINER_PREFIX:-}batch-scheduler
     restart: unless-stopped
     command: ["python3", "-m", "batch_layer.marketplace_scheduler"]
@@ -245,7 +245,7 @@ services:
   #     python3 -m batch_layer.marketplace_warehouse --run-id ... --as-of ... [--resume]
   batch-once:
     <<: *spark-marketplace
-    profiles: ["batch"]
+    profiles: ["batch", "demo", "bench"]
     command: ["python3", "-m", "batch_layer.marketplace_warehouse", "--help"]
     restart: "no"
     environment:
@@ -280,7 +280,7 @@ services:
   # after the records are indexed.
   es-projector:
     <<: *marketplace-python
-    profiles: ["ops"]
+    profiles: ["ops", "demo"]
     container_name: ${MP_CONTAINER_PREFIX:-}es-projector
     restart: unless-stopped
     command: ["python", "-m", "ops.es_projector"]
@@ -310,7 +310,7 @@ services:
   # the drills set TIKI_LISTING_URL to http://stub-source:8000/...
   stub-source:
     <<: *marketplace-python
-    profiles: ["smoke"]
+    profiles: ["smoke", "demo", "bench"]
     container_name: ${MP_CONTAINER_PREFIX:-}stub-source
     restart: unless-stopped
     # Phase 9 plan section 7: a benchmark widens the stub. The defaults are
@@ -528,7 +528,7 @@ services:
 
   kibana:
     # Also under `legacy`, whose dashboard importer depends on it.
-    profiles: ["serve", "legacy"]
+    profiles: ["serve", "legacy", "demo"]
     image: docker.elastic.co/kibana/kibana:8.18.1
     container_name: ${MP_CONTAINER_PREFIX:-}kibana
     environment:
@@ -557,7 +557,7 @@ services:
   # imported with overwrite=true.
   kibana-marketplace-setup:
     <<: *marketplace-python
-    profiles: ["serve"]
+    profiles: ["serve", "demo"]
     container_name: ${MP_CONTAINER_PREFIX:-}kibana-marketplace-setup
     restart: "no"
     command: ["python", "-m", "display.kibana.setup_marketplace_kibana"]
@@ -590,7 +590,7 @@ services:
 
   # ── SERVING LAYER BI (Apache Superset) ─────────────────────
   superset:
-    profiles: ["serve"]
+    profiles: ["serve", "demo"]
     image: apache/superset:4.1.1
     container_name: ${MP_CONTAINER_PREFIX:-}superset
     command: >
@@ -615,7 +615,7 @@ services:
       - bigdata
 
   superset-init:
-    profiles: ["serve"]
+    profiles: ["serve", "demo"]
     image: apache/superset:4.1.1
     container_name: ${MP_CONTAINER_PREFIX:-}superset-init
     user: root
