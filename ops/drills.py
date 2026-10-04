@@ -457,13 +457,49 @@ class Stack:
 
         return len(self.src.list_objects(data_lake_uri("silver", MARKETPLACE_SILVER_DATASET)))
 
-    def reparse(self, ref: dict) -> tuple[int, dict]:
-        """Run `crawler.reparse` over one stored artifact, in the ops container."""
+    # -- D11 only: a second Compose project, and JSON out of a tool container --
+    @staticmethod
+    def json_objects(text: str) -> list[dict]:
+        """Every JSON object a tool container printed, compact or indented."""
+        found, index = [], 0
+        while True:
+            start = text.find("{", index)
+            if start == -1:
+                return found
+            depth, cursor = 0, start
+            while cursor < len(text):
+                depth += (text[cursor] == "{") - (text[cursor] == "}")
+                cursor += 1
+                if depth == 0:
+                    break
+            try:
+                found.append(json.loads(text[start:cursor]))
+                index = cursor
+            except json.JSONDecodeError:
+                index = start + 1
+
+    def ops_in(self, project: str | None, *args: str) -> tuple[int, list[dict]]:
+        """`python -m ops ...` in a project's ops container; returns its JSON."""
+        command = list(COMPOSE)
+        if project:
+            command += ["-p", project]
+        command += ["--profile", "ops", "run", "--rm", "--no-deps", "ops", "python", "-m", "ops", *args]
+        result = self.run(command, check=False)
+        return result.returncode, self.json_objects(result.stdout)
+
+    def compose_in(self, project: str, *args: str, check: bool = True):
+        return self.run(COMPOSE + ["-p", project, *args], check=check)
+
+    def reparse(self, ref: Any) -> tuple[int, dict]:
+        """Run `crawler.reparse` over one stored artifact, in the ops container.
+
+        ``ref`` is a ``crawler.reparse.RawArtifactRef``.
+        """
         result = self.run(COMPOSE + ["--profile", "ops", "run", "--rm", "--no-deps", "ops",
                                      "python", "-m", "crawler.reparse",
-                                     "--marketplace", ref["marketplace"], "--observed-date", ref["observed_date"],
-                                     "--hour", ref["hour"], "--crawl-run-id", ref["crawl_run_id"],
-                                     "--raw-artifact-id", ref["raw_artifact_id"]], check=False)
+                                     "--marketplace", ref.marketplace_code, "--observed-date", ref.observed_date,
+                                     "--hour", ref.hour, "--crawl-run-id", ref.crawl_run_id,
+                                     "--raw-artifact-id", ref.raw_artifact_id], check=False)
         lines = [line for line in result.stdout.strip().splitlines() if line.startswith("{")]
         if not lines:
             raise DrillFailed(f"reparse printed no report (exit {result.returncode}): {result.stderr.strip()[-400:]}")
@@ -844,17 +880,19 @@ def d6_expired_lease(stack: Stack, rec: Record) -> None:
         raise DrillFailed(f"only {len(recovered)} of {len(leased)} expired leases were recovered")
 
 
-def _raw_artifact_ref(raw_uri: str) -> dict:
-    """The five components `crawler.reparse` needs, read back off the URI.
+def _raw_artifact_ref(raw_uri: str):
+    """The reference `crawler.reparse` addresses, read back off a stored URI.
 
-    Hive-style path, written by `crawler.raw_store`:
-    ``.../marketplace=<code>/observed_date=<d>/hour=<h>/crawl_run_id=<id>/raw_artifact_id=<id>/body.bin``
+    One place knows the Bronze layout, and it is the module that writes it:
+    ``RawArtifactRef.from_uri`` is the inverse of ``RawArtifactRef.body_path``.
+    This wrapper exists only to turn its refusal into a drill failure.
     """
-    parts = dict(segment.split("=", 1) for segment in raw_uri.split("/") if "=" in segment)
-    missing = {"marketplace", "observed_date", "hour", "crawl_run_id", "raw_artifact_id"} - set(parts)
-    if missing:
-        raise DrillFailed(f"raw URI {raw_uri} names no {sorted(missing)}")
-    return parts
+    from crawler.reparse import RawArtifactRef
+
+    try:
+        return RawArtifactRef.from_uri(raw_uri)
+    except ValueError as error:
+        raise DrillFailed(str(error)) from error
 
 
 def d7_parser_schema_drift(stack: Stack, rec: Record) -> None:
@@ -899,7 +937,7 @@ def d7_parser_schema_drift(stack: Stack, rec: Record) -> None:
     code, report = stack.reparse(ref)
     after = {"kafka": stack.kafka_end_offsets(), "silver": stack.silver_object_count(),
              "attempts": stack.attempt_count(), **stack.serving_version()}
-    rec.step("observe", reparse_exit=code, reparse_counts=report.get("counts"), artifact=ref["raw_artifact_id"],
+    rec.step("observe", reparse_exit=code, reparse_counts=report.get("counts"), artifact=ref.raw_artifact_id,
              before=before, after=after)
     if report.get("counts", {}).get("PARSE_FAILED") != 1:
         raise DrillFailed(f"reparse of a drifted artifact did not report PARSE_FAILED: {report.get('counts')}")
@@ -1101,6 +1139,103 @@ def d10_concurrent_batches(stack: Stack, rec: Record) -> None:
         raise DrillFailed(f"the pointer and the cache must both name the run that won the lock, {winner}: {serving}")
 
 
+def _backup_root() -> Path:
+    return ROOT / "data" / "ops" / "backups"
+
+
+def d11_backup_and_restore(stack: Stack, rec: Record) -> None:
+    """Back the stack up, then restore it into a *different* Compose project.
+
+    The one drill whose fault is not an outage: it asks whether the evidence
+    survives losing the machine. It is therefore also the only drill that
+    takes the stack down -- `container_name` is global and two projects of
+    this Compose file cannot be up at once -- which is why it runs last, and
+    why its `finally` removes the restored project before the harness brings
+    the real one back.
+
+    Two things it proves that an exit code alone would not: the restore wrote
+    into its own volumes and never touched the running stack's, and the
+    restored pointer serves the version the backup named rather than merely
+    some coherent version of its own.
+    """
+    project = stack.project()
+    target = f"{project}-restore"
+    if target == project:
+        raise DrillFailed("the restore project must differ from the running one")
+    before = stack.serving_version()
+    volumes_before = sorted(stack.project_volumes(""))
+
+    code, reports = stack.ops_in(None, "backup")
+    written = next((r for r in reports if r.get("event") == "backup_written"), None)
+    if code != 0 or written is None:
+        raise DrillFailed(f"backup did not complete (exit {code})")
+    backup_id = written["backup_id"]
+    manifest = json.loads((_backup_root() / backup_id / "backup-manifest.json").read_text(encoding="utf-8"))
+    rec.step("inject", action="backup", backup_id=backup_id, counts=written["counts"],
+             files=written["files"], pointer_run_id=manifest["pointer_run_id"],
+             cache_run_id=manifest["cache_run_id"])
+    # The backup refuses itself when these two disagree. Assert the record
+    # says so rather than trusting that the refusal would have fired.
+    served = {manifest["pointer_run_id"], manifest["cache_run_id"], before["pointer_run_id"]}
+    if len(served) != 1:
+        raise DrillFailed(f"the backup's run ids disagree with what was being served: {sorted(served)}")
+
+    try:
+        stack.run(COMPOSE + ["--profile", "*", "down"])
+        stack.compose_in(target, "up", "-d")
+        stack.wait_healthy("postgres-dw")
+        if stack.ops_in(target, "migrate")[0] != 0:
+            raise DrillFailed("the restored project could not be migrated")
+
+        code, reports = stack.ops_in(target, "restore", "--from", backup_id)
+        report = next((r for r in reports if "checks" in r), {"checks": []})
+        statuses = {c["check"]: c["status"] for c in report["checks"]}
+        plan = next((r for r in reports if r.get("event") == "quality_only_batch_next"), {})
+        rec.step("observe", restore_exit=code, checks=statuses, as_of=plan.get("as_of"))
+        if code != 0 or len(statuses) != 3 or set(statuses.values()) != {"PASS"}:
+            raise DrillFailed(f"the restore checks did not all pass: {statuses}")
+
+        # Plan 12.3 step 3's fourth check. It needs Spark, so it runs the way
+        # every other Spark job does, in its own container.
+        run_id = f"{plan['pointer_run_id']}-d11"[:64]
+        result = stack.compose_in(target, "--profile", "batch", "run", "--rm", "--no-deps", "batch-once",
+                                  "python3", "-m", "batch_layer.marketplace_warehouse",
+                                  "--run-id", run_id, "--as-of", plan["as_of"], "--quality-only", check=False)
+        batch = next((r for r in stack.json_objects(result.stdout) if "quality_status" in r), {})
+        rec.step("observe", quality_only=run_id, quality_status=batch.get("quality_status"),
+                 mandatory_failures=batch.get("mandatory_failure_count"),
+                 manifest_promoted=batch.get("manifest_promoted"), silver_rows=batch.get("silver_rows"))
+        if result.returncode != 0 or batch.get("quality_status") != "PASS" or batch.get("mandatory_failure_count"):
+            raise DrillFailed(f"the quality gate refused the restored Silver: {batch}")
+        if batch.get("manifest_promoted"):
+            raise DrillFailed("a --quality-only run promoted the pointer")
+
+        code, reports = stack.ops_in(target, "validate", "--restored")
+        verdict = next((r for r in reports if r.get("event") == "validate_restored"), {})
+        checks = next((r for r in reports if "checks" in r), {"checks": []})
+        pointer = next((c for c in checks["checks"] if c["check"] == "pointer_matches_cache"), {})
+        rec.step("observe", validate_restored=verdict.get("passed"), tolerated=verdict.get("tolerated"),
+                 unexpected=verdict.get("unexpected"), restored_pointer=pointer.get("observed"))
+        if code != 0 or not verdict.get("passed") or verdict.get("unexpected"):
+            raise DrillFailed(f"the restored stack fails a check that is not an empty derived store: {verdict}")
+        if (pointer.get("observed") or {}).get("pointer") != manifest["pointer_run_id"]:
+            raise DrillFailed(f"the restored pointer serves {pointer.get('observed')}, "
+                              f"not the backed-up {manifest['pointer_run_id']}")
+    finally:
+        # Before the harness brings the real stack back: the two projects
+        # cannot both own these container names.
+        stack.compose_in(target, "--profile", "*", "down", "--volumes", check=False)
+
+    volumes_after = sorted(stack.project_volumes(""))
+    rec.step("verify", restored_into=target, backup_id=backup_id,
+             running_project_volumes=len(volumes_after), intact=volumes_after == volumes_before)
+    # "Never restore over the running stack" is the rule; this is what it
+    # means in practice -- the running project's volumes were never an input.
+    if volumes_after != volumes_before:
+        raise DrillFailed("the running project's volumes changed across a restore: "
+                          f"{sorted(set(volumes_before) ^ set(volumes_after))}")
+
+
 DRILLS: dict[str, Callable[[Stack, Record], None]] = {
     "d1": d1_source_errors,
     "d2": d2_kafka_down_during_crawl,
@@ -1112,6 +1247,8 @@ DRILLS: dict[str, Callable[[Stack, Record], None]] = {
     "d8": d8_quality_failure,
     "d9": d9_publish_failure,
     "d10": d10_concurrent_batches,
+    # Last on purpose: the only drill that takes the stack down.
+    "d11": d11_backup_and_restore,
 }
 
 
