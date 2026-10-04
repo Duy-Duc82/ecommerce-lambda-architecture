@@ -1,8 +1,8 @@
 # Phase 9 implementation plan — Evaluation and feature freeze
 
-> Status: **draft, awaiting review** (2026-10-04, branch
-> `phase-9-evaluation-plan`). No code may be written until the decisions in
-> Section 2.1 are accepted or overruled, and the result is recorded there.
+> Status: **accepted** (2026-10-04; D1–D6 accepted by the user the same day).
+> WP0 done on branch `phase-9-evaluation-plan`: live collection started
+> 2026-10-04 10:16:08 UTC. Section 4 carries the amendments WP0 made.
 >
 > Intended implementer: a low-capability coding model working one work package
 > at a time. It must follow the fixed contracts and stop between packages.
@@ -104,10 +104,11 @@ Before editing, record and verify:
 
 If any item is absent or differs, stop and report the exact mismatch.
 
-### 2.1 Decisions — proposed 2026-10-04, **not yet reviewed**
+### 2.1 Decisions — proposed and **accepted 2026-10-04**
 
-Each decision below needs an explicit accept or overrule before its work
-package starts. Record the outcome next to it.
+The user accepted all six on 2026-10-04, together with the D1 universe below
+(categories 1846, 8322, 1882, 1520, 931). A reviewer may still overrule one
+before its work package starts; record that here if so.
 
 - **D1 — Live collection starts now, on its own Compose project, and nothing
   else ever runs there.** This is the first time any Phase 8+ automation
@@ -196,9 +197,13 @@ package starts. Record the outcome next to it.
 
 ## 4. Live collection — WP0 (do this first)
 
-1. Agree the five categories with the user and freeze them in
-   `config/settings.py` as `TIKI_CATEGORIES`. Then record them, with the date,
-   in `PROGRESS.md`.
+1. Agree the five categories with the user, and freeze them in
+   `env/live.env` as `TIKI_CATEGORIES`. Then record them, with the date, in
+   `PROGRESS.md`.
+
+   *Amended in WP0:* the plan first said `config/settings.py`. That default
+   (nine categories) is what every other stack and test reads, and changing it
+   would change them. The live universe belongs to the live stack's own file.
 2. Create `env/live.env` with `COMPOSE_PROJECT_NAME=mp-live` and the live
    `TIKI_LISTING_URL`. Commit it; it holds no secrets.
 3. On the host, bring the stack up and seed it:
@@ -220,6 +225,15 @@ package starts. Record the outcome next to it.
 Acceptance: within two hours, `mp status` shows successful live attempts;
 Silver gains observations; one scheduled batch succeeds the next day; and
 `validate` passes.
+
+*Found in WP0:* the five core services (`kafka`, `minio`, `redis`,
+`postgres-dw`, `elasticsearch`) had no restart policy, while the services
+did. After a host or Docker restart, the services would have come back to
+nothing, and collection would have stopped silently. They now have
+`restart: unless-stopped`, as a test commit followed by a fix commit. Two
+host settings are outside the repository, and they have to be right for 30
+days of collection: the host must not sleep, and Docker Desktop must start at
+login. Both are recorded in `PROGRESS.md` §24.
 
 WP0 ships before WP1 lands, so its first run uses the existing unprefixed
 container names. Until WP1 is merged, **no smoke, drill or benchmark may run

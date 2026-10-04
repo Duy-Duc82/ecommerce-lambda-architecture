@@ -2403,3 +2403,69 @@ xanh và offline.
    từ Phase 8 các record drill làm bằng chứng tin cậy, `mp smoke` làm nền cho
    benchmark, stub source làm bộ sinh tải *có nhãn là fixture phát lại*, và
    các index của projector làm chuỗi thời gian vận hành.
+
+## 24. Session 2026-10-04 (tiếp) — Phase 9: plan, và WP0 thu thập thật
+
+Plan: `docs/PHASE_9_EVALUATION_FEATURE_FREEZE_IMPLEMENTATION_PLAN.md`, user
+duyệt cả sáu quyết định D1–D6 ngày 2026-10-04. Nhánh `phase-9-evaluation-plan`.
+
+### 24.1 Vì sao WP0 đi trước mọi thứ
+
+Khảo sát lúc viết plan: `audit.crawl_request_attempt` của stack đang chạy chỉ
+có 476 attempt trong hai ngày, toàn bộ là smoke/drill gọi stub. **Chưa từng có
+thu thập liên tục trên Tiki thật**, trong khi Brief §23 đòi tối thiểu 30 ngày.
+Ngày nào chưa thu là mất hẳn ngày đó.
+
+### 24.2 Stack `mp-live`
+
+- Bắt đầu: **2026-10-04 10:16:08 UTC**. Ngày 30 sớm nhất: **2026-11-03**.
+- Tập theo dõi đóng băng trong `env/live.env`: category `1846, 8322, 1882,
+  1520, 931`, mỗi cái 3 trang, tier `ACTIVE` (60 phút), delay 2 s.
+  Tức 15 request/giờ, khoảng 600 offer.
+- Chu kỳ đầu: 15/15 `SUCCEEDED`, 600 parsed, 0 rejected, latency p50
+  3,674 ms, 2,365,145 byte raw; speed layer 600 change (`NEW_OFFER`).
+  Frontier đã tự xếp chu kỳ sau lúc 11:16 UTC.
+- Project `mp-smoke` đã `down` (giữ volume) để nhường tên container. Volume
+  của `mp-live` là volume mới, không lẫn traffic stub.
+- **Quy tắc D1:** không smoke, drill, benchmark hay demo nào chạy trong
+  `mp-live`. Cho tới khi WP1 (tiền tố `container_name`) xong, máy này
+  **không chạy smoke/drill**, vì chúng cần dừng `mp-live`.
+
+Mỗi lệnh `mp.ps1`/`docker compose` cho stack này phải nạp `env/live.env`
+trước (WP1 sẽ thêm `-Env`):
+
+```powershell
+Get-Content env/live.env | Where-Object { $_ -match '^[A-Z_]+=' } |
+  ForEach-Object { $k, $v = $_ -split '=', 2; Set-Item "env:$k" $v }
+.\scripts\mp.ps1 status
+.\scripts\mp.ps1 validate -Json data/ops/live/validate-<date>.json   # mỗi ngày
+```
+
+### 24.3 Một lỗ hổng tìm được khi bật stack: core không tự khởi động lại
+
+Năm service core (`kafka`, `minio`, `redis`, `postgres-dw`,
+`elasticsearch`) không có restart policy, còn các service ứng dụng thì có.
+Sau khi máy hoặc Docker khởi động lại, worker lên lại nhưng không có gì để nối
+vào, và việc thu thập dừng mà không để lại dấu vết. Đã thêm
+`restart: unless-stopped` (commit test `a51aaa0`, commit fix `97460f8`). Drill
+chỉ `stop` core, mà `unless-stopped` tôn trọng `stop`, nên không drill nào
+đổi hành vi.
+
+### 24.4 Hai cài đặt máy host, nằm ngoài repo
+
+Kiểm 2026-10-04:
+
+- Windows đặt **sleep sau 30 phút** khi cắm điện (`STANDBYIDLE` AC = 1800 s).
+  Máy ngủ thì không crawl.
+- Docker Desktop **`AutoStart: false`**. Sau khi máy khởi động lại, không có
+  gì chạy cho tới khi có người mở Docker.
+
+Cả hai cần user tự đổi. Khoảng trống do chúng gây ra sẽ hiện trong báo cáo
+P2-02 như mọi khoảng trống khác, và không được làm sạch đi.
+
+### 24.5 Việc tiếp theo
+
+1. Ngày mai (2026-10-05): kiểm batch theo lịch đầu tiên `SUCCEEDED`, con trỏ
+   có giá trị, `validate` pass. Đó là tiêu chí nghiệm thu WP0 (plan §4).
+2. WP1: tiền tố `container_name`, `env/bench.env`, `env/demo.env`,
+   `mp.ps1 -Env`, chặn smoke/drill/demo trong `mp-live`.
