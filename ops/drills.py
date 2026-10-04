@@ -51,6 +51,12 @@ CRAWL_ENV = {
 BATCH_SETTLE_SECONDS = 60
 SERVICES = ("stub-source", "silver-sink", "speed", "batch-scheduler")
 
+# D8 plants one audit row and D9 one constraint. Both carry a name no part of
+# the pipeline writes, so a leftover is recognisable as this drill's and the
+# baseline can refuse to start on top of one.
+DRILL_D8_MARKER = "drill-d8 planted mismatch; deleted by the drill"
+DRILL_D9_CONSTRAINT = "drill_d9_reject_one_cache_row"
+
 # D5 has to kill the speed container *inside* a micro-batch. The batch's
 # audit row is open only while the sinks are written, which on this stack is
 # 10 ms for an empty batch and 90 ms for one crawl cycle, while a host-side
@@ -236,6 +242,14 @@ class Stack:
     def query(self, sql: str, params: tuple = ()) -> list[tuple]:
         return self.src.query(sql, params)
 
+    def execute(self, sql: str, params: tuple = ()) -> None:
+        """A statement with no result set. `query` always fetches, and DDL
+        has nothing to fetch, which psycopg2 reports as "no results to fetch"."""
+        from common.postgres import postgres_connection_factory
+
+        with postgres_connection_factory()() as conn, conn.cursor() as cur:
+            cur.execute(sql, params)
+
     def db_now(self) -> datetime:
         (now,), = self.query("SELECT now()")
         return now
@@ -319,16 +333,141 @@ class Stack:
                               what=f"the speed query to go {quiet_seconds}s without a batch carrying rows")
         return observed["batches_with_rows"]
 
-    def batch_after_last_crawl(self) -> tuple[int, str]:
-        """One batch over everything crawled so far, as the smoke runs it."""
+    # -- the batch --
+    def plan_batch(self) -> dict:
+        """The run_id and as_of the smoke would use for everything crawled so far."""
         plan = self.run(COMPOSE + ["--profile", "ops", "run", "--rm", "--no-deps", "ops", "python", "-m", "ops",
                                    "batch-plan", "--after-last-crawl"],
                         env={"MARKETPLACE_QUALITY_RECONCILIATION_SETTLE_SECONDS": str(BATCH_SETTLE_SECONDS)})
-        plan = json.loads(plan.stdout.strip().splitlines()[-1])
-        result = self.run(COMPOSE + ["--profile", "batch", "run", "--rm", "--no-deps", "batch-once", "python3", "-m",
-                                     "batch_layer.marketplace_warehouse", "--run-id", plan["run_id"], "--as-of", plan["as_of"]],
-                          env={"MARKETPLACE_QUALITY_RECONCILIATION_SETTLE_SECONDS": str(BATCH_SETTLE_SECONDS)}, check=False)
-        return result.returncode, plan["run_id"]
+        return json.loads(plan.stdout.strip().splitlines()[-1])
+
+    def batch_command(self, run_id: str, as_of: str, *extra: str) -> list[str]:
+        return COMPOSE + ["--profile", "batch", "run", "--rm", "--no-deps", "batch-once", "python3", "-m",
+                          "batch_layer.marketplace_warehouse", "--run-id", run_id, "--as-of", as_of, *extra]
+
+    def run_batch(self, run_id: str, as_of: str, *extra: str) -> subprocess.CompletedProcess:
+        return self.run(self.batch_command(run_id, as_of, *extra),
+                        env={"MARKETPLACE_QUALITY_RECONCILIATION_SETTLE_SECONDS": str(BATCH_SETTLE_SECONDS)},
+                        check=False)
+
+    def start_batch(self, run_id: str, as_of: str, *extra: str) -> subprocess.Popen:
+        """Launch a batch without waiting -- D10 needs two of them racing."""
+        return subprocess.Popen(self.batch_command(run_id, as_of, *extra), cwd=ROOT,
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                                env={**os.environ,
+                                     "MARKETPLACE_QUALITY_RECONCILIATION_SETTLE_SECONDS": str(BATCH_SETTLE_SECONDS)})
+
+    def batch_after_last_crawl(self) -> tuple[int, str]:
+        """One batch over everything crawled so far, as the smoke runs it."""
+        plan = self.plan_batch()
+        return self.run_batch(plan["run_id"], plan["as_of"]).returncode, plan["run_id"]
+
+    def batch_run(self, run_id: str) -> tuple | None:
+        rows = self.query("SELECT run_id, status, cache_published, error_message FROM audit.marketplace_batch_run "
+                          "WHERE run_id = %s", (run_id,))
+        return rows[0] if rows else None
+
+    def quality_results(self, run_id: str) -> list[tuple]:
+        return self.query("SELECT check_name, status, observed_value FROM audit.marketplace_quality_result "
+                          "WHERE run_id = %s ORDER BY check_name", (run_id,))
+
+    def serving_version(self) -> dict:
+        """What is being served right now: the pointer, the cache version, its size."""
+        pointer = self.src.current_pointer() or {}
+        rows = self.query("SELECT run_id FROM audit.marketplace_cache_version WHERE singleton")
+        (offers,), = self.query("SELECT count(*) FROM cache.marketplace_offer_current")
+        return {"pointer_run_id": pointer.get("run_id"), "cache_run_id": rows[0][0] if rows else None,
+                "cache_offer_rows": int(offers)}
+
+    # -- the two documented mutations, each with its own reverse --
+    def insert_mismatched_attempt(self, crawl_run_id: str, task_id: str, completed_at: datetime,
+                                  parsed_count: int) -> int:
+        """D8's one SQL statement: a settled attempt whose count Silver denies.
+
+        Returns the BIGSERIAL key, which is how the drill later deletes exactly
+        this row and nothing else.
+        """
+        (attempt_id,), = self.query(
+            "INSERT INTO audit.crawl_request_attempt (crawl_run_id, task_id, attempt_number, started_at, "
+            "completed_at, status, parsed_count, rejected_count, error_message) "
+            "VALUES (%s, %s, %s, %s, %s, 'SUCCEEDED', %s, 0, %s) RETURNING attempt_id",
+            (crawl_run_id, task_id, 99, completed_at, completed_at, parsed_count, DRILL_D8_MARKER))
+        return int(attempt_id)
+
+    def delete_attempt(self, attempt_id: int) -> list:
+        return self.query("DELETE FROM audit.crawl_request_attempt WHERE attempt_id = %s RETURNING attempt_id",
+                          (attempt_id,))
+
+    def planted_attempts(self) -> list[tuple]:
+        """Any D8 row still in the audit, by its marker. Nothing else matches."""
+        return self.query("SELECT attempt_id FROM audit.crawl_request_attempt WHERE error_message = %s",
+                          (DRILL_D8_MARKER,))
+
+    def add_rejecting_constraint(self, offer_id: str) -> None:
+        """D9's one SQL statement: refuse exactly one cache row at publication.
+
+        ``NOT VALID`` so it binds the rows the next publish inserts without
+        first rejecting the rows being served, which hold that same offer. The
+        reverse is ``drop_rejecting_constraint``, called from the drill's
+        ``finally``.
+        """
+        self.execute(f"ALTER TABLE cache.marketplace_offer_current ADD CONSTRAINT {DRILL_D9_CONSTRAINT} "
+                     "CHECK (offer_id <> %s) NOT VALID", (offer_id,))
+
+    def drop_rejecting_constraint(self) -> None:
+        self.execute(f"ALTER TABLE cache.marketplace_offer_current DROP CONSTRAINT IF EXISTS {DRILL_D9_CONSTRAINT}")
+
+    def constraint_exists(self, name: str) -> bool:
+        (count,), = self.query("SELECT count(*) FROM pg_constraint WHERE conname = %s", (name,))
+        return count > 0
+
+    # -- D7 --
+    def source_state(self) -> tuple:
+        rows = self.query("SELECT consecutive_failures, opened_until FROM audit.crawl_source_state "
+                          "WHERE marketplace_code = 'tiki'")
+        return rows[0] if rows else (0, None)
+
+    def attempt_count(self) -> int:
+        (total,), = self.query("SELECT count(*) FROM audit.crawl_request_attempt")
+        return int(total)
+
+    def frontier_status(self, task_id: str) -> str:
+        (status,), = self.query("SELECT status FROM audit.crawl_frontier WHERE task_id = %s", (task_id,))
+        return status
+
+    def kafka_end_offsets(self) -> dict:
+        """End offset per partition of the observations topic: what reparse must not move."""
+        import kafka
+
+        from config.settings import KAFKA_BOOTSTRAP_SERVERS
+        from config.topics import MARKETPLACE_OBSERVATIONS
+
+        consumer = kafka.KafkaConsumer(bootstrap_servers=KAFKA_BOOTSTRAP_SERVERS, consumer_timeout_ms=10000)
+        try:
+            partitions = consumer.partitions_for_topic(MARKETPLACE_OBSERVATIONS.name)
+            if not partitions:
+                raise DrillFailed(f"topic {MARKETPLACE_OBSERVATIONS.name} has no partitions")
+            tps = [kafka.TopicPartition(MARKETPLACE_OBSERVATIONS.name, p) for p in sorted(partitions)]
+            return {tp.partition: offset for tp, offset in consumer.end_offsets(tps).items()}
+        finally:
+            consumer.close()
+
+    def silver_object_count(self) -> int:
+        from config.settings import MARKETPLACE_SILVER_DATASET, data_lake_uri
+
+        return len(self.src.list_objects(data_lake_uri("silver", MARKETPLACE_SILVER_DATASET)))
+
+    def reparse(self, ref: dict) -> tuple[int, dict]:
+        """Run `crawler.reparse` over one stored artifact, in the ops container."""
+        result = self.run(COMPOSE + ["--profile", "ops", "run", "--rm", "--no-deps", "ops",
+                                     "python", "-m", "crawler.reparse",
+                                     "--marketplace", ref["marketplace"], "--observed-date", ref["observed_date"],
+                                     "--hour", ref["hour"], "--crawl-run-id", ref["crawl_run_id"],
+                                     "--raw-artifact-id", ref["raw_artifact_id"]], check=False)
+        lines = [line for line in result.stdout.strip().splitlines() if line.startswith("{")]
+        if not lines:
+            raise DrillFailed(f"reparse printed no report (exit {result.returncode}): {result.stderr.strip()[-400:]}")
+        return result.returncode, json.loads(lines[-1])
 
     def validate(self) -> list:
         from ops.validate import default_limits, validate
@@ -369,9 +508,19 @@ def _failing(results) -> list[str]:
 
 def baseline(stack: Stack, rec: Record) -> None:
     failing = _failing(stack.validate())
-    rec.step("baseline", failing=failing)
+    # D8 and D9 undo their mutation in a `finally`, but a killed process has no
+    # `finally`. A leftover would quietly change what the next drill measures,
+    # so it stops the drill instead, naming what to remove.
+    leftovers = []
+    if stack.planted_attempts():
+        leftovers.append(f"{len(stack.planted_attempts())} planted audit row(s) from D8")
+    if stack.constraint_exists(DRILL_D9_CONSTRAINT):
+        leftovers.append(f"constraint {DRILL_D9_CONSTRAINT} from D9")
+    rec.step("baseline", failing=failing, leftovers=leftovers)
     if failing:
         raise DrillFailed(f"baseline validate fails: {failing}; a drill never starts from a broken stack")
+    if leftovers:
+        raise DrillFailed(f"an earlier drill left the stack mutated: {leftovers}")
 
 
 def restore(stack: Stack, rec: Record) -> list[str]:
@@ -695,6 +844,263 @@ def d6_expired_lease(stack: Stack, rec: Record) -> None:
         raise DrillFailed(f"only {len(recovered)} of {len(leased)} expired leases were recovered")
 
 
+def _raw_artifact_ref(raw_uri: str) -> dict:
+    """The five components `crawler.reparse` needs, read back off the URI.
+
+    Hive-style path, written by `crawler.raw_store`:
+    ``.../marketplace=<code>/observed_date=<d>/hour=<h>/crawl_run_id=<id>/raw_artifact_id=<id>/body.bin``
+    """
+    parts = dict(segment.split("=", 1) for segment in raw_uri.split("/") if "=" in segment)
+    missing = {"marketplace", "observed_date", "hour", "crawl_run_id", "raw_artifact_id"} - set(parts)
+    if missing:
+        raise DrillFailed(f"raw URI {raw_uri} names no {sorted(missing)}")
+    return parts
+
+
+def d7_parser_schema_drift(stack: Stack, rec: Record) -> None:
+    """The source returns a shape the adapter must reject.
+
+    A parse error is a fault in this response, not evidence the marketplace is
+    unhealthy, so it is terminal for the task and must not move the source's
+    circuit. The raw body is kept either way -- that is the whole point of
+    raw-first -- and `crawler.reparse` over it must report PARSE_FAILED
+    without writing anything anywhere.
+    """
+    circuit_before = stack.source_state()
+    since = stack.db_now()
+    stack.stub_mode("drift")
+    rec.step("inject", stub_mode="drift", circuit_before=circuit_before)
+    stack.start_crawler()
+    rows = wait_until(lambda: ((r := [a for a in stack.attempts_since(since) if a[2] == "PARSE_ERROR"]) != [], r),
+                      timeout=300, what="an attempt classified PARSE_ERROR")
+    stack.stop_crawler()
+
+    # Raw kept, task terminal, circuit untouched.
+    kept = []
+    for task_id, status, kind, parsed, raw_uri, *_ in rows:
+        if raw_uri is None or not stack.src.object_exists(raw_uri):
+            raise DrillFailed(f"a PARSE_ERROR attempt of {task_id} lost its raw body: {raw_uri}")
+        kept.append((task_id, raw_uri))
+    retried = [task for task, _ in kept if stack.frontier_status(task) not in ("FAILED", "DISABLED")]
+    circuit_after = stack.source_state()
+    rec.step("observe", parse_errors=len(rows), raw_kept=len(kept), circuit_after=circuit_after,
+             still_schedulable=retried)
+    if retried:
+        raise DrillFailed(f"a parse error left {retried} schedulable; it is terminal for the attempt")
+    if circuit_after[0] > circuit_before[0] or (circuit_after[1] is not None and circuit_before[1] is None):
+        raise DrillFailed(f"a parse error moved the source circuit: {circuit_before} -> {circuit_after}")
+
+    # Reparse the artifact just written. It must grade it PARSE_FAILED and
+    # write nothing: no Kafka record, no Silver object, no audit attempt, and
+    # neither the serving pointer nor the cache may move.
+    ref = _raw_artifact_ref(kept[0][1])
+    before = {"kafka": stack.kafka_end_offsets(), "silver": stack.silver_object_count(),
+              "attempts": stack.attempt_count(), **stack.serving_version()}
+    code, report = stack.reparse(ref)
+    after = {"kafka": stack.kafka_end_offsets(), "silver": stack.silver_object_count(),
+             "attempts": stack.attempt_count(), **stack.serving_version()}
+    rec.step("observe", reparse_exit=code, reparse_counts=report.get("counts"), artifact=ref["raw_artifact_id"],
+             before=before, after=after)
+    if report.get("counts", {}).get("PARSE_FAILED") != 1:
+        raise DrillFailed(f"reparse of a drifted artifact did not report PARSE_FAILED: {report.get('counts')}")
+    if code == 0:
+        raise DrillFailed("reparse exited 0 over an artifact it could not parse")
+    wrote = {key: (before[key], after[key]) for key in before if before[key] != after[key]}
+    if wrote:
+        raise DrillFailed(f"reparse is read-only and wrote: {wrote}")
+
+    stack.stub_mode("ok")
+    recovered_from = stack.db_now()
+    rec.step("recover", stub_mode="ok")
+    stack.start_crawler()
+    wait_until(lambda: stack.every_target_succeeded_since(recovered_from), timeout=300,
+               what="every target to succeed once the source returns a shape the adapter accepts")
+    stack.stop_crawler()
+    rec.step("verify", reparse="PARSE_FAILED", wrote_nothing=True, raw_kept=len(kept))
+
+
+def _settled_crawl_run(stack: Stack, as_of: datetime) -> tuple[str, str, datetime]:
+    """A crawl run inside the reconciliation window that Silver already holds.
+
+    The gate reconciles only runs present in Silver, settled at least the
+    settle delay before ``as_of`` and no older than the lookback, so a planted
+    mismatch is only seen if it joins one of those.
+    """
+    from config.settings import MARKETPLACE_QUALITY_RECONCILIATION_LOOKBACK_SECONDS
+    from ops.smoke import smoke_targets
+
+    newest = as_of - timedelta(seconds=BATCH_SETTLE_SECONDS)
+    oldest = as_of - timedelta(seconds=MARKETPLACE_QUALITY_RECONCILIATION_LOOKBACK_SECONDS)
+    rows = stack.query(
+        "SELECT a.crawl_run_id, a.task_id, r.completed_at FROM audit.crawl_request_attempt a "
+        "JOIN audit.crawl_run r USING (crawl_run_id) JOIN audit.crawl_frontier f ON f.task_id = a.task_id "
+        "WHERE f.marketplace_code = 'tiki' AND f.target = ANY(%s) AND a.status IN ('SUCCEEDED', 'PARTIAL') "
+        "AND a.parsed_count > 0 AND r.completed_at IS NOT NULL AND r.completed_at <= %s AND r.completed_at >= %s "
+        "ORDER BY r.completed_at DESC LIMIT 1", (smoke_targets(), newest, oldest))
+    if not rows:
+        raise DrillFailed(f"no settled crawl run between {oldest} and {newest} to disagree with")
+    return rows[0][0], rows[0][1], rows[0][2]
+
+
+def d8_quality_failure(stack: Stack, rec: Record) -> None:
+    """One audit row Silver denies: the gate refuses, and nothing moves.
+
+    The run still records its evidence -- a refused run with no stored results
+    cannot be told apart from a crash -- but the cache version and the serving
+    pointer stay where they were, so the failed run's Gold never becomes the
+    version anyone reads. Deleting that one row and resuming the same run must
+    then publish normally.
+    """
+    before = stack.serving_version()
+    _crawl_once(stack)
+    stack.quiet()
+    plan = stack.plan_batch()
+    as_of = datetime.fromisoformat(plan["as_of"].replace("Z", "+00:00"))
+    crawl_run_id, task_id, settled_at = _settled_crawl_run(stack, as_of)
+    attempt_id = None
+    try:
+        attempt_id = stack.insert_mismatched_attempt(crawl_run_id, task_id, settled_at, parsed_count=7)
+        rec.step("inject", attempt_id=attempt_id, crawl_run_id=crawl_run_id, parsed_count=7,
+                 settled_at=settled_at, run_id=plan["run_id"], as_of=plan["as_of"], before=before)
+
+        refused = stack.run_batch(plan["run_id"], plan["as_of"])
+        row = stack.batch_run(plan["run_id"])
+        results = stack.quality_results(plan["run_id"])
+        failing = [name for name, status, _ in results if status != "PASS"]
+        during = stack.serving_version()
+        rec.step("observe", exit_code=refused.returncode, status=None if row is None else row[1],
+                 cache_published=None if row is None else row[2], quality_results=len(results),
+                 failing_checks=failing, serving=during)
+        if refused.returncode == 0 or row is None or row[1] != "QUALITY_FAILED":
+            raise DrillFailed(f"the gate let a denied window through: exit {refused.returncode}, run {row}")
+        if "silver_parse_attempt_reconciliation" not in failing:
+            raise DrillFailed(f"the run failed for the wrong reason: {failing}")
+        if not results:
+            raise DrillFailed("a refused run stored no quality results; a block with no evidence is not a block")
+        if during != before:
+            raise DrillFailed(f"a refused run moved the serving version: {before} -> {during}")
+    finally:
+        if attempt_id is not None:
+            stack.delete_attempt(attempt_id)
+    left = stack.planted_attempts()
+    rec.step("recover", deleted_attempt=attempt_id, planted_rows_left=len(left))
+    if left:
+        raise DrillFailed(f"the planted audit row outlived the drill: {left}")
+
+    resumed = stack.run_batch(plan["run_id"], plan["as_of"], "--resume")
+    row = stack.batch_run(plan["run_id"])
+    after = stack.serving_version()
+    rec.step("verify", exit_code=resumed.returncode, status=None if row is None else row[1], serving=after)
+    if resumed.returncode != 0 or row is None or row[1] != "SUCCEEDED":
+        raise DrillFailed(f"the resume did not succeed: exit {resumed.returncode}, run {row}")
+    if after["pointer_run_id"] != plan["run_id"] or after["cache_run_id"] != plan["run_id"]:
+        raise DrillFailed(f"the pointer advanced only on the successful resume, so both must name "
+                          f"{plan['run_id']}: {after}")
+
+
+def d9_publish_failure(stack: Stack, rec: Record) -> None:
+    """PostgreSQL refuses one cache row at publication.
+
+    The publish truncates the serving tables and refills them in one
+    transaction, so a refusal must take the truncate with it. What is already
+    being served -- the cache rows, the cache version and the pointer -- has to
+    survive untouched, and a resume of the same run must then publish it.
+    """
+    before = stack.serving_version()
+    rows = stack.query("SELECT offer_id FROM cache.marketplace_offer_current ORDER BY offer_id LIMIT 1")
+    if not rows:
+        raise DrillFailed("the cache serves no offer, so there is no row for the constraint to refuse")
+    offer_id = rows[0][0]
+    _crawl_once(stack)
+    stack.quiet()
+    plan = stack.plan_batch()
+    try:
+        stack.add_rejecting_constraint(offer_id)
+        rec.step("inject", constraint=DRILL_D9_CONSTRAINT, rejected_offer=offer_id,
+                 run_id=plan["run_id"], as_of=plan["as_of"], before=before)
+
+        failed = stack.run_batch(plan["run_id"], plan["as_of"])
+        row = stack.batch_run(plan["run_id"])
+        during = stack.serving_version()
+        message = (row[3] or "") if row else ""
+        rec.step("observe", exit_code=failed.returncode, status=None if row is None else row[1],
+                 cache_published=None if row is None else row[2], serving=during,
+                 error=message[:300])
+        if failed.returncode == 0 or row is None or row[1] != "FAILED":
+            raise DrillFailed(f"publication was refused but the run did not fail: exit {failed.returncode}, {row}")
+        if DRILL_D9_CONSTRAINT not in message:
+            raise DrillFailed(f"the run failed at something other than the constraint: {message[:300]}")
+        if row[2]:
+            raise DrillFailed("a run that could not publish is recorded as having published")
+        if during != before:
+            raise DrillFailed(f"the refused transaction did not roll back whole: {before} -> {during}")
+    finally:
+        stack.drop_rejecting_constraint()
+    rec.step("recover", constraint_dropped=DRILL_D9_CONSTRAINT,
+             still_present=stack.constraint_exists(DRILL_D9_CONSTRAINT))
+    if stack.constraint_exists(DRILL_D9_CONSTRAINT):
+        raise DrillFailed("the drill's constraint outlived it")
+
+    resumed = stack.run_batch(plan["run_id"], plan["as_of"], "--resume")
+    row = stack.batch_run(plan["run_id"])
+    after = stack.serving_version()
+    rec.step("verify", exit_code=resumed.returncode, status=None if row is None else row[1], serving=after)
+    if resumed.returncode != 0 or row is None or row[1] != "SUCCEEDED":
+        raise DrillFailed(f"the resume did not succeed: exit {resumed.returncode}, run {row}")
+    if after["pointer_run_id"] != plan["run_id"] or after["cache_run_id"] != plan["run_id"]:
+        raise DrillFailed(f"after recovery the pointer and the cache must both name {plan['run_id']}: {after}")
+
+
+def d10_concurrent_batches(stack: Stack, rec: Record) -> None:
+    """Two batches at once: one runs, the other is refused having done nothing.
+
+    The two carry different run ids on purpose. With one id the loser's
+    "wrote no audit row" would be indistinguishable from the winner's row, and
+    the exit code alone is not evidence; with two, the refused id must have no
+    row in `audit.marketplace_batch_run` at all.
+    """
+    _crawl_once(stack)
+    stack.quiet()
+    plan = stack.plan_batch()
+    contender = f"{plan['run_id']}-d10"
+    if stack.batch_run(contender) is not None:
+        raise DrillFailed(f"{contender} already has an audit row; a previous D10 did not clean up")
+    first = stack.start_batch(plan["run_id"], plan["as_of"])
+    second = stack.start_batch(contender, plan["as_of"])
+    rec.step("inject", started=[plan["run_id"], contender], as_of=plan["as_of"])
+    outcomes = {}
+    for run_id, process in ((plan["run_id"], first), (contender, second)):
+        stdout, stderr = process.communicate(timeout=1800)
+        outcomes[run_id] = {"exit": process.returncode,
+                            "stdout": stdout.strip().splitlines()[-1][:300] if stdout.strip() else "",
+                            "stderr": stderr.strip()[-200:]}
+    refused = [run_id for run_id, out in outcomes.items() if out["exit"] == 75]
+    ran = [run_id for run_id, out in outcomes.items() if out["exit"] == 0]
+    rec.step("observe", outcomes=outcomes, refused=refused, ran=ran)
+    if len(refused) != 1 or len(ran) != 1:
+        raise DrillFailed(f"exactly one batch must run and one be refused 75: {outcomes}")
+    loser, winner = refused[0], ran[0]
+    if "ALREADY_RUNNING" not in outcomes[loser]["stdout"]:
+        raise DrillFailed(f"the refused run did not say ALREADY_RUNNING: {outcomes[loser]}")
+
+    # The audit database, not the exit code, is what decides this.
+    loser_row = stack.batch_run(loser)
+    winner_row = stack.batch_run(winner)
+    serving = stack.serving_version()
+    versions = stack.query("SELECT count(*) FROM audit.marketplace_cache_version")[0][0]
+    rec.step("verify", winner=winner, loser=loser, loser_audit_row=loser_row,
+             winner_status=None if winner_row is None else winner_row[1], cache_versions=int(versions),
+             serving=serving)
+    if loser_row is not None:
+        raise DrillFailed(f"the refused run wrote an audit row: {loser_row}")
+    if winner_row is None or winner_row[1] != "SUCCEEDED":
+        raise DrillFailed(f"the run that took the lock did not succeed: {winner_row}")
+    if int(versions) != 1:
+        raise DrillFailed(f"the cache version is a singleton; found {versions} rows")
+    if serving["pointer_run_id"] != winner or serving["cache_run_id"] != winner:
+        raise DrillFailed(f"the pointer and the cache must both name the run that won the lock, {winner}: {serving}")
+
+
 DRILLS: dict[str, Callable[[Stack, Record], None]] = {
     "d1": d1_source_errors,
     "d2": d2_kafka_down_during_crawl,
@@ -702,6 +1108,10 @@ DRILLS: dict[str, Callable[[Stack, Record], None]] = {
     "d4": d4_sinks_down_during_speed,
     "d5": d5_speed_restart,
     "d6": d6_expired_lease,
+    "d7": d7_parser_schema_drift,
+    "d8": d8_quality_failure,
+    "d9": d9_publish_failure,
+    "d10": d10_concurrent_batches,
 }
 
 
