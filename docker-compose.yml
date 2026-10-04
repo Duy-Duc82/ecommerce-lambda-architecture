@@ -161,6 +161,9 @@ services:
       CRAWL_RETRY_BASE_SECONDS: ${CRAWL_RETRY_BASE_SECONDS:-30}
       CRAWL_RETRY_MAX_SECONDS: ${CRAWL_RETRY_MAX_SECONDS:-1800}
       CRAWL_CIRCUIT_OPEN_SECONDS: ${CRAWL_CIRCUIT_OPEN_SECONDS:-900}
+      # Politeness between requests. The crawl benchmark runs once at this
+      # default and once at 0 (Phase 9 plan section 8); live keeps 2.0.
+      CRAWL_REQUEST_DELAY_SECONDS: ${CRAWL_REQUEST_DELAY_SECONDS:-2.0}
       SERVICE_HEARTBEAT_FILE: /tmp/heartbeat
     # SIGTERM finishes the cycle in hand: up to CRAWL_WORKER_BATCH_SIZE pages
     # at CRAWL_REQUEST_DELAY_SECONDS each, plus their fetches.
