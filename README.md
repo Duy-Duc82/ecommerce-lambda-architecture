@@ -17,4 +17,4 @@ Lịch:
 
 ## Báo cáo (mới nhất trước)
 
-_(chưa có)_
+- [2026-10-05](reports/2026-10-05.md) — CẦN XEM: benchmark xong 36/36, ổn định; trang 1882 p3 rơi khỏi lịch crawl mp-live
