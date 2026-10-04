@@ -310,6 +310,29 @@ micro-batch per query:
   defined precisely. `RUNBOOK.md` must state the definition, including that it
   includes Kafka queueing time while the query was idle.
 
+*Amended in WP2:*
+- **Latency is measured from `produced_at`, not from the Kafka timestamp.**
+  - `kafka_timestamp` leaves the stream right after decoding. Keeping it
+    would change the output schema of the stateful operator that `mp-live`
+    has been running since 2026-10-04 under checkpoint `v2`.
+  - Every applied observation's `OfferState` already carries `produced_at`,
+    the instant the crawler sent it. kafka-python stamps that same send as
+    the record's CreateTime, so the two agree to within milliseconds.
+  - So the latency is completion minus `produced_at`, over the applied
+    observations of the batch. It is computed exactly, with nearest rank, in
+    `write_batch` after the sinks succeed, rather than with `approxQuantile`
+    in Spark: the batch is already collected on the driver there.
+  - Duplicate and late rows carry no `produced_at` and are not counted.
+- **The progress row is joined, not copied.** `audit.marketplace_stream_progress`
+  holds Spark's own numbers, plus the state-store row count and memory.
+  Latency lives only in `marketplace_speed_batch`, and the two join on
+  `(query_name, query_id, batch_id)`: Spark's progress `id` is the query id
+  kept in the checkpoint.
+- **The service polls `recentProgress`, not `lastProgress`.** A trigger
+  shorter than the five-second poll would otherwise lose batches.
+- **No sign check on latency.** A clock step between containers must not fail
+  a batch whose sinks were written.
+
 ### 6.2 Silver write time
 
 The sink is not changed. The benchmark derives Silver latency from MinIO

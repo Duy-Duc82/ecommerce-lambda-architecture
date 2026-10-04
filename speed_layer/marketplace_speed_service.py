@@ -15,7 +15,10 @@ Run inside the Spark 4 image, where the Kafka connector is on the classpath:
 from __future__ import annotations
 
 import argparse
-from typing import Any, Callable
+import json
+import math
+from datetime import datetime, timezone
+from typing import Any, Callable, Iterable, Mapping
 
 from pyspark.sql import DataFrame, SparkSession
 from pyspark.sql import functions as F
@@ -66,7 +69,100 @@ def start_query(
             .start())
 
 
-def await_query(query: Any, *, stop: Any, poll_seconds: float = 5) -> None:
+# -- Phase 9 plan section 6.1: Spark's own progress, one row per micro-batch --
+
+_DURATIONS = {
+    "trigger_execution_ms": "triggerExecution", "add_batch_ms": "addBatch", "get_batch_ms": "getBatch",
+    "latest_offset_ms": "latestOffset", "query_planning_ms": "queryPlanning", "wal_commit_ms": "walCommit",
+    "commit_offsets_ms": "commitOffsets",
+}
+PROGRESS_COLUMNS = ("query_name", "query_id", "batch_id", "run_id", "progress_at", "recorded_at", "num_input_rows",
+                    "input_rows_per_second", "processed_rows_per_second", "batch_duration_ms",
+                    *_DURATIONS, "state_rows_total", "state_memory_bytes")
+
+
+def _as_mapping(progress: Any) -> Mapping[str, Any]:
+    """PySpark 4 hands out StreamingQueryProgress objects; their ``json`` is the
+    progress exactly as Spark reported it. A plain dict passes through."""
+    text = getattr(progress, "json", None)
+    return json.loads(text) if isinstance(text, str) else progress
+
+
+def _rate(value: Any) -> float | None:
+    """Spark reports a rate over an empty interval as NaN or Infinity."""
+    if value is None:
+        return None
+    number = float(value)
+    return number if math.isfinite(number) else None
+
+
+def progress_row(progress: Any, *, query_name: str, recorded_at: datetime) -> dict[str, Any]:
+    p = _as_mapping(progress)
+    durations = p.get("durationMs") or {}
+    operators = p.get("stateOperators") or []
+    return {
+        "query_name": query_name,
+        "query_id": str(p["id"]),
+        "batch_id": int(p["batchId"]),
+        "run_id": str(p["runId"]),
+        "progress_at": datetime.fromisoformat(str(p["timestamp"]).replace("Z", "+00:00")),
+        "recorded_at": recorded_at,
+        "num_input_rows": p.get("numInputRows"),
+        "input_rows_per_second": _rate(p.get("inputRowsPerSecond")),
+        "processed_rows_per_second": _rate(p.get("processedRowsPerSecond")),
+        "batch_duration_ms": p.get("batchDuration"),
+        **{column: durations.get(key) for column, key in _DURATIONS.items()},
+        "state_rows_total": sum(o.get("numRowsTotal") or 0 for o in operators) if operators else None,
+        "state_memory_bytes": sum(o.get("memoryUsedBytes") or 0 for o in operators) if operators else None,
+    }
+
+
+class ProgressRecorder:
+    """Stores each micro-batch's progress once.
+
+    ``recentProgress`` keeps the last hundred or so updates, so every poll
+    sees batches already stored; those are skipped here and, after a restart,
+    by the primary key. The query id is the one Spark keeps in the
+    checkpoint, which is what ``audit.marketplace_speed_batch`` is keyed by.
+    """
+
+    def __init__(self, connection_factory: Callable[[], Any], *, query_name: str = MARKETPLACE_SPEED_QUERY_NAME,
+                 clock: Callable[[], datetime] = lambda: datetime.now(timezone.utc)) -> None:
+        self.connection_factory, self.query_name, self.clock = connection_factory, query_name, clock
+        self.seen: set[tuple[str, int]] = set()
+
+    def record(self, progresses: Iterable[Any]) -> int:
+        now = self.clock()
+        rows = []
+        for progress in progresses:
+            row = progress_row(progress, query_name=self.query_name, recorded_at=now)
+            key = (row["query_id"], row["batch_id"])
+            if key not in self.seen:
+                rows.append(row)
+        if not rows:
+            return 0
+        placeholders = ",".join(["%s"] * len(PROGRESS_COLUMNS))
+        with self.connection_factory() as conn, conn.cursor() as cur:
+            for row in rows:
+                cur.execute(f"INSERT INTO audit.marketplace_stream_progress ({','.join(PROGRESS_COLUMNS)}) "
+                            f"VALUES ({placeholders}) ON CONFLICT (query_name, query_id, batch_id) DO NOTHING",
+                            tuple(row[c] for c in PROGRESS_COLUMNS))
+        self.seen.update((row["query_id"], row["batch_id"]) for row in rows)
+        return len(rows)
+
+
+def record_progress_safely(recorder: ProgressRecorder, query: Any) -> None:
+    """A measurement must never stop the stream it measures: a failure is
+    logged, and the next poll retries the same batches."""
+    try:
+        recorder.record(query.recentProgress)
+    except Exception as error:  # noqa: BLE001
+        print(json.dumps({"event": "progress_record_failed", "error": f"{type(error).__name__}: {error}"[:500]}),
+              flush=True)
+
+
+def await_query(query: Any, *, stop: Any, poll_seconds: float = 5,
+                on_poll: Callable[[], None] | None = None) -> None:
     """Block until the query ends by itself, or stop it once asked to.
 
     ``query.stop()`` cancels a micro-batch in progress rather than waiting
@@ -75,6 +171,8 @@ def await_query(query: Any, *, stop: Any, poll_seconds: float = 5) -> None:
     sink is idempotent by deterministic ID.
     """
     while not query.awaitTermination(poll_seconds):
+        if on_poll is not None:
+            on_poll()
         if stop.is_set():
             query.stop()
             return
@@ -98,9 +196,13 @@ def main() -> None:
 
     stop = StopSignal()
     install_signal_handlers(stop)
+    from common.postgres import postgres_connection_factory
+
     spark = build_spark()
+    recorder = ProgressRecorder(postgres_connection_factory())
     try:
-        await_query(start_query(spark), stop=stop)
+        query = start_query(spark)
+        await_query(query, stop=stop, on_poll=lambda: record_progress_safely(recorder, query))
     finally:
         spark.stop()
 

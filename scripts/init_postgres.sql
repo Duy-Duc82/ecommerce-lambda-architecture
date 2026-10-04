@@ -151,6 +151,60 @@ ALTER TABLE audit.marketplace_speed_batch ADD COLUMN IF NOT EXISTS query_id VARC
 ALTER TABLE audit.marketplace_speed_batch DROP CONSTRAINT IF EXISTS marketplace_speed_batch_pkey;
 ALTER TABLE audit.marketplace_speed_batch ADD CONSTRAINT marketplace_speed_batch_pkey PRIMARY KEY (query_name, query_id, batch_id);
 
+-- Phase 9 (plan section 6.1): processing latency per micro-batch, in ms.
+-- Latency is the batch's completion -- every sink written -- minus each
+-- applied observation's produced_at, the instant the crawler sent it to
+-- Kafka (kafka-python stamps the record's CreateTime at that send). It
+-- includes the time the record waited in Kafka for the next trigger.
+-- Nullable: a batch with no applied observation has no latency, and rows
+-- from before Phase 9 have none either. No sign check: a clock step between
+-- containers must not fail a batch that wrote its sinks. Safe to run twice.
+ALTER TABLE audit.marketplace_speed_batch ADD COLUMN IF NOT EXISTS latency_p50_ms BIGINT;
+ALTER TABLE audit.marketplace_speed_batch ADD COLUMN IF NOT EXISTS latency_p95_ms BIGINT;
+ALTER TABLE audit.marketplace_speed_batch ADD COLUMN IF NOT EXISTS latency_max_ms BIGINT;
+
+-- Phase 9 (plan section 6.1): Spark's own StreamingQueryProgress, one row per
+-- micro-batch. query_id is the id Spark keeps in the checkpoint, the same one
+-- marketplace_speed_batch is keyed by, so the two join on
+-- (query_name, query_id, batch_id). Written by the speed service, which polls
+-- recentProgress; a batch it has already stored is left alone.
+CREATE TABLE IF NOT EXISTS audit.marketplace_stream_progress (
+    query_name VARCHAR(128) NOT NULL,
+    query_id VARCHAR(64) NOT NULL,
+    batch_id BIGINT NOT NULL CHECK (batch_id >= 0),
+    run_id VARCHAR(64) NOT NULL,
+    progress_at TIMESTAMPTZ NOT NULL,
+    recorded_at TIMESTAMPTZ NOT NULL,
+    num_input_rows BIGINT CHECK (num_input_rows IS NULL OR num_input_rows >= 0),
+    input_rows_per_second DOUBLE PRECISION,
+    processed_rows_per_second DOUBLE PRECISION,
+    batch_duration_ms BIGINT,
+    trigger_execution_ms BIGINT,
+    add_batch_ms BIGINT,
+    get_batch_ms BIGINT,
+    latest_offset_ms BIGINT,
+    query_planning_ms BIGINT,
+    wal_commit_ms BIGINT,
+    commit_offsets_ms BIGINT,
+    state_rows_total BIGINT,
+    state_memory_bytes BIGINT,
+    PRIMARY KEY (query_name, query_id, batch_id)
+);
+CREATE INDEX IF NOT EXISTS idx_stream_progress_at ON audit.marketplace_stream_progress (progress_at);
+
+-- Phase 9 (plan section 6.3): what each store holds, once per UTC day. Read
+-- by the storage-growth report (P2-04). One row per (day, component, scope);
+-- a second snapshot on the same day writes nothing.
+CREATE TABLE IF NOT EXISTS audit.storage_snapshot (
+    snapshot_date DATE NOT NULL,
+    captured_at TIMESTAMPTZ NOT NULL,
+    component VARCHAR(16) NOT NULL CHECK (component IN ('minio','postgres','elasticsearch','kafka')),
+    scope VARCHAR(256) NOT NULL,
+    bytes BIGINT NOT NULL CHECK (bytes >= 0),
+    objects BIGINT CHECK (objects IS NULL OR objects >= 0),
+    PRIMARY KEY (snapshot_date, component, scope)
+);
+
 -- ---------- Marketplace temporal warehouse cache (Phase 6) ----------
 CREATE TABLE IF NOT EXISTS cache.marketplace_offer_current (
     offer_id VARCHAR(128) PRIMARY KEY, marketplace VARCHAR(64) NOT NULL, marketplace_id VARCHAR(128) NOT NULL,

@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Callable, Iterable
 import json
+import math
 
 from config.marketplace_wire import marketplace_change_from_wire
 from config.settings import (
@@ -45,6 +46,32 @@ class BatchCounts:
     redis_rows: int = 0
 
 
+@dataclass(frozen=True)
+class BatchLatency:
+    """Processing latency of one micro-batch, in milliseconds (Phase 9 plan 6.1).
+
+    Each value is the batch's completion, with every sink written, minus an
+    applied observation's ``produced_at``: the instant the crawler sent it to
+    Kafka, which kafka-python also stamps as the record's CreateTime. It
+    therefore includes the time the record waited for the next trigger.
+    """
+    p50_ms: int
+    p95_ms: int
+    max_ms: int
+
+
+def _nearest_rank(ordered: list[int], q: float) -> int:
+    return ordered[max(0, math.ceil(q * len(ordered)) - 1)]
+
+
+def batch_latency(produced: Iterable[datetime], completed_at: datetime) -> BatchLatency | None:
+    """Exact nearest-rank percentiles; None when nothing was applied."""
+    values = sorted(round((completed_at - instant).total_seconds() * 1000) for instant in produced)
+    if not values:
+        return None
+    return BatchLatency(_nearest_rank(values, 0.50), _nearest_rank(values, 0.95), values[-1])
+
+
 def _epoch_micros(dt: datetime) -> int:
     delta = dt.astimezone(timezone.utc) - datetime(1970, 1, 1, tzinfo=timezone.utc)
     return delta.days * 86_400_000_000 + delta.seconds * 1_000_000 + delta.microseconds
@@ -65,19 +92,22 @@ class MarketplaceSpeedAudit:
                 VALUES (%s,%s,%s,'RUNNING',%s) ON CONFLICT (query_name,query_id,batch_id) DO UPDATE SET status='RUNNING',started_at=EXCLUDED.started_at,completed_at=NULL,error_message=NULL""", (query_name, query_id, batch_id, started_at))
         return "RUN"
 
-    def mark_succeeded(self, *, query_name: str, query_id: str, batch_id: int, completed_at: datetime, counts: BatchCounts) -> None:
-        self._update(query_name, query_id, batch_id, "SUCCEEDED", completed_at, counts, None)
+    def mark_succeeded(self, *, query_name: str, query_id: str, batch_id: int, completed_at: datetime, counts: BatchCounts,
+                       latency: BatchLatency | None = None) -> None:
+        self._update(query_name, query_id, batch_id, "SUCCEEDED", completed_at, counts, None, latency)
 
     def mark_failed(self, *, query_name: str, query_id: str, batch_id: int, completed_at: datetime, error: Exception) -> None:
-        self._update(query_name, query_id, batch_id, "FAILED", completed_at, None, str(error)[:2000])
+        self._update(query_name, query_id, batch_id, "FAILED", completed_at, None, str(error)[:2000], None)
 
-    def _update(self, query_name, query_id, batch_id, status, completed_at, counts, error):
+    def _update(self, query_name, query_id, batch_id, status, completed_at, counts, error, latency):
         counts = counts or BatchCounts()
+        p50, p95, top = (latency.p50_ms, latency.p95_ms, latency.max_ms) if latency else (None, None, None)
         with self.connection_factory() as conn, conn.cursor() as cur:
             cur.execute("""UPDATE audit.marketplace_speed_batch SET status=%s,completed_at=%s,
                 input_rows=%s,invalid_rows=%s,applied_rows=%s,duplicate_rows=%s,late_rows=%s,
-                change_rows=%s,kafka_rows=%s,es_rows=%s,redis_rows=%s,error_message=%s
-                WHERE query_name=%s AND query_id=%s AND batch_id=%s""", (status, completed_at, counts.input_rows, counts.invalid_rows, counts.applied_rows, counts.duplicate_rows, counts.late_rows, counts.change_rows, counts.kafka_rows, counts.es_rows, counts.redis_rows, error, query_name, query_id, batch_id))
+                change_rows=%s,kafka_rows=%s,es_rows=%s,redis_rows=%s,error_message=%s,
+                latency_p50_ms=%s,latency_p95_ms=%s,latency_max_ms=%s
+                WHERE query_name=%s AND query_id=%s AND batch_id=%s""", (status, completed_at, counts.input_rows, counts.invalid_rows, counts.applied_rows, counts.duplicate_rows, counts.late_rows, counts.change_rows, counts.kafka_rows, counts.es_rows, counts.redis_rows, error, p50, p95, top, query_name, query_id, batch_id))
 
 
 def _change_document(change: dict) -> dict:
@@ -155,7 +185,12 @@ class MarketplaceSpeedSinks:
             if changes: pipe.zremrangebyrank("rt:changes:recent", 0, -(REDIS_MARKETPLACE_RECENT_CHANGES_MAX + 1))
             if hasattr(pipe, "execute"): pipe.execute()
             counts = BatchCounts(**{**counts.__dict__, "input_rows": sum(r.output_kind != "CHANGE" for r in rows), "change_rows": len(changes), "kafka_rows": len(changes), "es_rows": len(changes) + len(states), "redis_rows": len(changes) + len(states)})
-            self.audit.mark_succeeded(query_name=query_name, query_id=query_id, batch_id=batch_id, completed_at=datetime.now(timezone.utc), counts=counts)
+            # Measured only now, with every sink written: a batch that fails
+            # part-way has no latency to report.
+            completed = datetime.now(timezone.utc)
+            latency = batch_latency((state.produced_at for state in states), completed)
+            self.audit.mark_succeeded(query_name=query_name, query_id=query_id, batch_id=batch_id, completed_at=completed,
+                                      counts=counts, latency=latency)
             return counts
         except Exception as exc:
             try: self.audit.mark_failed(query_name=query_name, query_id=query_id, batch_id=batch_id, completed_at=datetime.now(timezone.utc), error=exc)

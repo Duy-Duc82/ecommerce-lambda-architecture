@@ -407,6 +407,10 @@ def main(argv: list[str] | None = None) -> int:
     projector = Projector(sources=sources, bulk=elasticsearch_bulk(es),
                           overlap_seconds=MARKETPLACE_OPS_PROJECT_OVERLAP_SECONDS)
     rebuild = args.rebuild
+    # Phase 9 plan section 6.3: the projector already wakes every interval on
+    # every stack, live included, so it takes the day's storage snapshot.
+    from ops.storage import DailySnapshot, run_snapshot
+    daily = DailySnapshot(run_snapshot)
     try:
         while True:
             try:
@@ -419,6 +423,12 @@ def main(argv: list[str] | None = None) -> int:
                 # The overlap means the next pass re-reads whatever this one
                 # missed, so an outage costs freshness, never a document.
                 print(json.dumps({"event": "projection_failed",
+                                  "error": f"{type(error).__name__}: {error}"[:500]}, sort_keys=True), flush=True)
+            try:
+                if not args.once:
+                    daily.maybe(datetime.now(timezone.utc))
+            except Exception as error:
+                print(json.dumps({"event": "storage_snapshot_failed",
                                   "error": f"{type(error).__name__}: {error}"[:500]}, sort_keys=True), flush=True)
             beat()
             if args.once or stop.wait(interval):
