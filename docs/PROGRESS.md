@@ -2590,10 +2590,17 @@ Suite mặc định trên `e12a45c`: **1140 pass**, 11 deselected (D1–D11),
 
 ### 26.5 Còn mở
 
-1. **Chưa có `docs/SOURCE_FEASIBILITY.md`** (Brief §3, P0-01). Bằng chứng
-   nằm rải ở §4a. Evidence bundle báo MISSING cho tới khi có file này.
-2. **Chưa có kết quả benchmark thật**, cần `bench all --repeat 3`, mất vài
-   giờ.
+1. **`docs/SOURCE_FEASIBILITY.md` có bản nháp** (`0d8dad1`). File chỉ tổng
+   hợp số đã đo ở §4, §4a và audit `mp-live`, và **chờ thầy duyệt**.
+2. **`bench all --repeat 3` đang chạy** từ 2026-10-04 khoảng 14:15 UTC, ước
+   tính 7 giờ. Log ở `data/ops/bench-all.log`, kết quả ở `data/ops/bench/`.
+   Trước đó đã chạy trial 1 lần cho từng kịch bản (lưu ở
+   `data/ops/bench-trial/`, không tính là kết quả). Trial tìm ra một bug:
+   trang stub luôn `PARTIAL`, mà kịch bản crawl chỉ chờ `SUCCEEDED` (test
+   `effea85`, fix `1f40de2`). Kịch bản batch trên dữ liệu phát lại luôn
+   `QUALITY_FAILED`, vì crawl run giả không có trong audit nên rule đối soát
+   fail. Thời gian chạy batch vẫn là số đo hợp lệ, nhưng báo cáo phải ghi rõ
+   điều này.
 3. **Demo đầy đủ (có Kibana và Superset)** mới chỉ chạy `--without-serve`, vì
    RAM dùng chung với `mp-live`. Cần chạy khi có người theo dõi.
 4. **Integration run (plan §12.2) và tag `feature-freeze-w9`**: chờ user.
