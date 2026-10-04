@@ -2644,6 +2644,7 @@ Suite mặc định trên `e12a45c`: **1140 pass**, 11 deselected (D1–D11),
    - Chạy demo đầy đủ có Kibana/Superset khi có người theo dõi RAM.
    - Integration run (plan §12.2), rồi tag `feature-freeze-w9`.
    - Merge `phase-9-evaluation-plan` vào `develop`, rồi mở PR `develop` →
-     `master`. Nội dung PR đã soạn trong session 2026-10-04: lấy bản trong
-     PROGRESS §23.7, kèm mục "Giới hạn đã biết".
+     `master`. Nội dung PR đã soạn sẵn ở `data/ops/pr-develop-to-master.md`
+     (gitignored, chỉ có trên máy này). Nó viết trước Phase 9, nên phải bổ
+     sung Phase 9 trước khi mở PR.
 4. **2026-11-03:** đủ 30 ngày thu thập. Chạy lại `evaluate` và `evidence`.
