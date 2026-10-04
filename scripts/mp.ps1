@@ -23,14 +23,15 @@
 # (project name, container prefix, ports) and restores the caller's
 # environment afterwards. Phase 9 plan section 5:
 #   env/live.env    live collection; smoke, drill and `down -Volumes` refuse it
-#   env/bench.env   benchmarks, smoke and drills, beside the live stack
+#   env/bench.env   benchmarks (`bench crawl|ingest|speed|batch|all|report`),
+#                   smoke and drills, beside the live stack
 #   env/demo.env    the offline demo
 # ============================================================
 
 param(
     [Parameter(Position = 0, Mandatory = $true)]
     [ValidateSet("up", "down", "status", "migrate", "seed", "smoke", "validate", "batch", "drill",
-                 "backup", "restore")]
+                 "backup", "restore", "bench")]
     [string]$Command,
     [string[]]$With = @("crawl", "ingest", "speed", "batch"),
     [switch]$Volumes,
@@ -309,6 +310,21 @@ try {
             $ExitCode = Invoke-Ops @("backup")
         }
         "restore" { $ExitCode = Invoke-Restore $BackupId $Project }
+        "bench" {
+            # Phase 9 plan section 8. Like the drills: on the host, through the
+            # isolated project's published ports, with the lake on MinIO.
+            Assert-NotLive "bench"
+            $python = Join-Path $ProjectRoot ".venv\Scripts\python.exe"
+            if (-not (Test-Path $python)) { $python = "python" }
+            $savedProfile = $env:DATA_LAKE_PROFILE
+            $env:DATA_LAKE_PROFILE = "minio"
+            try {
+                & $python -m ops.bench @Rest | Write-Host
+                $ExitCode = $LASTEXITCODE
+            } finally {
+                $env:DATA_LAKE_PROFILE = $savedProfile
+            }
+        }
         "drill" {
             # Drills drive Docker, so they run on the host, against the
             # published ports from .env, with the lake on MinIO.
