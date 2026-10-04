@@ -92,12 +92,16 @@ def crawl_metrics(attempts: list[dict[str, Any]]) -> dict[str, Any]:
     started = min(a["started_at"] for a in attempts)
     completed = max(a["completed_at"] for a in attempts)
     seconds = max((completed - started).total_seconds(), 1e-9)
-    succeeded = [a for a in attempts if a["status"] == "SUCCEEDED"]
+    # PARTIAL is a crawled page some of whose rows were rejected: every stub
+    # page is, by its deliberately invalid fixture row.
+    completed = [a for a in attempts if a["status"] in ("SUCCEEDED", "PARTIAL")]
     latencies = [a["latency_ms"] for a in attempts if a.get("latency_ms") is not None]
     parsed = sum(a["parsed_count"] for a in attempts)
     raw_bytes = sum(a["raw_bytes"] for a in attempts)
     return {
-        "requests": len(attempts), "succeeded": len(succeeded), "seconds": round(seconds, 3),
+        "requests": len(attempts), "completed": len(completed),
+        "partial": sum(a["status"] == "PARTIAL" for a in attempts),
+        "failed": sum(a["status"] == "FAILED" for a in attempts), "seconds": round(seconds, 3),
         "requests_per_second": len(attempts) / seconds, "parsed_per_second": parsed / seconds,
         "bytes_per_second": raw_bytes / seconds, "parsed": parsed,
         "latency_p50_ms": percentile(latencies, 0.50), "latency_p95_ms": percentile(latencies, 0.95),
@@ -414,6 +418,11 @@ def run_speed(stack: Stack, *, rate: float, seconds: int, seed: int) -> dict[str
     return speed_metrics(batches, progress, sent=sent, send_seconds=send_seconds, drain_seconds=drain)
 
 
+# Pages crawled in a run: a PARTIAL attempt fetched and parsed its page too.
+CRAWLED_SQL = ("SELECT count(DISTINCT task_id) AS n FROM audit.crawl_request_attempt "
+               "WHERE started_at >= %s AND status IN ('SUCCEEDED', 'PARTIAL')")
+
+
 def run_crawl(stack: Stack, *, delay: float, categories: int, pages: int, rows_per_page: int) -> dict[str, Any]:
     stack.env.update({"STUB_LAST_PAGE": str(pages), "STUB_ROWS_PER_PAGE": str(rows_per_page),
                       "CRAWL_REQUEST_DELAY_SECONDS": str(delay), "CRAWL_ACTIVE_CADENCE_MINUTES": "60",
@@ -429,8 +438,7 @@ def run_crawl(stack: Stack, *, delay: float, categories: int, pages: int, rows_p
     expected = categories * pages
 
     def done() -> bool:
-        return stack.query("SELECT count(DISTINCT task_id) AS n FROM audit.crawl_request_attempt "
-                           "WHERE started_at >= %s AND status = 'SUCCEEDED'", (since,))[0]["n"] >= expected
+        return stack.query(CRAWLED_SQL, (since,))[0]["n"] >= expected
 
     wait_until(done, timeout=max(600, expected * (delay + 5) * 2), what=f"{expected} pages crawled", poll=5)
     stack.compose("stop", "crawl-worker", check=False)
