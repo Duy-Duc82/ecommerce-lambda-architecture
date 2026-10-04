@@ -129,3 +129,64 @@ def test_the_daily_snapshot_runs_once_per_utc_date_and_retries_a_total_failure()
     daily.maybe(datetime(2026, 10, 5, 0, 1, tzinfo=timezone.utc))  # a new date: taken
 
     assert [c.minute for c in calls] == [30, 31, 1]
+
+
+# -- P2-04: the growth report (plan section 10, test 11) --
+
+def _snapshot(day, *, bronze, silver, observations, gold=1000, cache=500, audit=300, es=200, kafka=100):
+    d = date(2026, 10, day)
+    return [
+        {"snapshot_date": d, "component": "minio", "scope": "ecommerce-bronze/marketplace/raw", "bytes": bronze, "objects": 1},
+        {"snapshot_date": d, "component": "minio", "scope": storage.SILVER_SCOPE, "bytes": silver, "objects": observations},
+        {"snapshot_date": d, "component": "minio", "scope": "ecommerce-gold/marketplace/runs", "bytes": gold, "objects": 1},
+        {"snapshot_date": d, "component": "postgres", "scope": "cache", "bytes": cache, "objects": 1},
+        {"snapshot_date": d, "component": "postgres", "scope": "audit", "bytes": audit, "objects": 1},
+        {"snapshot_date": d, "component": "postgres", "scope": "public", "bytes": 10**9, "objects": 1},
+        {"snapshot_date": d, "component": "elasticsearch", "scope": "marketplace-changes-v1", "bytes": es, "objects": 1},
+        {"snapshot_date": d, "component": "kafka", "scope": "marketplace.observations.v1", "bytes": kafka, "objects": 3},
+    ]
+
+
+def test_growth_needs_two_snapshot_dates():
+    import pytest
+
+    with pytest.raises(ValueError, match="two dates"):
+        storage.growth_report(_snapshot(4, bronze=10, silver=10, observations=1))
+
+
+def test_growth_per_day_bytes_per_observation_and_ratios():
+    rows = _snapshot(4, bronze=2_000_000, silver=500_000, observations=1_000) + \
+        _snapshot(6, bronze=6_000_000, silver=1_500_000, observations=3_000, gold=3000)
+
+    report = storage.growth_report(rows, free_bytes=10_000_000)
+
+    assert report["window"] == {"first": "2026-10-04", "last": "2026-10-06", "days": 2, "snapshots": 2}
+    assert report["growth_bytes_per_day"]["bronze"] == 2_000_000
+    assert report["growth_bytes_per_day"]["silver_observations"] == 1_000
+    assert report["bytes_per_observation"]["bronze"] == 2000.0
+    assert report["bytes_per_observation"]["silver"] == 500.0
+    assert report["ratios"] == {"bronze_to_silver": 4.0, "silver_to_gold": 500.0}
+    # the public schema is the legacy demo's, not this pipeline's
+    assert report["per_date"]["2026-10-06"]["cache"] == 500
+
+
+def test_the_projection_grows_observations_at_the_measured_rate():
+    rows = _snapshot(4, bronze=1000, silver=1000, observations=10, gold=0, cache=0, audit=0, es=0, kafka=0) + \
+        _snapshot(5, bronze=2000, silver=2000, observations=20, gold=0, cache=0, audit=0, es=0, kafka=0)
+
+    report = storage.growth_report(rows)
+
+    assert report["bytes_per_observation_total"] == 200.0
+    # 20 observations after one day, +10 a day: 310 on day 30
+    assert report["projection_total_bytes"]["day_30"] == 310 * 200
+    brief = {(r["offers"], r["cadence_seconds"]): r for r in report["projection_brief_rows_60_days"]}
+    assert brief[(1_000, 3600)]["observations"] == 1_440_000
+    assert brief[(5_000, 1800)]["bytes"] == 14_400_000 * 200
+    assert "not a measurement" in report["projection_note"]
+
+
+def test_days_until_full_uses_total_growth():
+    rows = _snapshot(4, bronze=0, silver=0, observations=0, gold=0, cache=0, audit=0, es=0, kafka=0) + \
+        _snapshot(5, bronze=500, silver=500, observations=5, gold=0, cache=0, audit=0, es=0, kafka=0)
+
+    assert storage.growth_report(rows, free_bytes=10_000)["disk"]["days_until_full"] == 10.0

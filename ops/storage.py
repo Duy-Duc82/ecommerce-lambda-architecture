@@ -214,3 +214,116 @@ def run_snapshot(now: datetime | None = None) -> dict[str, Any]:
     report = take_snapshot(live_collectors(), postgres_connection_factory(), now=now or datetime.now(timezone.utc))
     print(json.dumps(report, sort_keys=True), flush=True)
     return report
+
+
+# -- P2-04: the growth report (Phase 9 plan section 10) ------------------------
+
+SILVER_SCOPE = "ecommerce-silver/marketplace/offer_observations"
+# Brief section 5's planning table: monitored offers and cadence over 60 days.
+BRIEF_ROWS = ((1_000, 4 * 3600), (1_000, 3600), (5_000, 3600), (5_000, 1800))
+
+
+def layers(rows: Iterable[Mapping[str, Any]]) -> dict[str, int]:
+    """One snapshot's rows folded into the layers the report speaks of."""
+    out = {"bronze": 0, "silver": 0, "gold": 0, "quarantine": 0, "cache": 0, "audit": 0,
+           "elasticsearch": 0, "kafka": 0, "silver_observations": 0}
+    for r in rows:
+        c, scope, size = r["component"], r["scope"], int(r["bytes"])
+        if c == "minio":
+            if scope.startswith("ecommerce-bronze"):
+                out["bronze"] += size
+            elif scope == SILVER_SCOPE:
+                out["silver"] += size
+                out["silver_observations"] += int(r["objects"] or 0)
+            elif scope.startswith("ecommerce-silver") and "quarantine" in scope:
+                out["quarantine"] += size
+            elif scope.startswith("ecommerce-gold"):
+                out["gold"] += size
+        elif c == "postgres" and scope in ("cache", "audit"):
+            out[scope] += size
+        elif c in ("elasticsearch", "kafka"):
+            out[c] += size
+    return out
+
+
+STORED = ("bronze", "silver", "gold", "quarantine", "cache", "audit", "elasticsearch", "kafka")
+
+
+def growth_report(snapshots: Iterable[Mapping[str, Any]], *, free_bytes: int | None = None) -> dict[str, Any]:
+    by_date: dict[Any, list[Mapping[str, Any]]] = {}
+    for row in snapshots:
+        by_date.setdefault(row["snapshot_date"], []).append(row)
+    dates = sorted(by_date)
+    if len(dates) < 2:
+        raise ValueError(f"a growth report needs snapshots on two dates at least; found {len(dates)}")
+    series = {d: layers(by_date[d]) for d in dates}
+    first, last = series[dates[0]], series[dates[-1]]
+    days = (dates[-1] - dates[0]).days
+    observations = last["silver_observations"]
+    per_day = {k: (last[k] - first[k]) / days for k in (*STORED, "silver_observations")}
+    total_per_day = sum(per_day[k] for k in STORED)
+    per_observation = {k: (last[k] / observations if observations else None) for k in STORED}
+    bytes_per_observation = sum(v for v in per_observation.values() if v is not None) if observations else None
+
+    def projected_bytes(at_day: int) -> int | None:
+        if bytes_per_observation is None:
+            return None
+        obs = observations + per_day["silver_observations"] * max(at_day - days, 0)
+        return round(obs * bytes_per_observation)
+
+    return {
+        "report": "storage_growth", "dataset": "live",
+        "window": {"first": dates[0].isoformat(), "last": dates[-1].isoformat(), "days": days, "snapshots": len(dates)},
+        "per_date": {d.isoformat(): s for d, s in series.items()},
+        "growth_bytes_per_day": {k: round(v) for k, v in per_day.items()},
+        "growth_total_bytes_per_day": round(total_per_day),
+        "bytes_per_observation": {k: (round(v, 1) if v is not None else None) for k, v in per_observation.items()},
+        "bytes_per_observation_total": round(bytes_per_observation, 1) if bytes_per_observation else None,
+        "ratios": {"bronze_to_silver": round(last["bronze"] / last["silver"], 3) if last["silver"] else None,
+                   "silver_to_gold": round(last["silver"] / last["gold"], 3) if last["gold"] else None},
+        "projection_note": "a projection from measured bytes per observation, not a measurement",
+        "projection_total_bytes": {f"day_{n}": projected_bytes(n) for n in (30, 45, 60)},
+        "projection_brief_rows_60_days": [
+            {"offers": offers, "cadence_seconds": cadence, "observations": offers * (86400 // cadence) * 60,
+             "bytes": round(offers * (86400 // cadence) * 60 * bytes_per_observation) if bytes_per_observation else None}
+            for offers, cadence in BRIEF_ROWS],
+        "disk": {"free_bytes": free_bytes,
+                 "days_until_full": round(free_bytes / total_per_day, 1) if free_bytes and total_per_day > 0 else None,
+                 "measured_on": "the Docker volume disk, as seen from the kafka_data mount"},
+    }
+
+
+def growth_markdown(report: Mapping[str, Any]) -> str:
+    w = report["window"]
+    lines = [f"# storage_growth ({report['dataset']})", "",
+             f"Snapshots {w['first']} to {w['last']} ({w['days']} days, {w['snapshots']} snapshots).", "",
+             "| layer | bytes/day | bytes/observation |", "|---|---:|---:|"]
+    for layer in STORED:
+        lines.append(f"| {layer} | {report['growth_bytes_per_day'][layer]} | {report['bytes_per_observation'][layer]} |")
+    lines += ["", f"Projection ({report['projection_note']}): " +
+              ", ".join(f"{k} {v} B" for k, v in report["projection_total_bytes"].items()), ""]
+    return "\n".join(lines) + "\n"
+
+
+def run_growth_report(out_dir: str) -> int:
+    import shutil
+
+    from common.postgres import postgres_connection_factory
+
+    with postgres_connection_factory()() as conn, conn.cursor() as cur:
+        cur.execute("SELECT snapshot_date, component, scope, bytes, objects FROM audit.storage_snapshot")
+        rows = [dict(zip(("snapshot_date", "component", "scope", "bytes", "objects"), r)) for r in cur.fetchall()]
+    mount = Path(os.environ.get("KAFKA_DATA_MOUNT", "/kafka-data"))
+    free = shutil.disk_usage(mount).free if mount.is_dir() else None
+    try:
+        report = growth_report(rows, free_bytes=free)
+    except ValueError as error:
+        print(json.dumps({"event": "evaluation_refused", "reason": str(error)}), flush=True)
+        return 2
+    out = Path(out_dir)
+    out.mkdir(parents=True, exist_ok=True)
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    (out / f"storage-{stamp}.json").write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    (out / f"storage-{stamp}.md").write_text(growth_markdown(report), encoding="utf-8")
+    print(json.dumps({"event": "evaluation_written", "kind": "storage", "window": report["window"]}), flush=True)
+    return 0
