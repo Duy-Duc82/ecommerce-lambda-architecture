@@ -12,7 +12,9 @@
 #   .\scripts\mp.ps1 seed --category 1846 --pages 2
 #   .\scripts\mp.ps1 smoke [-TimeoutSeconds 900]
 #   .\scripts\mp.ps1 validate [-Json path]
-#   .\scripts\mp.ps1 drill d1..d10|all              (after a passing smoke)
+#   .\scripts\mp.ps1 drill d1..d11|all              (after a passing smoke)
+#       d11 takes the stack down and restores into a second project; it runs
+#       last in `drill all` and rebuilds the stack before it returns.
 #   .\scripts\mp.ps1 batch -AsOf 2026-10-02T00:00:00Z [-AllowBackfill] [-QualityOnly]
 #   .\scripts\mp.ps1 backup
 #   .\scripts\mp.ps1 restore -BackupId bk-... -Project mp-restore

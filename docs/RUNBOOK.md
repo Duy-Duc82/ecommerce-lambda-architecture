@@ -186,7 +186,7 @@ On a stack that also holds host-run crawls with a `local` lake,
 `bronze_present` fails: those attempts recorded `file:///D:/...` raw URIs that
 no container can read (`PROGRESS.md` §16.4).
 
-### Drills D1-D10 (plan section 10)
+### Drills D1-D11 (plan section 10)
 
 A drill injects one fault into the **running** stack, asserts what the system
 does while faulted, removes the fault and checks the system came back. It runs
@@ -195,8 +195,8 @@ on the host, not in the `ops` container, because it drives Docker:
 ```powershell
 $env:COMPOSE_PROJECT_NAME = "mp-smoke"
 .\scripts\mp.ps1 smoke            # a drill starts from a passing validate
-.\scripts\mp.ps1 drill d1         # then d2 ... d10, one at a time
-.\scripts\mp.ps1 drill all        # or all ten in order
+.\scripts\mp.ps1 drill d1         # then d2 ... d11, one at a time
+.\scripts\mp.ps1 drill all        # or all eleven in order
 ```
 
 `mp drill` runs `.venv\Scripts\python.exe -m ops.drills` with
@@ -216,6 +216,7 @@ timestamp, the observations, and `passed`.
 | D8 | one planted row in `audit.crawl_request_attempt` whose `parsed_count` Silver denies | delete that row by the `attempt_id` the insert returned, then resume the same run |
 | D9 | `CHECK` constraint `drill_d9_reject_one_cache_row` on `cache.marketplace_offer_current`, `NOT VALID` | `DROP CONSTRAINT`, then resume the same run |
 | D10 | two `batch-once` containers started at once under different run ids | none needed; the refused one did nothing |
+| D11 | `ops backup`, then the whole stack **down** and a restore into `<project>-restore` | the drill removes the restored project with its volumes; the harness then brings the real stack back |
 
 **D10 publishes under a run id ending `-d10`.** The two racing batches carry
 different run ids on purpose: with one id, "the refused run wrote no audit

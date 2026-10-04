@@ -592,10 +592,19 @@ def test_a_query_that_never_goes_quiet_fails_with_how_long_it_waited(monkeypatch
 # ---------------------------------------------------------------------------
 # The WP7 half of the harness: D7-D10, offline.
 # ---------------------------------------------------------------------------
-def test_the_drills_cover_d1_to_d10():
+def test_the_drills_cover_d1_to_d11():
     from ops import drills
 
-    assert sorted(drills.DRILLS, key=lambda name: int(name[1:])) == [f"d{n}" for n in range(1, 11)]
+    assert sorted(drills.DRILLS, key=lambda name: int(name[1:])) == [f"d{n}" for n in range(1, 12)]
+
+
+def test_d11_runs_last_because_it_is_the_one_that_takes_the_stack_down():
+    from ops import drills
+
+    # `drill all` follows the registry's order. D11 brings a second Compose
+    # project up, which needs the first one down, so anywhere but last would
+    # make every drill after it start from a cold stack.
+    assert list(drills.DRILLS)[-1] == "d11"
 
 
 def test_a_raw_uri_yields_the_five_components_reparse_needs():
@@ -604,8 +613,11 @@ def test_a_raw_uri_yields_the_five_components_reparse_needs():
     uri = ("s3a://ecommerce-bronze/marketplace/raw/marketplace=tiki/observed_date=2026-10-03/hour=14/"
            "crawl_run_id=run-7/raw_artifact_id=art-9/body.bin")
 
-    assert drills._raw_artifact_ref(uri) == {"marketplace": "tiki", "observed_date": "2026-10-03", "hour": "14",
-                                             "crawl_run_id": "run-7", "raw_artifact_id": "art-9"}
+    from crawler.reparse import RawArtifactRef
+
+    # The drills no longer parse the path themselves: reparse owns the layout
+    # it writes, and the drill only turns a refusal into a DrillFailed.
+    assert drills._raw_artifact_ref(uri) == RawArtifactRef("tiki", "2026-10-03", "14", "run-7", "art-9")
 
 
 def test_a_raw_uri_missing_a_component_is_an_error_not_a_guess():
@@ -700,3 +712,206 @@ def test_a_resume_passes_resume_through_to_the_batch():
     stack = drills.Stack.__new__(drills.Stack)
 
     assert stack.batch_command("mp-1", "2026-10-03T15:00:00+00:00", "--resume")[-1] == "--resume"
+
+
+
+# --- D11, offline ------------------------------------------------------------
+
+class _FakeD11Stack:
+    """Enough of Stack for D11, with every outcome dialled from the test."""
+
+    BACKUP_ID = "bk-20261004T000000Z"
+    RUN_ID = "mp-20261004T0000Z"
+
+    def __init__(self, tmp_path, *, checks=None, quality=None, verdict=None, pointer=None,
+                 volumes_after=None, manifest_cache_run_id=None):
+        from ops import drills
+
+        self.drills = drills
+        self.root = tmp_path
+        self.checks = checks if checks is not None else {
+            "restored_pointer_matches_cache": "PASS",
+            "restored_datasets_match_manifest": "PASS",
+            "restored_raw_reparses_identical": "PASS",
+        }
+        self.quality = quality if quality is not None else {
+            "quality_status": "PASS", "mandatory_failure_count": 0,
+            "manifest_promoted": False, "silver_rows": 878}
+        self.verdict = verdict if verdict is not None else {
+            "event": "validate_restored", "passed": True,
+            "tolerated": ["es_changes_unique"], "unexpected": []}
+        self.pointer = pointer if pointer is not None else self.RUN_ID
+        self.volumes = ["mp_pg_data", "mp_minio_data"]
+        self.volumes_after = volumes_after
+        self.calls: list[tuple] = []
+        self.torn_down = False
+        backup = tmp_path / "data" / "ops" / "backups" / self.BACKUP_ID
+        backup.mkdir(parents=True)
+        (backup / "backup-manifest.json").write_text(json.dumps({
+            "backup_id": self.BACKUP_ID, "pointer_run_id": self.RUN_ID,
+            "cache_run_id": manifest_cache_run_id or self.RUN_ID,
+            "pointer_as_of": "2026-10-04T00:00:00Z"}), encoding="utf-8")
+
+    # -- the bits D11 uses --
+    # The real reader: parsing what the tool containers print is part of
+    # what these tests exercise.
+    json_objects = staticmethod(__import__("ops.drills", fromlist=["x"]).Stack.json_objects)
+
+    def project(self):
+        return "mp"
+
+    def serving_version(self):
+        return {"pointer_run_id": self.RUN_ID, "cache_run_id": self.RUN_ID, "cache_offer_rows": 12}
+
+    def project_volumes(self, _name_contains):
+        """Before the restore, what the running project has; after it, what a
+        test says it has — which is how the "untouched" claim is tested."""
+        if self.torn_down and self.volumes_after is not None:
+            return list(self.volumes_after)
+        return list(self.volumes)
+
+    def wait_healthy(self, container, timeout=180):
+        self.calls.append(("wait_healthy", container))
+
+    def run(self, args, **kwargs):
+        self.calls.append(("run", " ".join(args[-3:])))
+        return _Completed(0, "")
+
+    def compose_in(self, project, *args, check=True):
+        if "down" in args:
+            self.calls.append(("down-target", project))
+            self.torn_down = True
+            return _Completed(0, "")
+        if "batch-once" in args:
+            self.calls.append(("quality-only", project))
+            return _Completed(0 if self.quality.get("quality_status") == "PASS" else 1,
+                              json.dumps(self.quality))
+        self.calls.append(("compose", project, args[0]))
+        return _Completed(0, "")
+
+    def ops_in(self, project, *args):
+        self.calls.append(("ops", project, args[0]))
+        if args[0] == "backup":
+            return 0, [{"event": "backup_written", "backup_id": self.BACKUP_ID,
+                        "counts": {"silver": 879}, "files": 1832}]
+        if args[0] == "migrate":
+            return 0, [{"event": "migrated"}]
+        if args[0] == "restore":
+            failed = any(status != "PASS" for status in self.checks.values())
+            return (1 if failed else 0), [
+                {"checks": [{"check": name, "status": status} for name, status in self.checks.items()]},
+                {"event": "quality_only_batch_next", "as_of": "2026-10-04T00:00:00Z",
+                 "pointer_run_id": self.RUN_ID}]
+        if args[0] == "validate":
+            return (0 if self.verdict.get("passed") else 1), [
+                {"checks": [{"check": "pointer_matches_cache",
+                             "observed": {"pointer": self.pointer, "cache": self.pointer}}]},
+                self.verdict]
+        raise AssertionError(args)
+
+
+class _Completed:
+    def __init__(self, returncode, stdout):
+        self.returncode, self.stdout, self.stderr = returncode, stdout, ""
+
+
+def _run_d11(tmp_path, monkeypatch, **kwargs):
+    from ops import drills
+
+    stack = _FakeD11Stack(tmp_path, **kwargs)
+    monkeypatch.setattr(drills, "_backup_root", lambda: tmp_path / "data" / "ops" / "backups")
+    rec = drills.Record("d11")
+    drills.d11_backup_and_restore(stack, rec)
+    return stack, rec
+
+
+def test_d11_restores_into_a_project_of_its_own_and_tears_it_down(tmp_path, monkeypatch):
+    stack, rec = _run_d11(tmp_path, monkeypatch)
+
+    assert ("ops", "mp-restore", "restore") in stack.calls
+    # And the restored project is gone before the harness brings the real
+    # stack back: the two cannot both own these container names.
+    assert ("down-target", "mp-restore") in stack.calls
+    assert rec.steps[-1]["step"] == "verify"
+
+
+def test_d11_takes_the_running_stack_down_before_bringing_the_other_up(tmp_path, monkeypatch):
+    stack, _ = _run_d11(tmp_path, monkeypatch)
+    order = [call for call in stack.calls if call[0] in ("run", "compose")]
+
+    down = next(index for index, call in enumerate(order) if call[0] == "run")
+    up = next(index for index, call in enumerate(order) if call[0] == "compose" and call[2] == "up")
+    assert down < up
+
+
+def test_d11_fails_when_a_restore_check_does_not_pass(tmp_path, monkeypatch):
+    from ops import drills
+
+    checks = {"restored_pointer_matches_cache": "PASS", "restored_datasets_match_manifest": "FAIL",
+              "restored_raw_reparses_identical": "PASS"}
+    with pytest.raises(drills.DrillFailed, match="restore checks did not all pass"):
+        _run_d11(tmp_path, monkeypatch, checks=checks)
+
+
+def test_d11_fails_when_the_quality_gate_refuses_the_restored_silver(tmp_path, monkeypatch):
+    from ops import drills
+
+    quality = {"quality_status": "FAIL", "mandatory_failure_count": 2, "manifest_promoted": False}
+    with pytest.raises(drills.DrillFailed, match="quality gate refused"):
+        _run_d11(tmp_path, monkeypatch, quality=quality)
+
+
+def test_d11_fails_when_a_quality_only_run_moves_the_pointer(tmp_path, monkeypatch):
+    from ops import drills
+
+    quality = {"quality_status": "PASS", "mandatory_failure_count": 0, "manifest_promoted": True}
+    with pytest.raises(drills.DrillFailed, match="promoted the pointer"):
+        _run_d11(tmp_path, monkeypatch, quality=quality)
+
+
+def test_d11_fails_when_the_restored_pointer_serves_another_version(tmp_path, monkeypatch):
+    from ops import drills
+
+    # A coherent stack serving the wrong version passes every per-stack check
+    # and is still a failed restore.
+    with pytest.raises(drills.DrillFailed, match="not the backed-up"):
+        _run_d11(tmp_path, monkeypatch, pointer="mp-19700101T0000Z")
+
+
+def test_d11_fails_on_a_validate_failure_that_is_not_an_empty_derived_store(tmp_path, monkeypatch):
+    from ops import drills
+
+    verdict = {"event": "validate_restored", "passed": False, "tolerated": [],
+               "unexpected": ["bronze_present"]}
+    with pytest.raises(drills.DrillFailed, match="not an empty derived store"):
+        _run_d11(tmp_path, monkeypatch, verdict=verdict)
+
+
+def test_d11_fails_if_the_running_projects_volumes_changed(tmp_path, monkeypatch):
+    from ops import drills
+
+    # "Never restore over the running stack" is the rule; this is what it
+    # means in practice.
+    with pytest.raises(drills.DrillFailed, match="volumes changed across a restore"):
+        _run_d11(tmp_path, monkeypatch, volumes_after=["mp_pg_data"])
+
+
+def test_d11_refuses_a_backup_whose_run_ids_disagree_with_what_is_served(tmp_path, monkeypatch):
+    from ops import drills
+
+    with pytest.raises(drills.DrillFailed, match="disagree with what was being served"):
+        _run_d11(tmp_path, monkeypatch, manifest_cache_run_id="mp-19700101T0000Z")
+
+
+def test_the_tool_container_json_reader_takes_compact_and_indented_objects():
+    from ops import drills
+
+    text = 'noise\n{"event": "a"}\ntail {"b": 1} and\n{\n  "checks": [{"check": "x"}]\n}\n'
+
+    assert drills.Stack.json_objects(text) == [{"event": "a"}, {"b": 1}, {"checks": [{"check": "x"}]}]
+
+
+def test_the_json_reader_skips_a_brace_that_starts_nothing():
+    from ops import drills
+
+    assert drills.Stack.json_objects("{ not json at all") == []

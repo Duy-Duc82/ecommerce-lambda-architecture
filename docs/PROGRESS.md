@@ -2309,3 +2309,97 @@ trước heading, nên markdown không render heading. Đã sửa trong commit d
    Bronze.
 3. Xong hai việc đó thì Phase 8 đạt Definition of Done (plan §17) và mở được
    PR `develop` → `master` để thầy hướng dẫn duyệt.
+
+## 23. Session 2026-10-04 (tiếp) — drill D11: XONG. Phase 8 đóng.
+
+> **Trạng thái:** D11 (backup/restore) **đã chạy thật và pass ngay lượt đầu**
+> trên stack `mp-smoke`. Đây là việc cuối cùng của Phase 8 so với plan. Nhánh
+> `phase-8-d11-backup-restore-drill`, rẽ từ `develop` sau khi WP7–WP10 merge.
+
+### 23.1 Gộp helper trùng trước đã
+
+`ops/drills.py` có `_raw_artifact_ref()` tự tách `raw_uri` (WP7), còn
+`crawler/reparse.py` có `RawArtifactRef.from_uri()` (WP9) — hai chỗ cùng biết
+layout Bronze. Nay chỉ còn một: `_raw_artifact_ref` là lớp vỏ mỏng gọi
+`from_uri`, tồn tại để đổi `ValueError` thành `DrillFailed`. `Stack.reparse`
+nhận thẳng `RawArtifactRef` thay vì dict. Module **ghi** layout cũng là module
+**đọc** nó.
+
+### 23.2 D11 khác mọi drill khác ở chỗ nào
+
+Mười drill trước đều tiêm một sự cố *vào stack đang chạy*. D11 hỏi một câu
+khác: **bằng chứng có sống sót khi mất luôn cái máy không?** Nên nó là drill
+duy nhất **hạ cả stack xuống** — `container_name` là global, hai project của
+cùng file Compose không thể cùng up. Hệ quả thiết kế:
+
+- nó nằm **cuối** registry `DRILLS`, vì `drill all` chạy theo thứ tự đó; đặt
+  giữa thì mọi drill sau nó sẽ bắt đầu từ một stack nguội. Một test offline
+  chốt cứng `list(DRILLS)[-1] == "d11"`;
+- `finally` của nó phải xoá project `<project>-restore` **kèm volume** trước
+  khi trả quyền, nếu không `restore()` của harness không dựng lại được stack
+  thật — hai project sẽ tranh nhau cùng bộ tên container.
+
+Hai điều nó chứng minh mà một exit code 0 không chứng minh được:
+
+1. **Volume của project đang chạy không hề là đầu vào của restore.** Drill
+   chụp danh sách volume trước và sau, và fail nếu khác. Đây là nghĩa thực tế
+   của luật "không bao giờ restore đè lên stack đang chạy".
+2. **Con trỏ sau restore phục vụ đúng version mà backup đã ghi tên**, chứ
+   không phải một version nào đó tự nó mạch lạc. Một stack restore nhầm bản
+   vẫn pass mọi check nội bộ.
+
+### 23.3 Kết quả thật (2026-10-04)
+
+| Bước | Quan sát |
+|---|---|
+| baseline | `validate` xanh, không có vết mutation nào sót |
+| backup | `bk-20261004T044256Z`, **1832 file** — gold 31, bronze 920, silver 879, postgres 2. `pointer_run_id` = `cache_run_id` = `mp-20261003T1617Z-d10`, và khớp cả với cái đang được phục vụ |
+| restore vào `mp-smoke-restore` | exit 0; **cả ba** check §12.3 PASS |
+| quality-only batch | `mp-20261003T1617Z-d10-d11`: `quality_status PASS`, 0 mandatory failure, 878 silver row, `manifest_promoted false` — không đụng con trỏ |
+| `validate --restored` | passed; nới **đúng ba** (`es_changes_unique`, `kafka_to_silver_lag`, `redis_offer_state_present`), `unexpected` rỗng |
+| con trỏ sau restore | `mp-20261003T1617Z-d10` — đúng bản backup ghi tên |
+| volume project chạy | 7 volume, `intact: true` |
+| dọn | project restore xoá kèm volume; harness dựng lại stack thật, `validate` xanh |
+
+**Pass ngay lượt đầu**, không phải sửa gì — vì toàn bộ đường đi đã được chạy
+tay ở WP9 §20.3, D11 chỉ gói nó lại.
+
+**Chạy `drill d1` ngay sau D11**: pass. Đó là bằng chứng cho câu "D11 dựng
+lại stack trước khi thoát" — không chỉ `validate` xanh, mà stack còn chạy
+được drill tiếp theo.
+
+### 23.4 Một trục trặc môi trường, không phải bug
+
+Giữa chừng Docker Desktop tắt (`open //./pipe/dockerDesktopLinuxEngine: The
+system cannot find the file specified`). Khởi động lại, `compose up -d`, chờ
+healthcheck, `validate` 11/11 xanh — không mất dữ liệu, vì tất cả nằm trong
+named volume. Không liên quan tới code.
+
+### 23.5 Trạng thái test
+
+- Suite mặc định: **964 pass, 11 deselected** (11 = D1–D11), 2m25s.
+- `tests/test_marketplace_quality.py`: **42 pass**.
+- **Tổng 1006.** Chênh so với `develop` (994) là 12 test offline mới cho D11:
+  1 chốt thứ tự registry, 9 chốt từng điều kiện fail của drill, 2 cho bộ đọc
+  JSON của tool container.
+
+### 23.6 Phase 8 đã đóng
+
+Đối chiếu Definition of Done (plan §17): mười một drill đều chạy thật và để
+lại `validate` xanh; bốn dịch vụ chạy không người trông; batch chạy qua
+`s3a://`; `mp smoke` và `mp validate` pass; Kibana có hai dashboard có dữ
+liệu, mỗi panel ghi đúng thứ nó đo; một backup restore được vào project mới
+với con trỏ và cache khớp nhau và reparse `IDENTICAL`;
+ARCHITECTURE/DATA_MODEL/RUNBOOK mô tả hệ thống như đã dựng; suite mặc định
+xanh và offline.
+
+### 23.7 Việc tiếp theo
+
+1. Mở PR `develop` → `master` để thầy hướng dẫn duyệt (`PHASE_INDEX.md` §3b:
+   `master` chỉ nhận PR từ `develop`, và chỉ sau khi thầy duyệt).
+2. Xoá các nhánh đã merge nếu muốn (convention §18.1); hiện vẫn còn
+   `phase-8-wp7…` → `phase-8-wp10-docs` trên remote.
+3. **Phase 9** (Tuần 9, P2-01…P2-07): đánh giá và feature freeze. Nó thừa kế
+   từ Phase 8 các record drill làm bằng chứng tin cậy, `mp smoke` làm nền cho
+   benchmark, stub source làm bộ sinh tải *có nhãn là fixture phát lại*, và
+   các index của projector làm chuỗi thời gian vận hành.
