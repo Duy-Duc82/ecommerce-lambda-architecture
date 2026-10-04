@@ -40,7 +40,7 @@ def test_crawl_metrics_measure_from_first_start_to_last_completion():
 
     m = bench.crawl_metrics(attempts)
 
-    assert m["seconds"] == 10 and m["requests"] == 3 and m["succeeded"] == 2
+    assert m["seconds"] == 10 and m["requests"] == 3 and m["completed"] == 2
     assert m["requests_per_second"] == pytest.approx(0.3)
     assert m["parsed_per_second"] == pytest.approx(8.0)
     assert (m["latency_p50_ms"], m["latency_p95_ms"]) == (200, 300)
@@ -144,3 +144,15 @@ def test_mp_refuses_a_benchmark_on_the_live_stack():
 
     script = (Path(__file__).resolve().parents[1] / "scripts" / "mp.ps1").read_text(encoding="utf-8")
     assert 'Assert-NotLive "bench"' in script
+
+
+def test_a_partial_page_counts_as_crawled():
+    """Found on the bench stack, 2026-10-04: every stub page carries the
+    fixture's deliberately invalid row, so every attempt ends PARTIAL. A wait
+    for SUCCEEDED attempts never ended, and would have failed `bench all`."""
+    attempts = [_attempt(0, status="PARTIAL"), _attempt(2, status="PARTIAL"), _attempt(4, status="FAILED", parsed=0)]
+
+    m = bench.crawl_metrics(attempts)
+
+    assert (m["completed"], m["partial"], m["failed"]) == (2, 2, 1)
+    assert "PARTIAL" in bench.CRAWLED_SQL and "SUCCEEDED" in bench.CRAWLED_SQL
