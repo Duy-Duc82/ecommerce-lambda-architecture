@@ -13,7 +13,7 @@ from config.settings import (
     REDIS_MARKETPLACE_OFFER_TTL_SECONDS, REDIS_MARKETPLACE_RECENT_CHANGES_MAX,
     MARKETPLACE_SPEED_QUERY_NAME,
 )
-from data_ingestion.marketplace_change_producer import publish_change
+from data_ingestion.marketplace_change_producer import publish_changes
 from speed_layer.marketplace_change_rules import offer_state_from_json
 
 
@@ -169,8 +169,7 @@ class MarketplaceSpeedSinks:
         try:
             began = time.monotonic()
             changes = [marketplace_change_from_wire(json.loads(r.change_json)) for r in rows if r.output_kind == "CHANGE" and r.change_json]
-            for event in changes: publish_change(self.producer, event)
-            if hasattr(self.producer, "flush"): self.producer.flush()
+            publish_changes(self.producer, changes)
             kafka_ms, began = _elapsed_ms(began), time.monotonic()
             es_actions = []
             change_rows = [r for r in rows if r.output_kind == "CHANGE" and r.change_json]

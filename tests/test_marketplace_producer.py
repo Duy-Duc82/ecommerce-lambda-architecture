@@ -189,3 +189,68 @@ def test_the_producer_keeps_per_key_order_under_retries(monkeypatch, factory):
     assert captured["acks"] == "all"
     assert captured["retries"] > 0
     assert captured["max_in_flight_requests_per_connection"] == 1
+
+
+class OrderedProducer(FakeProducer):
+    """Logs sends, flushes and ack waits in the order they happen."""
+
+    def __init__(self, error_at=None):
+        super().__init__()
+        self.log, self.error_at = [], error_at
+
+    def send(self, topic, key=None, value=None):
+        index = len(self.sent)
+        future = super().send(topic, key=key, value=value)
+        self.log.append(("send", index))
+        error = RuntimeError(f"ack {index} lost") if index == self.error_at else None
+        log = self.log
+
+        class Logged(FakeFuture):
+            def get(self, timeout=None):
+                log.append(("get", index))
+                return super().get(timeout)
+
+        logged = Logged(future.record, error)
+        self.sent[-1]["future"] = logged
+        return logged
+
+    def flush(self):
+        super().flush()
+        self.log.append(("flush",))
+
+
+def test_a_batch_of_changes_is_sent_before_any_ack_is_awaited():
+    from data_ingestion.marketplace_change_producer import publish_changes
+
+    producer = OrderedProducer()
+    changes = [_new_offer_change()] * 3
+
+    acks = publish_changes(producer, changes, ack_timeout_seconds=9)
+
+    assert producer.log == [("send", 0), ("send", 1), ("send", 2), ("flush",), ("get", 0), ("get", 1), ("get", 2)]
+    assert [a["offset"] for a in acks] == [0, 1, 2]
+    assert all(row["future"].timeouts == [9] for row in producer.sent)
+    assert [row["key"] for row in producer.sent] == [c.offer_id for c in changes]
+
+
+def test_any_lost_ack_fails_the_whole_batch():
+    from data_ingestion.marketplace_change_producer import publish_changes
+
+    with pytest.raises(RuntimeError, match="ack 1 lost"):
+        publish_changes(OrderedProducer(error_at=1), [_new_offer_change()] * 3)
+
+
+def test_no_change_means_no_send_and_no_flush():
+    from data_ingestion.marketplace_change_producer import publish_changes
+
+    producer = OrderedProducer()
+
+    assert publish_changes(producer, []) == []
+    assert producer.log == []
+
+
+def test_a_batch_publish_refuses_a_non_positive_timeout():
+    from data_ingestion.marketplace_change_producer import publish_changes
+
+    with pytest.raises(ValueError):
+        publish_changes(OrderedProducer(), [_new_offer_change()], ack_timeout_seconds=0)
