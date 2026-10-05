@@ -204,11 +204,19 @@ class MarketplaceSpeedSinks:
                 payload = json.loads(row.state_json)
                 pipe.hset(f"rt:offer:{state.offer_id}", mapping={"state_json": json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")), "offer_id": state.offer_id, "marketplace": state.marketplace, "observation_id": state.observation_id})
                 pipe.expire(f"rt:offer:{state.offer_id}", REDIS_MARKETPLACE_OFFER_TTL_SECONDS)
-                source_key = f"rt:source:{state.marketplace}:last_observation"
+            # One read per marketplace, against the batch's latest: the queued
+            # sets only land at execute, so comparing each state with the
+            # stored value let an older state queued last win.
+            latest: dict[str, str] = {}
+            for state in states:
+                observed = state.observed_at.isoformat()
+                if observed > latest.get(state.marketplace, ""): latest[state.marketplace] = observed
+            for marketplace, observed in latest.items():
+                source_key = f"rt:source:{marketplace}:last_observation"
                 previous = self.redis.get(source_key) if hasattr(self.redis, "get") else None
                 if isinstance(previous, bytes): previous = previous.decode("utf-8")
-                if previous is None or previous < state.observed_at.isoformat():
-                    pipe.set(source_key, state.observed_at.isoformat(), nx=False)
+                if previous is None or previous < observed:
+                    pipe.set(source_key, observed, nx=False)
             if changes: pipe.zremrangebyrank("rt:changes:recent", 0, -(REDIS_MARKETPLACE_RECENT_CHANGES_MAX + 1))
             if hasattr(pipe, "execute"): pipe.execute()
             redis_ms = _elapsed_ms(began)
