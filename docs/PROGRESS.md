@@ -3054,7 +3054,7 @@ Phân bổ mới của batch K=3.000 (7,0 s): Spark collect 4.069 (58 %), Kafka
 `test_marketplace_speed_layer.py`: 79 pass. Suite đầy đủ chưa chạy (§29.4:
 kẹt trên máy dev).
 
-### 31.5 Việc tiếp theo (resume ở đây)
+### 31.5 Việc tiếp theo (cũ, nay resume ở §32.4)
 
 1. **Spark collect** giờ chiếm hơn nửa batch lớn (~4 s ở K=3.000), và cũng là
    phần lớn sàn ~1,1 s của batch nhỏ. Chi phí theo số offer khác nhau
@@ -3066,3 +3066,64 @@ kẹt trên máy dev).
 4. Chạy `speed-cost --repeat 3` và `speed-soak` dài hơn trên máy thu thập.
    Soak cũng là nơi xác nhận client giữ lâu không rò rỉ (RAM container `speed`).
 5. Còn mở: §28.5, suite kẹt §29.4.
+
+## 32. 2026-10-05 (chiều, máy dev) — sửa scheduler bỏ qua cửa sổ (§28.1)
+
+Mục 1 của §28.5. Nhánh `phase-9-scheduler-wall-clock`, tách từ
+`phase-9-speed-keep-clients` (xếp chồng tiếp; sửa không phụ thuộc gì vào hai
+nhánh speed). Lịch sử git đã được viết lại trước đó trong ngày (bỏ trailer
+co-author), nên mọi hash cũ hơn hôm nay đã đổi; bảng đổi ở
+`D:\code\data\ela-history-backup\commit-map.txt` trên máy dev.
+
+### 32.1 Sửa gì
+
+`run_scheduler` (`batch_layer/marketplace_scheduler.py`, test `4b6d7a1`, fix
+`1ddcec9`):
+
+- Giữ **giờ đến hạn** của cửa sổ kế tiếp, tính từ cửa sổ *vừa chạy*
+  (`as_of + interval + lag`), không từ đồng hồ sau khi batch xong. Batch chạy
+  qua mốc kế tiếp thì cửa sổ đó chạy ngay, không bị bỏ.
+- Thức dậy mà wall clock còn trước giờ đến hạn (ngủ theo monotonic, lệch với
+  wall clock sau một ngày) thì **ngủ tiếp phần còn thiếu**, không tick lại cửa
+  sổ cũ.
+- Mỗi tick vẫn chỉ chạy cửa sổ mới nhất đã đóng, vẫn không backfill. Stack tắt
+  qua nhiều cửa sổ thì khi bật lại chỉ chạy cửa sổ mới nhất; những cửa sổ giữa
+  là việc backfill tay. RUNBOOK mục Backfill đã ghi điều này.
+
+Ba test dựng lại đúng §28.1: thức sớm 50 s (trước đây chạy lại 10-04), tick
+bắt đầu 00:29:59,99 và kéo 20 s (trước đây nhảy sang 10-06), và mốc sau đó vẫn
+đúng 00:30 ngày kế tiếp. Cả ba fail trước khi sửa, pass sau khi sửa.
+
+### 32.2 Chạy thật
+
+Vòng lặp thật với `threading.Event` và đồng hồ thật, interval 60 s, lag 5 s,
+tick lẻ kéo 62 s (vượt mốc kế tiếp như batch §28.1):
+
+| cửa sổ | bắt đầu (UTC) | kết thúc |
+|---|---|---|
+| 07:47 | 07:47:37,708 | 07:48:39,709 |
+| 07:48 | 07:48:39,709 (ngay, vì đã quá hạn 07:48:05) | 07:48:40,710 |
+| 07:49 | 07:49:05,010 (đúng mốc + lag) | 07:50:07,010 |
+| 07:50 | 07:50:07,010 (ngay) | 07:50:08,011 |
+
+Bốn cửa sổ liên tiếp, cách nhau đúng 60 s, không bỏ, không lặp. Chưa chạy trên
+stack thu thập (máy đó đang chuyển host, §28.4).
+
+### 32.3 Test
+
+`test_marketplace_scheduler.py`: 31 pass (thêm 3).
+
+### 32.4 Việc tiếp theo (resume ở đây)
+
+1. **Triển khai lên stack thu thập** khi host mới chạy: restart
+   `batch-scheduler` với code này. Nghiệm thu WP0 lại như §28.5 mục 4 (một
+   batch `SUCCEEDED` trên dữ liệu thật, con trỏ có giá trị, `validate` pass),
+   rồi chạy lại `evidence`, mục 15 phải thành PRESENT.
+2. Cửa sổ 2026-10-05 (§28.5 mục 2): scheduler sẽ không tự chạy bù. Nếu cần,
+   chạy tay `mp -EnvFile env/live.env batch -AsOf 2026-10-05T00:00:00Z
+   -AllowBackfill`. Chờ user quyết.
+3. Trang `1882` p3 (§27.3): attempt fail vì hai mốc thời gian từ hai đồng hồ
+   lệch nhau, và frontier không có occurrence kế tiếp. Chờ user quyết có retry
+   lỗi này không.
+4. Speed: các mục ở §31.5 (profile Spark collect trước).
+5. Còn mở: suite kẹt §29.4; các việc chờ user/thầy ở §26.6 bước 3.

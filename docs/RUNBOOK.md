@@ -209,7 +209,13 @@ not in the logs.
 
 The scheduler never backfills. It skips a `SUCCEEDED` window, starts an absent
 one, resumes any other status, and never passes `--allow-backfill` — so an old
-window is always a deliberate operator action:
+window is always a deliberate operator action.
+
+It wakes at each boundary plus the lag by the wall clock: a sleep that ends
+early is slept out, and a batch that runs past the next due time is followed
+at once by that window. Only the newest closed window runs per tick, so a
+stack that was down across several windows runs the newest on restart, and
+the ones in between need a backfill:
 
 ```powershell
 .\scripts\mp.ps1 batch -AsOf 2026-09-28T00:00:00Z -AllowBackfill
