@@ -2607,7 +2607,7 @@ Suite mặc định trên `e12a45c`: **1140 pass**, 11 deselected (D1–D11),
 5. Ngày 2026-11-03 mới đủ 30 ngày thu thập. Sau đó chạy lại `evaluate` và
    `evidence`.
 
-### 26.6 Việc tiếp theo (resume ở đây)
+### 26.6 Việc tiếp theo (cũ, nay resume ở §28.5)
 
 **Đang chạy, không phụ thuộc session Claude nào:**
 
@@ -2747,3 +2747,91 @@ lỗi này nên được retry hay không, và có đưa trang về lịch khôn
 Vẫn theo §26.6, trừ mục "khi benchmark xong" đã làm phần `bench report` và
 mục này. Còn lại: chạy `mp -EnvFile env/live.env evidence`, nghiệm thu batch
 `mp-20261005T0000Z` (job 07:47 sáng nay), và xử lý §27.3.
+
+## 28. 2026-10-05 07:47 (job tự động) — nghiệm thu WP0: chưa đạt, scheduler bỏ qua cửa sổ
+
+Job chạy không người trông lúc 00:47 UTC. Không sửa code, không đụng dữ liệu
+`mp-live`. Báo cáo đầy đủ ở nhánh `daily-reports`, `reports/2026-10-05.md`.
+
+### 28.1 Batch `mp-20261005T0000Z` không chạy
+
+`audit.marketplace_batch_run` chỉ có `mp-20261004T0000Z`. Log
+`batch-scheduler` có ba tick, cả ba đều `as_of = 2026-10-04`, đều
+`QUALITY_FAILED` (`silver_parse_attempt_reconciliation` SKIPPED vì cửa sổ có 0
+dòng Silver, như §26.3):
+
+| tick in ra lúc (UTC) | ghi chú |
+|---|---|
+| 2026-10-04 10:22:02 | tick lúc khởi động |
+| 2026-10-05 00:29:30 | thức sớm khoảng 50 s so với mốc 00:30:00 |
+| 2026-10-05 00:30:20 | `started_at` 00:30:00,05, xong 00:30:19,59 |
+
+Nguyên nhân, suy từ `batch_layer/marketplace_scheduler.py`:
+
+1. `run_scheduler` ngủ bằng `stop.wait(timeout)`, tức là theo đồng hồ
+   monotonic. Sau 14 giờ ngủ, nó thức khi wall clock còn trước 00:30, nên
+   `window_as_of` vẫn ra cửa sổ 10-04, và nó resume run cũ.
+2. Lần chờ 30 s tiếp theo thức sớm vài ms. `as_of` vẫn là 10-04, trong khi
+   `started_at` ghi ngay sau đó đã là 00:30:00,05.
+3. Tick đó xong sau mốc. `next_wake(now)` trả về mốc của cửa sổ *sau* cửa sổ
+   hiện tại (2026-10-06 00:30), vì nó giả định cửa sổ hiện tại vừa chạy. Cửa sổ
+   10-05 bị bỏ qua.
+
+Scheduler vẫn sống và đang ngủ tới 2026-10-06 00:30. Test hiện có dùng clock
+giả luôn đúng mốc, nên không bắt được. Hướng sửa (chưa làm): sau khi thức, ngủ
+tiếp tới khi wall clock qua mốc, và tính mốc kế tiếp từ `as_of` vừa chạy, kèm
+test với clock thức sớm. Lỗi crawl §27.3 cũng dính tới đồng hồ, có thể chung gốc
+(đồng hồ VM WSL2), chưa xác minh.
+
+### 28.2 Nghiệm thu WP0: chưa đạt
+
+| điều kiện (§26.6 bước 1) | kết quả |
+|---|---|
+| batch `mp-20261005T0000Z` SUCCEEDED | không, batch không chạy |
+| con trỏ có giá trị | không, `null` |
+| `validate` pass | không, 7 PASS / 4 FAIL |
+
+Bốn check fail đều vì chưa có con trỏ (`pointer_gold_exists`,
+`pointer_matches_cache`, `quality_results_complete`,
+`silver_reconciles_with_audit`). Phần thu thập của WP0 thì đạt: 10/10 container
+healthy, 216 attempt, 215 `SUCCEEDED`, 8.600 dòng parse, latency p50 2.908 ms,
+p95 3.724 ms, khoảng cách crawl một trang p50 3.623,6 s (100 % trong 110 %
+cadence).
+
+### 28.3 Evaluate và evidence
+
+- `evaluate reliability|freshness|storage` đều chạy được (cửa sổ 0,588 ngày).
+  Storage nay có 2 snapshot: tăng khoảng 64,4 MB/ngày, 10.754 byte/observation,
+  dự báo ngày 30 khoảng 2,03 GB. Freshness theo offer còn rỗng vì chưa có Gold
+  publish. Crawl → Kafka p50 29,8 ms, p95 116,8 ms.
+- `evidence`: bundle `data/ops/evidence/20261005T004946Z` (commit `bd98dd8`,
+  cây sạch). Suite chạy kèm: **1141 pass**, 0 fail, 741 s, khi `mp-live` đang
+  chạy. 15 PRESENT, 1 MISSING, 3 MANUAL. So với bundle 2026-10-04 13:37 UTC,
+  thêm PRESENT các mục 1 (bản nháp SOURCE_FEASIBILITY), 11, 12 (benchmark) và
+  13 (storage).
+- Mục MISSING duy nhất: **15, ví dụ lịch sử/thay đổi/bất thường giá**. Mục này
+  cần Gold đã publish từ dữ liệu thật, nên đang bị chặn bởi §28.1, không phải
+  chỉ "chưa tới hạn". Ba mục MANUAL (ảnh Superset/Kibana, phần hạn chế, video
+  demo) là việc tay.
+
+### 28.4 Máy
+
+Ổ C: còn 177,7 GB. VM Docker 16,3 GB RAM, 10 container `mp-live` dùng khoảng
+5,8 GiB. Đồng hồ container và host lệch dưới 0,1 s lúc kiểm.
+
+User đã lên lịch `mp-shutdown` lúc 08:50 giờ máy hôm nay: dừng `mp-live`
+(giữ volume), tắt máy, và sẽ chuyển thu thập sang host khác.
+
+### 28.5 Việc tiếp theo (resume ở đây)
+
+1. **Sửa scheduler** (§28.1), có test, rồi triển khai lên stack thu thập.
+2. Quyết định có chạy bù cửa sổ 2026-10-05 không (chạy tay `mp -EnvFile
+   env/live.env batch` với as_of đó, hoặc restart `batch-scheduler`). Chỉ làm
+   được khi stack chạy lại.
+3. Trang `1882` p3 (§27.3).
+4. Trên host mới: kiểm NTP, rồi nghiệm thu WP0 lại: một batch `SUCCEEDED` trên
+   dữ liệu thật, con trỏ có giá trị, `validate` pass. Sau đó chạy lại
+   `evidence`, mục 15 phải thành PRESENT.
+5. Các mục chờ user hoặc thầy ở §26.6 bước 3 vẫn giữ nguyên. Mốc 30 ngày
+   (2026-11-03) tính từ ngày thu thập bắt đầu, nên sẽ dời nếu thu thập bị gián
+   đoạn khi chuyển host.
