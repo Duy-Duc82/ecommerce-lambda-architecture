@@ -219,6 +219,69 @@ def test_a_stop_during_the_wait_ends_the_loop():
     assert ticks == 1
 
 
+class EarlyStop(FakeStop):
+    """The first wait ends ``early`` seconds short by the wall clock.
+
+    On the collection machine the scheduler slept 14 hours on the monotonic
+    clock and woke ~50 s before 00:30 by the wall clock (PROGRESS 28.1).
+    """
+
+    def __init__(self, clock, early):
+        super().__init__(clock)
+        self.early = early
+
+    def wait(self, seconds):
+        self.waits.append(seconds)
+        self.clock.now += timedelta(seconds=seconds - (self.early if len(self.waits) == 1 else 0))
+        return False
+
+
+def _slow_tick(clock, seconds, seen):
+    """A tick that cuts its window from ``now`` and takes ``seconds``, like a batch does."""
+    def run(now):
+        seen.append((now, scheduler.run_id_for(scheduler.window_as_of(now, interval_seconds=DAY, lag_seconds=LAG))))
+        clock.now += timedelta(seconds=seconds)
+        return {"run_id": seen[-1][1], "outcome": "QUALITY_FAILED"}
+    return run
+
+
+def test_a_wake_early_by_the_wall_clock_waits_out_the_rest_and_runs_the_due_window():
+    clock = Clock(at("2026-10-04T10:22:00"))
+    stop = EarlyStop(clock, early=50)
+    seen = []
+
+    scheduler.run_scheduler(_slow_tick(clock, 20, seen), clock=clock, stop=stop, interval_seconds=DAY,
+                            lag_seconds=LAG, max_ticks=2, log=lambda line: None)
+
+    assert [run_id for _, run_id in seen] == ["mp-20261004T0000Z", "mp-20261005T0000Z"]
+    assert seen[1][0] >= at("2026-10-05T00:30:00")
+
+
+def test_a_tick_that_ends_past_the_next_boundary_does_not_skip_that_window():
+    # 28.1: the 10-04 window started a hair before 00:30 and finished after.
+    clock = Clock(at("2026-10-05T00:29:59.990000"))
+    stop = FakeStop(clock)
+    seen = []
+
+    scheduler.run_scheduler(_slow_tick(clock, 20, seen), clock=clock, stop=stop, interval_seconds=DAY,
+                            lag_seconds=LAG, max_ticks=2, log=lambda line: None)
+
+    assert [run_id for _, run_id in seen] == ["mp-20261004T0000Z", "mp-20261005T0000Z"]
+    assert seen[1][0] < at("2026-10-05T00:31:00")
+
+
+def test_the_next_wake_follows_the_window_that_ran_not_the_clock_after_it():
+    clock = Clock(at("2026-10-05T00:29:59.990000"))
+    stop = FakeStop(clock)
+    seen = []
+
+    scheduler.run_scheduler(_slow_tick(clock, 20, seen), clock=clock, stop=stop, interval_seconds=DAY,
+                            lag_seconds=LAG, max_ticks=3, log=lambda line: None)
+
+    assert [run_id for _, run_id in seen] == ["mp-20261004T0000Z", "mp-20261005T0000Z", "mp-20261006T0000Z"]
+    assert seen[2][0] == at("2026-10-06T00:30:00")
+
+
 def test_the_run_status_reads_the_audit_row():
     executed = []
 
