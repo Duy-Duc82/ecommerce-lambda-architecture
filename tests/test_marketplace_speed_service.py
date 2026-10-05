@@ -168,7 +168,7 @@ def test_each_micro_batch_closes_its_audit_connections(monkeypatch):
         def __init__(self, *, producer, es, redis, audit):
             self.audit = audit
 
-        def write_batch(self, outputs, batch_id, *, query_id):
+        def write_batch(self, outputs, batch_id, *, query_id, stages=None):
             built.append(("batch", batch_id, len(outputs), query_id))
 
     import speed_layer.marketplace_sinks as sinks
@@ -203,7 +203,7 @@ def test_each_micro_batch_closes_its_sink_clients(monkeypatch, outcome):
     class SucceedingSinks:
         def __init__(self, **kwargs): pass
 
-        def write_batch(self, outputs, batch_id, *, query_id): pass
+        def write_batch(self, outputs, batch_id, *, query_id, stages=None): pass
 
     monkeypatch.setattr(sinks, "MarketplaceSpeedSinks", SucceedingSinks)
     batch = _micro_batch("query-uuid")
