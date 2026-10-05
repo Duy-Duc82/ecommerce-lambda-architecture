@@ -17,6 +17,15 @@ from tests.spark_support import requires_spark
 from tests.test_marketplace_change_rules import CONFIG, _event
 
 
+@pytest.fixture(autouse=True)
+def _no_sink_clients_across_tests():
+    # The layer keeps its sink clients between micro-batches; a test must not
+    # inherit another's.
+    layer.close_sink_clients()
+    yield
+    layer.close_sink_clients()
+
+
 class RecordingWriter:
     def __init__(self, log):
         self.log = log
@@ -189,35 +198,92 @@ class _ClosingClient:
         self.closed += 1
 
 
-# One micro-batch every trigger, for days: clients a batch opens must not
-# outlive it, whether the batch succeeds, is skipped or never reaches the sink.
-@pytest.mark.parametrize("outcome", ["succeeded", "collect_failed"])
-def test_each_micro_batch_closes_its_sink_clients(monkeypatch, outcome):
+# One micro-batch every trigger, for days. Opening the three clients cost
+# ~110 ms of every batch, so they live across batches; what must not happen is
+# a failed batch's clients (the sink may have closed them) being used again,
+# or a client being left open when the query stops.
+def _keep_clients(monkeypatch, sinks_class):
     from common import postgres
     import speed_layer.marketplace_sinks as sinks
 
-    clients = (_ClosingClient(), _ClosingClient(), _ClosingClient())
+    opened = []
+
+    def open_clients():
+        opened.append((_ClosingClient(), _ClosingClient(), _ClosingClient()))
+        return opened[-1]
+
     monkeypatch.setattr(postgres, "postgres_connection_factory", lambda: (lambda: None))
-    monkeypatch.setattr(layer, "_sink_clients", lambda: clients)
+    monkeypatch.setattr(layer, "_sink_clients", open_clients)
+    monkeypatch.setattr(sinks, "MarketplaceSpeedSinks", sinks_class)
+    return opened
 
-    class SucceedingSinks:
-        def __init__(self, **kwargs): pass
 
-        def write_batch(self, outputs, batch_id, *, query_id, stages=None): pass
+class _SucceedingSinks:
+    def __init__(self, **kwargs): pass
 
-    monkeypatch.setattr(sinks, "MarketplaceSpeedSinks", SucceedingSinks)
+    def write_batch(self, outputs, batch_id, *, query_id, stages=None): pass
+
+
+class _FailingSinks:
+    def __init__(self, **kwargs): pass
+
+    def write_batch(self, outputs, batch_id, *, query_id, stages=None): raise RuntimeError("redis down")
+
+
+def test_succeeded_micro_batches_reuse_one_set_of_sink_clients(monkeypatch):
+    opened = _keep_clients(monkeypatch, _SucceedingSinks)
+
+    layer.write_marketplace_batch(_micro_batch("query-uuid"), 7)
+    layer.write_marketplace_batch(_micro_batch("query-uuid"), 8)
+
+    assert len(opened) == 1
+    assert [client.closed for client in opened[0]] == [0, 0, 0]
+
+
+@pytest.mark.parametrize("failure", ["sink", "collect"])
+def test_a_failed_micro_batch_closes_its_clients_and_the_next_opens_new_ones(monkeypatch, failure):
+    opened = _keep_clients(monkeypatch, _FailingSinks if failure == "sink" else _SucceedingSinks)
     batch = _micro_batch("query-uuid")
-    if outcome == "collect_failed":
+    if failure == "collect":
         def failing_collect(): raise RuntimeError("executor lost")
         batch.collect = failing_collect
 
-    if outcome == "succeeded":
+    with pytest.raises(RuntimeError):
         layer.write_marketplace_batch(batch, 7)
-    else:
-        with pytest.raises(RuntimeError, match="executor lost"):
-            layer.write_marketplace_batch(batch, 7)
+    import speed_layer.marketplace_sinks as sinks
+    monkeypatch.setattr(sinks, "MarketplaceSpeedSinks", _SucceedingSinks)
+    layer.write_marketplace_batch(_micro_batch("query-uuid"), 8)
 
-    assert [client.closed for client in clients] == [1, 1, 1]
+    assert len(opened) == 2
+    assert [client.closed for client in opened[0]] == [1, 1, 1]
+    assert [client.closed for client in opened[1]] == [0, 0, 0]
+
+
+def test_closing_the_sink_clients_closes_each_once_and_is_idempotent(monkeypatch):
+    opened = _keep_clients(monkeypatch, _SucceedingSinks)
+    layer.write_marketplace_batch(_micro_batch("query-uuid"), 7)
+
+    layer.close_sink_clients()
+    layer.close_sink_clients()
+
+    assert [client.closed for client in opened[0]] == [1, 1, 1]
+
+
+def test_the_service_closes_the_sink_clients_when_the_query_stops(monkeypatch):
+    import speed_layer.marketplace_speed_service as service
+    from common import postgres
+
+    closed = []
+    monkeypatch.setattr(service, "build_spark", lambda: SimpleNamespace(stop=lambda: closed.append("spark")))
+    monkeypatch.setattr(service, "start_query", lambda spark: object())
+    monkeypatch.setattr(service, "await_query", lambda *a, **k: None)
+    monkeypatch.setattr(postgres, "postgres_connection_factory", lambda: (lambda: None))
+    monkeypatch.setattr(layer, "close_sink_clients", lambda: closed.append("clients"))
+    monkeypatch.setattr("sys.argv", ["marketplace_speed_service"])
+
+    service.main()
+
+    assert closed == ["clients", "spark"]
 
 
 def _micro_batch(query_id):
