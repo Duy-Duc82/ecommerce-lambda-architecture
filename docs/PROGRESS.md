@@ -2919,3 +2919,64 @@ Nếu user muốn tối ưu (ngoài phạm vi Phase 9): gửi Kafka async và fl
 mỗi batch, giữ client giữa các batch, đưa `GET` Redis vào pipeline, đo latency
 hoàn toàn bằng đồng hồ container. Chạy bản đầy đủ (`--repeat 3`, soak dài hơn)
 trên máy thu thập khi có thể.
+
+## 30. 2026-10-05 (chiều, máy dev) — sink Kafka của speed gửi async
+
+Nhánh `phase-9-speed-kafka-async`, tách từ `phase-9-speed-batch-cost`. User yêu
+cầu, dù plan Phase 9 §3 ghi "Tuning for speed" là ngoài phạm vi: đây là sửa
+có chủ đích, ghi lại ở đây để khỏi lẫn với phép đo.
+
+### 30.1 Sửa gì
+
+`publish_changes` (`data_ingestion/marketplace_change_producer.py`): gửi mọi
+change của batch, `flush` một lần, rồi `get` ack của **từng** change trước khi
+trả về. Trước đây sink chờ ack từng change rồi mới gửi change kế tiếp. Ngữ
+nghĩa giữ nguyên: batch chỉ được audit `SUCCEEDED` khi Kafka đã giữ đủ, một ack
+mất làm fail cả batch, và thứ tự theo offer vẫn do producer giữ
+(`max_in_flight_requests_per_connection=1`). `publish_change` (một change)
+vẫn còn. Test: gửi hết trước khi chờ ack, ack mất làm fail, batch rỗng không
+gửi và không flush, timeout không dương bị từ chối.
+
+### 30.2 Trước và sau
+
+Cùng máy, cùng tham số `speed-cost --cost-sizes 1 10 100 1000 3000
+--cost-batches 6 --repeat 1`. Trung vị ms.
+
+| K | tổng trước → sau | Kafka trước → sau | record/s trước → sau |
+|---:|---:|---:|---:|
+| 1 | 1.149 → 1.155 | 7 → 6 | 0,9 → 0,9 |
+| 10 | 1.264 → 1.278 | 28 → 12 | 1,7 → 7,0 |
+| 100 | 2.120 → 1.586 | 371 → 69 | 43 → 59 |
+| 1.000 | 7.103 → 5.419 | 2.164 → 325 | 145 → 181 |
+| 3.000 | 12.656 → 8.291 | 7.197 → 1.228 | 181 → **347** |
+
+- Bão hoà gần gấp đôi: 181 → 347 record/s. Fit trên trung vị: 1,7 s + 3,8
+  ms/record → 1,6 s + 2,4 ms/record (R² 0,94). Theo mô hình, tốc độ còn theo
+  kịp ở trigger 30 s ~395/s, 10 s ~350/s, 5 s ~285/s, 2 s ~90/s.
+- Batch nhỏ không đổi: sàn ~1,15 s là của Spark, không phải của Kafka.
+- Lần này không có batch ~30 s nào (§29.3).
+
+Phân bổ mới của batch K=3.000 (8,3 s): Spark collect 3.656 (44 %), Redis
+1.640 (20 %), Kafka 1.228 (15 %), ES 447, phần còn lại là plan/commit, client
+và audit.
+
+### 30.3 Việc tiếp theo (resume ở đây)
+
+Tối ưu speed, theo thứ tự lợi ích ước lượng trên số đo trên:
+
+1. **Redis**: `GET rt:source:<marketplace>:last_observation` chạy một lần cho
+   mỗi state, ngoài pipeline (`speed_layer/marketplace_sinks.py`, vòng
+   `state_rows`). Chỉ cần đọc một lần mỗi batch và giữ max trong bộ nhớ. Hiện
+   1,6 s ở K=3.000.
+2. **Spark collect**: tăng theo số offer khác nhau (~1.000 nhóm ≈ 3,5 s), tức
+   chi phí mỗi nhóm của `applyInPandasWithState`. Chưa đo tách; cần profile
+   trước khi sửa.
+3. **Client**: mở lại Kafka/ES/Redis mỗi batch (~110 ms, ~10 % sàn của batch
+   nhỏ). Giữ client trong process giữa các batch.
+4. **Latency đo bằng một đồng hồ**: hiện trộn đồng hồ host và container
+   (§29.3).
+5. Chạy bản đầy đủ `speed-cost --repeat 3` và `speed-soak` dài hơn trên máy
+   thu thập, rồi thay số máy dev ở §29–30.
+
+Còn mở từ trước: suite đầy đủ kẹt ở `test_marketplace_quality.py` trên máy dev
+(§29.4); các việc ở §28.5.

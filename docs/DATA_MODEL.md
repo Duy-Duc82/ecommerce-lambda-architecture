@@ -232,6 +232,15 @@ skipped as already `SUCCEEDED` — which is exactly what stopped the Phase 8
 index rebuild until it was fixed. A check constraint also enforces
 `input_rows = invalid + applied + duplicate + late`.
 
+Besides the counts, each `SUCCEEDED` row carries the batch's latency
+(`latency_p50_ms`, `latency_p95_ms`, `latency_max_ms`: completion minus each
+applied observation's `produced_at`) and where its time went, in ms on the
+monotonic clock: `stage_clients_ms` (opening the Kafka, Elasticsearch and
+Redis clients), `stage_collect_ms` (Spark computing the batch, the stateful
+comparison included), `stage_kafka_ms`, `stage_es_ms`, `stage_redis_ms`. All
+are nullable: a `FAILED` row and rows from before these columns have none.
+`marketplace_stream_progress` holds Spark's own progress for the same key.
+
 ## 6. Elasticsearch
 
 | Index | Written by | `_id` | Holds |

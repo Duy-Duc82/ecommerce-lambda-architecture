@@ -85,6 +85,8 @@ do not exist on Tiki.
 | Command | Stack | What it writes |
 |---|---|---|
 | `mp -EnvFile env/bench.env bench crawl\|ingest\|speed\|batch\|all [--repeat 3]` | bench, rebuilt per run | `data/ops/bench/<scenario>-<variant>-<stamp>.json` |
+| `mp -EnvFile env/bench.env bench speed-cost [--cost-sizes 1 10 100 1000 5000 15000] [--cost-batches 8] [--repeat 3]` | bench, rebuilt per run | cost of one speed micro-batch per batch size K, and where it went |
+| `mp -EnvFile env/bench.env bench speed-soak [--soak-rates 200] [--soak-seconds 1800] [--trigger "30 seconds"]` | bench, rebuilt per run | one rate held at one trigger, cut into windows, with a `stable` verdict |
 | `mp -EnvFile env/bench.env bench report` | none, it reads files | Markdown tables to stdout |
 | `mp -EnvFile env/live.env evaluate reliability\|freshness\|storage` | live, read-only | `data/ops/evaluation/<kind>-<stamp>.{json,md}` |
 | `mp -EnvFile env/demo.env demo [--auto] [--snapshot] [--skip-faults] [--without-serve]` | demo | the demo, plus `data/ops/demo-backup/latest.json` with `--snapshot` |
@@ -106,6 +108,23 @@ includes the time the record waited for the next trigger. With the 30 s
 trigger, a p50 of 10–25 s is the trigger and not a slow pipeline.
 `audit.marketplace_stream_progress` holds Spark's own per-batch numbers; join
 it to the batch audit on `(query_name, query_id, batch_id)`.
+
+**Reading the speed benchmarks.**
+
+- Spark's `num_input_rows` is twice the records read: the query reads the
+  Kafka source in two branches (valid, invalid) and unions them. Count
+  records from the audit's `input_rows`, as `speed-cost` and `speed-soak` do.
+- The `stage_*_ms` columns time each stage of a batch on the monotonic clock;
+  Spark's `trigger_execution_ms` is wall clock. A batch whose duration is
+  ~30 s over the sum of its stages is a clock step, not slow work.
+- Latency crosses clocks: `produced_at` is stamped where the sender runs (the
+  host, for `bench_load`), completion inside the speed container. On a machine
+  whose Docker VM clock is off (one dev machine: ~30 s, and stepping), latency
+  is off by as much. Measure the offset first:
+  `docker exec <container> date +%s.%N` against the host's clock.
+- `speed-cost` needs room on the Docker disk for its backlog; on a nearly
+  full C: run it reduced (`--cost-sizes 1 10 100 1000 3000 --cost-batches 6
+  --repeat 1`) and watch free space.
 
 **The storage snapshot sizes Kafka from its files.** Kafka 4 no longer
 answers the `DescribeLogDirs` versions kafka-python speaks. The broker's
