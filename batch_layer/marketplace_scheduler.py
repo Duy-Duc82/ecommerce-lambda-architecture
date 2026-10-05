@@ -130,16 +130,24 @@ def run_scheduler(
     _check(interval_seconds, lag_seconds)
     if max_ticks is not None and max_ticks <= 0:
         raise ValueError("max_ticks must be positive")
-    ticks = 0
+    ticks, due = 0, None
     while not stop.is_set():
-        log(json.dumps(run_tick(clock()), sort_keys=True))
+        now = clock()
+        # The wait sleeps on the monotonic clock, and windows are cut by the
+        # wall clock; the two drift apart over a day's sleep. A wake short of
+        # the due time by the wall clock would rerun the old window.
+        if due is not None and now < due:
+            if stop.wait((due - now).total_seconds()):
+                break
+            continue
+        ran = window_as_of(now, interval_seconds=interval_seconds, lag_seconds=lag_seconds)
+        log(json.dumps(run_tick(now), sort_keys=True))
         ticks += 1
         if max_ticks is not None and ticks >= max_ticks:
             break
-        now = clock()
-        wait = (next_wake(now, interval_seconds=interval_seconds, lag_seconds=lag_seconds) - now).total_seconds()
-        if stop.wait(max(wait, 0.0)):
-            break
+        # From the window that ran, not the clock after the batch: a batch
+        # that ends past the next boundary would otherwise skip that window.
+        due = ran + timedelta(seconds=interval_seconds + lag_seconds)
     return ticks
 
 
