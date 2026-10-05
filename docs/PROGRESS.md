@@ -2960,7 +2960,7 @@ Phân bổ mới của batch K=3.000 (8,3 s): Spark collect 3.656 (44 %), Redis
 1.640 (20 %), Kafka 1.228 (15 %), ES 447, phần còn lại là plan/commit, client
 và audit.
 
-### 30.3 Việc tiếp theo (resume ở đây)
+### 30.3 Việc tiếp theo (cũ, nay resume ở §31.5)
 
 Tối ưu speed, theo thứ tự lợi ích ước lượng trên số đo trên:
 
@@ -2980,3 +2980,89 @@ Tối ưu speed, theo thứ tự lợi ích ước lượng trên số đo trên
 
 Còn mở từ trước: suite đầy đủ kẹt ở `test_marketplace_quality.py` trên máy dev
 (§29.4); các việc ở §28.5.
+
+## 31. 2026-10-05 (chiều, máy dev) — Redis đọc một lần mỗi batch, giữ client giữa các batch
+
+Làm mục 1 và 3 của §30.3. Hai nhánh xếp chồng lên nhau:
+`phase-9-speed-redis-read` (tách từ `phase-9-speed-kafka-async`), rồi
+`phase-9-speed-keep-clients` (tách từ nhánh trước). Cũng là tối ưu ngoài phạm
+vi plan Phase 9 §3, giống §30.
+
+### 31.1 Sửa gì
+
+- **Redis** (`speed_layer/marketplace_sinks.py`, test `71fa3ee`, fix
+  `bfbcc2e`). Trước đây sink `GET rt:source:<marketplace>:last_observation`
+  một lần cho mỗi state, ngoài pipeline. Nay sink lấy `observed_at` lớn nhất
+  của batch theo từng marketplace trước, rồi mỗi marketplace chỉ một `GET` và
+  tối đa một `SET`. **Kèm sửa một lỗi đúng/sai:** các `SET` trong pipeline chỉ
+  chạy lúc `execute`, nên mỗi state được so với giá trị *đang lưu*, không phải
+  với state trước trong cùng batch. Nếu hai state đều mới hơn giá trị đang lưu
+  mà state cũ hơn xếp sau, thì nó thắng, và watermark lùi lại. `es-projector`
+  đọc key này để tính freshness của nguồn (`ops/es_projector.py`).
+- **Client** (`speed_layer/marketplace_speed_layer.py`, test `26b18ba`, fix
+  `7a6eb96`). Producer Kafka, client ES và Redis được giữ ở mức module, dùng
+  chung cho mọi batch. `foreachBatch` chạy trên driver, mỗi lần một batch, nên
+  không có tranh chấp. Batch fail thì client bị đóng và bỏ (sink đã đóng chúng
+  rồi, và trạng thái client sau lỗi không chắc chắn), batch sau mở bộ mới.
+  `marketplace_speed_service.main` đóng client khi query dừng. Test cũ "đóng
+  mọi client sau mỗi batch" được thay bằng: dùng lại sau batch thành công,
+  đóng rồi mở mới sau batch fail (cả khi fail ở sink lẫn ở collect), đóng một
+  lần khi tắt.
+- `0977de0`: hai fake trong `test_marketplace_speed_service.py` chưa nhận
+  `stages=` từ `a66a024`, nên đã fail sẵn với `TypeError`. Đã sửa chữ ký.
+
+### 31.2 Số đo
+
+Cùng máy dev, cùng tham số `speed-cost --cost-sizes 1 10 100 1000 3000
+--cost-batches 6 --repeat 1` như §30.2. Trung vị, ms. Ba cột: sau async Kafka
+(§30.2), sau sửa Redis, sau giữ client.
+
+| K | tổng | client | Redis | record/s |
+|---:|---:|---:|---:|---:|
+| 1 | 1.155 → 1.413 → 1.140 | 110 → 112 → 0 | 2 → 3 → 1 | 0,9 → 0,7 → 0,6 |
+| 10 | 1.278 → 1.648 → 1.176 | ~110 → 111 → 0 | — → 4 → 3 | 7,0 → 6,1 → 8,2 |
+| 100 | 1.586 → 1.991 → 1.662 | ~110 → 111 → 0 | — → 15 → 11 | 59 → 49 → 56 |
+| 1.000 | 5.419 → 5.281 → 4.365 | ~110 → 110 → 0 | — → 74 → 76 | 181 → 186 → 220 |
+| 3.000 | 8.291 → 7.232 → 7.030 | ~110 → 111 → 0 | 1.640 → 294 → 260 | 347 → 396 → **440** |
+
+("—": §30.2 chỉ ghi phân bổ đầy đủ cho K=3.000.)
+
+- Redis ở K=3.000 giảm 1.640 → ~260–294 ms. Phần còn lại là pipeline ghi
+  thật (hset/expire/setex/zadd cho mỗi state và change).
+- `clients_ms` về 0 ở mọi K. Bench bỏ 2 batch đầu sau mỗi lần khởi động, nên
+  batch mở client không nằm trong số đo. Trên `mp-live` thì chỉ batch đầu sau
+  khởi động hoặc sau một batch fail mới tốn ~110 ms.
+- Bão hoà 347 → 396 → **440 record/s**. Fit sau cùng: 1,46 s + 1,96 ms/record
+  (R² 0,96).
+- **Lần chạy giữa (sau sửa Redis) bị nhiễu ở batch nhỏ.** K=1 và K=10 chậm hơn
+  §30.2 ~250–370 ms, toàn bộ ở Spark collect và audit, là những phần hai thay
+  đổi không đụng tới. Mỗi kịch bản chỉ chạy 1 lần nên không tách được nhiễu
+  máy; lần chạy cuối lại về mức §30.2. Đừng đọc số batch nhỏ của cột giữa như
+  một hồi quy.
+
+Phân bổ mới của batch K=3.000 (7,0 s): Spark collect 4.069 (58 %), Kafka
+1.435 (20 %), ES 400, Redis 260, phần còn lại là plan/commit và audit.
+
+### 31.3 Đĩa
+
+Ổ C: còn 6,5 GB trước và sau hai lần chạy. Script chạy có canh đĩa: dừng
+`ops.bench` nếu C: còn dưới 2 GB. Không lần nào chạm ngưỡng.
+
+### 31.4 Test
+
+`test_marketplace_speed_sinks.py`, `test_marketplace_speed_service.py`,
+`test_marketplace_speed_layer.py`: 79 pass. Suite đầy đủ chưa chạy (§29.4:
+kẹt trên máy dev).
+
+### 31.5 Việc tiếp theo (resume ở đây)
+
+1. **Spark collect** giờ chiếm hơn nửa batch lớn (~4 s ở K=3.000), và cũng là
+   phần lớn sàn ~1,1 s của batch nhỏ. Chi phí theo số offer khác nhau
+   (`applyInPandasWithState`). Cần profile trước khi sửa (§30.3 mục 2).
+2. **Kafka** (~1,4 s ở K=3.000) đứng thứ hai: producer giữ thứ tự bằng
+   `max_in_flight_requests_per_connection=1`. Nới nó thì mất thứ tự theo offer
+   khi retry, nên đây là quyết định thiết kế, không phải sửa nhanh.
+3. Latency đo bằng một đồng hồ (§30.3 mục 4).
+4. Chạy `speed-cost --repeat 3` và `speed-soak` dài hơn trên máy thu thập.
+   Soak cũng là nơi xác nhận client giữ lâu không rò rỉ (RAM container `speed`).
+5. Còn mở: §28.5, suite kẹt §29.4.
