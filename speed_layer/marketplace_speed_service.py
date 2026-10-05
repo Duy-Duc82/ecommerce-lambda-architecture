@@ -216,6 +216,7 @@ def main() -> None:
         query = start_query(spark)
         await_query(query, stop=stop, on_poll=lambda: record_progress_safely(recorder, query))
     finally:
+        layer.close_sink_clients()
         spark.stop()
 
 

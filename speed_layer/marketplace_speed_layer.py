@@ -193,7 +193,23 @@ def _sink_clients():
     return create_change_producer(), Elasticsearch(ES_HOST), Redis(host=REDIS_HOST, port=REDIS_PORT, db=REDIS_DB)
 
 
+# The query writes one micro-batch per trigger, for days, and foreachBatch
+# runs on the driver one batch at a time, so one set of clients serves every
+# batch. Reopening them cost ~110 ms a batch.
+_clients: tuple | None = None
+
+
+def close_sink_clients() -> None:
+    """Close and forget the kept clients. Closing a closed client is a no-op."""
+    global _clients
+    clients, _clients = _clients, None
+    for client in clients or ():
+        try: client.close()
+        except Exception: pass
+
+
 def write_marketplace_batch(batch_df: DataFrame, batch_id: int) -> None:
+    global _clients
     from common import postgres
     from speed_layer.marketplace_sinks import BatchStages, MarketplaceSpeedAudit, MarketplaceSpeedSinks
     # Spark sets the query id, which lives in the checkpoint, as a local
@@ -201,7 +217,8 @@ def write_marketplace_batch(batch_df: DataFrame, batch_id: int) -> None:
     query_id = batch_df.sparkSession.sparkContext.getLocalProperty("sql.streaming.queryId")
     if not query_id: raise ValueError("micro-batch carries no streaming query id; refusing to audit it as another run's batch")
     began = time.monotonic()
-    producer, es, redis = _sink_clients()
+    if _clients is None: _clients = _sink_clients()
+    producer, es, redis = _clients
     clients_ms, began = round((time.monotonic() - began) * 1000), time.monotonic()
     try:
         # A closing factory: the query runs for days, one micro-batch every
@@ -211,10 +228,8 @@ def write_marketplace_batch(batch_df: DataFrame, batch_id: int) -> None:
         stages = BatchStages(clients_ms=clients_ms, collect_ms=round((time.monotonic() - began) * 1000))
         MarketplaceSpeedSinks(producer=producer, es=es, redis=redis, audit=audit).write_batch(
             outputs, batch_id, query_id=query_id, stages=stages)
-    finally:
-        # The same holds for the three sink clients: a producer left open per
-        # batch keeps its network thread and sockets alive. Closing an already
-        # closed client (the sink closes them on failure) is a no-op.
-        for client in (producer, es, redis):
-            try: client.close()
-            except Exception: pass
+    except BaseException:
+        # The sink closes its clients on failure, and a client that failed
+        # may be in any state: the next batch starts from new ones.
+        close_sink_clients()
+        raise
