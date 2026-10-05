@@ -5,6 +5,8 @@ connection is opened.
 """
 import json
 from contextlib import contextmanager
+from dataclasses import replace
+from datetime import timedelta
 from decimal import Decimal
 
 import pytest
@@ -92,11 +94,13 @@ class FakeRedis:
         self.closed = 0
         self.fail_on_execute = fail_on_execute
         self.stored = stored or {}
+        self.gets = []
 
     def pipeline(self):
         return FakePipeline(self, self.fail_on_execute)
 
     def get(self, key):
+        self.gets.append(key)
         return self.stored.get(key)
 
     def close(self):
@@ -666,3 +670,47 @@ def test_the_migration_adds_nullable_stage_columns():
     sql = (Path(__file__).parent.parent / "scripts" / "init_postgres.sql").read_text(encoding="utf-8")
     for column in ("stage_clients_ms", "stage_collect_ms", "stage_kafka_ms", "stage_es_ms", "stage_redis_ms"):
         assert f"ALTER TABLE audit.marketplace_speed_batch ADD COLUMN IF NOT EXISTS {column} BIGINT;" in sql
+
+
+def _states_observed_at(*seconds):
+    """STATE outputs for distinct offers of one marketplace, in the given order."""
+    _, _, state = _batch()
+    states = [replace(state, offer_id=f"{state.offer_id}-{i}", observed_at=state.observed_at + timedelta(seconds=s))
+              for i, s in enumerate(seconds)]
+    outputs = [SpeedOutput(output_kind="STATE", offer_id=s.offer_id, state_json=offer_state_to_json(s)) for s in states]
+    return outputs, states
+
+
+def _source_sets(redis):
+    return [command for command in redis.commands if command[0] == "set" and command[1].startswith("rt:source:")]
+
+
+def test_the_source_s_last_observation_is_read_once_per_marketplace_not_per_state():
+    outputs, states = _states_observed_at(0, 5, 3)
+    sinks, parts = _sinks()
+
+    sinks.write_batch(outputs, batch_id=1, query_id=QUERY_ID)
+
+    assert parts["redis"].gets == [f"rt:source:{states[0].marketplace}:last_observation"]
+
+
+def test_the_source_s_last_observation_is_the_batch_s_latest_not_the_last_queued():
+    # Both are newer than what is stored; the older one comes last.
+    outputs, states = _states_observed_at(5, 3)
+    key = f"rt:source:{states[0].marketplace}:last_observation"
+    sinks, parts = _sinks(redis=FakeRedis(stored={key: (states[0].observed_at - timedelta(hours=1)).isoformat()}))
+
+    sinks.write_batch(outputs, batch_id=1, query_id=QUERY_ID)
+
+    assert _source_sets(parts["redis"]) == [("set", key, states[0].observed_at.isoformat(), False)]
+
+
+def test_the_source_s_last_observation_never_moves_back():
+    outputs, states = _states_observed_at(0, 5)
+    key = f"rt:source:{states[0].marketplace}:last_observation"
+    stored = (states[1].observed_at + timedelta(seconds=1)).isoformat()
+    sinks, parts = _sinks(redis=FakeRedis(stored={key: stored.encode("utf-8")}))
+
+    sinks.write_batch(outputs, batch_id=1, query_id=QUERY_ID)
+
+    assert _source_sets(parts["redis"]) == []
