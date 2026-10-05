@@ -1,4 +1,4 @@
-# Waits for this morning's scheduled Claude jobs, stops the stacks cleanly
+﻿# Waits for this morning's scheduled Claude jobs, stops the stacks cleanly
 # (containers and volumes are kept), quits Docker Desktop and shuts Windows down.
 param([datetime]$Deadline = [datetime]"2026-10-05 11:00")
 
