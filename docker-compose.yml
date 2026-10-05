@@ -206,6 +206,9 @@ services:
       MARKETPLACE_SPEED_CHECKPOINT_ROOT: /data/checkpoints
       # Bumped by drill D5 to force a full replay from a fresh checkpoint.
       MARKETPLACE_STREAM_CHECKPOINT_VERSION: ${MARKETPLACE_STREAM_CHECKPOINT_VERSION:-v1}
+      # Overridden only by the speed-cost and speed-soak benchmarks.
+      MARKETPLACE_STREAM_TRIGGER: ${MARKETPLACE_STREAM_TRIGGER:-30 seconds}
+      MARKETPLACE_SPEED_MAX_OFFSETS_PER_TRIGGER: ${MARKETPLACE_SPEED_MAX_OFFSETS_PER_TRIGGER:-0}
     volumes:
       - ./:/app:ro
       - speed_checkpoints:/data/checkpoints

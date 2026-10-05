@@ -113,9 +113,9 @@ class RecordingAudit:
         self.query_ids = getattr(self, "query_ids", []) + [query_id]
         return self.begin
 
-    def mark_succeeded(self, *, query_name, query_id, batch_id, completed_at, counts, latency=None):
+    def mark_succeeded(self, *, query_name, query_id, batch_id, completed_at, counts, latency=None, stages=None):
         self.calls.append(("succeeded", query_name, batch_id, counts))
-        self.latency, self.completed_at = latency, completed_at
+        self.latency, self.completed_at, self.stages = latency, completed_at, stages
 
     def mark_failed(self, *, query_name, query_id, batch_id, completed_at, error):
         self.calls.append(("failed", query_name, batch_id, str(error)))
@@ -628,3 +628,41 @@ def test_the_migration_adds_nullable_latency_columns_and_the_progress_table():
         assert f"ALTER TABLE audit.marketplace_speed_batch ADD COLUMN IF NOT EXISTS {column} BIGINT;" in sql
     assert "CREATE TABLE IF NOT EXISTS audit.marketplace_stream_progress" in sql
     assert "CREATE TABLE IF NOT EXISTS audit.storage_snapshot" in sql
+
+
+def test_a_succeeded_batch_reports_each_sink_stage_and_keeps_the_caller_s():
+    from speed_layer.marketplace_sinks import BatchStages
+
+    outputs, _, _ = _batch()
+    sinks, parts = _sinks()
+
+    sinks.write_batch(outputs, batch_id=1, query_id=QUERY_ID, stages=BatchStages(clients_ms=7, collect_ms=900))
+
+    stages = parts["audit"].stages
+    assert (stages.clients_ms, stages.collect_ms) == (7, 900)
+    assert all(isinstance(v, int) and v >= 0 for v in (stages.kafka_ms, stages.es_ms, stages.redis_ms))
+
+
+def test_the_audit_writes_the_stage_columns_and_nulls_them_on_failure():
+    from speed_layer.marketplace_sinks import BatchStages
+
+    factory = _connection_factory()
+    audit = MarketplaceSpeedAudit(factory)
+
+    audit.mark_succeeded(query_name=MARKETPLACE_SPEED_QUERY_NAME, query_id=QUERY_ID, batch_id=7, completed_at=None,
+                         counts=BatchCounts(), stages=BatchStages(1, 2, 3, 4, 5))
+    audit.mark_failed(query_name=MARKETPLACE_SPEED_QUERY_NAME, query_id=QUERY_ID, batch_id=8, completed_at=None,
+                      error=RuntimeError("x"))
+
+    (ok_sql, ok_params), (_, failed_params) = factory.connection.cur.executed
+    assert "stage_clients_ms=%s,stage_collect_ms=%s,stage_kafka_ms=%s,stage_es_ms=%s,stage_redis_ms=%s" in ok_sql
+    assert ok_params[-11:-6] == (1, 2, 3, 4, 5)
+    assert failed_params[-11:-6] == (None,) * 5
+
+
+def test_the_migration_adds_nullable_stage_columns():
+    from pathlib import Path
+
+    sql = (Path(__file__).parent.parent / "scripts" / "init_postgres.sql").read_text(encoding="utf-8")
+    for column in ("stage_clients_ms", "stage_collect_ms", "stage_kafka_ms", "stage_es_ms", "stage_redis_ms"):
+        assert f"ALTER TABLE audit.marketplace_speed_batch ADD COLUMN IF NOT EXISTS {column} BIGINT;" in sql

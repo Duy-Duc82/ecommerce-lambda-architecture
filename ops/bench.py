@@ -27,6 +27,18 @@ Scenarios:
 - ``speed``: fixed send rates for a fixed time each; Spark's progress, batch
   durations and the per-batch latency the speed audit records.
 - ``batch``: the batch over the Silver ``ingest`` leaves, at each size.
+- ``speed-cost``: what one speed micro-batch costs. A backlog is loaded with
+  the speed query down, then the query drains it at a fixed batch size K
+  (``maxOffsetsPerTrigger``) and a zero trigger, one K after another. Per K:
+  batch duration and where it went (Spark's phases, then clients, compute,
+  Kafka, Elasticsearch, Redis); over all K, the fixed and per-row cost of a
+  batch and the saturated throughput. Independent of the load generator's
+  own ceiling, which the ``speed`` scenario hits near 550/s.
+- ``speed-soak``: one rate held for a long time at a given trigger. The run is
+  cut into windows; drift between the first and the last window, failed
+  batches and whether the backlog drained say whether it stayed stable.
+
+``speed-cost`` and ``speed-soak`` are not part of ``all``.
 
 ``resources`` is not a scenario of its own: ``docker stats`` is sampled every
 five seconds alongside each run, and summarised per container.
@@ -54,6 +66,7 @@ COMPOSE = ["docker", "compose", "-f", str(ROOT / "docker-compose.yml")]
 LIVE_PROJECT = "mp-live"
 DATASET = "replayed_fixture"
 SCENARIOS = ("crawl", "ingest", "speed", "batch")
+EXTRA_SCENARIOS = ("speed-cost", "speed-soak")
 CORE = ("kafka", "minio", "redis", "postgres-dw", "elasticsearch")
 
 
@@ -158,6 +171,156 @@ def resource_summary(samples: list[dict[str, Any]]) -> dict[str, dict[str, float
             for name, rows in sorted(by_name.items())}
 
 
+STAGE_COLUMNS = ("stage_clients_ms", "stage_collect_ms", "stage_kafka_ms", "stage_es_ms", "stage_redis_ms")
+SPARK_PHASES = ("add_batch_ms", "query_planning_ms", "latest_offset_ms", "get_batch_ms", "wal_commit_ms",
+                "commit_offsets_ms")
+
+
+def fit_line(points: Sequence[tuple[float, float]]) -> dict[str, float | None]:
+    """Least squares ``y = fixed + per_unit * x``, with R squared."""
+    if len(points) < 2 or len({x for x, _ in points}) < 2:
+        return {"fixed": None, "per_unit": None, "r2": None, "points": len(points)}
+    n = len(points)
+    mx, my = sum(x for x, _ in points) / n, sum(y for _, y in points) / n
+    sxx = sum((x - mx) ** 2 for x, _ in points)
+    slope = sum((x - mx) * (y - my) for x, y in points) / sxx
+    fixed = my - slope * mx
+    total = sum((y - my) ** 2 for _, y in points)
+    residual = sum((y - fixed - slope * x) ** 2 for x, y in points)
+    return {"fixed": fixed, "per_unit": slope, "r2": 1 - residual / total if total else None, "points": n}
+
+
+def cost_step_metrics(batches: list[dict[str, Any]], *, size: int) -> dict[str, Any]:
+    """One batch size: Spark progress joined to the speed audit, warm batches only.
+
+    ``overhead_ms`` is the part of the trigger outside ``addBatch`` (offsets,
+    planning, the write-ahead log and commit); ``audit_other_ms`` is the part
+    of ``addBatch`` no stage column accounts for: the audit writes and the
+    hand-over between Spark and Python."""
+    with_rows = [b for b in batches if (b.get("records") or 0) > 0]
+    if not with_rows:
+        raise BenchFailed(f"speed-cost: no warm batch with rows at K={size}")
+    duration = [b["trigger_execution_ms"] for b in with_rows]
+    rows = sum(b["records"] for b in with_rows)
+    step: dict[str, Any] = {
+        "size": size, "batches": len(with_rows),
+        "records_p50": percentile([b["records"] for b in with_rows], 0.50),
+        "duration_p50_ms": percentile(duration, 0.50), "duration_p95_ms": percentile(duration, 0.95),
+        "duration_max_ms": max(duration),
+        "rows_per_second": rows / (sum(duration) / 1000) if sum(duration) else None,
+        "overhead_p50_ms": percentile([b["trigger_execution_ms"] - (b.get("add_batch_ms") or 0) for b in with_rows], 0.50),
+        "state_rows_max": max((b.get("state_rows_total") or 0 for b in with_rows), default=None),
+    }
+    for column in (*SPARK_PHASES, *STAGE_COLUMNS):
+        step[f"{column.removeprefix('stage_')}_p50"] = percentile([b.get(column) for b in with_rows], 0.50)
+    staged = [b for b in with_rows if all(b.get(c) is not None for c in STAGE_COLUMNS) and b.get("add_batch_ms") is not None]
+    step["audit_other_ms_p50"] = percentile([b["add_batch_ms"] - sum(b[c] for c in STAGE_COLUMNS) for b in staged], 0.50)
+    return step
+
+
+def capacity_at_trigger(fixed_ms: float | None, per_row_ms: float | None, trigger_seconds: float) -> float | None:
+    """Rows per second the speed query keeps up with when a batch must finish
+    within one trigger: ``fixed + K * per_row <= trigger``, so ``K / trigger``."""
+    if fixed_ms is None or not per_row_ms or per_row_ms <= 0:
+        return None
+    rows = (trigger_seconds * 1000 - fixed_ms) / per_row_ms
+    return max(rows, 0.0) / trigger_seconds
+
+
+def cost_metrics(steps: list[dict[str, Any]], batches: list[dict[str, Any]],
+                 triggers: Sequence[float] = (2, 5, 10, 30)) -> dict[str, Any]:
+    """One fit over the steps' medians: duration against records.
+
+    Medians, not every batch: Spark times a batch by the wall clock, and a
+    step of the Docker VM's clock (seen: +30 s) lands whole in one batch's
+    duration while the stage columns, timed on the monotonic clock, do not
+    move. One such batch would otherwise drag the fit."""
+    fit = fit_line([(s["records_p50"], s["duration_p50_ms"]) for s in steps])
+    collect = fit_line([(s["records_p50"], s["collect_ms_p50"]) for s in steps if s.get("collect_ms_p50") is not None])
+    metrics: dict[str, Any] = {
+        "fixed_cost_ms": fit["fixed"], "per_row_cost_ms": fit["per_unit"], "fit_r2": fit["r2"],
+        "fit_steps": fit["points"], "fit_batches": len(batches), "collect_fixed_ms": collect["fixed"], "collect_per_row_ms": collect["per_unit"],
+        "saturated_rows_per_second": max((s["rows_per_second"] or 0 for s in steps), default=None),
+        "steps": steps,
+    }
+    for trigger in triggers:
+        metrics[f"capacity_at_trigger_{trigger:g}s_rows_per_second"] = capacity_at_trigger(
+            fit["fixed"], fit["per_unit"], trigger)
+    for step in steps:
+        for key in ("duration_p50_ms", "duration_p95_ms", "rows_per_second", "add_batch_ms_p50", "overhead_p50_ms",
+                    "clients_ms_p50", "collect_ms_p50", "kafka_ms_p50", "es_ms_p50", "redis_ms_p50", "audit_other_ms_p50"):
+            metrics[f"k{step['size']}_{key}"] = step.get(key)
+    return metrics
+
+
+def _window_of(at: datetime, start: datetime, window_seconds: int) -> int:
+    return int((at - start).total_seconds() // window_seconds)
+
+
+def soak_metrics(batches: list[dict[str, Any]], progress: list[dict[str, Any]], resources: list[dict[str, Any]], *,
+                 start: datetime, window_seconds: int, trigger_seconds: float, sent: int, send_seconds: float,
+                 drain_seconds: float | None, failed_batches: int, speed_container: str) -> dict[str, Any]:
+    """A long run cut into windows of ``window_seconds``.
+
+    Stable means: it drained, no batch failed, and neither the batch duration
+    p50 nor the speed container's memory grew by more than 25 % from the first
+    full window to the last. The thresholds are stated in the result."""
+    windows: dict[int, dict[str, list]] = {}
+    for p in progress:
+        if (p.get("num_input_rows") or 0) > 0 and p.get("trigger_execution_ms") is not None:
+            w = windows.setdefault(_window_of(p["progress_at"], start, window_seconds), {"d": [], "rows": [], "lat50": [],
+                                                                                         "lat95": [], "mem": []})
+            w["d"].append(p["trigger_execution_ms"])
+    # Rows from the audit: Spark's numInputRows counts each record twice (see COST_SQL).
+    for b in batches:
+        if (b.get("input_rows") or 0) > 0 and b.get("latency_p50_ms") is not None and b.get("completed_at"):
+            w = windows.get(_window_of(b["completed_at"], start, window_seconds))
+            if w is not None:
+                w["rows"].append(b["input_rows"])
+                w["lat50"].append(b["latency_p50_ms"])
+                w["lat95"].append(b["latency_p95_ms"])
+    for r in resources:
+        if r["name"] == speed_container and r.get("at"):
+            w = windows.get(_window_of(r["at"], start, window_seconds))
+            if w is not None:
+                w["mem"].append(r["mem_mib"])
+    rows = []
+    for index in sorted(windows):
+        w = windows[index]
+        rows.append({"window": index, "batches": len(w["d"]), "rows": sum(w["rows"]),
+                     "duration_p50_ms": percentile(w["d"], 0.50), "duration_p95_ms": percentile(w["d"], 0.95),
+                     "over_trigger": sum(d > trigger_seconds * 1000 for d in w["d"]),
+                     "latency_p50_median_ms": spread(w["lat50"])["median"],
+                     "latency_p95_max_ms": max(w["lat95"], default=None),
+                     "speed_mem_max_mib": max(w["mem"], default=None)})
+    # The last window is usually cut short by the end of sending; compare
+    # the first and the last *full* ones.
+    full = rows[:-1] if len(rows) > 2 else rows
+
+    def drift(key: str) -> float | None:
+        if len(full) < 2 or not full[0][key] or full[-1][key] is None:
+            return None
+        return full[-1][key] / full[0][key] - 1
+
+    durations = [p["trigger_execution_ms"] for p in progress if (p.get("num_input_rows") or 0) > 0]
+    latencies = [b["latency_p95_ms"] for b in batches if b.get("latency_p95_ms") is not None]
+    duration_drift, memory_drift = drift("duration_p50_ms"), drift("speed_mem_max_mib")
+    limit = 0.25
+    stable = (drain_seconds is not None and failed_batches == 0
+              and (duration_drift is None or duration_drift <= limit)
+              and (memory_drift is None or memory_drift <= limit))
+    return {
+        "sent": sent, "offered_rate": sent / send_seconds if send_seconds > 0 else None,
+        "drain_seconds": drain_seconds, "kept_up": drain_seconds is not None, "failed_batches": failed_batches,
+        "batches": len(durations), "batch_duration_p50_ms": percentile(durations, 0.50),
+        "batch_duration_p95_ms": percentile(durations, 0.95), "batch_duration_max_ms": max(durations, default=None),
+        "batches_over_trigger": sum(d > trigger_seconds * 1000 for d in durations),
+        "latency_batch_p95_max_ms": max(latencies, default=None),
+        "duration_p50_drift": duration_drift, "speed_mem_drift": memory_drift,
+        "drift_limit": limit, "stable": stable, "windows": rows,
+    }
+
+
 _UNITS = {"B": 1 / 2**20, "KiB": 1 / 1024, "MiB": 1, "GiB": 1024, "TiB": 1024**2,
           "kB": 1000 / 2**20, "MB": 1e6 / 2**20, "GB": 1e9 / 2**20}
 
@@ -246,10 +409,11 @@ class ResourceSampler:
         prefix = os.environ.get("MP_CONTAINER_PREFIX", "")
         while not self._stop.is_set():
             out = _run(["docker", "stats", "--no-stream", "--format", "{{json .}}"], check=False, timeout=60).stdout
+            at = datetime.now(timezone.utc)
             for line in out.splitlines():
                 row = parse_stats_line(line)
                 if row and row["name"].startswith(prefix):
-                    self.samples.append(row)
+                    self.samples.append({**row, "at": at})
             self._stop.wait(self.interval)
 
     def __enter__(self) -> "ResourceSampler":
@@ -418,6 +582,94 @@ def run_speed(stack: Stack, *, rate: float, seconds: int, seed: int) -> dict[str
     return speed_metrics(batches, progress, sent=sent, send_seconds=send_seconds, drain_seconds=drain)
 
 
+# Spark's numInputRows counts the Kafka source once per branch that reads it
+# (valid and invalid are unioned back), so it reports twice the records. The
+# speed audit's input_rows has one output per record read: that is the size.
+COST_SQL = ("SELECT p.batch_id, p.progress_at, b.input_rows AS records, p.trigger_execution_ms, "
+            + ", ".join(f"p.{c}" for c in SPARK_PHASES) + ", p.state_rows_total, "
+            + ", ".join(f"b.{c}" for c in STAGE_COLUMNS)
+            + " FROM audit.marketplace_stream_progress p LEFT JOIN audit.marketplace_speed_batch b"
+            " USING (query_name, query_id, batch_id) WHERE p.batch_id > %s AND b.input_rows > 0"
+            " ORDER BY p.batch_id")
+
+
+_TRIGGER_UNITS = {"millisecond": 0.001, "second": 1, "minute": 60}
+
+
+def trigger_seconds(trigger: str) -> float:
+    """``"30 seconds"``, ``"500 milliseconds"``, ``"1 minute"`` -> seconds."""
+    number, _, unit = trigger.strip().partition(" ")
+    unit = unit.strip().lower().removesuffix("s")
+    if unit not in _TRIGGER_UNITS:
+        raise ValueError(f"unknown trigger unit in {trigger!r}")
+    return float(number) * _TRIGGER_UNITS[unit]
+
+
+def _wait_first_progress(stack: Stack) -> None:
+    wait_until(lambda: bool(stack.query("SELECT 1 FROM audit.marketplace_stream_progress LIMIT 1")),
+               timeout=600, what="the speed query's first micro-batch", poll=5)
+
+
+def run_speed_cost(stack: Stack, *, sizes: list[int], batches: int, warmup: int, seed: int) -> dict[str, Any]:
+    """Drain one preloaded backlog at each batch size K in turn.
+
+    The speed service restarts for every K, so the first ``warmup`` batches
+    after each start are dropped: the first one is the batch the previous K
+    left planned in the write-ahead log, and the JVM and Python workers are
+    still cold. The trigger is zero: a batch starts as soon as the last ends,
+    so the step measures the batch and never the wait for a trigger."""
+    stack.env.update({"MARKETPLACE_STREAM_TRIGGER": "0 seconds"})
+    stack.fresh()
+    total = sum(sizes) * (warmup + batches + 1)
+    # At most 60 one-minute rounds per offer: event times stay within the hour
+    # before now, far inside the six-hour stale timeout.
+    sent, send_seconds = _send_load(seed=seed, count=total, offers=max(1000, math.ceil(total / 60)), rate=0)
+    steps, measured = [], []
+    for size in sizes:
+        stack.env["MARKETPLACE_SPEED_MAX_OFFSETS_PER_TRIGGER"] = str(size)
+        last = stack.query("SELECT coalesce(max(batch_id), -1) AS b FROM audit.marketplace_stream_progress")[0]["b"]
+        stack.compose("up", "-d", "--no-deps", "--force-recreate", "speed", timeout=600)
+        wanted = warmup + batches
+        wait_until(lambda: len(stack.query(COST_SQL, (last,))) >= wanted,
+                   timeout=max(900, wanted * (10 + size * 0.01)), what=f"{wanted} batches at K={size}", poll=3)
+        stack.compose("stop", "speed", timeout=300)
+        warm = stack.query(COST_SQL, (last,))[warmup:wanted]
+        steps.append(cost_step_metrics(warm, size=size))
+        measured += warm
+        print(json.dumps({"event": "bench_cost_step", **steps[-1]}, default=str), flush=True)
+    return {"preloaded": sent, "preload_seconds": round(send_seconds, 3), "warmup_batches": warmup,
+            **cost_metrics(steps, measured)}
+
+
+def run_speed_soak(stack: Stack, *, rate: float, seconds: int, trigger: str, window: int, seed: int,
+                   sampler: ResourceSampler | None = None) -> dict[str, Any]:
+    stack.env["MARKETPLACE_STREAM_TRIGGER"] = trigger
+    stack.fresh("speed")
+    _wait_first_progress(stack)
+    since = stack.db_now()
+    start = datetime.now(timezone.utc)
+    sent, send_seconds = _send_load(seed=seed, count=int(rate * seconds), offers=max(1000, int(rate * 60)), rate=rate)
+
+    def applied() -> int:
+        return int(stack.query("SELECT coalesce(sum(input_rows), 0) AS n FROM audit.marketplace_speed_batch "
+                               "WHERE started_at >= %s AND status = 'SUCCEEDED'", (since,))[0]["n"])
+
+    try:
+        drain = wait_until(lambda: applied() >= sent, timeout=max(600, seconds), what="the speed layer to catch up",
+                           poll=5)
+    except BenchFailed:
+        drain = None
+    batches = stack.query("SELECT * FROM audit.marketplace_speed_batch WHERE started_at >= %s AND status = 'SUCCEEDED'",
+                          (since,))
+    failed = stack.query("SELECT count(*) AS n FROM audit.marketplace_speed_batch WHERE started_at >= %s "
+                         "AND status = 'FAILED'", (since,))[0]["n"]
+    progress = stack.query("SELECT * FROM audit.marketplace_stream_progress WHERE progress_at >= %s", (since,))
+    return soak_metrics(batches, progress, list(sampler.samples) if sampler else [], start=start,
+                        window_seconds=window, trigger_seconds=trigger_seconds(trigger), sent=sent,
+                        send_seconds=send_seconds, drain_seconds=drain, failed_batches=int(failed),
+                        speed_container=container("speed"))
+
+
 # Pages crawled in a run: a PARTIAL attempt fetched and parsed its page too.
 CRAWLED_SQL = ("SELECT count(DISTINCT task_id) AS n FROM audit.crawl_request_attempt "
                "WHERE started_at >= %s AND status IN ('SUCCEEDED', 'PARTIAL')")
@@ -457,10 +709,18 @@ def variants(scenario: str, args: argparse.Namespace) -> list[tuple[str, dict[st
         return [(f"n={n}", {"count": n}) for n in args.sizes]
     if scenario == "batch":
         return [(f"n={n}", {"count": n}) for n in args.sizes]
+    if scenario == "speed-cost":
+        return [(f"k={'-'.join(map(str, args.cost_sizes))}",
+                 {"sizes": args.cost_sizes, "batches": args.cost_batches, "warmup": args.cost_warmup})]
+    if scenario == "speed-soak":
+        return [(f"rate={r:g}/s-trigger={args.trigger}", {"rate": r, "seconds": args.soak_seconds,
+                                                         "trigger": args.trigger, "window": args.soak_window})
+                for r in args.soak_rates]
     return [(f"rate={r:g}/s", {"rate": r, "seconds": args.seconds}) for r in args.rates]
 
 
-RUNNERS = {"crawl": run_crawl, "ingest": run_ingest, "batch": run_batch, "speed": run_speed}
+RUNNERS = {"crawl": run_crawl, "ingest": run_ingest, "batch": run_batch, "speed": run_speed,
+           "speed-cost": run_speed_cost, "speed-soak": run_speed_soak}
 
 
 def run_scenario(scenario: str, args: argparse.Namespace) -> list[Path]:
@@ -473,12 +733,14 @@ def run_scenario(scenario: str, args: argparse.Namespace) -> list[Path]:
         for repeat in range(args.repeat):
             stack = Stack()
             run_params = dict(params)
-            if scenario in ("ingest", "batch", "speed"):
+            if scenario in ("ingest", "batch", "speed", *EXTRA_SCENARIOS):
                 run_params["seed"] = args.seed + repeat
             started = datetime.now(timezone.utc)
             try:
                 with ResourceSampler() as sampler:
-                    metrics = RUNNERS[scenario](stack, **run_params)
+                    # The soak cuts the resource trace into its windows.
+                    extra = {"sampler": sampler} if scenario == "speed-soak" else {}
+                    metrics = RUNNERS[scenario](stack, **run_params, **extra)
                 runs.append({"repeat": repeat, "started_at": started.isoformat(), "params": run_params,
                              "metrics": metrics, "resources": resource_summary(sampler.samples)})
                 print(json.dumps({"event": "bench_run", "scenario": scenario, "variant": variant, "repeat": repeat,
@@ -489,7 +751,7 @@ def run_scenario(scenario: str, args: argparse.Namespace) -> list[Path]:
         result = {"scenario": scenario, "variant": variant, "dataset": DATASET, "environment": env,
                   "params": params, "seed": args.seed, "repeat": args.repeat,
                   "single_run": args.repeat == 1, "runs": runs, "summary": summarise_runs(runs)}
-        path = RESULTS / f"{scenario}-{variant.replace('/', 'per').replace('=', '-')}-{started:%Y%m%dT%H%M%SZ}.json"
+        path = RESULTS / f"{scenario}-{variant.replace('/', 'per').replace('=', '-').replace(' ', '')}-{started:%Y%m%dT%H%M%SZ}.json"
         path.write_text(json.dumps(result, indent=2, sort_keys=True, default=str) + "\n", encoding="utf-8")
         written.append(path)
     return written
@@ -497,7 +759,7 @@ def run_scenario(scenario: str, args: argparse.Namespace) -> list[Path]:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python -m ops.bench", description="Phase 9 benchmarks (replayed fixtures)")
-    parser.add_argument("scenario", choices=[*SCENARIOS, "all", "report"])
+    parser.add_argument("scenario", choices=[*SCENARIOS, *EXTRA_SCENARIOS, "all", "report"])
     parser.add_argument("--repeat", type=int, default=3)
     parser.add_argument("--seed", type=int, default=1)
     parser.add_argument("--sizes", type=int, nargs="+", default=[10_000, 50_000, 200_000])
@@ -507,6 +769,14 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--categories", type=int, default=6)
     parser.add_argument("--pages", type=int, default=20)
     parser.add_argument("--rows-per-page", type=int, default=40)
+    parser.add_argument("--cost-sizes", type=int, nargs="+", default=[1, 10, 100, 1000, 5000, 15000],
+                        help="speed-cost: batch sizes K (maxOffsetsPerTrigger)")
+    parser.add_argument("--cost-batches", type=int, default=8, help="speed-cost: warm batches measured per K")
+    parser.add_argument("--cost-warmup", type=int, default=2, help="speed-cost: batches dropped after each restart")
+    parser.add_argument("--soak-rates", type=float, nargs="+", default=[200])
+    parser.add_argument("--soak-seconds", type=int, default=1800)
+    parser.add_argument("--soak-window", type=int, default=300, help="speed-soak: seconds per window")
+    parser.add_argument("--trigger", default="30 seconds", help="speed-soak: the speed query's trigger")
     parser.add_argument("--keep", action="store_true", help="leave the last project up for inspection")
     args = parser.parse_args(argv)
     if args.repeat < 1:

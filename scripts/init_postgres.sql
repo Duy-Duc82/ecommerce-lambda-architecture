@@ -163,6 +163,16 @@ ALTER TABLE audit.marketplace_speed_batch ADD COLUMN IF NOT EXISTS latency_p50_m
 ALTER TABLE audit.marketplace_speed_batch ADD COLUMN IF NOT EXISTS latency_p95_ms BIGINT;
 ALTER TABLE audit.marketplace_speed_batch ADD COLUMN IF NOT EXISTS latency_max_ms BIGINT;
 
+-- Speed-cost benchmark: where one micro-batch's time went, in ms. clients
+-- opens the three sink clients, collect is Spark computing the batch (the
+-- stateful comparison included), then one column per sink. Nullable: a
+-- failed batch and every batch before these columns have none. Safe to run twice.
+ALTER TABLE audit.marketplace_speed_batch ADD COLUMN IF NOT EXISTS stage_clients_ms BIGINT;
+ALTER TABLE audit.marketplace_speed_batch ADD COLUMN IF NOT EXISTS stage_collect_ms BIGINT;
+ALTER TABLE audit.marketplace_speed_batch ADD COLUMN IF NOT EXISTS stage_kafka_ms BIGINT;
+ALTER TABLE audit.marketplace_speed_batch ADD COLUMN IF NOT EXISTS stage_es_ms BIGINT;
+ALTER TABLE audit.marketplace_speed_batch ADD COLUMN IF NOT EXISTS stage_redis_ms BIGINT;
+
 -- Phase 9 (plan section 6.1): Spark's own StreamingQueryProgress, one row per
 -- micro-batch. query_id is the id Spark keeps in the checkpoint, the same one
 -- marketplace_speed_batch is keyed by, so the two join on
