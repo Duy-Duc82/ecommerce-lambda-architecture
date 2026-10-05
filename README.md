@@ -17,4 +17,5 @@ Lịch:
 
 ## Báo cáo (mới nhất trước)
 
-- [2026-10-05](reports/2026-10-05.md) — CẦN XEM: benchmark xong 36/36, ổn định; trang 1882 p3 rơi khỏi lịch crawl mp-live
+- [2026-10-05 07:47](reports/2026-10-05.md) — LỖI: scheduler bỏ qua batch mp-20261005T0000Z, WP0 chưa nghiệm thu; crawl vẫn 215/216 OK
+- [2026-10-05 05:43](reports/2026-10-05.md) — CẦN XEM: benchmark xong 36/36, ổn định; trang 1882 p3 rơi khỏi lịch crawl mp-live
