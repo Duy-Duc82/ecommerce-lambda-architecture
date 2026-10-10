@@ -17,6 +17,7 @@ Lịch:
 
 ## Báo cáo (mới nhất trước)
 
+- [2026-10-10 18:00](reports/2026-10-10.md) — CẦN XEM: Docker vẫn tắt (từ 10-06), mp-live không chạy, không có batch
 - [2026-10-09 18:53](reports/2026-10-09.md) — CẦN XEM: Docker tắt từ 10-06, mp-live không chạy; job 10-06..10-08 không ra báo cáo
 
 - [2026-10-05 07:47](reports/2026-10-05.md) — LỖI: scheduler bỏ qua batch mp-20261005T0000Z, WP0 chưa nghiệm thu; crawl vẫn 215/216 OK
