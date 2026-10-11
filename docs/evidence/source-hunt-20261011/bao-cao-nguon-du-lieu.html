@@ -1,0 +1,491 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Nguồn dữ liệu crawl</title>
+<style>
+:root{
+  --bg:#f5f6f4; --card:#ffffff; --fg:#1c2321; --muted:#5b6764; --line:#dbe0dd; --accent:#1f6f62; --accent-soft:#e2efeb;
+  --code-bg:#1e2524; --code-fg:#dbe7e3;
+  --ok:#1f7a45; --ok-bg:#e2f3e7; --bad:#b3261e; --bad-bg:#fbe4e2; --warn:#946000; --warn-bg:#fbefd6;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:17px/1.65 "Segoe UI",system-ui,Roboto,sans-serif;padding:36px 16px 72px}
+main{max-width:1080px;margin:0 auto;display:flex;flex-direction:column;gap:44px}
+h1{font-size:2.05rem;margin:0 0 6px;line-height:1.2}
+h2{font-size:1.45rem;margin:0 0 16px;padding-bottom:8px;border-bottom:2px solid var(--line)}
+h3{font-size:1.15rem;margin:0}
+h4{font-size:1.02rem;margin:18px 0 8px}
+p{margin:0}
+.sub{color:var(--muted)}
+code{font-family:Consolas,"Cascadia Mono",ui-monospace,monospace;font-size:.86em;background:var(--accent-soft);padding:1px 5px;border-radius:4px;overflow-wrap:anywhere}
+pre{margin:0;background:var(--code-bg);color:var(--code-fg);border-radius:8px;padding:14px 16px;overflow-x:auto;font:14px/1.55 Consolas,"Cascadia Mono",ui-monospace,monospace}
+.method{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:20px 22px;display:flex;flex-direction:column;gap:12px;min-width:0}
+.method h3{display:flex;align-items:center;gap:10px}
+.num{display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;border-radius:50%;background:var(--accent);color:#fff;font-size:.95rem;flex-shrink:0}
+.row{display:grid;grid-template-columns:130px 1fr;gap:8px 14px;margin:0}
+.row dt{font-weight:700;color:var(--muted)}
+.row dd{margin:0;min-width:0}
+.methods{display:flex;flex-direction:column;gap:18px}
+.tw{overflow-x:auto;background:var(--card);border:1px solid var(--line);border-radius:12px}
+table{border-collapse:collapse;width:100%;min-width:860px}
+table.narrow{min-width:560px}
+th,td{padding:11px 13px;text-align:left;vertical-align:top;border-bottom:1px solid var(--line);font-size:.92rem}
+th{background:#eef1ef;font-size:.83rem;color:var(--muted)}
+tr:last-child td{border-bottom:0}
+tr.tier td{background:#f3f6f4;font-weight:700;color:var(--accent)}
+td.site{font-weight:700;white-space:nowrap}
+td.r{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+.chip{display:inline-block;font-size:.8rem;font-weight:700;padding:3px 10px;border-radius:999px;white-space:nowrap}
+.ok{color:var(--ok);background:var(--ok-bg)} .bad{color:var(--bad);background:var(--bad-bg)} .warn{color:var(--warn);background:var(--warn-bg)}
+.box code{background:#fff}
+.box{background:var(--accent-soft);border-radius:12px;padding:20px 22px;display:flex;flex-direction:column;gap:10px}
+ul,ol{margin:0;padding-left:1.3em;display:flex;flex-direction:column;gap:7px}
+.why{background:var(--card);border-left:4px solid var(--warn);border-radius:0 12px 12px 0;padding:16px 20px;display:flex;flex-direction:column;gap:8px}
+.why.bad{border-left-color:var(--bad);background:var(--card);color:inherit}
+@media (max-width:640px){.row{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<main>
+
+<header>
+  <h1>Khảo sát nguồn dữ liệu crawl cho pipeline</h1>
+  <p class="sub">Yêu cầu: nguồn dễ crawl, lấy được liên tục và ổn định, không gọi API · Thử nghiệm 11/10/2026, 17:30–20:25 · Python 3.11 <code>urllib.request</code> + <code>re</code>/<code>json</code>; Playwright 1.57 (Chromium headless) · Đã thử 40+ website</p>
+</header>
+
+<section class="box">
+  <h2 style="border:0;padding:0;margin:0">Kết luận</h2>
+  <ol>
+    <li><b>Bộ nguồn đề xuất (6 nguồn chính):</b> Tiki (trang danh mục), Websosanh, FPT Shop, Thế Giới Di Động / Điện Máy Xanh, Phong Vũ, Chợ Tốt. Cả 6 lấy bằng HTTP thường, dữ liệu là JSON nhúng sẵn trong HTML (<code>__NEXT_DATA__</code>, JSON-LD, RSC), không cần trình duyệt.</li>
+    <li><b>Nguồn bổ sung tốt</b>, cũng dùng HTTP thường và phân trang được qua URL: <b>meta.vn</b>, <b>MediaMart</b>, <b>Pico</b>, <b>Hoàng Hà Mobile</b> (điện tử); <b>Kingfoodmart</b> (thực phẩm, có số đã bán và tồn kho); <b>Bonbanh</b> (ô tô cũ, nếu muốn thêm một miền giá khác). Lazada vẫn lấy được bằng Playwright.</li>
+    <li><b>Mỗi nguồn có ít nhất một trường dùng được cho ML ngoài giá:</b>
+      <ul>
+        <li>Số đã bán cộng dồn (lấy hiệu giữa hai snapshot ra doanh số ước lượng): Tiki <code>quantity_sold</code>, FPT <code>sold.realQuantity</code>, Pico <code>orderQuantity</code>, Kingfoodmart <code>orderedCounter</code>. Trên Tiki, theo giờ chỉ ~0,8% SP có số đã bán tăng, nên tín hiệu này hợp chu kỳ ngày (mục 3.6).</li>
+        <li>Tồn kho: Phong Vũ <code>stockQuantity</code>, Kingfoodmart <code>inStock</code>.</li>
+        <li>Thị trường đã ghép giữa các shop: Websosanh <code>offerCount</code>, <code>lowPrice</code>, <code>highPrice</code>.</li>
+        <li>Luồng sự kiện mới: Chợ Tốt khoảng <b>230 tin điện thoại/giờ</b>, khoảng <b>1.200 tin/giờ</b> nếu tính mọi danh mục.</li>
+      </ul>
+    </li>
+    <li><b>Kết quả đo:</b> <!--SUMMARY-->144/145 lần tải danh mục thành công (99%) trên 16 nguồn trong khoảng 18:04–20:22. Không có 403/429/captcha. Lỗi duy nhất: Bonbanh trả trang "máy chủ quá tải" với HTTP 200 ở 1 lần tải (mục 3.6). Parser không phải sửa lần nào. Thời gian tải 0,1–1 giây/trang với HTTP, 9–16 giây với Playwright. <!--/SUMMARY--></li>
+    <li><b>Hai giới hạn quan trọng:</b>
+      <ul>
+        <li><b>Tiki:</b> trang <i>sản phẩm</i> chuyển sang trang thử thách JavaScript (mã đã làm rối) sau khoảng 25 request trong vài phút, mỗi request cách 2–3 giây, và tự gỡ sau 10–15 phút. Ở tốc độ 15 giây/request thì không bị chặn (24/24). Trang <i>danh mục</i> không bị ảnh hưởng.</li>
+        <li><b>Websosanh:</b> danh sách giá từng shop nằm sau <code>/compare-api/*</code>, mà robots.txt cấm. Chỉ dùng mức tổng hợp trong JSON-LD.</li>
+      </ul>
+    </li>
+    <li><b>Phân trang:</b> trong 6 nguồn chính chỉ có Chợ Tốt phân trang được qua URL; các trang khác tải trang 2 bằng JS. Muốn phủ rộng thì đi theo <b>sitemap + trang sản phẩm</b> hoặc theo <b>nhiều danh mục con</b>. Nhóm nguồn bổ sung (meta, MediaMart, Pico, Hoàng Hà, Kingfoodmart, Bonbanh) thì phân trang URL được.</li>
+    <li><b>Biến động đo được trong 2,3 giờ:</b>
+      <ul>
+        <li>ĐMX xoay vòng giá flash sale, mỗi TV tăng 9–37% trong 30–45 phút rồi về lại;</li>
+        <li>Chợ Tốt có 1–4% tin giá bất thường theo model, có tin hạ giá, tin gỡ trả HTTP 410;</li>
+        <li>Websosanh: 22% SP có highPrice/lowPrice &gt; 3;</li>
+        <li>Pico và Tiki có số đã bán tăng (Tiki thưa: 0,8% SP trong 31 phút);</li>
+        <li>FPT và TGDD hiện giá của biến thể khác nhau giữa các lần tải.</li>
+      </ul>
+      Chi tiết ở mục 3.6–3.11.</li>
+    <li><b>Ghép sản phẩm giữa site là bài toán chính cần giải:</b> ghép bằng slug đơn giản ra nhiều trang sai (AppleCare+, hàng trưng bày, sai biến thể). Laptop thì ghép chính xác được bằng mã model (12/22 có trên 4 site). Nên đưa <i>product/entity matching</i> vào phần khảo sát paper ML.</li>
+  </ol>
+</section>
+
+<section>
+  <h2>1. Tiêu chí và cách kiểm tra</h2>
+  <div class="tw"><table class="narrow">
+    <thead><tr><th>Tiêu chí</th><th>Cách đo</th></tr></thead>
+    <tbody>
+      <tr><td class="site">Dễ crawl</td><td>HTTP <code>GET</code> với User-Agent Chrome trả về 200 và dữ liệu nằm trong HTML: <code>__NEXT_DATA__</code>, JSON-LD schema.org, RSC <code>self.__next_f</code>, thuộc tính <code>data-*</code>, hoặc HTML card. Phải dùng Playwright thì tính là kém hơn.</td></tr>
+      <tr><td class="site">Liên tục, ổn định</td><td>Chạy cùng một bộ URL nhiều vòng (<code>crawl_round.py</code>, <code>crawl_round2.py</code>). Đo tỷ lệ thành công, số item mỗi vòng, độ trùng ID giữa hai vòng liền nhau (Jaccard), tỷ lệ item đổi giá, số ID mới mỗi vòng.</td></tr>
+      <tr><td class="site">Chịu tải</td><td>Tải 80–120 trang sản phẩm liên tiếp, mỗi request cách 2 giây (<code>sustain.py</code>). Ghi mã HTTP và kiểm tra nội dung có còn là trang sản phẩm không.</td></tr>
+      <tr><td class="site">Phủ rộng</td><td>Trang 2 có cho ra ID mới không (<code>pagetest.py</code>); số URL trong product sitemap (<code>sitemaps.py</code>).</td></tr>
+      <tr><td class="site">Ghép chéo</td><td>Chuẩn hoá tên model từ slug URL hoặc tên sản phẩm (bỏ dấu, bỏ "chính hãng", "5G"…), rồi đếm model trùng giữa các site (<code>overlap2.py</code>).</td></tr>
+      <tr><td class="site">Hợp lệ</td><td>Tuân thủ robots.txt với <code>User-agent: *</code> và <code>Crawl-delay</code>. Không gọi <code>/api</code> nội bộ, không proxy, không captcha solver, không stealth plugin, không đăng nhập, không giải mã cơ chế chống crawl.</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section>
+  <h2>2. Bảng xếp hạng nguồn</h2>
+  <div class="tw"><table>
+    <thead><tr><th>Nguồn</th><th>Loại</th><th>Cách lấy · SP/trang</th><th>Trang 2 qua URL</th><th>Quy mô</th><th>Trường đáng giá</th><th>Ghi chú</th></tr></thead>
+    <tbody>
+      <tr class="tier"><td colspan="7">Nhóm A: nguồn chính</td></tr>
+      <tr><td class="site">tiki.vn</td><td>Sàn</td><td>HTTP, <code>__NEXT_DATA__</code> · 42–55</td><td><span class="chip bad">không</span></td><td class="r">≈ 420.000 URL SP<br><span class="sub">233 file sitemap</span></td><td><code>price</code>, <code>original_price</code>, <code>discount_rate</code>, <code>quantity_sold</code>, <code>rating_average</code>, <code>review_count</code>, <code>seller_name</code></td><td>Trang SP bị thử thách JS khi tải dồn; dùng trang danh mục</td></tr>
+      <tr><td class="site">websosanh.vn</td><td>So sánh giá</td><td>HTTP, HTML card · 40; trang so sánh: JSON-LD</td><td><span class="chip bad">không</span></td><td class="r">273.922 trang so sánh</td><td>Giá thấp nhất, <code>highPrice</code>, <code>offerCount</code></td><td>80/80 trang SP OK khi cách 2s; 86% còn hàng</td></tr>
+      <tr><td class="site">fptshop.com.vn</td><td>Bán lẻ</td><td>HTTP, RSC · 28</td><td><span class="chip bad">không</span></td><td class="r">49 file sitemap SP</td><td><code>currentPrice</code>, <code>originalPrice</code>, <code>sold.realQuantity</code>, <code>averageScore</code></td><td>Trang SP có JSON-LD + review</td></tr>
+      <tr><td class="site">thegioididong.com<br>dienmayxanh.com</td><td>Bán lẻ</td><td>HTTP, JSON-LD (10) / <code>data-*</code> (40)</td><td><span class="chip bad">không</span></td><td class="r">TGDD ≈ 17.800<br>ĐMX 389 file</td><td><code>price</code>, <code>ratingCount</code>, <code>availability</code>, brand, cate</td><td>Crawl-delay 5s; sitemap có nhiều SP ngừng bán</td></tr>
+      <tr><td class="site">phongvu.vn</td><td>Bán lẻ</td><td>HTTP, <code>__NEXT_DATA__</code> · 40</td><td><span class="chip bad">không</span></td><td class="r">theo danh mục</td><td><code>latestPrice</code>, <code>supplierRetailPrice</code>, <code>stockQuantity</code></td><td></td></tr>
+      <tr><td class="site">chotot.com</td><td>Rao vặt</td><td>HTTP, <code>__NEXT_DATA__</code> · 20</td><td><span class="chip ok">có</span> <code>?page=N</code></td><td class="r">~230 tin ĐT/giờ</td><td><code>price</code>, <code>region_name</code>, <code>elt_condition</code>, <code>mobile_model</code>, tuổi tin</td><td>Bỏ trường cá nhân</td></tr>
+      <tr class="tier"><td colspan="7">Nhóm B: bổ sung (dò thêm ngày 11/10)</td></tr>
+      <tr><td class="site">meta.vn</td><td>Bán lẻ đa ngành</td><td>HTTP, JSON-LD ItemList · 32</td><td><span class="chip ok">có</span> <code>?p=N</code> (cộng dồn)</td><td class="r">chưa đếm</td><td>sku, giá, tồn kho, rating, review (vd 531)</td><td></td></tr>
+      <tr><td class="site">mediamart.vn</td><td>Điện máy</td><td>HTTP, JSON-LD ItemList · 38</td><td><span class="chip ok">có</span> <code>?page=N</code></td><td class="r">≥ 3.799</td><td>sku, giá, tồn kho</td><td>reviewCount hầu hết bằng 1</td></tr>
+      <tr><td class="site">pico.vn</td><td>Điện máy</td><td>HTTP, <code>__NEXT_DATA__</code> · 25</td><td><span class="chip ok">có</span></td><td class="r">5.435 URL SP</td><td><code>finalPrice</code>, <code>price</code>, <code>stockStatus</code>, <code>orderQuantity</code></td><td><code>orderQuantity</code> tăng trong 10 phút</td></tr>
+      <tr><td class="site">hoanghamobile.com</td><td>Điện thoại</td><td>HTTP, HTML card · 18</td><td><span class="chip ok">có</span> <code>?p=N</code></td><td class="r">≈ 9.600</td><td>giá, giá gốc</td><td></td></tr>
+      <tr><td class="site">kingfoodmart.com</td><td>Thực phẩm</td><td>HTTP, <code>__NEXT_DATA__</code> · 41</td><td><span class="chip ok">có</span></td><td class="r">≤ 59.000</td><td><code>discountPrice</code>, <code>originalPrice</code>, <code>inStock</code>, <code>orderedCounter</code></td><td>Thay được Bách Hóa Xanh, không cần trình duyệt</td></tr>
+      <tr><td class="site">bonbanh.com</td><td>Ô tô cũ</td><td>HTTP, microdata schema.org/Car · 20</td><td><span class="chip ok">có</span> <code>/page,N</code></td><td class="r">≈ 29.000 tin</td><td>giá chính xác, năm, tỉnh</td><td>Miền dữ liệu khác TMĐT; ≥ 120 tin mới/giờ</td></tr>
+      <tr><td class="site">lazada.vn</td><td>Sàn</td><td>Playwright · 40, ~8s/trang</td><td><span class="chip ok">có</span> <code>?page=N</code></td><td class="r">—</td><td>giá, rating; trang SP có JSON-LD <code>AggregateOffer</code></td><td>Thử lại 11/10: 2 trang + 1 trang SP, không bị chặn</td></tr>
+      <tr><td class="site">bachhoaxanh.com</td><td>Thực phẩm</td><td>Playwright, <code>div.box_product</code> · 31, ~9s</td><td>—</td><td class="r">191 danh mục</td><td>giá bán, giá gạch, theo <code>storeId</code></td><td></td></tr>
+      <tr><td class="site">hasaki.vn</td><td>Mỹ phẩm</td><td>Playwright headless · ~55 SP (110 giá gồm giá gốc), ~8,5s/trang</td><td>chưa thử</td><td class="r">có sitemap</td><td>giá bán, giá gốc</td><td>robots.txt chỉ có nhóm cho Googlebot/Bingbot/GPTBot…, không có nhóm <code>*</code>; tránh <code>?sort=</code></td></tr>
+      <tr><td class="site">nguyenkim.com</td><td>Điện máy</td><td>HTTP, JSON-LD · 25</td><td><span class="chip bad">không</span></td><td class="r">có sitemap</td><td>giá</td><td></td></tr>
+    </tbody>
+  </table></div>
+
+  <h4>Bị loại hoặc chỉ dùng hạn chế</h4>
+  <div class="tw"><table class="narrow">
+    <thead><tr><th>Nguồn</th><th>Lý do</th></tr></thead>
+    <tbody>
+      <tr><td class="site">Shopee, TikTok Shop</td><td>Chặn ở mọi mức / slider captcha (báo cáo 09/10)</td></tr>
+      <tr><td class="site">Long Châu, Fahasa, Guardian</td><td>HTTP 403</td></tr>
+      <tr><td class="site">nhatot.com, batdongsan.com.vn</td><td>403 với Cloudflare "Just a moment" (trang thử thách)</td></tr>
+      <tr><td class="site">viettelstore.vn</td><td>Listing không có giá trong HTML; Playwright bị 403 "Access Denied"</td></tr>
+      <tr><td class="site">sosanhgia.vn</td><td>Giá hiển thị là <b>giá giả</b> (tủ lạnh 525L hiện 243.553.912 đ); giá thật mã hoá trong thuộc tính, JS mới giải. Giải mã là vượt cơ chế chống crawl, nên loại.</td></tr>
+      <tr><td class="site">Sendo; sosanhgia.com, pricez.vn, sosanh.vn</td><td>Lỗi SSL / site chết / DNS lỗi</td></tr>
+      <tr><td class="site">CellphoneS</td><td>Listing là <code>__NUXT__</code> minify; trang SP có JSON-LD (12/12 OK), sitemap ≈ 8.000 URL, nên chỉ dùng theo kiểu 1 request/SP</td></tr>
+      <tr><td class="site">Bibomart, An Khang</td><td>Listing cần Playwright và robots.txt cấm tham số phân trang (<code>/*?*</code>, <code>*?p=*</code>)</td></tr>
+      <tr><td class="site">Lịch sử giá (lichsugia.com, tiện ích BeeTracker/Soi Giá)</td><td>Không có trang lịch sử giá dạng HTML để crawl; phải dán URL sản phẩm vào form, và dữ liệu là dữ liệu dẫn xuất của bên thứ ba. Các tiện ích Chrome cập nhật lần cuối năm 2023. Websosanh cũng không nhúng lịch sử giá. Vì vậy <b>không có đường backfill</b>: chuỗi thời gian phải tự tích luỹ từ ngày bắt đầu crawl.</td></tr>
+      <tr><td class="site">Thiên Nam Hòa</td><td>Crawl-delay 120 giây</td></tr>
+      <tr><td class="site">WinMart, Lotte Mart, Pharmacity, Co.op Online</td><td>CSR cần Playwright, hoặc không có giá trong HTML danh mục, hoặc không phân trang qua URL (Co.op chỉ 40 SP đầu)</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section>
+  <h2>3. Kết quả đo</h2>
+
+  <h4>3.1 Chạy liên tục nhiều vòng</h4>
+  <p style="margin-bottom:12px">Mỗi vòng tải 1 trang danh mục cố định cho mỗi nguồn (Tiki 2 trang), parse ra <code>(id, name, price, extra)</code>, ghi 1 dòng JSONL/nguồn, nghỉ 5–6 giây giữa các host. <!--WINDOW-->Nhóm A: 10 vòng từ 18:04 đến 20:21. Nhóm B + Lazada: 10 lượt từ 18:51 đến 20:22 (giờ Việt Nam, 11/10/2026).<!--/WINDOW--></p>
+  <!--CONTINUITY--><div class="tw"><table><thead><tr><th>Nguồn</th><th>Lần tải</th><th>Thành công</th><th>Item/vòng</th><th>Giây/trang</th><th>Jaccard ID</th><th>Item đổi giá</th><th>ID mới/vòng</th></tr></thead><tbody><tr class="tier"><td colspan="8">Nhóm A + BHX</td></tr><tr><td class="site">Tiki (2 danh mục)</td><td class="r">20</td><td class="r">100%</td><td class="r">50</td><td class="r">0,39s</td><td class="r">0,88</td><td class="r">0%</td><td class="r">3,94</td></tr><tr><td class="site">Chợ Tốt</td><td class="r">10</td><td class="r">100%</td><td class="r">20</td><td class="r">0,88s</td><td class="r">0</td><td class="r">0%</td><td class="r">20</td></tr><tr><td class="site">TGDD</td><td class="r">10</td><td class="r">100%</td><td class="r">10</td><td class="r">0,44s</td><td class="r">1</td><td class="r">0%</td><td class="r">0</td></tr><tr><td class="site">ĐMX</td><td class="r">10</td><td class="r">100%</td><td class="r">40</td><td class="r">0,48s</td><td class="r">1</td><td class="r">4%</td><td class="r">0</td></tr><tr><td class="site">Phong Vũ</td><td class="r">10</td><td class="r">100%</td><td class="r">40</td><td class="r">0,51s</td><td class="r">1</td><td class="r">0%</td><td class="r">0</td></tr><tr><td class="site">FPT Shop</td><td class="r">10</td><td class="r">100%</td><td class="r">28,2</td><td class="r">0,88s</td><td class="r">0,89</td><td class="r">8%</td><td class="r">1,67</td></tr><tr><td class="site">Nguyễn Kim</td><td class="r">10</td><td class="r">100%</td><td class="r">25</td><td class="r">0,78s</td><td class="r">1</td><td class="r">0%</td><td class="r">0</td></tr><tr><td class="site">Websosanh</td><td class="r">10</td><td class="r">100%</td><td class="r">40</td><td class="r">0,66s</td><td class="r">0,54</td><td class="r">0%</td><td class="r">16,67</td></tr><tr><td class="site">Bách Hóa Xanh (Playwright)</td><td class="r">10</td><td class="r">100%</td><td class="r">30,7</td><td class="r">13,24s</td><td class="r">0,93</td><td class="r">0%</td><td class="r">1,22</td></tr><tr class="tier"><td colspan="8">Nhóm B</td></tr><tr><td class="site">meta.vn</td><td class="r">7</td><td class="r">100%</td><td class="r">32</td><td class="r">0,21s</td><td class="r">1</td><td class="r">0%</td><td class="r">0</td></tr><tr><td class="site">MediaMart</td><td class="r">7</td><td class="r">100%</td><td class="r">38</td><td class="r">0,27s</td><td class="r">1</td><td class="r">0%</td><td class="r">0</td></tr><tr><td class="site">Pico</td><td class="r">7</td><td class="r">100%</td><td class="r">25</td><td class="r">1,06s</td><td class="r">1</td><td class="r">0%</td><td class="r">0</td></tr><tr><td class="site">Kingfoodmart</td><td class="r">7</td><td class="r">100%</td><td class="r">41</td><td class="r">0,52s</td><td class="r">1</td><td class="r">0%</td><td class="r">0</td></tr><tr><td class="site">Hoàng Hà</td><td class="r">7</td><td class="r">100%</td><td class="r">18</td><td class="r">0,21s</td><td class="r">1</td><td class="r">0%</td><td class="r">0</td></tr><tr><td class="site">Bonbanh</td><td class="r">7</td><td class="r">86%</td><td class="r">17,14</td><td class="r">0,27s</td><td class="r">0</td><td class="r">0%</td><td class="r">20</td></tr><tr><td class="site">Tiki trang SP (canary)</td><td class="r">7</td><td class="r">86%</td><td class="r">0,86</td><td class="r">0,2s</td><td class="r">1</td><td class="r">0%</td><td class="r">0</td></tr><tr><td class="site">Lazada (Playwright)</td><td class="r">3</td><td class="r">100%</td><td class="r">40</td><td class="r">12,79s</td><td class="r">0,5</td><td class="r">0%</td><td class="r">20</td></tr></tbody></table></div><!--/CONTINUITY-->
+  <p class="sub" style="margin-top:10px">Jaccard ID = |ID vòng trước ∩ ID vòng sau| / |hợp|; bằng 1,0 nghĩa là cùng tập sản phẩm. Chợ Tốt có Jaccard thấp là bình thường vì trang sắp theo tin mới nhất. Cửa sổ đo khoảng 2,3 giờ (buổi tối) nên tỷ lệ đổi giá chưa đại diện cho biến động theo ngày.</p>
+
+  <h4>3.2 Trang sản phẩm hàng loạt</h4>
+  <div class="tw"><table class="narrow">
+    <thead><tr><th>Nguồn</th><th>Mẫu từ sitemap</th><th>HTTP 200</th><th>Có giá</th><th>Thời gian TB</th><th>Ghi chú</th></tr></thead>
+    <tbody>
+      <tr><td class="site">Tiki</td><td class="r">12 (cách 3s)</td><td class="r">12</td><td class="r">12</td><td class="r">0,34s</td><td>JSON-LD + <code>__NEXT_DATA__</code> có <code>quantity_sold</code>, <code>stock_item</code></td></tr>
+      <tr><td class="site">Tiki</td><td class="r">120 (cách 2s)</td><td class="r">120</td><td class="r">~15 đầu</td><td class="r">0,09s</td><td><b>Từ khoảng request thứ 15</b>: trang 17 KB chỉ chứa JS đã làm rối, không còn dữ liệu sản phẩm. Bị chặn khoảng 10–15 phút: canary lúc 18:51 vẫn bị chặn, lúc 19:02 đã bình thường.</td></tr>
+      <tr><td class="site">Tiki</td><td class="r">20 + 4 (cách 15s)</td><td class="r">24</td><td class="r">24</td><td class="r">0,33s</td><td><b>Không bị chặn.</b> Giá luôn có trong <code>__NEXT_DATA__</code> (<code>price</code>, <code>inventory_status</code>); JSON-LD chỉ có ở 25% trang, nên parse <code>__NEXT_DATA__</code>. Tốc độ an toàn ước lượng: ~1 request/15 giây (~240 trang/giờ)</td></tr>
+      <tr><td class="site">Websosanh</td><td class="r">80 (cách 2s)</td><td class="r">80</td><td class="r">69 (86%)</td><td class="r">0,43s</td><td>14% <code>offerCount = 0</code> (SP không còn nơi bán)</td></tr>
+      <tr><td class="site">TGDD</td><td class="r">12 (cách 6s)</td><td class="r">12</td><td class="r">12</td><td class="r">2,31s</td><td>Sitemap có SP cũ <code>OutOfStock</code></td></tr>
+      <tr><td class="site">ĐMX</td><td class="r">12 (cách 6s)</td><td class="r">12</td><td class="r">10</td><td class="r">1,64s</td><td></td></tr>
+      <tr><td class="site">FPT Shop</td><td class="r">12 (cách 3s)</td><td class="r">12</td><td class="r">12</td><td class="r">0,62s</td><td>JSON-LD có <code>reviewCount</code>; RSC có <code>realQuantity</code></td></tr>
+      <tr><td class="site">CellphoneS</td><td class="r">12 (cách 3s)</td><td class="r">12</td><td class="r">12</td><td class="r">2,43s</td><td>Một số SP giá "0" (ngừng bán)</td></tr>
+    </tbody>
+  </table></div>
+  <p class="sub" style="margin-top:10px">Hệ quả: lịch crawl trang sản phẩm phải chậm (≥ 10–20 giây/request mỗi host) và chia thành panel cố định, thay vì quét cả sitemap.</p>
+  <div class="why" style="margin-top:12px">
+    <p><b>Tiki: trang danh mục không bị ảnh hưởng.</b> Đúng lúc trang sản phẩm đang bị thử thách, tải 25 danh mục ngẫu nhiên từ <code>sitemap_categories_1.xml</code> (mỗi request cách 5 giây):
+      <ul>
+        <li><b>25/25</b> trả 200 với <code>__NEXT_DATA__</code> đầy đủ, 0 trang thử thách;</li>
+        <li>20 danh mục có SP, trung bình <b>37,6 SP/trang</b>, tổng <b>753 SP</b>, đa số có <code>quantity_sold</code>.</li>
+      </ul>
+    </p>
+    <p>Tiki có <b>4.237 danh mục</b> trong sitemap, nên một lượt quét toàn bộ cần khoảng 4.200 request (~6 giờ nếu cách 5 giây) và cho ≈ 130.000 snapshot SP (80% danh mục có SP × 37,6 SP). Kiểu crawl này phù hợp chạy hằng ngày.</p>
+  </div>
+  <div class="why" style="margin-top:12px">
+    <p><b>Độ "tươi" của sitemap</b> (tỷ lệ SP còn hàng trong 12 mẫu ngẫu nhiên):
+      <ul>
+        <li>FPT 12/12, Tiki 11/12, ĐMX 10/12, Websosanh 10/12;</li>
+        <li><b>TGDD 0/12</b> và <b>CellphoneS 1/12</b>: sitemap của hai site này chủ yếu là SP cũ đã ngừng bán (vd laptop đời 2020).</li>
+      </ul>
+    </p>
+    <p>Với TGDD/CellphoneS, danh sách SP đang bán phải lấy từ slug trên trang danh mục, không lấy từ sitemap.</p>
+  </div>
+
+  <h4>3.3 Phân trang qua URL</h4>
+  <div class="tw"><table class="narrow">
+    <thead><tr><th>Nguồn</th><th>Thử</th><th>ID mới so với trang 1</th></tr></thead>
+    <tbody>
+      <tr><td class="site">Chợ Tốt</td><td><code>?page=2</code>, <code>?page=3</code></td><td class="r">20/20, 20/20</td></tr>
+      <tr><td class="site">Tiki</td><td><code>?page=2</code>, <code>?page=3</code></td><td class="r">1/42 (lặp trang 1)</td></tr>
+      <tr><td class="site">FPT Shop</td><td><code>?page=2</code>, <code>?trang=2</code></td><td class="r">3/28 (lặp)</td></tr>
+      <tr><td class="site">Phong Vũ, ĐMX, TGDD, Nguyễn Kim</td><td><code>?page=2</code>, <code>?pi=2</code>, <code>page-2/</code></td><td class="r">0 (lặp) hoặc 404</td></tr>
+      <tr><td class="site">meta, MediaMart, Pico, Hoàng Hà, Kingfoodmart, Bonbanh, Lazada</td><td><code>?p=</code> / <code>?page=</code> / <code>/page,N</code></td><td class="r">gần như toàn bộ là mới</td></tr>
+    </tbody>
+  </table></div>
+
+  <h4>3.4 Mức trùng sản phẩm giữa các site (điện thoại)</h4>
+  <p>Lấy 17 model điện thoại TGDD đang bán (slug trong trang <code>/dtdd</code>), chuẩn hoá tên model rồi tìm trong slug sitemap của các site khác.</p>
+  <div class="tw" style="margin-top:10px"><table class="narrow">
+    <thead><tr><th>So với 17 model TGDD</th><th>Trùng</th><th>Số model ĐT trong catalog site đó</th></tr></thead>
+    <tbody>
+      <tr><td class="site">Websosanh</td><td class="r">16/17</td><td class="r">467</td></tr>
+      <tr><td class="site">CellphoneS</td><td class="r">16/17</td><td class="r">130</td></tr>
+      <tr><td class="site">FPT Shop</td><td class="r">11/17</td><td class="r">49</td></tr>
+      <tr><td class="site">Có trên cả 4 site</td><td class="r">11</td><td>Galaxy A27/A37/A57/S26 Ultra, iPhone 17/17 Pro/17 Pro Max/18 Pro/18 Pro Max, Reno16 F, Xiaomi 17</td></tr>
+    </tbody>
+  </table></div>
+  <p class="sub" style="margin-top:10px">Chỉ dùng trang 1 của mỗi listing thì chỉ 11 model xuất hiện trên ≥ 2 site. Muốn so giá chéo thì phải theo dõi một <b>panel model cố định</b> qua trang sản phẩm, không thể chỉ dựa vào trang danh mục.</p>
+
+  <h4>3.5 Demo panel: giá thị trường (Websosanh) cạnh giá TGDD</h4>
+  <p>Mỗi model: tìm trên Websosanh <code>/s/&lt;từ khoá&gt;</code>, mở trang so sánh đầu tiên và đọc JSON-LD <code>AggregateOffer</code>; sau đó mở trang SP TGDD và đọc JSON-LD <code>offers.price</code>. Tổng cộng 33 request, không lỗi.</p>
+  <div class="tw" style="margin-top:10px"><table>
+    <thead><tr><th>Model (Websosanh)</th><th>lowPrice</th><th>highPrice</th><th>Số nơi bán</th><th>TGDD (biến thể trong JSON-LD)</th><th>Giá TGDD</th></tr></thead>
+    <tbody>
+      <tr><td>Galaxy A37 5G 8GB/128GB</td><td class="r">6.299.000</td><td class="r">11.869.000</td><td class="r">39</td><td>A37 5G 8GB/128GB</td><td class="r">9.600.000</td></tr>
+      <tr><td>Galaxy A57 8GB/256GB</td><td class="r">9.999.000</td><td class="r">15.490.000</td><td class="r">19</td><td>A57 5G 8GB/256GB</td><td class="r">11.610.000</td></tr>
+      <tr><td>iPhone 17 Pro 256GB</td><td class="r">19.855.000</td><td class="r">49.489.000</td><td class="r">215</td><td>iPhone 17 Pro 256GB</td><td class="r">31.990.000</td></tr>
+      <tr><td>iPhone 17 Pro Max 256GB</td><td class="r">25.300.000</td><td class="r">52.789.000</td><td class="r">227</td><td>iPhone 17 Pro Max 256GB</td><td class="r">34.490.000</td></tr>
+      <tr><td>Oppo Reno16 F 5G 8GB/128GB</td><td class="r">9.399.000</td><td class="r"><b>32.989.000</b></td><td class="r">16</td><td>Reno16F 5G 8GB/128GB</td><td class="r">13.190.000</td></tr>
+      <tr><td>Galaxy A27 6GB/128GB</td><td class="r">5.999.000</td><td class="r"><b>32.989.000</b></td><td class="r">44</td><td><i>A27 8GB/128GB</i></td><td class="r">8.480.000</td></tr>
+      <tr><td>iPhone 18 Pro Max 256GB</td><td class="r">39.699.000</td><td class="r"><b>185.900.000</b></td><td class="r">71</td><td><i>18 Pro Max 2TB</i></td><td class="r">80.990.000</td></tr>
+    </tbody>
+  </table></div>
+  <ul style="margin-top:10px">
+    <li><b>highPrice gấp 3–5 lần giá thị trường</b> (32,99 triệu cho điện thoại tầm trung, 185,9 triệu cho iPhone 256GB) là offer ghép sai hoặc giá nhập sai. Đây là dữ liệu bất thường có sẵn cho bài toán phát hiện bất thường.</li>
+    <li><b>lowPrice</b> thường là hàng cũ hoặc xách tay, thấp hơn giá chính hãng 30–40%. Muốn so sánh công bằng thì cần thêm tình trạng máy, mà thông tin này chỉ có ở danh sách từng shop (bị robots cấm).</li>
+    <li>Trên trang TGDD, JSON-LD đầu tiên có thể là biến thể khác với slug (in nghiêng). Phải ghép theo tên biến thể (RAM/ROM), không ghép theo URL.</li>
+  </ul>
+  <p class="sub" style="margin-top:6px">Đầy đủ 11 model: <code>results/panel.json</code>.</p>
+
+  <h4>3.6 Thay đổi đo được trong 2,3 giờ</h4>
+  <ul>
+    <li><b>Tiki: số đã bán tăng giữa các vòng</b> (danh mục sách, 50 phút): Dragon Ball 391 → 409, Claymore 892 → 904, Ship of Theseus 367 → 376. Có cả <b>giảm</b> (Thanh Gươm Diệt Quỷ 4.527 → 251; Dragon Ball 409 → 387 ở vòng sau) ở listing "chọn tập lẻ" vì biến thể đại diện đổi. Pipeline cần kiểm tra số đã bán chỉ được tăng và đánh dấu giá trị giảm là lỗi dữ liệu.</li>
+    <li><b>ĐMX: giá flash sale xoay vòng.</b> Mỗi TV tăng giá 9–37% trong 30–45 phút (2–3 vòng) rồi về lại giá cũ, các TV thay phiên nhau (nghìn đồng; ô đỏ là giá khác lần đầu):<div class="tw" style="margin-top:8px"><table><thead><tr><th>TV</th><th>18:04</th><th>18:20</th><th>18:37</th><th>18:53</th><th>19:09</th><th>19:24</th><th>19:39</th><th>19:51</th><th>20:06</th><th>20:21</th></tr></thead><tbody><tr><td class="site">LG 55NU855BPSA</td><td class="r">11.790</td><td class="r">11.790</td><td class="r">11.790</td><td class="r">11.790</td><td class="r">11.790</td><td class="r">11.790</td><td class="r"><b style="color:var(--bad)">15.500</b></td><td class="r"><b style="color:var(--bad)">15.500</b></td><td class="r">11.790</td><td class="r">11.790</td></tr><tr><td class="site">Samsung Neo QLED 55"</td><td class="r">16.390</td><td class="r">16.390</td><td class="r">16.390</td><td class="r">16.390</td><td class="r"><b style="color:var(--bad)">21.100</b></td><td class="r"><b style="color:var(--bad)">21.100</b></td><td class="r">16.390</td><td class="r">16.390</td><td class="r">16.390</td><td class="r">16.390</td></tr><tr><td class="site">Toshiba 55C350RP</td><td class="r">11.100</td><td class="r">11.100</td><td class="r">11.100</td><td class="r">11.100</td><td class="r"><b style="color:var(--bad)">12.090</b></td><td class="r"><b style="color:var(--bad)">12.090</b></td><td class="r">11.100</td><td class="r">11.100</td><td class="r">11.100</td><td class="r">11.100</td></tr><tr><td class="site">Samsung Mini LED 65"</td><td class="r">19.790</td><td class="r">19.790</td><td class="r">19.790</td><td class="r">19.790</td><td class="r">19.790</td><td class="r">19.790</td><td class="r">19.790</td><td class="r">19.790</td><td class="r"><b style="color:var(--bad)">21.900</b></td><td class="r"><b style="color:var(--bad)">21.900</b></td></tr><tr><td class="site">LG 65NANO80</td><td class="r">16.390</td><td class="r">16.390</td><td class="r">16.390</td><td class="r"><b style="color:var(--bad)">22.400</b></td><td class="r"><b style="color:var(--bad)">22.400</b></td><td class="r"><b style="color:var(--bad)">22.400</b></td><td class="r">16.390</td><td class="r">16.390</td><td class="r">16.390</td><td class="r">16.390</td></tr><tr><td class="site">Aqua 50" AQT50K800</td><td class="r">7.890</td><td class="r">7.890</td><td class="r">7.890</td><td class="r">7.890</td><td class="r">7.890</td><td class="r"><b style="color:var(--bad)">8.690</b></td><td class="r"><b style="color:var(--bad)">8.690</b></td><td class="r"><b style="color:var(--bad)">8.690</b></td><td class="r">7.890</td><td class="r">7.890</td></tr></tbody></table></div>Đây là sự kiện đổi giá thật, có chu kỳ, hợp cho bài toán phát hiện điểm đổi giá. Crawl theo giờ sẽ bỏ sót hoặc bị aliasing, nên ĐMX cần chu kỳ ≤ 15 phút cho nhóm SP flash sale (URL có <code>utm_flashsale=1</code>).</li>
+    <li><b>Pico: <code>orderQuantity</code> tăng ngay trong 10 phút</b>: TV TCL QD-Mini LED 204 → 205, LG QNED 65" 312 → 313. Đây là tín hiệu bán hàng gần thời gian thực.</li>
+    <li><b>Bonbanh</b>: trang <code>/oto</code> có 20/20 tin mới sau mỗi 10 phút (≥ 120 tin ô tô/giờ). Đây là luồng tin thứ hai sau Chợ Tốt.</li>
+    <li><b>Bonbanh vòng 4 (19:21): status 200 nhưng 0 item.</b> Trang trả về chỉ 633 byte: "Máy chủ đang quá tải vì quá nhiều người truy cập, vui lòng đợi vài giây…". Đây là trang hạn chế mềm có <b>HTTP 200</b>. Pipeline phải kiểm tra nội dung (kích thước trang, số item &gt; 0, có marker dữ liệu), không chỉ kiểm tra status code. Lúc 19:30 tải lại thì bình thường (154 KB, 20 tin). Cách xử lý: thử lại sau vài phút với backoff.</li>
+    <li><b>FPT</b>: "iPhone Duo" 84.490.000 → 103.990.000 là do listing đổi biến thể đại diện, không phải đổi giá. Xác nhận lại lưu ý ở mục 4 (FPT Shop).</li>
+  </ul>
+  <p class="sub" style="margin-top:6px">Chi tiết: <code>results/rounds_changes.json</code>.</p>
+
+  <div class="why">
+    <p><b>Mật độ tín hiệu trên Tiki ở quy mô lớn hơn.</b> Hai snapshot của cùng 34 danh mục (30 ngẫu nhiên + 4 lớn), 19:44 và 20:15, gồm 1.193 SP, trong đó 832 SP có <code>quantity_sold</code>:</p>
+    <ul>
+      <li>chỉ <b>7 SP (0,8%) có số đã bán tăng</b> trong 31 phút, và 3 SP giảm (đổi biến thể);</li>
+      <li><b>5 SP (0,4%) đổi giá</b>, vd mascara Maybelline 192.000 → 188.000, ly LocknLock 124.320 → 150.220;</li>
+      <li>mức tăng lớn nhất (+446, "Siêu Quậy Teppei tập 1–31") là listing nhiều tập, nhiều khả năng do đổi biến thể chứ không phải bán thật.</li>
+    </ul>
+    <p>Kết luận: theo giờ, tín hiệu nhu cầu và giá trên Tiki <b>thưa</b>; chu kỳ <b>theo ngày</b> là hợp lý cho batch. Tín hiệu dày theo giờ chỉ có ở Chợ Tốt, Bonbanh (tin mới) và Pico (<code>orderQuantity</code>). Cần đo thêm 3–5 ngày để có tỷ lệ đổi giá/ngày.</p>
+  </div>
+
+  <h4>3.7 Tốc độ tin mới trên Chợ Tốt</h4>
+  <div class="tw"><table class="narrow">
+    <thead><tr><th>Danh mục</th><th>Tin ở trang 1–5</th><th>Tuổi tin cũ nhất</th><th>Ước lượng tin/giờ</th></tr></thead>
+    <tbody>
+      <tr><td class="site">mua-ban-dien-thoai</td><td class="r">99</td><td class="r">26 phút</td><td class="r">≈ 230</td></tr>
+      <tr><td class="site">mua-ban-do-dien-tu</td><td class="r">98</td><td class="r">16 phút</td><td class="r">≈ 370</td></tr>
+      <tr><td class="site">mua-ban-laptop</td><td class="r">100</td><td class="r">3 giờ</td><td class="r">≈ 33</td></tr>
+      <tr><td class="site">mua-ban (tất cả)</td><td class="r">82</td><td class="r">4 phút</td><td class="r">≈ 1.200</td></tr>
+    </tbody>
+  </table></div>
+  <p class="sub" style="margin-top:10px">Poll trang 1–3 mỗi 5 phút là đủ bắt gần hết tin điện thoại mới. Cùng với Bonbanh (mục 3.6), đây là nguồn cho dòng sự kiện thật với tần suất cao, hợp với speed layer (Kafka + Spark Streaming).</p>
+
+  <h4>3.8 Chợ Tốt: phân phối giá theo model và tin giá bất thường</h4>
+  <p>Lấy trang 1–5 của URL lọc theo model (từ <code>sitemap-dien-thoai-model-*.xml</code>, vd <code>/mua-ban-dien-thoai-apple-iphone-15-pro-max-sdmd1ml2483</code>), nhóm theo <code>mobile_capacity</code>, đánh dấu outlier bằng IQR (ngoài [Q1 − 1,5·IQR, Q3 + 1,5·IQR]).</p>
+  <div class="tw" style="margin-top:10px"><table class="narrow">
+    <thead><tr><th>Model</th><th>Tin</th><th>Cửa hàng (<code>company_ad</code>)</th><th>Trung vị (dung lượng phổ biến)</th><th>Q1–Q3</th><th>Outlier</th><th>Ví dụ outlier</th></tr></thead>
+    <tbody>
+      <tr><td class="site">iPhone 15 Pro Max</td><td class="r">100</td><td class="r">82%</td><td class="r">15.990.000</td><td class="r">13,7–17,8 tr</td><td class="r">1%</td><td>"iPhone 15 Pro Max 256GB VN đẹp 98%": 5.400.000</td></tr>
+      <tr><td class="site">iPhone 16 Pro Max</td><td class="r">99</td><td class="r">74%</td><td class="r">21.300.000</td><td class="r">18,5–23,5 tr</td><td class="r">1,1%</td><td>"256GB Đen 90%, full chức năng": 9.499.999</td></tr>
+      <tr><td class="site">iPhone 13</td><td class="r">100</td><td class="r">71%</td><td class="r">6.555.555</td><td class="r">5,8–7,3 tr</td><td class="r">4,1%</td><td>"128GB Trắng 99%": 2.400.000; "Màn vàng vỡ lưng": 2.999.000</td></tr>
+    </tbody>
+  </table></div>
+  <p class="sub" style="margin-top:10px">Outlier đều là giá <b>thấp</b> bất thường. Một phần có lý do ghi trong tiêu đề (vỡ lưng, màn vàng), phần còn lại (máy 98–99% với giá bằng 1/3 trung vị) là ứng viên tin mồi hoặc lừa đảo. Bài toán phát hiện bất thường có thể dùng tiêu đề (NLP) để tách hai nhóm này. Giá trung vị hàng cũ so với giá mới trên TGDD/FPT cũng cho đường khấu hao theo model.</p>
+
+  <div class="why">
+    <p><b>Vòng đời tin.</b> Chụp lại 300 tin của 3 model sau 26 phút (19:55 → 20:21):</p>
+    <ul>
+      <li>297 tin vẫn còn, 2 tin mới, 3 tin rời trang 1–5;</li>
+      <li>1 tin <b>hạ giá</b>: "iPhone 16 Pro Max Đen 98%" 23.000.000 → 22.600.000;</li>
+      <li>trong 3 tin rời trang, trang chi tiết của 1 tin trả <b>HTTP 410 Gone</b> (tin đã gỡ hoặc đã bán), 2 tin còn sống (chỉ bị đẩy xuống).</li>
+    </ul>
+    <p>Từ đó có đủ thành phần cho bài toán <b>dự đoán thời gian bán / xác suất bán</b>: thời điểm đăng (<code>list_time</code>), các lần sửa giá, và thời điểm trang chuyển sang 410. Trang lọc theo model không sắp theo tin mới nhất, nên luồng tin mới lấy từ trang danh mục chung.</p>
+  </div>
+
+  <h4>3.9 Websosanh: độ phân tán giá trên 100 trang so sánh ngẫu nhiên</h4>
+  <p>25 trang ngẫu nhiên mỗi nhóm (điện thoại, tin học, gia dụng, điện lạnh), cách 3 giây, đọc JSON-LD <code>AggregateOffer</code>.</p>
+  <div class="tw" style="margin-top:10px"><table class="narrow">
+    <thead><tr><th>Chỉ số</th><th>Giá trị</th></tr></thead>
+    <tbody>
+      <tr><td>Trang còn nơi bán (<code>offerCount</code> &gt; 0)</td><td class="r">96/100</td></tr>
+      <tr><td>Số nơi bán: trung vị / lớn nhất</td><td class="r">8 / 159</td></tr>
+      <tr><td>highPrice / lowPrice: trung vị</td><td class="r">1,86</td></tr>
+      <tr><td>Tỷ lệ SP có high/low &gt; 2 · &gt; 3 · &gt; 10</td><td class="r">45% · 22% · 4%</td></tr>
+      <tr><td>SP có high/low &gt; 3 theo nhóm</td><td class="r">điện thoại 8/23 · tin học 5/22 · gia dụng 3/25 · điện lạnh 4/23</td></tr>
+    </tbody>
+  </table></div>
+  <p class="sub" style="margin-top:10px">Ví dụ cực đoan: Galaxy A04 3/32GB 1.705.000 – 25.300.000; Vivo S1 3.795.000 – 48.400.000; bàn phím E-Dra EK701 150.000 – 3.683.900. Khoảng 1/5 sản phẩm có offer lệch trên 3 lần, nên mức tổng hợp của Websosanh <b>không dùng thẳng được</b>: cần lọc bất thường trước khi làm "giá thị trường". Chính bước lọc đó là một bài toán ML có dữ liệu thật.</p>
+
+  <h4>3.10 Ghép laptop theo mã model nhà sản xuất</h4>
+  <p>Trong 40 laptop ở listing Phong Vũ, 22 có mã dạng <code>UX5406AA-SU415W</code> trong tên (regex <code>[A-Z0-9]{2,}[A-Z][A-Z0-9]*-[A-Z0-9]{3,}</code>). Tìm mã này trong slug sitemap của các site khác:</p>
+  <div class="tw" style="margin-top:10px"><table class="narrow">
+    <thead><tr><th>Site</th><th>URL trong sitemap</th><th>Khớp mã</th></tr></thead>
+    <tbody>
+      <tr><td class="site">CellphoneS</td><td class="r">7.991</td><td class="r">18/22</td></tr>
+      <tr><td class="site">FPT Shop</td><td class="r">369</td><td class="r">16/22</td></tr>
+      <tr><td class="site">Websosanh (tin học)</td><td class="r">29.746</td><td class="r">16/22</td></tr>
+      <tr><td class="site">Có trên cả 4 site</td><td colspan="2">12/22 (vd <code>x1404ma-eb027w</code>, <code>gu605cp-qr141w</code>, <code>um3406ga-qd075w</code>, <code>sfa14-i31-54a2</code>)</td></tr>
+    </tbody>
+  </table></div>
+  <p class="sub" style="margin-top:10px">Với laptop, mã nhà sản xuất là khoá ghép chính xác (exact match), không cần so khớp tên gần đúng. Với điện thoại thì phải chuẩn hoá tên + RAM/ROM (mục 3.4).</p>
+
+  <h4>3.11 So giá giữa nhà bán lẻ từ trang sản phẩm, và độ chính xác của việc ghép</h4>
+  <p>Với mỗi model, tìm URL trong slug (TGDD từ listing, FPT và CellphoneS từ sitemap) bằng khoá model + dung lượng, rồi đọc JSON-LD <code>Product</code> trên trang SP.</p>
+  <div class="tw" style="margin-top:10px"><table>
+    <thead><tr><th>Model cần</th><th>TGDD (tên trong JSON-LD · giá)</th><th>FPT Shop</th><th>CellphoneS</th></tr></thead>
+    <tbody>
+      <tr><td class="site">Galaxy A57 8/256</td><td>A57 5G 8GB/256GB · 11.610.000</td><td>A57 5G 8GB · 11.290.000</td><td>—</td></tr>
+      <tr><td class="site">Galaxy A37 8/128</td><td>A37 5G 8GB/128GB · 9.600.000</td><td>A37 5G 8GB · 9.990.000</td><td>—</td></tr>
+      <tr><td class="site">iPhone 17 Pro Max 256</td><td>17 Pro Max 256GB · 34.490.000</td><td>17 Pro Max · 34.490.000</td><td><span class="chip warn">hàng trưng bày</span> · 32.490.000</td></tr>
+      <tr><td class="site">OPPO Reno16 F</td><td>Reno16F 5G 8GB/128GB · 13.190.000</td><td>Reno16 F 5G 8GB · 14.990.000</td><td>Reno16 F 5G 8GB 256GB · 14.990.000</td></tr>
+      <tr><td class="site">Galaxy S26 Ultra 256</td><td><span class="chip warn">biến thể 512GB</span> · 35.640.000</td><td>S26 Ultra 5G 12GB · 29.490.000</td><td>—</td></tr>
+      <tr><td class="site">iPhone 18 Pro 256</td><td><span class="chip warn">biến thể 1TB</span> · 58.490.000</td><td>18 Pro · 38.990.000</td><td><span class="chip bad">AppleCare+</span> · 0</td></tr>
+      <tr><td class="site">iPhone 18 Pro Max 256</td><td><span class="chip warn">biến thể 2TB</span> · 80.990.000</td><td>18 Pro Max · 41.990.000</td><td><span class="chip bad">AppleCare+</span> · 0</td></tr>
+    </tbody>
+  </table></div>
+  <ul style="margin-top:10px">
+    <li><b>Ghép đơn giản bằng slug có độ chính xác thấp.</b> Ở CellphoneS, 2/6 trang khớp là dịch vụ (AppleCare+) và 3/6 là hàng trưng bày. Ở TGDD, 3/8 trang trả JSON-LD của biến thể khác. FPT không ghi dung lượng trong tên ("8GB").</li>
+    <li>Khi đúng biến thể thì chênh lệch giữa các nhà bán lẻ là 0–14% (Reno16 F: 13,19 tr ở TGDD và 14,99 tr ở FPT; iPhone 17 Pro Max bằng nhau 34,49 tr).</li>
+    <li>Vì vậy pipeline cần một bước <b>ghép sản phẩm (entity resolution)</b> có kiểm tra biến thể: tách RAM/ROM từ tên, loại từ khoá dịch vụ/phụ kiện/tình trạng (<code>applecare</code>, <code>trưng bày</code>, <code>cũ</code>, <code>ốp</code>), ưu tiên mã model khi có (laptop, mục 3.10). Đây là một bài toán ML có sẵn tài liệu (product matching / entity matching), nên đưa vào phần khảo sát paper.</li>
+  </ul>
+
+  <h4>3.12 Prototype schema chung và kiểm tra chất lượng</h4>
+  <p><code>snapshot_adapter.py</code> đưa item của mọi nguồn về <code>PRICE_SNAPSHOT</code> (<code>crawl_ts, site, product_id, name, price, original_price, sold_cum, stock, rating, review_count, offer_count, region, condition</code>) và loại bản ghi theo các luật: thiếu id/tên, giá ≤ 0 hoặc vượt trần (5 tỷ; ô tô 100 tỷ), giá gốc &lt; 50% giá bán, số đã bán giảm so với snapshot trước. <!--ADAPTER-->Trên 4.657 snapshot từ 16 nguồn: 4.628 hợp lệ (99,4%).<!--/ADAPTER--></p>
+  <!--ADAPTERTABLE--><div class="tw" style="margin-top:10px"><table><thead><tr><th>Nguồn</th><th>Snapshot</th><th>Hợp lệ</th><th>giá gốc</th><th>đã bán</th><th>tồn kho</th><th>rating</th><th>review</th><th>số shop</th><th>khu vực</th><th>tình trạng</th><th>Bị loại</th></tr></thead><tbody><tr><td class="site">Bách Hóa Xanh (Playwright)</td><td class="r">307</td><td class="r">307</td><td class="r">28%</td><td class="r"></td><td class="r"></td><td class="r"></td><td class="r"></td><td class="r"></td><td class="r"></td><td class="r"></td><td>—</td></tr><tr><td class="site">Bonbanh</td><td class="r">120</td><td class="r">120</td><td class="r"></td><td class="r"></td><td class="r"></td><td class="r"></td><td class="r"></td><td class="r"></td><td class="r">100%</td><td class="r"></td><td>—</td></tr><tr><td class="site">Chợ Tốt</td><td class="r">200</td><td class="r">200</td><td class="r"></td><td class="r"></td><td class="r"></td><td class="r"></td><td class="r"></td><td class="r"></td><td class="r">100%</td><td class="r">100%</td><td>—</td></tr><tr><td class="site">ĐMX</td><td class="r">400</td><td class="r">400</td><td class="r"></td><td class="r"></td><td class="r"></td><td class="r"></td><td class="r"></td><td class="r"></td><td class="r"></td><td class="r"></td><td>—</td></tr><tr><td class="site">FPT Shop</td><td class="r">282</td><td class="r">282</td><td class="r">100%</td><td class="r">100%</td><td class="r"></td><td class="r">95%</td><td class="r"></td><td class="r"></td><td class="r"></td><td class="r"></td><td>—</td></tr><tr><td class="site">Hoàng Hà</td><td class="r">126</td><td class="r">126</td><td class="r">28%</td><td class="r"></td><td class="r"></td><td class="r"></td><td class="r"></td><td class="r"></td><td class="r"></td><td class="r"></td><td>—</td></tr><tr><td class="site">Kingfoodmart</td><td class="r">287</td><td class="r">287</td><td class="r">100%</td><td class="r">100%</td><td class="r">100%</td><td class="r"></td><td class="r"></td><td class="r"></td><td class="r"></td><td class="r"></td><td>—</td></tr><tr><td class="site">Lazada (Playwright)</td><td class="r">120</td><td class="r">120</td><td class="r"></td><td class="r">18%</td><td class="r"></td><td class="r"></td><td class="r"></td><td class="r"></td><td class="r"></td><td class="r"></td><td>—</td></tr><tr><td class="site">MediaMart</td><td class="r">266</td><td class="r">266</td><td class="r"></td><td class="r"></td><td class="r">100%</td><td class="r">100%</td><td class="r">100%</td><td class="r"></td><td class="r"></td><td class="r"></td><td>—</td></tr><tr><td class="site">meta.vn</td><td class="r">224</td><td class="r">224</td><td class="r"></td><td class="r"></td><td class="r">100%</td><td class="r">100%</td><td class="r">100%</td><td class="r"></td><td class="r"></td><td class="r"></td><td>—</td></tr><tr><td class="site">Nguyễn Kim</td><td class="r">250</td><td class="r">250</td><td class="r"></td><td class="r"></td><td class="r"></td><td class="r"></td><td class="r"></td><td class="r"></td><td class="r"></td><td class="r"></td><td>—</td></tr><tr><td class="site">Phong Vũ</td><td class="r">400</td><td class="r">400</td><td class="r">100%</td><td class="r"></td><td class="r">100%</td><td class="r"></td><td class="r"></td><td class="r"></td><td class="r"></td><td class="r"></td><td>—</td></tr><tr><td class="site">Pico</td><td class="r">175</td><td class="r">175</td><td class="r">100%</td><td class="r">100%</td><td class="r">100%</td><td class="r"></td><td class="r"></td><td class="r"></td><td class="r"></td><td class="r"></td><td>—</td></tr><tr><td class="site">TGDD</td><td class="r">100</td><td class="r">100</td><td class="r"></td><td class="r"></td><td class="r">100%</td><td class="r">90%</td><td class="r">90%</td><td class="r"></td><td class="r"></td><td class="r"></td><td>—</td></tr><tr><td class="site">Tiki (2 danh mục)</td><td class="r">1000</td><td class="r">971</td><td class="r">100%</td><td class="r">80%</td><td class="r"></td><td class="r">100%</td><td class="r">100%</td><td class="r"></td><td class="r"></td><td class="r"></td><td>sold_decreased: 29</td></tr><tr><td class="site">Websosanh</td><td class="r">400</td><td class="r">400</td><td class="r"></td><td class="r"></td><td class="r"></td><td class="r"></td><td class="r"></td><td class="r">100%</td><td class="r"></td><td class="r"></td><td>—</td></tr></tbody></table></div><p class="sub" style="margin-top:8px">Ô số là tỷ lệ snapshot có trường đó (từ trang danh mục; trang SP của TGDD/ĐMX/Nguyễn Kim có thêm rating/review). Lỗi <code>sold_decreased</code> của Tiki là listing nhiều biến thể đổi biến thể đại diện.</p><!--/ADAPTERTABLE-->
+</section>
+
+<section>
+  <h2>4. Chi tiết các nguồn chính</h2>
+  <div class="methods">
+
+    <div class="method">
+      <h3><span class="num">1</span>Tiki</h3>
+      <dl class="row">
+        <dt>URL</dt><dd>Trang danh mục <code>/&lt;slug&gt;/c&lt;id&gt;</code>. Để phủ rộng, đi theo cây danh mục con (<code>sitemap_categories_index.xml</code>), không dùng <code>?page=</code></dd>
+        <dt>Parse</dt><dd><code>re.search(r'&lt;script id="__NEXT_DATA__"…')</code> → <code>json.loads</code> → duyệt đệ quy lấy list dict dài nhất có khóa <code>price</code></dd>
+        <dt>Lọc</dt><dd>5/45 item trên mỗi trang có trường <code>advertisement</code> (SP quảng cáo, xoay vòng giữa các lần tải). Đây là nguyên nhân của ~6 ID mới mỗi vòng. Bỏ các item này thì còn 40 SP hữu cơ (<code>params.limit = 40</code> trong <code>impression_info</code>)</dd>
+        <dt>Tần suất</dt><dd>Trang danh mục: 1–2 giờ/lần. Trang sản phẩm: panel cố định, ≥ 15 giây/request (đã kiểm chứng 24/24 không bị chặn)</dd>
+        <dt>Dùng cho</dt><dd>Ước lượng nhu cầu từ Δ<code>quantity_sold</code>, độ co giãn theo <code>discount_rate</code>, giá bất thường trong danh mục</dd>
+      </dl>
+<pre>{"id": 278505394, "price": 5990000, "original_price": 6990000, "quantity_sold": {"value": 255},
+ "rating_average": 5, "review_count": 10, "seller_name": "Tiki Trading", "primary_category_path": "1/2/1789/1795"}</pre>
+    </div>
+
+    <div class="method">
+      <h3><span class="num">2</span>Websosanh</h3>
+      <dl class="row">
+        <dt>URL</dt><dd>Danh mục <code>/…/cat-NN.htm</code> (40 SP đầu trong HTML; trang sau gọi <code>/search-api</code>, bị Disallow). Trang so sánh <code>/…/{rootId}/so-sanh.htm</code> lấy từ 25 file <code>product-*-sitemap.xml</code></dd>
+        <dt>Parse</dt><dd>Danh mục: regex trên <code>div.product-single</code> lấy rootId, tên, "Giá từ X đ", <code>span.merchant-number</code>. Trang so sánh: JSON-LD <code>Product.offers</code> kiểu <code>AggregateOffer</code></dd>
+        <dt>Không dùng</dt><dd><code>/compare-api/get-compare-*-merchant</code> (danh sách từng shop): robots.txt Disallow</dd>
+        <dt>Dùng cho</dt><dd>Độ phân tán giá thị trường theo thời gian, số shop bán, tên chuẩn để ghép sản phẩm của các nguồn khác</dd>
+      </dl>
+<pre>{"@type": "Product", "name": "Điện thoại Samsung Galaxy A27 6GB/128GB", "sku": 1612398833,
+ "offers": {"@type": "AggregateOffer", "lowPrice": 5999000, "highPrice": 32989000, "offerCount": 44}}</pre>
+    </div>
+
+    <div class="method">
+      <h3><span class="num">3</span>FPT Shop</h3>
+      <dl class="row">
+        <dt>Parse</dt><dd>Ghép chuỗi trong <code>self.__next_f.push([1,"…"])</code>, tìm <code>{"propertyNameOfUpc"</code>, rồi <code>json.JSONDecoder().raw_decode(s, pos)</code> để lấy nguyên object</dd>
+        <dt>Trường</dt><dd><code>code</code>, <code>name</code>, <code>currentPrice</code>, <code>originalPrice</code>, <code>discountPercentage</code>, <code>sold.realQuantity</code> (vd iPhone 18 Pro Max: 14.681), <code>averageScore</code></dd>
+        <dt>Lưu ý</dt><dd>Cùng <code>code</code> có thể hiện giá của biến thể khác nhau giữa các lần tải (41.990.000 rồi 61.490.000). Cần lưu kèm biến thể, hoặc lấy từ trang sản phẩm</dd>
+      </dl>
+    </div>
+
+    <div class="method">
+      <h3><span class="num">4</span>Thế Giới Di Động / Điện Máy Xanh</h3>
+      <dl class="row">
+        <dt>Parse</dt><dd>TGDD: JSON-LD <code>CollectionPage → ItemList → Product</code>. ĐMX: <code>re.findall(r'data-([\w-]+)="([^"]*)"')</code> trên thẻ <code>&lt;a data-id …&gt;</code></dd>
+        <dt>Hạn chế</dt><dd>JSON-LD listing TGDD chỉ có 10 SP (<code>numberOfItems: 177</code>); slug của 48 SP có trong HTML nên lấy giá từ trang SP, cách nhau ≥ 5 giây</dd>
+      </dl>
+    </div>
+
+    <div class="method">
+      <h3><span class="num">5</span>Phong Vũ</h3>
+      <dl class="row">
+        <dt>Parse</dt><dd><code>__NEXT_DATA__</code> → list dict có <code>sku</code>; <code>price</code> là dict</dd>
+        <dt>Trường</dt><dd><code>price.latestPrice</code>, <code>price.supplierRetailPrice</code>, <code>price.discountAmount</code>, <code>stockQuantity</code>, <code>categories[].code</code></dd>
+      </dl>
+    </div>
+
+    <div class="method">
+      <h3><span class="num">6</span>Chợ Tốt</h3>
+      <dl class="row">
+        <dt>Parse</dt><dd><code>__NEXT_DATA__</code> → list dict có <code>list_id</code>; phân trang <code>?page=N</code></dd>
+        <dt>Trường giữ</dt><dd><code>list_id</code>, <code>subject</code>, <code>price</code>, <code>region_name</code>, <code>elt_condition</code>, <code>mobile_brand/model/capacity</code>, <code>date</code></dd>
+        <dt>Trường bỏ</dt><dd><code>phone</code>, <code>account_name</code>, <code>full_name</code>, <code>latitude/longitude</code></dd>
+        <dt>Dùng cho</dt><dd>Phát hiện tin có giá bất thường so với cùng model và tình trạng; so giá đồ cũ với giá mới trên TGDD/FPT</dd>
+      </dl>
+    </div>
+
+    <div class="method">
+      <h3><span class="num">7</span>Nhóm B: cách parse</h3>
+      <dl class="row">
+        <dt>meta.vn, MediaMart</dt><dd>JSON-LD <code>ItemList.itemListElement[].item</code> → <code>sku</code>, <code>offers.price</code>, <code>offers.availability</code>, <code>aggregateRating</code>. Phân trang <code>?p=N</code> (meta trả cộng dồn 1..N) / <code>?page=N</code></dd>
+        <dt>Pico</dt><dd><code>__NEXT_DATA__ → props.pageProps.pageDetail.data[]</code>: <code>code</code>, <code>name.vi</code>, <code>finalPrice</code>, <code>price</code>, <code>stockStatus</code>, <code>orderQuantity</code> (vd 584)</dd>
+        <dt>Kingfoodmart</dt><dd><code>__NEXT_DATA__ → props.pageProps.categoryData.products[]</code>: <code>discountPrice</code>, <code>originalPrice</code>, <code>inStock</code> (kg/đơn vị, vd 4.944,4), <code>orderedCounter</code> (vd Cam Úc Navel: 55.341)</dd>
+        <dt>Hoàng Hà</dt><dd>Regex <code>&lt;h3&gt;&lt;a title= href=&gt;</code> + <code>div.price strong</code> + <code>&lt;strike&gt;</code>; phân trang <code>?p=N</code></dd>
+        <dt>Bonbanh</dt><dd>Microdata <code>li[itemtype="http://schema.org/Car"]</code>, <code>itemprop="price" content="809000000"</code>; phân trang <code>/oto/page,N</code></dd>
+      </dl>
+    </div>
+
+  </div>
+</section>
+
+<section>
+  <h2>5. Gợi ý ghép nguồn với bài toán ML</h2>
+  <div class="tw"><table class="narrow">
+    <thead><tr><th>Bài toán</th><th>Nguồn</th><th>Trường dùng</th></tr></thead>
+    <tbody>
+      <tr><td class="site">Phát hiện giá bất thường</td><td>Chợ Tốt, Tiki, Lazada</td><td>price theo (model, tình trạng, khu vực); tên SP (vd "0PP0 A6 Pr0" trên Lazada)</td></tr>
+      <tr><td class="site">So giá chéo, độ phân tán</td><td>Websosanh + TGDD/FPT/Phong Vũ/CellphoneS</td><td>lowPrice/highPrice/offerCount; giá từng shop cho panel model</td></tr>
+      <tr><td class="site">Ước lượng / dự báo nhu cầu</td><td>Tiki, FPT, Pico, Kingfoodmart</td><td>Δ số đã bán cộng dồn giữa hai snapshot, giá, khuyến mãi</td></tr>
+      <tr><td class="site">Dự báo giá, phát hiện điểm đổi giá</td><td>Mọi nguồn bán lẻ; thực phẩm (Kingfoodmart, BHX) đổi giá thường xuyên hơn</td><td>chuỗi price theo product_id</td></tr>
+      <tr><td class="site">Tồn kho, hết hàng</td><td>Phong Vũ, Kingfoodmart, meta</td><td><code>stockQuantity</code>, <code>inStock</code>, <code>availability</code></td></tr>
+      <tr><td class="site">Ghép sản phẩm giữa site (entity matching)</td><td>TGDD, FPT, CellphoneS, Phong Vũ, Websosanh</td><td>tên, RAM/ROM, mã model; nhãn dương lấy từ laptop khớp mã (12 model trên 4 site), nhãn âm từ các trường hợp sai ở mục 3.11</td></tr>
+      <tr><td class="site">Phát hiện tin lừa đảo / giá mồi</td><td>Chợ Tốt, Bonbanh</td><td>giá so với trung vị (model, dung lượng), tiêu đề, <code>company_ad</code>, khu vực</td></tr>
+      <tr><td class="site">Dự đoán thời gian bán / xác suất bán</td><td>Chợ Tốt, Bonbanh</td><td>giá đăng so với trung vị, các lần hạ giá, khu vực, tình trạng; nhãn = thời điểm trang tin trả HTTP 410</td></tr>
+      <tr><td class="site">Phân tích review (nếu cần NLP)</td><td>Dataset công khai UIT-ViSFD</td><td>11.122 bình luận điện thoại có nhãn khía cạnh/cảm xúc</td></tr>
+    </tbody>
+  </table></div>
+  <p class="sub" style="margin-top:10px">Dataset công khai: <a href="https://huggingface.co/datasets/visolex/ViSFD">UIT-ViSFD trên Hugging Face</a> (<a href="https://arxiv.org/abs/2105.15079v1">bài báo</a>). Các dataset review khác (ViSpamReviews, bộ 10.021 review Tiki/Shopee/Sendo/Hasaki) chưa xác nhận được là công khai. Đây là dữ liệu tĩnh, không thay được nguồn crawl liên tục.</p>
+</section>
+
+<section>
+  <h2>6. Đưa vào pipeline</h2>
+  <ul>
+    <li>Schema chung <code>PRICE_SNAPSHOT_SCHEMA</code>: <code>crawl_ts, site, product_id, name, price, original_price, sold_cum, stock, rating, review_count, offer_count, category, url</code>. Nguồn nào không có trường thì để null.</li>
+    <li>Mỗi nguồn một adapter <code>parse(html) -&gt; list[dict]</code> (đã có trong <code>crawl_round.py</code>, <code>crawl_round2.py</code>, <code>probe2/parsers.py</code>). Kết quả đẩy vào Kafka topic <code>ecommerce_price_snapshots</code>, sau đó vào bronze, rồi <code>fact_price_snapshot</code> + <code>dim_site</code>. Tin Chợ Tốt có thể vào topic riêng <code>ecommerce_listings</code>.</li>
+    <li>Lịch và ngân sách request đề xuất (mỗi host chạy tuần tự, không song song):
+      <div class="tw" style="margin-top:8px"><table class="narrow">
+        <thead><tr><th>Nguồn</th><th>Việc</th><th>Tần suất</th><th>Request/ngày</th><th>Snapshot/ngày (ước)</th></tr></thead>
+        <tbody>
+          <tr><td class="site">Chợ Tốt</td><td>trang 1–3 danh mục điện thoại, laptop, đồ điện tử</td><td>5 phút</td><td class="r">≈ 2.600</td><td class="r">≈ 6.000–9.000 tin mới</td></tr>
+          <tr><td class="site">Tiki</td><td>toàn bộ 4.237 danh mục, cách 5s</td><td>1 lần/ngày</td><td class="r">≈ 4.200</td><td class="r">≈ 130.000</td></tr>
+          <tr><td class="site">Tiki</td><td>100 danh mục trọng tâm</td><td>1 giờ</td><td class="r">2.400</td><td class="r">≈ 96.000</td></tr>
+          <tr><td class="site">Websosanh</td><td>panel 1.000 trang so sánh, cách 10s</td><td>1 lần/ngày</td><td class="r">1.000</td><td class="r">1.000</td></tr>
+          <tr><td class="site">ĐMX (SP flash sale)</td><td>3–5 trang có <code>utm_flashsale</code></td><td>15 phút</td><td class="r">≈ 400</td><td class="r">≈ 16.000</td></tr>
+          <tr><td class="site">FPT, Phong Vũ, ĐMX, TGDD</td><td>10–20 trang danh mục mỗi site</td><td>2 giờ</td><td class="r">120–240 mỗi site</td><td class="r">≈ 3.000–9.000 mỗi site</td></tr>
+          <tr><td class="site">TGDD/FPT/CellphoneS</td><td>panel trang SP (giá theo biến thể), cách ≥ 6s</td><td>1 lần/ngày</td><td class="r">200–500 mỗi site</td><td class="r">200–500</td></tr>
+          <tr><td class="site">Nhóm B</td><td>5–10 trang danh mục mỗi site, phân trang URL</td><td>2–6 giờ</td><td class="r">20–120 mỗi site</td><td class="r">≈ 1.000–4.000 mỗi site</td></tr>
+        </tbody>
+      </table></div>
+      Tổng cộng khoảng 12.000–15.000 request/ngày chia cho ~12 host, tức trung bình dưới 1 request/phút cho mỗi host (trừ Tiki và Chợ Tốt). Đủ dữ liệu cho cả speed layer lẫn batch.</li>
+    <li>Giám sát: số item mỗi vòng về 0 trong khi status 200, hoặc trang nhỏ bất thường (vd Tiki 17 KB), nghĩa là parser hỏng hoặc đang bị thử thách. Ghi thành chỉ số chất lượng lên dashboard và tự giãn tần suất.</li>
+  </ul>
+</section>
+
+<section>
+  <h2>7. Tuân thủ</h2>
+  <ul>
+    <li><b>robots.txt:</b> mọi URL dùng trong khảo sát đều được phép với <code>User-agent: *</code>. Không dùng các đường dẫn bị Disallow (<code>/compare-api/*</code>, <code>/search-api/*</code> của Websosanh; <code>/*?*</code> của Bibomart, CellphoneS; <code>*?p=*</code> của An Khang). Tuân thủ <code>Crawl-delay</code> (TGDD 5s, Pharmacity 20s, Thiên Nam Hòa 120s).</li>
+    <li><b>Điều khoản sử dụng:</b> thoả thuận của TGDD (điều 3.2 k) cấm "sao chép, truyền bá, phân phối, cung cấp … cho bên thứ ba nếu không được sự đồng ý". Vì vậy dữ liệu crawl chỉ dùng nội bộ cho nghiên cứu và <b>không đưa dữ liệu thô lên repo public</b>; repo chỉ chứa script và số liệu tổng hợp. Trang điều khoản của Tiki render bằng JS nên chưa đọc được nội dung.</li>
+    <li><b>Dữ liệu cá nhân (Nghị định 13/2023/NĐ-CP):</b> bỏ <code>phone</code>, <code>account_name</code>, <code>full_name</code>, toạ độ của tin Chợ Tốt ngay ở bước parse, không lưu.</li>
+    <li><b>Không vượt anti-bot:</b> khi Tiki trả trang thử thách JS thì dừng và giãn tần suất, không giải. sosanhgia.vn bị loại vì giá thật bị mã hoá có chủ đích.</li>
+  </ul>
+</section>
+
+<section>
+  <h2>8. Việc tiếp theo và câu hỏi cho thầy</h2>
+  <ol>
+    <li>Chạy kiểm tra liên tục 3–5 ngày (Windows Task Scheduler, mỗi 1–2 giờ) để đo tỷ lệ đổi giá theo ngày và độ bền của parser.</li>
+    <li>Chốt panel ~200 model (điện thoại + laptop) có mặt ở ≥ 3 site để so giá chéo.</li>
+    <li>Câu hỏi: dùng mức tổng hợp của Websosanh (lowPrice/highPrice/offerCount) thay vì danh sách từng shop có được không?</li>
+    <li>Câu hỏi: tập trung một ngành hẹp (điện thoại + laptop, nơi 4–5 nguồn trùng nhau) hay phủ rộng nhiều ngành (thêm thực phẩm qua Kingfoodmart)?</li>
+  </ol>
+  <p class="sub" style="margin-top:14px">Mã nguồn và kết quả đo: <code>docs/evidence/source-hunt-20261011/</code>.</p>
+</section>
+
+</main>
+</body>
+</html>

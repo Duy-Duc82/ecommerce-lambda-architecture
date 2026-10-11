@@ -1,0 +1,119 @@
+[
+ {
+  "site": "tgdd",
+  "url": "https://www.thegioididong.com/dtdd/iphone-duo-2tb",
+  "http": 200,
+  "secs": 0.15,
+  "name": "Điện thoại iPhone Duo 2TB",
+  "sku": null,
+  "brand": "iPhone (Apple)",
+  "offer_type": "Offer",
+  "price": "103990000",
+  "currency": "VND",
+  "availability": ".org/InStock",
+  "rating": null
+ },
+ {
+  "site": "dmx",
+  "url": "https://www.dienmayxanh.com/tivi/google-tivi-qled-tcl-4k-65-inch-65t6d",
+  "http": 200,
+  "secs": 0.69,
+  "name": "Google Tivi QLED TCL 4K 65 inch 65T6D",
+  "sku": "370523",
+  "brand": [
+   "TCL"
+  ],
+  "offer_type": "Offer",
+  "price": 18190000.0,
+  "currency": "VND",
+  "availability": ".org/InStock",
+  "rating": 5.0
+ },
+ {
+  "site": "fptshop",
+  "links_found": 38,
+  "result": "không thấy JSON-LD Product trên 6 trang chi tiết thử"
+ },
+ {
+  "site": "cellphones",
+  "url": "https://cellphones.com.vn/do-choi-cong-nghe.html",
+  "http": 200,
+  "secs": 0.13,
+  "name": "Đồng hồ thông minh",
+  "sku": null,
+  "brand": null,
+  "offer_type": "AggregateOffer",
+  "price": "59000",
+  "currency": "VND",
+  "availability": "",
+  "rating": null
+ },
+ {
+  "site": "nguyenkim",
+  "links_found": 0,
+  "result": "không thấy JSON-LD Product trên 6 trang chi tiết thử"
+ },
+ {
+  "site": "phongvu",
+  "url": "https://phongvu.vn/laptop-acer-gaming-nitro-propanel-anv15-52-50rb--s260305640",
+  "http": 200,
+  "secs": 0.7,
+  "name": "Máy tính xách tay/ Laptop Acer Gaming Nitro ProPanel AN",
+  "sku": "260305640",
+  "brand": "Acer",
+  "offer_type": "Offer",
+  "price": "33490000",
+  "currency": "VND",
+  "availability": ".org/InStock",
+  "rating": null
+ },
+ {
+  "site": "gearvn",
+  "url": "https://gearvn.com/products/laptop-gaming-acer-aspire-7-a715-59g-59rd",
+  "http": 200,
+  "secs": 0.44,
+  "name": "Laptop gaming Acer Aspire 7 A715-59G-59RD (Core 5-210H/",
+  "sku": "LAP-ACER-ASPIRE-7-A715-59G-59RD",
+  "brand": "ACER",
+  "offer_type": "Offer",
+  "price": 25990000,
+  "currency": "VND",
+  "availability": ".org/InStock",
+  "rating": null
+ },
+ {
+  "site": "dienmaycholon",
+  "url": "https://dienmaycholon.com/tivi/smart-tivi-samsung-4k-uhd-43-inch-ua43au7002",
+  "http": 200,
+  "secs": 0.82,
+  "name": "Smart Tivi Samsung 4K UHD 43 Inch UA43AU7002",
+  "sku": "149492",
+  "brand": [
+   "Samsung"
+  ],
+  "offer_type": "Offer",
+  "price": "3990000",
+  "currency": "VND",
+  "availability": "g/OutOfStock",
+  "rating": 4.9
+ },
+ {
+  "site": "hoangha",
+  "url": "https://hoanghamobile.com/dien-thoai-di-dong",
+  "http": 200,
+  "secs": 0.18,
+  "name": "Điện thoại",
+  "sku": null,
+  "brand": "Samsung",
+  "offer_type": "AggregateOffer",
+  "price": 339000,
+  "currency": "VND",
+  "availability": "",
+  "rating": null
+ },
+ {
+  "site": "bachhoaxanh",
+  "links_found": 0,
+  "result": "không thấy JSON-LD Product trên 6 trang chi tiết thử"
+ }
+]

@@ -1,0 +1,148 @@
+[
+ {
+  "site": "tgdd",
+  "p1": 200,
+  "p1_products": 48,
+  "p2": 200,
+  "p2_products": 48,
+  "p2_new": 0,
+  "ld_types": [
+   "ItemList",
+   "Offer",
+   "Product"
+  ],
+  "total_hint": []
+ },
+ {
+  "site": "dmx",
+  "p1": 200,
+  "p1_products": 34,
+  "p2": 200,
+  "p2_products": 34,
+  "p2_new": 0,
+  "ld_types": [
+   "AggregateOffer",
+   "Product"
+  ],
+  "total_hint": []
+ },
+ {
+  "site": "fptshop",
+  "p1": 200,
+  "p1_products": 38,
+  "p2": 200,
+  "p2_products": 38,
+  "p2_new": 2,
+  "ld_types": [],
+  "total_hint": [
+   "142",
+   "118"
+  ]
+ },
+ {
+  "site": "cellphones",
+  "p1": 200,
+  "p1_products": 51,
+  "p2": 200,
+  "p2_products": 51,
+  "p2_new": 0,
+  "ld_types": [
+   "AggregateOffer",
+   "Product"
+  ],
+  "total_hint": [
+   "882",
+   "1",
+   "01"
+  ]
+ },
+ {
+  "site": "nguyenkim",
+  "p1": 200,
+  "p1_products": 5,
+  "p2": 200,
+  "p2_products": 5,
+  "p2_new": 0,
+  "ld_types": [
+   "ItemList",
+   "Offer",
+   "Product"
+  ],
+  "total_hint": []
+ },
+ {
+  "site": "phongvu",
+  "p1": 200,
+  "p1_products": 45,
+  "p2": 200,
+  "p2_products": 46,
+  "p2_new": 1,
+  "ld_types": [
+   "AggregateOffer",
+   "ItemList"
+  ],
+  "total_hint": [
+   "419"
+  ]
+ },
+ {
+  "site": "gearvn",
+  "p1": 200,
+  "p1_products": 25,
+  "p2": 200,
+  "p2_products": 28,
+  "p2_new": 20,
+  "ld_types": [
+   "AggregateOffer",
+   "Product"
+  ],
+  "total_hint": [
+   "202",
+   "202"
+  ]
+ },
+ {
+  "site": "dienmaycholon",
+  "p1": 200,
+  "p1_products": 44,
+  "p2": 200,
+  "p2_products": 44,
+  "p2_new": 0,
+  "ld_types": [
+   "AggregateOffer",
+   "Product"
+  ],
+  "total_hint": [
+   "275",
+   "259"
+  ]
+ },
+ {
+  "site": "bachhoaxanh",
+  "p1": 200,
+  "p1_products": 0,
+  "p2": 200,
+  "p2_products": 0,
+  "p2_new": 0,
+  "ld_types": [
+   "AggregateOffer",
+   "Product"
+  ],
+  "total_hint": []
+ },
+ {
+  "site": "hoangha",
+  "p1": 200,
+  "p1_products": 0,
+  "p2": 200,
+  "p2_products": 0,
+  "p2_new": 0,
+  "ld_types": [
+   "AggregateOffer",
+   "Product"
+  ],
+  "total_hint": [
+   "177"
+  ]
+ }
+]

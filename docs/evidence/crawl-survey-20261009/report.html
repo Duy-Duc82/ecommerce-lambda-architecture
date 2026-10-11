@@ -1,0 +1,246 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Khảo sát crawl sàn TMĐT</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+/* Layout: single reading column (~72ch) with wide tables allowed to scroll; verdict chips carry state */
+:root{
+  --bg:#f6f7f5; --surface:#ffffff; --fg:#1d2422; --muted:#5d6966; --line:#dde2df;
+  --accent:#1f6f62; --accent-soft:#e3f0ec;
+  --ok:#1f7a45; --ok-bg:#e3f3e8; --warn:#9a6200; --warn-bg:#fbf0d9; --bad:#b3261e; --bad-bg:#fbe5e3; --na:#5d6966; --na-bg:#eceeed;
+  --font-body:"Be Vietnam Pro",system-ui,"Segoe UI",Roboto,sans-serif;
+  --font-mono:"JetBrains Mono",ui-monospace,Consolas,monospace;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#121615; --surface:#1a1f1e; --fg:#e4ebe8; --muted:#9aa8a4; --line:#2c3432;
+  --accent:#6cc5b2; --accent-soft:#1c302b;
+  --ok:#7dd69c; --ok-bg:#183223; --warn:#f0c062; --warn-bg:#352a12; --bad:#f2928a; --bad-bg:#3a1c1a; --na:#9aa8a4; --na-bg:#242b29; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#121615; --surface:#1a1f1e; --fg:#e4ebe8; --muted:#9aa8a4; --line:#2c3432;
+  --accent:#6cc5b2; --accent-soft:#1c302b;
+  --ok:#7dd69c; --ok-bg:#183223; --warn:#f0c062; --warn-bg:#352a12; --bad:#f2928a; --bad-bg:#3a1c1a; --na:#9aa8a4; --na-bg:#242b29; color-scheme:dark}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--fg);font:15px/1.65 var(--font-body);padding-inline:16px;padding-block:32px 64px}
+main{max-width:1040px;margin:0 auto;display:flex;flex-direction:column;gap:48px}
+.read{max-width:72ch}
+h1,h2,h3{text-wrap:balance;line-height:1.25;margin:0}
+h1{font-size:2rem;font-weight:700;letter-spacing:-.01em}
+h2{font-size:1.35rem;font-weight:700;padding-bottom:8px;border-bottom:1px solid var(--line)}
+h3{font-size:1.05rem;font-weight:600}
+p{margin:0}
+section{display:flex;flex-direction:column;gap:16px}
+.eyebrow{font:600 .72rem/1 var(--font-mono);letter-spacing:.08em;text-transform:uppercase;color:var(--accent)}
+.meta{color:var(--muted);font-size:.9rem}
+header{display:flex;flex-direction:column;gap:12px}
+code,.mono{font-family:var(--font-mono);font-size:.86em}
+code{background:var(--accent-soft);padding:1px 5px;border-radius:4px;overflow-wrap:anywhere}
+a{color:var(--accent)}
+.verdicts{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:12px}
+.v{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:16px;display:flex;flex-direction:column;gap:8px;min-width:0}
+.v h3{display:flex;justify-content:space-between;align-items:center;gap:8px}
+.v p{color:var(--muted);font-size:.9rem}
+.chip{display:inline-block;font:600 .72rem/1 var(--font-mono);letter-spacing:.04em;padding:5px 8px;border-radius:999px;white-space:nowrap}
+.ok{color:var(--ok);background:var(--ok-bg)} .warn{color:var(--warn);background:var(--warn-bg)} .bad{color:var(--bad);background:var(--bad-bg)} .na{color:var(--na);background:var(--na-bg)}
+.callout{background:var(--accent-soft);border-radius:10px;padding:16px 18px;display:flex;flex-direction:column;gap:8px}
+.callout strong{color:var(--accent)}
+.tw{overflow-x:auto;border:1px solid var(--line);border-radius:10px;background:var(--surface)}
+table{border-collapse:collapse;width:100%;font-size:.88rem}
+th,td{text-align:left;vertical-align:top;padding:9px 12px;border-bottom:1px solid var(--line)}
+th{font-weight:600;color:var(--muted);font-size:.78rem;text-transform:uppercase;letter-spacing:.04em;background:var(--bg)}
+tr:last-child td{border-bottom:0}
+td.num{font-variant-numeric:tabular-nums;text-align:right;font-family:var(--font-mono);white-space:nowrap}
+.wide{min-width:880px}
+ul,ol{margin:0;padding-left:1.3em;display:flex;flex-direction:column;gap:6px}
+.shots{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px}
+figure{margin:0;background:var(--surface);border:1px solid var(--line);border-radius:10px;overflow:hidden;display:flex;flex-direction:column}
+figure img{display:block;width:100%;aspect-ratio:16/10;object-fit:cover;object-position:top;border-bottom:1px solid var(--line);background:#fff}
+figcaption{padding:10px 12px;font-size:.84rem;color:var(--muted)}
+.bar{display:grid;grid-template-columns:7ch 1fr 10ch;align-items:center;gap:10px;font-size:.86rem}
+.bar .track{height:10px;background:var(--bg);border-radius:5px;position:relative;border:1px solid var(--line)}
+.bar .fill{position:absolute;top:-1px;bottom:-1px;left:0;border-radius:5px}
+.bar .t{background:var(--accent)} .bar .l{background:var(--warn)}
+.bars{display:flex;flex-direction:column;gap:6px;background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:14px 16px}
+.small{font-size:.84rem;color:var(--muted)}
+.qs li{padding-left:2px}
+</style>
+</head>
+<body>
+
+<main>
+<header>
+  <span class="eyebrow">Đồ án tốt nghiệp · Nguồn dữ liệu giá</span>
+  <h1>Khảo sát crawl trực tiếp các sàn TMĐT Việt Nam</h1>
+  <p class="meta read">Đo tối 09/10/2026 (khoảng 19:15–21:00, giờ Việt Nam) từ một máy, mạng gia đình. Yêu cầu của thầy: tìm hiểu crawl Shopee, <strong>crawl thẳng trang web, không gọi API</strong>. Không dùng proxy, không giả Googlebot, không dùng công cụ ẩn dấu tự động hóa, không giải captcha.</p>
+</header>
+
+<section>
+  <h2>Kết luận</h2>
+  <div class="verdicts">
+    <div class="v"><h3>Shopee <span class="chip bad">KHÔNG KHẢ THI</span></h3><p>Bị chặn ở cả 4 mức: HTTP thuần, trình duyệt headless, trình duyệt thật, và trình duyệt tự động có người thật đăng nhập.</p></div>
+    <div class="v"><h3>TikTok Shop <span class="chip bad">KHÔNG KHẢ THI</span></h3><p>Captcha kéo mảnh ghép ngay từ request đầu, kể cả robots.txt.</p></div>
+    <div class="v"><h3>Lazada <span class="chip ok">KHẢ THI · TRÌNH DUYỆT</span></h3><p>Playwright headless: 25 trang, 40 SP/trang, đủ giá, không bị chặn. HTTP thuần bị chặn (baxia).</p></div>
+    <div class="v"><h3>Tiki <span class="chip ok">KHẢ THI · HTTP</span></h3><p>HTML có sẵn JSON <code>__NEXT_DATA__</code>: 49 SP/trang, 45 trường. Không cần trình duyệt.</p></div>
+    <div class="v"><h3>Chuỗi bán lẻ <span class="chip ok">KHẢ THI · HTTP</span></h3><p>TGDD, ĐMX, FPT Shop, CellphoneS, Phong Vũ, GearVN, ĐM Chợ Lớn: giá có sẵn trong HTML, phần lớn có JSON-LD schema.org.</p></div>
+    <div class="v"><h3>Sendo <span class="chip na">CHƯA ĐÁNH GIÁ</span></h3><p>Trả HTTP 500 lúc đo.</p></div>
+  </div>
+  <div class="callout read">
+    <strong>Đề xuất</strong>
+    <p>Thay Shopee bằng <strong>Lazada</strong> làm sàn thứ hai. Giữ <strong>Tiki</strong> nhưng chuyển từ gọi API nội bộ sang parse HTML. Hai sàn lớn đều crawl thẳng được, đủ để so sánh giá xuyên sàn.</p>
+  </div>
+</section>
+
+<section>
+  <h2>Phương pháp đã thử</h2>
+  <div class="tw"><table>
+    <thead><tr><th>Mã</th><th>Phương pháp</th><th>Cách làm</th></tr></thead>
+    <tbody>
+      <tr><td class="mono">M1</td><td>HTTP thuần</td><td>Tải trang như trình duyệt, không chạy JavaScript; đọc giá trong HTML, JSON nhúng, JSON-LD</td></tr>
+      <tr><td class="mono">M2</td><td>Trình duyệt headless</td><td>Chromium qua Playwright, chạy JS, chờ 8–12 giây, cuộn trang</td></tr>
+      <tr><td class="mono">M3</td><td>Trình duyệt có giao diện</td><td>Như M2 nhưng mở cửa sổ thật</td></tr>
+      <tr><td class="mono">M4</td><td>Trình duyệt + đăng nhập tay</td><td>Người dùng tự đăng nhập tài khoản của mình (chỉ thử Shopee)</td></tr>
+      <tr><td class="mono">M5</td><td>Phân trang</td><td>So sánh tập sản phẩm trang 1 với trang 2, 3</td></tr>
+      <tr><td class="mono">M6</td><td>Sitemap</td><td>robots.txt → sitemap → đếm URL sản phẩm</td></tr>
+      <tr><td class="mono">M7</td><td>JSON-LD trang chi tiết</td><td>Đọc khối schema.org <code>Product</code>/<code>Offer</code></td></tr>
+      <tr><td class="mono">M8</td><td>Độ bền</td><td>Lazada: 5 trang, rồi 20 trang liên tục, cách nhau 3–5 giây</td></tr>
+    </tbody>
+  </table></div>
+  <p class="small read">Cố ý không thử vì là vượt anti-bot hoặc vi phạm điều khoản: plugin stealth, điều khiển Chrome thật qua cổng debug, proxy xoay vòng, dịch vụ giải captcha, giả User-Agent Googlebot, tự động đăng nhập.</p>
+</section>
+
+<section>
+  <h2>Bảng tổng hợp 15 site</h2>
+  <div class="tw"><table class="wide">
+    <thead><tr><th>Site</th><th>HTTP thuần</th><th>Trình duyệt</th><th>Phân trang</th><th>Trang chi tiết</th><th>Đánh giá</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Shopee</strong></td><td>Khung rỗng, 0 giá; API 403 (mã 90309999)</td><td>Chuyển tới trang lỗi traffic / đăng nhập</td><td>—</td><td>—</td><td><span class="chip bad">Không</span></td></tr>
+      <tr><td><strong>TikTok Shop</strong></td><td>"Security Check"</td><td>Captcha kéo mảnh ghép</td><td>—</td><td>—</td><td><span class="chip bad">Không</span></td></tr>
+      <tr><td><strong>Lazada</strong></td><td>60 KB, 0 giá, script baxia</td><td>40 SP/trang, đủ giá</td><td><code>?page=N</code> đúng; 25 trang</td><td>JSON-LD Product, bản HTTP không có giá</td><td><span class="chip ok">Trình duyệt</span></td></tr>
+      <tr><td><strong>Tiki</strong></td><td>49 SP, 45 trường trong <code>__NEXT_DATA__</code></td><td>Có</td><td>HTTP: trang 2 = trang 1; trình duyệt: +31 SP</td><td><code>__NEXT_DATA__</code>: giá, người bán, tồn kho</td><td><span class="chip ok">HTTP</span></td></tr>
+      <tr><td>Sendo</td><td>HTTP 500</td><td>HTTP 500</td><td>—</td><td>—</td><td><span class="chip na">Chưa rõ</span></td></tr>
+      <tr><td>Thế Giới Di Động</td><td>48 SP có giá</td><td>—</td><td>Chỉ trang đầu</td><td>Product + Offer</td><td><span class="chip ok">HTTP</span></td></tr>
+      <tr><td>Điện Máy Xanh</td><td>34 SP, <code>data-price</code></td><td>—</td><td>Chỉ trang đầu</td><td>Product + Offer + rating</td><td><span class="chip ok">HTTP</span></td></tr>
+      <tr><td>FPT Shop</td><td>Giá trong JSON RSC</td><td>—</td><td>+2 SP</td><td>Không có JSON-LD Product</td><td><span class="chip ok">HTTP</span></td></tr>
+      <tr><td>CellphoneS</td><td>34–51 SP có giá</td><td>—</td><td>Chỉ trang đầu</td><td>Product + Offer</td><td><span class="chip ok">HTTP</span></td></tr>
+      <tr><td>Phong Vũ</td><td>45 SP</td><td>—</td><td>+1 SP</td><td>Product + Offer, SKU</td><td><span class="chip ok">HTTP</span></td></tr>
+      <tr><td>GearVN</td><td>25 SP</td><td>—</td><td><strong>+20 SP</strong> (phân trang thật)</td><td>Product + Offer, SKU</td><td><span class="chip ok">HTTP</span></td></tr>
+      <tr><td>Điện Máy Chợ Lớn</td><td>44 SP</td><td>—</td><td>Chỉ trang đầu</td><td>Product + Offer + tồn kho</td><td><span class="chip ok">HTTP</span></td></tr>
+      <tr><td>Nguyễn Kim</td><td>Có giá</td><td>—</td><td>—</td><td>Chưa thử được</td><td><span class="chip warn">Thiếu dữ liệu</span></td></tr>
+      <tr><td>Hoàng Hà Mobile</td><td>Chứng chỉ SSL hết hạn</td><td>16 giá</td><td>—</td><td>Chưa thử được</td><td><span class="chip warn">Rủi ro</span></td></tr>
+      <tr><td>Bách Hóa Xanh</td><td>Không có giá</td><td>104 giá</td><td>—</td><td>—</td><td><span class="chip warn">Trình duyệt</span></td></tr>
+    </tbody>
+  </table></div>
+  <p class="small read">Nhiều trang bán lẻ chỉ render sẵn trang đầu, phần sau tải bằng AJAX khi bấm "Xem thêm". robots.txt của Điện Máy Xanh cấm <code>/aj/</code> và của FPT Shop cấm <code>/ajax/</code>, nên muốn có danh sách đầy đủ thì đi qua sitemap rồi crawl từng trang chi tiết.</p>
+</section>
+
+<section>
+  <h2>Shopee: chặn ở cả 4 mức</h2>
+  <div class="tw"><table>
+    <thead><tr><th>Thử</th><th>Kết quả</th></tr></thead>
+    <tbody>
+      <tr><td>robots.txt</td><td>Chỉ cấm giỏ hàng, tài khoản, đơn hàng; <strong>không cấm</strong> trang tìm kiếm, danh mục, sản phẩm</td></tr>
+      <tr><td>M1: 3 endpoint <code>/api/v4/…</code></td><td>403, <code>"error": 90309999</code>, khoảng 0,2 giây</td></tr>
+      <tr><td>M1: trang tìm kiếm (UA desktop / iPhone)</td><td>200, nhưng chỉ là khung SPA: 0 tên SP, 0 giá</td></tr>
+      <tr><td>M1: sitemap.xml</td><td>Trả về khung SPA, không phải XML</td></tr>
+      <tr><td>M2 headless</td><td>Chuyển tới <code>/verify/traffic/error</code>: "Trang không khả dụng"</td></tr>
+      <tr><td>M3 trình duyệt thật</td><td>Chuyển tới <code>/buyer/login</code>: "Cần đăng nhập"</td></tr>
+      <tr><td>M4 người thật đăng nhập</td><td>Không đăng nhập được: báo lỗi liên tục, không rời trang xác minh trong 7 phút</td></tr>
+    </tbody>
+  </table></div>
+  <p class="read">Nguyên nhân: Shopee nhận ra trình duyệt tự động (<code>navigator.webdriver</code>, fingerprint của Chromium) và chấm điểm rủi ro ngay ở bước đăng nhập. API được bảo vệ bằng header ký số <code>af-ac-enc-*</code>. Các cách còn lại đều là vượt anti-bot, có rủi ro khóa tài khoản và vi phạm điều khoản.</p>
+  <div class="shots">
+    <figure><img src="screenshots/shopee_category_headed.png" alt="Shopee yêu cầu đăng nhập khi mở trang danh mục"><figcaption>Shopee, trình duyệt thật: "Cần đăng nhập"</figcaption></figure>
+    <figure><img src="screenshots/tiktokshop_listing_headless.png" alt="TikTok Shop hiện captcha kéo mảnh ghép"><figcaption>TikTok Shop: captcha kéo mảnh ghép</figcaption></figure>
+    <figure><img src="screenshots/lazada_listing_headless.png" alt="Lazada hiển thị danh mục điện thoại có giá"><figcaption>Lazada, headless: danh mục hiển thị đủ giá</figcaption></figure>
+  </div>
+</section>
+
+<section>
+  <h2>Lazada và Tiki: hai nguồn khả thi</h2>
+  <div class="read" style="display:flex;flex-direction:column;gap:12px">
+    <h3>Lazada (Playwright)</h3>
+    <ul>
+      <li>Phiên 1: <code>?page=1…5</code>, 200 SP khác nhau, khoảng 7,7 giây/trang.</li>
+      <li>Phiên 2: <code>?page=6…25</code>, cách nhau 3 giây: <strong>20/20 trang thành công, 800 SP khác nhau, 2,8 phút</strong>, không gặp captcha.</li>
+      <li>Trường lấy được: <code>data-item-id</code>, SKU, tên, URL, giá. Trang chi tiết có JSON-LD <code>Product</code>.</li>
+      <li>Sitemap sản phẩm có đơn trong 30 ngày: 241 file <code>.xml.gz</code>, file đầu có 10.000 URL.</li>
+      <li>Nhiều listing giá bất thường, tên lách từ khóa ("Xia0mi_P0C0", "OP.PO"): nguyên liệu cho phần phát hiện bất thường.</li>
+    </ul>
+    <h3>Tiki (HTTP thuần, không gọi API)</h3>
+    <ul>
+      <li>Trang danh mục: 200, khoảng 0,14–0,7 giây, 49 SP × 45 trường: giá, giá gốc, giảm giá, rating, đã bán, người bán, thương hiệu.</li>
+      <li><code>?page=2</code> qua HTTP trả lại trang 1. Cách khám phá sản phẩm: sitemap (233 file, file đầu 1.844 URL) hoặc render trình duyệt.</li>
+      <li>Trang chi tiết: <code>__NEXT_DATA__</code> có <code>price</code>, <code>list_price</code>, <code>inventory_status</code>, <code>current_seller</code>, phù hợp crawl theo chu kỳ cho tập SP theo dõi.</li>
+      <li><strong>Lưu ý:</strong> crawler hiện tại gọi endpoint nội bộ <code>personalish/v1/blocks/listings</code>, tức là API. Cần chuyển sang parse HTML.</li>
+    </ul>
+  </div>
+</section>
+
+<section>
+  <h2>Demo chạy thật: Galaxy A27 trên hai sàn</h2>
+  <p class="read">Script crawl thẳng trang tìm kiếm của hai sàn với cùng từ khóa "samsung galaxy a27": Tiki bằng HTTP + <code>__NEXT_DATA__</code>, Lazada bằng Playwright + DOM. Kết quả ghi vào một CSV chung. Bảng dưới chỉ giữ máy 6GB/128GB, đã lọc phụ kiện.</p>
+  <div class="bars" role="img" aria-label="Giá Galaxy A27 6GB/128GB: Tiki 7,849 đến 8,49 triệu; Lazada 7,869 đến 9,09 triệu">
+    <div class="bar"><span>Tiki</span><div class="track"><div class="fill t" style="width:86.3%"></div></div><span class="mono">7.849.000</span></div>
+    <div class="bar"><span>Lazada</span><div class="track"><div class="fill l" style="width:86.6%"></div></div><span class="mono">7.869.000</span></div>
+    <div class="bar"><span>Lazada</span><div class="track"><div class="fill l" style="width:87.2%"></div></div><span class="mono">7.929.000</span></div>
+    <div class="bar"><span>Tiki</span><div class="track"><div class="fill t" style="width:87.9%"></div></div><span class="mono">7.990.000</span></div>
+    <div class="bar"><span>Lazada</span><div class="track"><div class="fill l" style="width:92.3%"></div></div><span class="mono">8.390.000</span></div>
+    <div class="bar"><span>Tiki</span><div class="track"><div class="fill t" style="width:93.4%"></div></div><span class="mono">8.490.000</span></div>
+    <div class="bar"><span>Lazada</span><div class="track"><div class="fill l" style="width:98.9%"></div></div><span class="mono">8.990.000</span></div>
+    <div class="bar"><span>Lazada</span><div class="track"><div class="fill l" style="width:100%"></div></div><span class="mono">9.090.000</span></div>
+    <p class="small">Độ dài thanh tỉ lệ với giá (100% = 9.090.000 ₫). Giá tính bằng ₫.</p>
+  </div>
+  <p class="read">Cùng một mẫu máy, listing đắt nhất cao hơn listing rẻ nhất <strong>15,8%</strong>. Khi tìm "iphone 16 128gb", 14 kết quả đầu trên Tiki toàn là ốp lưng và kính cường lực. Muốn so sánh xuyên sàn phải có bước <strong>ghép sản phẩm</strong> (product matching), không thể chỉ dựa vào từ khóa.</p>
+</section>
+
+<section>
+  <h2>Phương án đề xuất</h2>
+  <div class="tw"><table class="wide">
+    <thead><tr><th>Phương án</th><th>Nguồn</th><th>Ưu</th><th>Nhược</th></tr></thead>
+    <tbody>
+      <tr><td><span class="chip ok">A · KHUYẾN NGHỊ</span></td><td>Tiki (HTTP + HTML) + Lazada (Playwright)</td><td>Hai sàn lớn, so sánh giá xuyên sàn được, đúng yêu cầu crawl thẳng. Tiki nhẹ.</td><td>Lazada chậm hơn (5–8 giây/trang), tốn RAM, phải theo dõi khả năng bị chặn khi chạy lâu.</td></tr>
+      <tr><td><span class="chip warn">B · MỞ RỘNG</span></td><td>A + parser JSON-LD chung cho chuỗi bán lẻ</td><td>Một adapter phủ nhiều site; dữ liệu chuẩn schema.org (giá, VND, tồn kho).</td><td>Bán lẻ không phải sàn; chỉ trang đầu render sẵn, phải đi qua sitemap.</td></tr>
+      <tr><td><span class="chip bad">C · KHÔNG NÊN</span></td><td>Shopee bằng Chrome đã đăng nhập hoặc công cụ stealth</td><td>Có dữ liệu Shopee.</td><td>Vượt anti-bot, vi phạm điều khoản, dễ khóa tài khoản, không chạy hằng ngày được.</td></tr>
+    </tbody>
+  </table></div>
+  <div class="read" style="display:flex;flex-direction:column;gap:10px">
+    <h3>Tác động lên kiến trúc (phương án A)</h3>
+    <ul>
+      <li>Tầng thu thập: thêm <code>TikiHtmlAdapter</code> (thay adapter API) và <code>LazadaBrowserAdapter</code>. Bronze vẫn lưu body thô, nên reparse và drill schema drift vẫn dùng được.</li>
+      <li>Thêm một worker Playwright chạy tuần tự, delay 3–5 giây. RAM của worker này chưa đo.</li>
+      <li>Kafka, Spark, warehouse, dashboard giữ nguyên vì hợp đồng <code>PRICE_SNAPSHOT_SCHEMA</code> không đổi.</li>
+    </ul>
+    <h3>Quy tắc crawl ghi vào quyển</h3>
+    <ul>
+      <li>Chỉ dữ liệu công khai, không đăng nhập, không thu thập dữ liệu cá nhân.</li>
+      <li>Tuân thủ robots.txt của đúng host; một luồng mỗi site, delay ≥ 3 giây, tập SP theo dõi có giới hạn.</li>
+      <li>Gặp captcha hoặc trang xác minh thì dừng site đó và ghi lỗi, không thử lại liên tục.</li>
+    </ul>
+  </div>
+</section>
+
+<section class="read">
+  <h2>Câu hỏi cho thầy</h2>
+  <ol class="qs">
+    <li>Thầy đồng ý thay Shopee bằng Lazada làm sàn thứ hai không?</li>
+    <li>Phần Shopee đưa vào quyển như một phân tích khả thi có bằng chứng có đủ không?</li>
+    <li>Có cần thêm chuỗi bán lẻ (phương án B) không, hay hai sàn là đủ?</li>
+    <li>Crawl Lazada bằng trình duyệt headless có được tính là "crawl thẳng" theo ý thầy không?</li>
+  </ol>
+</section>
+
+<section class="read">
+  <h2>Giới hạn của khảo sát</h2>
+  <ul>
+    <li>Mỗi phép đo chạy một lần, một máy, một IP, một buổi tối. Kết quả có thể khác khi chạy hằng ngày, từ IP datacenter, hoặc khi các sàn đổi cơ chế chống bot.</li>
+    <li>Lazada mới thử tối đa 25 trang trong một buổi, chưa chạy theo lịch nhiều ngày.</li>
+    <li>Chưa đo RAM/CPU của worker trình duyệt. Số URL sitemap chỉ đếm file đầu tiên.</li>
+  </ul>
+  <p class="small">Dữ liệu thô, ảnh chụp và script: <code>docs/evidence/crawl-survey-20261009/</code>. Bản chi tiết: <code>docs/CRAWL_SOURCE_SURVEY_20261009.md</code>.</p>
+</section>
+</main>
+</body>
+</html>

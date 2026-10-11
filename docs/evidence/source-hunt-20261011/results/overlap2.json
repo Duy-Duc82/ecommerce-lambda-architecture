@@ -1,0 +1,76 @@
+{
+ "per_site": {
+  "tgdd": 17,
+  "fptshop": 49,
+  "websosanh": 467,
+  "cellphones": 130
+ },
+ "vs_tgdd": {
+  "fptshop": {
+   "n": 11,
+   "share": 0.65,
+   "sample": [
+    "galaxy a27",
+    "galaxy a37",
+    "galaxy a57",
+    "galaxy s26 ultra",
+    "iphone 17",
+    "iphone 17 pro",
+    "iphone 17 pro max",
+    "iphone 18 pro",
+    "iphone 18 pro max",
+    "reno16 f",
+    "xiaomi 17"
+   ]
+  },
+  "websosanh": {
+   "n": 16,
+   "share": 0.94,
+   "sample": [
+    "galaxy a27",
+    "galaxy a37",
+    "galaxy a57",
+    "galaxy s26 ultra",
+    "iphone 15 plus",
+    "iphone 17",
+    "iphone 17 pro",
+    "iphone 17 pro max",
+    "iphone 18 pro",
+    "iphone 18 pro max",
+    "realme 16",
+    "realme c100"
+   ]
+  },
+  "cellphones": {
+   "n": 16,
+   "share": 0.94,
+   "sample": [
+    "galaxy a27",
+    "galaxy a37",
+    "galaxy a57",
+    "galaxy s26 ultra",
+    "iphone 15 plus",
+    "iphone 17",
+    "iphone 17 pro",
+    "iphone 17 pro max",
+    "iphone 18 pro",
+    "iphone 18 pro max",
+    "realme 16",
+    "realme c100"
+   ]
+  }
+ },
+ "all4": [
+  "galaxy a27",
+  "galaxy a37",
+  "galaxy a57",
+  "galaxy s26 ultra",
+  "iphone 17",
+  "iphone 17 pro",
+  "iphone 17 pro max",
+  "iphone 18 pro",
+  "iphone 18 pro max",
+  "reno16 f",
+  "xiaomi 17"
+ ]
+}

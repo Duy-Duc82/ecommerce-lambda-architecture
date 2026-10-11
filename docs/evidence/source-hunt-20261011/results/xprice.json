@@ -1,0 +1,162 @@
+{
+ "galaxy a37|128": {
+  "tgdd": {
+   "url": "https://www.thegioididong.com/dtdd/samsung-galaxy-a37-6gb-128gb",
+   "name": "Samsung Galaxy A37 5G 8GB/128GB",
+   "price": 9600000,
+   "avail": "InStock"
+  },
+  "fptshop": {
+   "url": "https://fptshop.com.vn/dien-thoai/samsung-galaxy-a37",
+   "name": "Samsung Galaxy A37 5G 8GB",
+   "price": 9990000,
+   "avail": "InStock"
+  }
+ },
+ "galaxy a57|256": {
+  "tgdd": {
+   "url": "https://www.thegioididong.com/dtdd/samsung-galaxy-a57-8gb-256gb",
+   "name": "Samsung Galaxy A57 5G 8GB/256GB",
+   "price": 11610000,
+   "avail": "InStock"
+  },
+  "fptshop": {
+   "url": "https://fptshop.com.vn/dien-thoai/samsung-galaxy-a57",
+   "name": "Samsung Galaxy A57 5G 8GB",
+   "price": 11290000,
+   "avail": "InStock"
+  }
+ },
+ "galaxy s26 ultra|256": {
+  "tgdd": {
+   "url": "https://www.thegioididong.com/dtdd/samsung-galaxy-s26-ultra-12gb-256gb",
+   "name": "Samsung Galaxy S26 Ultra 5G 12GB/512GB",
+   "price": 35640000,
+   "avail": "InStock"
+  },
+  "fptshop": {
+   "url": "https://fptshop.com.vn/dien-thoai/samsung-galaxy-s26-ultra",
+   "name": "Samsung Galaxy S26 Ultra 5G 12GB",
+   "price": 29490000,
+   "avail": "InStock"
+  }
+ },
+ "iphone 17|256": {
+  "tgdd": {
+   "url": "https://www.thegioididong.com/dtdd/iphone-17",
+   "name": "iPhone 17 512GB",
+   "price": 31990000,
+   "avail": "InStock"
+  },
+  "fptshop": {
+   "url": "https://fptshop.com.vn/dien-thoai/iphone-17",
+   "name": "iPhone 17",
+   "price": 24990000,
+   "avail": "InStock"
+  },
+  "cellphones": {
+   "url": "https://cellphones.com.vn/iphone-17-256gb-hang-trung-bay.html",
+   "name": "iPhone 17 256GB | Chính hãng - Hàng trưng bày",
+   "price": "0",
+   "avail": "OutOfStock"
+  }
+ },
+ "iphone 17 pro|256": {
+  "tgdd": {
+   "url": "https://www.thegioididong.com/dtdd/iphone-17-pro",
+   "err": "IncompleteRead(489874 bytes read)"
+  },
+  "fptshop": {
+   "url": "https://fptshop.com.vn/dien-thoai/iphone-17-pro",
+   "name": "iPhone 17 Pro",
+   "price": 31990000,
+   "avail": "InStock"
+  },
+  "cellphones": {
+   "url": "https://cellphones.com.vn/iphone-17-pro-256gb-hang-trung-bay.html",
+   "name": "iPhone 17 Pro 256GB | Chính hãng - Hàng trưng bày",
+   "price": "0",
+   "avail": "OutOfStock"
+  }
+ },
+ "iphone 17 pro max|256": {
+  "tgdd": {
+   "url": "https://www.thegioididong.com/dtdd/iphone-17-pro-max",
+   "name": "iPhone 17 Pro Max 256GB",
+   "price": 34490000,
+   "avail": "InStock"
+  },
+  "fptshop": {
+   "url": "https://fptshop.com.vn/dien-thoai/iphone-17-pro-max",
+   "name": "iPhone 17 Pro Max",
+   "price": 34490000,
+   "avail": "InStock"
+  },
+  "cellphones": {
+   "url": "https://cellphones.com.vn/iphone-17-pro-max-256gb-hang-trung-bay.html",
+   "name": "iPhone 17 Pro Max 256GB | Chính hãng - Hàng trưng bày",
+   "price": "32490000",
+   "avail": "OutOfStock"
+  }
+ },
+ "iphone 18 pro|256": {
+  "tgdd": {
+   "url": "https://www.thegioididong.com/dtdd/iphone-18-pro",
+   "name": "iPhone 18 Pro 1TB",
+   "price": 58490000,
+   "avail": "InStock"
+  },
+  "fptshop": {
+   "url": "https://fptshop.com.vn/dien-thoai/iphone-18-pro",
+   "name": "iPhone 18 Pro",
+   "price": 38990000,
+   "avail": "InStock"
+  },
+  "cellphones": {
+   "url": "https://cellphones.com.vn/applecare-plus-cho-iphone-18-pro.html",
+   "name": "AppleCare+ cho iPhone 18 Pro",
+   "price": "0",
+   "avail": "OutOfStock"
+  }
+ },
+ "iphone 18 pro max|256": {
+  "tgdd": {
+   "url": "https://www.thegioididong.com/dtdd/iphone-18-pro-max",
+   "name": "iPhone 18 Pro Max 2TB",
+   "price": 80990000,
+   "avail": "InStock"
+  },
+  "fptshop": {
+   "url": "https://fptshop.com.vn/dien-thoai/iphone-18-pro-max",
+   "name": "iPhone 18 Pro Max",
+   "price": 41990000,
+   "avail": "InStock"
+  },
+  "cellphones": {
+   "url": "https://cellphones.com.vn/applecare-plus-cho-iphone-18-pro-max.html",
+   "name": "AppleCare+ cho iPhone 18 Pro Max",
+   "price": "0",
+   "avail": "OutOfStock"
+  }
+ },
+ "reno16 f|128": {
+  "tgdd": {
+   "url": "https://www.thegioididong.com/dtdd/oppo-reno16-f",
+   "name": "OPPO Reno16F 5G 8GB/128GB",
+   "price": 13190000,
+   "avail": "InStock"
+  },
+  "fptshop": {
+   "url": "https://fptshop.com.vn/dien-thoai/oppo-reno16-f",
+   "name": "OPPO Reno16 F 5G 8GB",
+   "price": 14990000,
+   "avail": "InStock"
+  },
+  "cellphones": {
+   "url": "https://cellphones.com.vn/dien-thoai-oppo-reno16-f.html",
+   "name": "OPPO Reno16 F 5G 8GB 256GB",
+   "price": "14990000",
+   "avail": "InStock"
+  }
+ }
+}

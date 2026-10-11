@@ -1,0 +1,72 @@
+{
+ "sampled": 100,
+ "live": 96,
+ "dead": 4,
+ "multi_offer": 93,
+ "offers_median": 8.0,
+ "offers_max": 159,
+ "ratio_median": 1.86,
+ "share_ratio_gt2": 0.45,
+ "share_ratio_gt3": 0.22,
+ "share_ratio_gt10": 0.04,
+ "by_cat": {
+  "dien-thoai-may-tinh-bang": {
+   "live": 24,
+   "multi": 23,
+   "gt3": 8
+  },
+  "tin-hoc": {
+   "live": 24,
+   "multi": 22,
+   "gt3": 5
+  },
+  "thiet-bi-gia-dung": {
+   "live": 25,
+   "multi": 25,
+   "gt3": 3
+  },
+  "dien-lanh": {
+   "live": 23,
+   "multi": 23,
+   "gt3": 4
+  }
+ },
+ "extreme_examples": [
+  {
+   "name": "Bàn phím - Keyboard E-Dra EK701 RGB",
+   "low": 150000,
+   "high": 3683900,
+   "offers": 23
+  },
+  {
+   "name": "Điện thoại Samsung Galaxy A04 3GB/32GB",
+   "low": 1705000,
+   "high": 25300000,
+   "offers": 22
+  },
+  {
+   "name": "Điện thoại Vivo S1 6GB/128GB 6.38 inch",
+   "low": 3795000,
+   "high": 48400000,
+   "offers": 6
+  },
+  {
+   "name": "Switch POE Dahua PFS3106-4ET-60 - 4 port",
+   "low": 1265000,
+   "high": 15070000,
+   "offers": 45
+  },
+  {
+   "name": "RAM Pioneer 16GB DDR4 3200Mhz",
+   "low": 489500,
+   "high": 4389000,
+   "offers": 14
+  },
+  {
+   "name": "Tai nghe có dây Baseus Encok C17",
+   "low": 99000,
+   "high": 880000,
+   "offers": 14
+  }
+ ]
+}

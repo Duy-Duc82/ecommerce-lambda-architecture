@@ -1,0 +1,58 @@
+{
+ "mua-ban-dien-thoai": {
+  "listings": 99,
+  "oldest_age_sec": 1560,
+  "per_hour": 228.5,
+  "priced": 99,
+  "age_samples": [
+   34,
+   55,
+   60,
+   1500,
+   1560,
+   1560
+  ]
+ },
+ "mua-ban-laptop": {
+  "listings": 100,
+  "oldest_age_sec": 10800,
+  "per_hour": 33.3,
+  "priced": 100,
+  "age_samples": [
+   56,
+   180,
+   420,
+   10800,
+   10800,
+   10800
+  ]
+ },
+ "mua-ban-do-dien-tu": {
+  "listings": 98,
+  "oldest_age_sec": 960,
+  "per_hour": 367.5,
+  "priced": 100,
+  "age_samples": [
+   44,
+   54,
+   60,
+   960,
+   960,
+   960
+  ]
+ },
+ "mua-ban": {
+  "listings": 82,
+  "oldest_age_sec": 240,
+  "per_hour": 1230.0,
+  "priced": 69,
+  "age_samples": [
+   21,
+   30,
+   31,
+   240,
+   240,
+   240
+  ]
+ }
+}

@@ -1,0 +1,217 @@
+{
+ "tiki": {
+  "root": "https://tiki.vn/clover/sitemap_index.xml",
+  "status": 200,
+  "index": true,
+  "n_loc": 6,
+  "children_sample": [
+   "https://tiki.vn/clover/sitemap_categories_index.xml",
+   "https://tiki.vn/clover/sitemap_products_index.xml",
+   "https://tiki.vn/clover/sitemap_authors_index.xml",
+   "https://tiki.vn/clover/sitemap_publishers_index.xml",
+   "https://tiki.vn/clover/sitemap_sellers_index.xml",
+   "https://tiki.vn/clover/sitemap_search_index.xml"
+  ],
+  "n_product_children": 6,
+  "child_counts": [
+   3,
+   233,
+   12,
+   2,
+   3,
+   10
+  ]
+ },
+ "tgdd": {
+  "root": "https://www.thegioididong.com/newsitemap/sitemap-product",
+  "status": 200,
+  "index": true,
+  "n_loc": 356,
+  "children_sample": [
+   "https://www.thegioididong.com/newsitemap/sitemap-product-2026-10?page=1",
+   "https://www.thegioididong.com/newsitemap/sitemap-product-2026-10?page=2",
+   "https://www.thegioididong.com/newsitemap/sitemap-product-2026-10?page=3",
+   "https://www.thegioididong.com/newsitemap/sitemap-product-2026-10?page=4",
+   "https://www.thegioididong.com/newsitemap/sitemap-product-2026-10?page=5",
+   "https://www.thegioididong.com/newsitemap/sitemap-product-2026-10?page=6",
+   "https://www.thegioididong.com/newsitemap/sitemap-product-2026-10?page=7",
+   "https://www.thegioididong.com/newsitemap/sitemap-product-2026-10?page=8"
+  ],
+  "n_product_children": 356,
+  "child_counts": [
+   50,
+   50,
+   50,
+   50,
+   50,
+   50
+  ]
+ },
+ "dmx": {
+  "root": "https://www.dienmayxanh.com/newsitemap/sitemap-product",
+  "status": 200,
+  "index": true,
+  "n_loc": 389,
+  "children_sample": [
+   "https://www.dienmayxanh.com/newsitemap/sitemap-product-2014-2?page=1",
+   "https://www.dienmayxanh.com/newsitemap/sitemap-product-2014-3?page=1",
+   "https://www.dienmayxanh.com/newsitemap/sitemap-product-2014-5?page=1",
+   "https://www.dienmayxanh.com/newsitemap/sitemap-product-2014-7?page=1",
+   "https://www.dienmayxanh.com/newsitemap/sitemap-product-2014-10?page=1",
+   "https://www.dienmayxanh.com/newsitemap/sitemap-product-2015-4?page=1",
+   "https://www.dienmayxanh.com/newsitemap/sitemap-product-2015-5?page=1",
+   "https://www.dienmayxanh.com/newsitemap/sitemap-product-2015-6?page=1"
+  ],
+  "n_product_children": 389,
+  "child_counts": [
+   5,
+   6,
+   1,
+   1,
+   1,
+   1
+  ]
+ },
+ "cellphones": {
+  "root": "https://cellphones.com.vn/sitemap/sitemap_index.xml?v=google",
+  "status": 200,
+  "index": true,
+  "n_loc": 70,
+  "children_sample": [
+   "https://cellphones.com.vn/sitemap/category-sitemap.xml",
+   "https://cellphones.com.vn/sitemap/category-sitemap2.xml",
+   "https://cellphones.com.vn/sitemap/category-sitemap3.xml",
+   "https://cellphones.com.vn/sitemap/product-sitemap.xml",
+   "https://cellphones.com.vn/sitemap/product-sitemap2.xml",
+   "https://cellphones.com.vn/sitemap/product-sitemap3.xml",
+   "https://cellphones.com.vn/sitemap/product-sitemap4.xml",
+   "https://cellphones.com.vn/sitemap/product-sitemap5.xml"
+  ],
+  "n_product_children": 70,
+  "child_counts": [
+   861,
+   980,
+   953,
+   1000,
+   997,
+   999
+  ]
+ },
+ "chotot": {
+  "root": "https://www.chotot.com/sitemap-index.xml",
+  "status": 200,
+  "index": true,
+  "n_loc": 23,
+  "children_sample": [
+   "https://www.chotot.com/sitemap-content-hub.xml",
+   "https://www.chotot.com/sitemap-dien-thoai.xml",
+   "https://www.chotot.com/sitemap-laptop.xml",
+   "https://www.chotot.com/sitemap-may-tinh-bang.xml",
+   "https://www.chotot.com/sitemap-tivi-am-thanh.xml",
+   "https://www.chotot.com/sitemap-may-anh-may-quay.xml",
+   "https://www.chotot.com/sitemap-thiet-bi-deo-thong-minh.xml",
+   "https://www.chotot.com/sitemap-phu-kien.xml"
+  ],
+  "n_product_children": 23,
+  "child_counts": [
+   915,
+   8,
+   4,
+   3,
+   3,
+   3
+  ]
+ },
+ "websosanh": {
+  "root": "https://websosanh.vn/product-sitemap.xml",
+  "status": 200,
+  "index": true,
+  "n_loc": 25,
+  "children_sample": [
+   "https://websosanh.vn/product-tivi-am-thanh-sitemap.xml",
+   "https://websosanh.vn/product-thiet-bi-gia-dung-sitemap.xml",
+   "https://websosanh.vn/product-thiet-bi-gia-dung-2-sitemap.xml",
+   "https://websosanh.vn/product-thoi-trang-my-pham-sitemap.xml",
+   "https://websosanh.vn/product-may-anh-may-quay-phim-sitemap.xml",
+   "https://websosanh.vn/product-tin-hoc-sitemap.xml",
+   "https://websosanh.vn/product-dien-thoai-may-tinh-bang-sitemap.xml",
+   "https://websosanh.vn/product-me-va-be-sitemap.xml"
+  ],
+  "n_product_children": 25,
+  "child_counts": [
+   13520,
+   50000,
+   41170,
+   12403,
+   2368,
+   29744
+  ]
+ },
+ "phongvu": {
+  "root": "https://phongvu.vn/sitemap.xml",
+  "status": 200,
+  "index": true,
+  "n_loc": 5,
+  "children_sample": [
+   "https://phongvu.vn/sitemap-collections.xml",
+   "https://phongvu.vn/sitemap-landings.xml",
+   "https://phongvu.vn/sitemap-pages.xml",
+   "https://phongvu.vn/sitemap-collection-products.xml",
+   "https://phongvu.vn/cong-nghe/sitemap_index.xml"
+  ],
+  "n_product_children": 5,
+  "child_counts": [
+   0,
+   0,
+   2,
+   0,
+   45
+  ]
+ },
+ "fptshop": {
+  "root": "https://fptshop.com.vn/sitemap.xml",
+  "status": 200,
+  "index": true,
+  "n_loc": 254,
+  "children_sample": [
+   "https://fptshop.com.vn/sitemap-category.xml",
+   "https://fptshop.com.vn/products/sitemap-phan-mem.xml",
+   "https://fptshop.com.vn/products/sitemap-dien-gia-dung.xml",
+   "https://fptshop.com.vn/products/sitemap-dien-thoai.xml",
+   "https://fptshop.com.vn/products/sitemap-may-tinh-xach-tay.xml",
+   "https://fptshop.com.vn/products/sitemap-tu-lanh.xml",
+   "https://fptshop.com.vn/products/sitemap-may-lanh-dieu-hoa.xml",
+   "https://fptshop.com.vn/products/sitemap-tivi.xml"
+  ],
+  "n_product_children": 49,
+  "child_counts": [
+   605,
+   40,
+   395,
+   142,
+   369,
+   134
+  ]
+ },
+ "bachhoaxanh": {
+  "root": "https://www.bachhoaxanh.com/sitemapnew",
+  "status": 200,
+  "index": true,
+  "n_loc": 5,
+  "children_sample": [
+   "https://www.bachhoaxanh.com/sitemapnew/sitemap-cate",
+   "https://www.bachhoaxanh.com/sitemapnew/sitemap-product",
+   "https://www.bachhoaxanh.com/sitemapnew/sitemap-news",
+   "https://www.bachhoaxanh.com/sitemapnew/sitemap-authority",
+   "https://www.bachhoaxanh.com/sitemapnew/sitemap-store"
+  ],
+  "n_product_children": 5,
+  "child_counts": [
+   220,
+   191,
+   2,
+   6,
+   46
+  ]
+ }
+}

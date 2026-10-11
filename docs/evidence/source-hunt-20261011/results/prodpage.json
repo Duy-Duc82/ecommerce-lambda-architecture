@@ -1,0 +1,1418 @@
+{
+ "tiki": {
+  "sitemap": "https://tiki.vn/clover/sitemap_products_1.xml",
+  "n": 12,
+  "ok": 12,
+  "with_price": 12,
+  "mean_secs": 0.34,
+  "rows": [
+   {
+    "url": "https://tiki.vn/khan-cai-tui-ao-vest-pocket-square-phu-kien-cai-ao-do-man-tron-p108900246.html",
+    "status": 200,
+    "secs": 0.32,
+    "kb": 228,
+    "ld": {
+     "name": "Khăn Cài Túi Áo Vest - Pocket Square - Phụ Kiện Cài Áo đỏ mậ",
+     "sku": "9709355703619",
+     "price": 99000,
+     "high": null,
+     "offers": null,
+     "avail": ".org/InStock",
+     "rating": "5",
+     "reviews": "1"
+    },
+    "next": {
+     "price": true,
+     "quantity_sold": true,
+     "stock_item": true,
+     "review_count": true,
+     "rating_average": true,
+     "sold": 1
+    }
+   },
+   {
+    "url": "https://tiki.vn/kim-tuy-tinh-tu-p2345563.html",
+    "status": 200,
+    "secs": 0.26,
+    "kb": 228,
+    "next": {
+     "price": true,
+     "quantity_sold": true,
+     "stock_item": true,
+     "review_count": true,
+     "rating_average": true,
+     "sold": 29
+    }
+   },
+   {
+    "url": "https://tiki.vn/quan-boxer-thun-lanh-khong-duong-vien-ong-qx528-p87475109.html",
+    "status": 200,
+    "secs": 0.31,
+    "kb": 233,
+    "ld": {
+     "name": "QUẦN BOXER THUN LẠNH KHÔNG ĐƯỜNG VIỀN ỐNG QX528",
+     "sku": "3303919974251",
+     "price": 325000,
+     "high": null,
+     "offers": null,
+     "avail": ".org/InStock",
+     "rating": null,
+     "reviews": null
+    },
+    "next": {
+     "price": true,
+     "quantity_sold": false,
+     "stock_item": true,
+     "review_count": true,
+     "rating_average": true,
+     "sold": null
+    }
+   },
+   {
+    "url": "https://tiki.vn/bo-10-vi-cuon-banh-trang-prota-kem-theo-gia-do-p445733.html",
+    "status": 200,
+    "secs": 0.62,
+    "kb": 244,
+    "ld": {
+     "name": "Bộ 10 Vỉ Cuốn Bánh Tráng Prota – Kèm Theo Giá Đỡ",
+     "sku": "5605319936764",
+     "price": 60000,
+     "high": null,
+     "offers": null,
+     "avail": ".org/InStock",
+     "rating": "4.8",
+     "reviews": "26"
+    },
+    "next": {
+     "price": true,
+     "quantity_sold": true,
+     "stock_item": true,
+     "review_count": true,
+     "rating_average": true,
+     "sold": 293
+    }
+   },
+   {
+    "url": "https://tiki.vn/may-mai-khuon-makita-gd0600-400w-p649038.html",
+    "status": 200,
+    "secs": 0.28,
+    "kb": 222,
+    "ld": {
+     "name": "Máy Mài Khuôn Makita GD0600 (400W)",
+     "sku": "4585508976911",
+     "price": 2104000,
+     "high": null,
+     "offers": null,
+     "avail": ".org/InStock",
+     "rating": null,
+     "reviews": null
+    },
+    "next": {
+     "price": true,
+     "quantity_sold": false,
+     "stock_item": true,
+     "review_count": true,
+     "rating_average": true,
+     "sold": null
+    }
+   },
+   {
+    "url": "https://tiki.vn/ao-khoac-kaki-tui-hop-chu-nhat-m360-kem-anh-that-p104513663.html",
+    "status": 200,
+    "secs": 0.31,
+    "kb": 239,
+    "ld": {
+     "name": "ÁO KHOÁC KAKI Túi Hộp Chữ Nhật (M360 - Kèm Ảnh Thật)",
+     "sku": "2861407296368",
+     "price": 499000,
+     "high": null,
+     "offers": null,
+     "avail": ".org/InStock",
+     "rating": null,
+     "reviews": null
+    },
+    "next": {
+     "price": true,
+     "quantity_sold": false,
+     "stock_item": true,
+     "review_count": true,
+     "rating_average": true,
+     "sold": null
+    }
+   },
+   {
+    "url": "https://tiki.vn/bo-tranh-canvas-treo-tuong-paris-p129068163.html",
+    "status": 200,
+    "secs": 0.36,
+    "kb": 227,
+    "ld": {
+     "name": "Bộ tranh canvas treo tường Paris",
+     "sku": "8041609677509",
+     "price": 280000,
+     "high": null,
+     "offers": null,
+     "avail": ".org/InStock",
+     "rating": null,
+     "reviews": null
+    },
+    "next": {
+     "price": true,
+     "quantity_sold": false,
+     "stock_item": true,
+     "review_count": true,
+     "rating_average": true,
+     "sold": null
+    }
+   },
+   {
+    "url": "https://tiki.vn/dao-cay-day-sieu-mong-khong-gay-xuoc-cho-day-dong-ho-p106392113.html",
+    "status": 200,
+    "secs": 0.24,
+    "kb": 221,
+    "ld": {
+     "name": "Dao Cậy Đáy Siêu Mỏng Không Gây Xước Cho Đáy Đồng Hồ",
+     "sku": "2413069166792",
+     "price": 55000,
+     "high": null,
+     "offers": null,
+     "avail": ".org/InStock",
+     "rating": null,
+     "reviews": null
+    },
+    "next": {
+     "price": true,
+     "quantity_sold": true,
+     "stock_item": true,
+     "review_count": true,
+     "rating_average": true,
+     "sold": 1
+    }
+   },
+   {
+    "url": "https://tiki.vn/dong-ho-nam-citizen-day-thep-khong-gi-at2405-87e-mat-den-sapphire-p2161623.html",
+    "status": 200,
+    "secs": 0.24,
+    "kb": 237,
+    "ld": {
+     "name": "Đồng Hồ Nam Citizen Dây Thép Không Gỉ AT2405-87E - Mặt Đen (",
+     "sku": "5592586909228",
+     "price": 11500000,
+     "high": null,
+     "offers": null,
+     "avail": ".org/InStock",
+     "rating": null,
+     "reviews": null
+    },
+    "next": {
+     "price": true,
+     "quantity_sold": false,
+     "stock_item": true,
+     "review_count": true,
+     "rating_average": true,
+     "sold": null
+    }
+   },
+   {
+    "url": "https://tiki.vn/giay-tay-nam-da-bo-sunpolo-su3020n-nau-p1589773.html",
+    "status": 200,
+    "secs": 0.3,
+    "kb": 255,
+    "ld": {
+     "name": "Giày Tây Nam Da Bò SUNPOLO SU3020N - Nâu",
+     "sku": "5023580969227",
+     "price": 1350000,
+     "high": null,
+     "offers": null,
+     "avail": ".org/InStock",
+     "rating": "5",
+     "reviews": "1"
+    },
+    "next": {
+     "price": true,
+     "quantity_sold": true,
+     "stock_item": true,
+     "review_count": true,
+     "rating_average": true,
+     "sold": 12
+    }
+   },
+   {
+    "url": "https://tiki.vn/but-long-kim-artline-supreme-0-4mm-do-p828329.html",
+    "status": 200,
+    "secs": 0.44,
+    "kb": 229,
+    "ld": {
+     "name": "Bút Lông Kim Artline Supreme (0.4mm) - Đỏ",
+     "sku": "6431164221989",
+     "price": 22500,
+     "high": null,
+     "offers": null,
+     "avail": ".org/InStock",
+     "rating": "4.8",
+     "reviews": "6"
+    },
+    "next": {
+     "price": true,
+     "quantity_sold": true,
+     "stock_item": true,
+     "review_count": true,
+     "rating_average": true,
+     "sold": 87
+    }
+   },
+   {
+    "url": "https://tiki.vn/bang-ghim-ban-bavico-bgb01-mau-go-0-4-x-0-6-m-p440560.html",
+    "status": 200,
+    "secs": 0.34,
+    "kb": 235,
+    "ld": {
+     "name": "Bảng Ghim Bần Bavico BGB01 Màu Gỗ - 0.4 x 0.6 m",
+     "sku": "2201158861576",
+     "price": 370500,
+     "high": null,
+     "offers": null,
+     "avail": ".org/InStock",
+     "rating": "4.7",
+     "reviews": "6"
+    },
+    "next": {
+     "price": true,
+     "quantity_sold": true,
+     "stock_item": true,
+     "review_count": true,
+     "rating_average": true,
+     "sold": 82
+    }
+   }
+  ]
+ },
+ "tgdd": {
+  "sitemap": "https://www.thegioididong.com/newsitemap/sitemap-product-2026-10?page=1",
+  "n": 12,
+  "ok": 12,
+  "with_price": 12,
+  "mean_secs": 2.31,
+  "rows": [
+   {
+    "url": "https://www.thegioididong.com/laptop/dell-inspiron-3501-i3-n3501c",
+    "status": 200,
+    "secs": 1.39,
+    "kb": 347,
+    "ld": {
+     "name": "Laptop Dell Inspiron 3501 i3 1115G4/4GB/256GB/Win10 (P90F005",
+     "sku": "235541",
+     "price": 14717455,
+     "high": null,
+     "offers": null,
+     "avail": "g/OutOfStock",
+     "rating": 4.1,
+     "reviews": 0
+    },
+    "rsc": {
+     "price": 2,
+     "currentPrice": 0,
+     "realQuantity": 0,
+     "stock": 1
+    }
+   },
+   {
+    "url": "https://www.thegioididong.com/laptop/asus-vivobook-a512fa-i3-10110u-ej2033t",
+    "status": 200,
+    "secs": 1.0,
+    "kb": 343,
+    "ld": {
+     "name": "Laptop Asus VivoBook A512FA i3 10110U/8GB/512GB/Win10 (EJ203",
+     "sku": "226254",
+     "price": 13735636,
+     "high": null,
+     "offers": null,
+     "avail": "g/OutOfStock",
+     "rating": 4.2,
+     "reviews": 0
+    },
+    "rsc": {
+     "price": 2,
+     "currentPrice": 0,
+     "realQuantity": 0,
+     "stock": 1
+    }
+   },
+   {
+    "url": "https://www.thegioididong.com/loa-laptop/loa-soundbar-bluetooth-enkor-s2830",
+    "status": 200,
+    "secs": 6.31,
+    "kb": 313,
+    "ld": {
+     "name": "Loa Soundbar Bluetooth Enkor S2830",
+     "sku": "100426",
+     "price": 834545,
+     "high": null,
+     "offers": null,
+     "avail": "g/OutOfStock",
+     "rating": 4.8,
+     "reviews": 1
+    },
+    "rsc": {
+     "price": 2,
+     "currentPrice": 0,
+     "realQuantity": 0,
+     "stock": 1
+    }
+   },
+   {
+    "url": "https://www.thegioididong.com/laptop/macbook-pro-touch-2020-i5-mxk32sa-a",
+    "status": 200,
+    "secs": 1.58,
+    "kb": 323,
+    "ld": {
+     "name": "Apple MacBook Pro Touch 2020 i5 1.4GHz/8GB/256GB (MXK32SA/A)",
+     "sku": "224643",
+     "price": 33990000,
+     "high": null,
+     "offers": null,
+     "avail": "g/OutOfStock",
+     "rating": 5,
+     "reviews": 2
+    },
+    "rsc": {
+     "price": 2,
+     "currentPrice": 0,
+     "realQuantity": 0,
+     "stock": 1
+    }
+   },
+   {
+    "url": "https://www.thegioididong.com/laptop/asus-rog-strix-scar-17-g733q-amd-r9-hg021t",
+    "status": 200,
+    "secs": 4.46,
+    "kb": 313,
+    "ld": {
+     "name": "Laptop Asus Rog Strix Scar 17 G733Q R9 5900HX/32GB/1TB SSD/1",
+     "sku": "235031",
+     "price": 73626545,
+     "high": null,
+     "offers": null,
+     "avail": "g/OutOfStock",
+     "rating": null,
+     "reviews": null
+    },
+    "rsc": {
+     "price": 2,
+     "currentPrice": 0,
+     "realQuantity": 0,
+     "stock": 1
+    }
+   },
+   {
+    "url": "https://www.thegioididong.com/laptop/lenovo-ideapad-s145-15iil-i5-1035g1-8gb-512gb-win1",
+    "status": 200,
+    "secs": 1.21,
+    "kb": 359,
+    "ld": {
+     "name": "Laptop Lenovo IdeaPad S145 15IIL i5 1035G1/8GB/512GB/Win10 (",
+     "sku": "214720",
+     "price": 15290000,
+     "high": null,
+     "offers": null,
+     "avail": "g/OutOfStock",
+     "rating": 4.6,
+     "reviews": 0
+    },
+    "rsc": {
+     "price": 2,
+     "currentPrice": 0,
+     "realQuantity": 0,
+     "stock": 1
+    }
+   },
+   {
+    "url": "https://www.thegioididong.com/dong-ho-deo-tay/nakzen-ss4057l-10n0-nu",
+    "status": 200,
+    "secs": 5.74,
+    "kb": 301,
+    "ld": {
+     "name": "Đồng hồ NAKZEN 32 mm Nữ SS4057L-10N0",
+     "sku": "228677",
+     "price": 235000,
+     "high": null,
+     "offers": null,
+     "avail": "g/OutOfStock",
+     "rating": 5,
+     "reviews": 6
+    },
+    "rsc": {
+     "price": 2,
+     "currentPrice": 0,
+     "realQuantity": 0,
+     "stock": 1
+    }
+   },
+   {
+    "url": "https://www.thegioididong.com/laptop/asus-vivobook-a512fa-i3-ej1868t",
+    "status": 200,
+    "secs": 1.19,
+    "kb": 330,
+    "ld": {
+     "name": "Laptop Asus VivoBook A512FA i3 8145U/4GB/512GB/Win10 (EJ1868",
+     "sku": "220574",
+     "price": 12557455,
+     "high": null,
+     "offers": null,
+     "avail": "g/OutOfStock",
+     "rating": 3.5,
+     "reviews": 0
+    },
+    "rsc": {
+     "price": 2,
+     "currentPrice": 0,
+     "realQuantity": 0,
+     "stock": 1
+    }
+   },
+   {
+    "url": "https://www.thegioididong.com/dong-ho-thong-minh/samsung-galaxy-watch-3-lte-vien-thep-day-da-hong",
+    "status": 200,
+    "secs": 1.09,
+    "kb": 370,
+    "ld": {
+     "name": "Đồng hồ thông minh Samsung Galaxy Watch 3 LTE 41mm Hồng",
+     "sku": "247124",
+     "price": 10299273,
+     "high": null,
+     "offers": null,
+     "avail": "g/OutOfStock",
+     "rating": 3.9,
+     "reviews": 0
+    },
+    "rsc": {
+     "price": 2,
+     "currentPrice": 0,
+     "realQuantity": 0,
+     "stock": 1
+    }
+   },
+   {
+    "url": "https://www.thegioididong.com/dong-ho-deo-tay/anne-klein-ak-3279svrt-nu",
+    "status": 200,
+    "secs": 0.98,
+    "kb": 293,
+    "ld": {
+     "name": "Đồng hồ ANNE KLEIN 32 mm Nữ AK/3279SVRT",
+     "sku": "207117",
+     "price": 3800000,
+     "high": null,
+     "offers": null,
+     "avail": "g/OutOfStock",
+     "rating": 3.7,
+     "reviews": 4
+    },
+    "rsc": {
+     "price": 2,
+     "currentPrice": 0,
+     "realQuantity": 0,
+     "stock": 1
+    }
+   },
+   {
+    "url": "https://www.thegioididong.com/laptop/dell-inspiron-5468-i7-7500u",
+    "status": 200,
+    "secs": 1.1,
+    "kb": 308,
+    "ld": {
+     "name": "Laptop Dell Inspiron 5468 i7 7500U/8GB/1TB/2GB M440/Win10",
+     "sku": "128196",
+     "price": 19626545,
+     "high": null,
+     "offers": null,
+     "avail": "g/OutOfStock",
+     "rating": null,
+     "reviews": null
+    },
+    "rsc": {
+     "price": 2,
+     "currentPrice": 0,
+     "realQuantity": 0,
+     "stock": 1
+    }
+   },
+   {
+    "url": "https://www.thegioididong.com/laptop/dell-precision-14-3480-i7-71024682",
+    "status": 200,
+    "secs": 1.71,
+    "kb": 313,
+    "ld": {
+     "name": "Laptop Dell Precision 14 3480 i7 12800H/32GB/1TB/4GB RTXA500",
+     "sku": "320181",
+     "price": 51339273,
+     "high": null,
+     "offers": null,
+     "avail": "g/OutOfStock",
+     "rating": 5,
+     "reviews": 6
+    },
+    "rsc": {
+     "price": 2,
+     "currentPrice": 0,
+     "realQuantity": 0,
+     "stock": 1
+    }
+   }
+  ]
+ },
+ "dmx": {
+  "sitemap": "https://www.dienmayxanh.com/newsitemap/sitemap-product",
+  "n": 12,
+  "ok": 12,
+  "with_price": 10,
+  "mean_secs": 1.64,
+  "rows": [
+   {
+    "url": "https://www.dienmayxanh.com/op-lung-flipcover/op-lung-magnetic-iphone-14-pro-max-unique-slimcase",
+    "status": 200,
+    "secs": 1.71,
+    "kb": 763,
+    "ld": {
+     "name": "Ốp lưng Magnetic iPhone 14 Pro Max UNIQUE SLIMCASE",
+     "sku": "371884",
+     "price": 425000.0,
+     "high": null,
+     "offers": null,
+     "avail": ".org/InStock",
+     "rating": null,
+     "reviews": null
+    }
+   },
+   {
+    "url": "https://www.dienmayxanh.com/may-hut-bui/may-hut-bui-cam-tay-deerma-xc01",
+    "status": 200,
+    "secs": 2.03,
+    "kb": 821,
+    "ld": {
+     "name": "Máy hút bụi cầm tay Deerma XC01",
+     "sku": "371955",
+     "price": 790000.0,
+     "high": null,
+     "offers": null,
+     "avail": ".org/InStock",
+     "rating": null,
+     "reviews": null
+    }
+   },
+   {
+    "url": "https://www.dienmayxanh.com/op-lung-flipcover/op-lung-magnetic-iphone-14-unique-slimcase",
+    "status": 200,
+    "secs": 1.96,
+    "kb": 763,
+    "ld": {
+     "name": "Ốp lưng Magnetic iPhone 14 UNIQUE SLIMCASE",
+     "sku": "371880",
+     "price": 425000.0,
+     "high": null,
+     "offers": null,
+     "avail": ".org/InStock",
+     "rating": null,
+     "reviews": null
+    }
+   },
+   {
+    "url": "https://www.dienmayxanh.com/op-lung-flipcover/op-lung-magnetic-iphone-16-unique-slimcase",
+    "status": 200,
+    "secs": 2.08,
+    "kb": 765,
+    "ld": {
+     "name": "Ốp lưng Magnetic iPhone 16 UNIQUE SLIMCASE",
+     "sku": "371895",
+     "price": 510000.0,
+     "high": null,
+     "offers": null,
+     "avail": ".org/InStock",
+     "rating": null,
+     "reviews": null
+    }
+   },
+   {
+    "url": "https://www.dienmayxanh.com/op-lung-flipcover/op-lung-iphone-14-pro-max-unique-slimcase",
+    "status": 200,
+    "secs": 1.62,
+    "kb": 763,
+    "ld": {
+     "name": "Ốp lưng iPhone 14 Pro Max UNIQUE SLIMCASE",
+     "sku": "371883",
+     "price": 340000.0,
+     "high": null,
+     "offers": null,
+     "avail": ".org/InStock",
+     "rating": null,
+     "reviews": null
+    }
+   },
+   {
+    "url": "https://www.dienmayxanh.com/may-doc-sach/may-doc-sach-boox-palma3",
+    "status": 200,
+    "secs": 1.27,
+    "kb": 750
+   },
+   {
+    "url": "https://www.dienmayxanh.com/op-lung-flipcover/op-lung-magnetic-iphone-18-pro-max-echo-slimcase",
+    "status": 200,
+    "secs": 1.38,
+    "kb": 761,
+    "ld": {
+     "name": "Ốp lưng Magnetic iPhone 18 Pro Max ECHO SLIMCASE",
+     "sku": "371922",
+     "price": 229000.0,
+     "high": null,
+     "offers": null,
+     "avail": ".org/InStock",
+     "rating": null,
+     "reviews": null
+    }
+   },
+   {
+    "url": "https://www.dienmayxanh.com/may-doc-sach/may-doc-sach-boox-note-air6-c",
+    "status": 200,
+    "secs": 1.22,
+    "kb": 751
+   },
+   {
+    "url": "https://www.dienmayxanh.com/op-lung-flipcover/op-lung-magnetic-iphone-15-pro-max-echo-slimcase",
+    "status": 200,
+    "secs": 1.98,
+    "kb": 765,
+    "ld": {
+     "name": "Ốp lưng Magnetic iPhone 15 Pro Max ECHO SLIMCASE",
+     "sku": "371918",
+     "price": 229000.0,
+     "high": null,
+     "offers": null,
+     "avail": ".org/InStock",
+     "rating": null,
+     "reviews": null
+    }
+   },
+   {
+    "url": "https://www.dienmayxanh.com/op-lung-flipcover/op-lung-iphone-15-pro-max-unique-slimcase",
+    "status": 200,
+    "secs": 1.98,
+    "kb": 759,
+    "ld": {
+     "name": "Ốp lưng iPhone 15 Pro Max UNIQUE SLIMCASE",
+     "sku": "371889",
+     "price": 425000.0,
+     "high": null,
+     "offers": null,
+     "avail": ".org/InStock",
+     "rating": null,
+     "reviews": null
+    }
+   },
+   {
+    "url": "https://www.dienmayxanh.com/op-lung-flipcover/op-lung-magnetic-iphone-14-pro-unique-slimcase",
+    "status": 200,
+    "secs": 1.99,
+    "kb": 763,
+    "ld": {
+     "name": "Ốp lưng Magnetic iPhone 14 Pro UNIQUE SLIMCASE",
+     "sku": "371882",
+     "price": 425000.0,
+     "high": null,
+     "offers": null,
+     "avail": ".org/InStock",
+     "rating": null,
+     "reviews": null
+    }
+   },
+   {
+    "url": "https://www.dienmayxanh.com/adapter-sac/sac-nhanh-apple-dynamic-40w-60w-mgtu4",
+    "status": 200,
+    "secs": 0.41,
+    "kb": 773,
+    "ld": {
+     "name": "Sạc nhanh Apple Dynamic 40W - 60W MGTU4",
+     "sku": "372013",
+     "price": 1190000.0,
+     "high": null,
+     "offers": null,
+     "avail": ".org/InStock",
+     "rating": null,
+     "reviews": null
+    }
+   }
+  ]
+ },
+ "fptshop": {
+  "sitemap": "https://fptshop.com.vn/products/sitemap-dien-thoai.xml",
+  "n": 12,
+  "ok": 12,
+  "with_price": 12,
+  "mean_secs": 0.62,
+  "rows": [
+   {
+    "url": "https://fptshop.com.vn/dien-thoai/xiaomi-17-ultra",
+    "status": 200,
+    "secs": 0.66,
+    "kb": 1271,
+    "ld": {
+     "name": "Xiaomi 17 Ultra 5G 16GB",
+     "sku": "00925846",
+     "price": 29990000,
+     "high": null,
+     "offers": null,
+     "avail": ".org/InStock",
+     "rating": "4.9",
+     "reviews": 52
+    },
+    "rsc": {
+     "price": 70,
+     "currentPrice": 45,
+     "realQuantity": 45,
+     "stock": 0
+    }
+   },
+   {
+    "url": "https://fptshop.com.vn/dien-thoai/tecno-spark-50",
+    "status": 200,
+    "secs": 0.45,
+    "kb": 1214,
+    "ld": {
+     "name": "Tecno Spark 50 4GB",
+     "sku": "00928700",
+     "price": 4590000,
+     "high": null,
+     "offers": null,
+     "avail": ".org/InStock",
+     "rating": "4.9",
+     "reviews": 30
+    },
+    "rsc": {
+     "price": 31,
+     "currentPrice": 45,
+     "realQuantity": 45,
+     "stock": 0
+    }
+   },
+   {
+    "url": "https://fptshop.com.vn/dien-thoai/samsung-galaxy-z-fold7",
+    "status": 200,
+    "secs": 0.65,
+    "kb": 1370,
+    "ld": {
+     "name": "Samsung Galaxy Z Fold7 5G",
+     "sku": "00919910",
+     "price": 36490000,
+     "high": null,
+     "offers": null,
+     "avail": ".org/InStock",
+     "rating": "4.9",
+     "reviews": 145
+    },
+    "rsc": {
+     "price": 106,
+     "currentPrice": 45,
+     "realQuantity": 45,
+     "stock": 0
+    }
+   },
+   {
+    "url": "https://fptshop.com.vn/dien-thoai/samsung-galaxy-z-fold8",
+    "status": 200,
+    "secs": 0.7,
+    "kb": 1325,
+    "ld": {
+     "name": "Samsung Galaxy Z Fold8 5G 12GB",
+     "sku": "00930104",
+     "price": 38490000,
+     "high": null,
+     "offers": null,
+     "avail": ".org/InStock",
+     "rating": "4.9",
+     "reviews": 126
+    },
+    "rsc": {
+     "price": 37,
+     "currentPrice": 45,
+     "realQuantity": 45,
+     "stock": 0
+    }
+   },
+   {
+    "url": "https://fptshop.com.vn/dien-thoai/samsung-galaxy-xcover7-pro",
+    "status": 200,
+    "secs": 0.51,
+    "kb": 1026,
+    "ld": {
+     "name": "Samsung Galaxy XCover7 Pro 5G 6GB",
+     "sku": "00920638",
+     "price": 14230000,
+     "high": null,
+     "offers": null,
+     "avail": ".org/InStock",
+     "rating": "4.9",
+     "reviews": 89
+    },
+    "rsc": {
+     "price": 84,
+     "currentPrice": 45,
+     "realQuantity": 45,
+     "stock": 0
+    }
+   },
+   {
+    "url": "https://fptshop.com.vn/dien-thoai/samsung-galaxy-z-flip7",
+    "status": 200,
+    "secs": 0.84,
+    "kb": 1268,
+    "ld": {
+     "name": "Samsung Galaxy Z Flip7 5G",
+     "sku": "00919888",
+     "price": 22490000,
+     "high": null,
+     "offers": null,
+     "avail": ".org/InStock",
+     "rating": "4.9",
+     "reviews": 67
+    },
+    "rsc": {
+     "price": 97,
+     "currentPrice": 45,
+     "realQuantity": 45,
+     "stock": 0
+    }
+   },
+   {
+    "url": "https://fptshop.com.vn/dien-thoai/xiaomi-redmi-note-15-5g",
+    "status": 200,
+    "secs": 0.62,
+    "kb": 1257,
+    "ld": {
+     "name": "Xiaomi Redmi Note 15 5G 6GB",
+     "sku": "00924528",
+     "price": 5690000,
+     "high": null,
+     "offers": null,
+     "avail": ".org/InStock",
+     "rating": "4.9",
+     "reviews": 197
+    },
+    "rsc": {
+     "price": 72,
+     "currentPrice": 45,
+     "realQuantity": 45,
+     "stock": 0
+    }
+   },
+   {
+    "url": "https://fptshop.com.vn/dien-thoai/honor-600-12gb",
+    "status": 200,
+    "secs": 0.44,
+    "kb": 1179,
+    "ld": {
+     "name": "Honor 600 5G 12GB",
+     "sku": "00928791",
+     "price": 17810000,
+     "high": null,
+     "offers": null,
+     "avail": ".org/InStock",
+     "rating": "4.9",
+     "reviews": 194
+    },
+    "rsc": {
+     "price": 60,
+     "currentPrice": 45,
+     "realQuantity": 45,
+     "stock": 0
+    }
+   },
+   {
+    "url": "https://fptshop.com.vn/dien-thoai/xiaomi-15t",
+    "status": 200,
+    "secs": 0.64,
+    "kb": 1187,
+    "ld": {
+     "name": "Xiaomi 15T 5G 12GB",
+     "sku": "00922263",
+     "price": 12290000,
+     "high": null,
+     "offers": null,
+     "avail": ".org/InStock",
+     "rating": "4.9",
+     "reviews": 240
+    },
+    "rsc": {
+     "price": 112,
+     "currentPrice": 45,
+     "realQuantity": 45,
+     "stock": 0
+    }
+   },
+   {
+    "url": "https://fptshop.com.vn/dien-thoai/nubia-v80-design-4gb",
+    "status": 200,
+    "secs": 0.68,
+    "kb": 1228,
+    "ld": {
+     "name": "Nubia V80 Design 4GB",
+     "sku": "00928419",
+     "price": 3690000,
+     "high": null,
+     "offers": null,
+     "avail": ".org/InStock",
+     "rating": "4.9",
+     "reviews": 163
+    },
+    "rsc": {
+     "price": 33,
+     "currentPrice": 45,
+     "realQuantity": 45,
+     "stock": 0
+    }
+   },
+   {
+    "url": "https://fptshop.com.vn/dien-thoai/honor-play-10",
+    "status": 200,
+    "secs": 0.68,
+    "kb": 1269,
+    "ld": {
+     "name": "Honor Play 10 3GB",
+     "sku": "00923468",
+     "price": 3110000,
+     "high": null,
+     "offers": null,
+     "avail": ".org/InStock",
+     "rating": "4.9",
+     "reviews": 54
+    },
+    "rsc": {
+     "price": 96,
+     "currentPrice": 45,
+     "realQuantity": 45,
+     "stock": 0
+    }
+   },
+   {
+    "url": "https://fptshop.com.vn/dien-thoai/oppo-reno16-f",
+    "status": 200,
+    "secs": 0.57,
+    "kb": 1219,
+    "ld": {
+     "name": "OPPO Reno16 F 5G 8GB",
+     "sku": "00929535",
+     "price": 14990000,
+     "high": null,
+     "offers": null,
+     "avail": ".org/InStock",
+     "rating": "4.9",
+     "reviews": 415
+    },
+    "rsc": {
+     "price": 64,
+     "currentPrice": 45,
+     "realQuantity": 45,
+     "stock": 0
+    }
+   }
+  ]
+ },
+ "cellphones": {
+  "sitemap": "https://cellphones.com.vn/sitemap/product-sitemap.xml",
+  "n": 12,
+  "ok": 12,
+  "with_price": 12,
+  "mean_secs": 2.43,
+  "rows": [
+   {
+    "url": "https://cellphones.com.vn/laptop-dell-15-dc15250-p112f010-cu-tray-xuoc.html",
+    "status": 200,
+    "secs": 1.97,
+    "kb": 613,
+    "ld": {
+     "name": "Laptop Dell 15 DC15250 P112F010 - Cũ Trầy Xước",
+     "sku": "laptop-dell-15-dc15250-p112f010-cu-tray-xuoc",
+     "price": "0",
+     "high": null,
+     "offers": null,
+     "avail": "g/OutOfStock",
+     "rating": null,
+     "reviews": null
+    }
+   },
+   {
+    "url": "https://cellphones.com.vn/may-lanh-aqua-15hp-inverter-aqa-ruv13vs.html",
+    "status": 200,
+    "secs": 1.72,
+    "kb": 611,
+    "ld": {
+     "name": "Máy lạnh Aqua 1.5HP inverter 2025 (AQA-RUV13VS)",
+     "sku": "ML-DRS-AQ-AQA-RUV13VS",
+     "price": "12090000",
+     "high": null,
+     "offers": null,
+     "avail": "g/OutOfStock",
+     "rating": null,
+     "reviews": null
+    }
+   },
+   {
+    "url": "https://cellphones.com.vn/laptop-msi-gaming-gf63-12uc-887vn-16gb-cu-dep.html",
+    "status": 200,
+    "secs": 2.19,
+    "kb": 618,
+    "ld": {
+     "name": "Laptop MSI Gaming GF63 12UC-887VN - Cũ Đẹp",
+     "sku": "laptop-msi-gaming-gf63-12uc-887vn-16gb-cu-dep",
+     "price": "18790000",
+     "high": null,
+     "offers": null,
+     "avail": "g/OutOfStock",
+     "rating": null,
+     "reviews": null
+    }
+   },
+   {
+    "url": "https://cellphones.com.vn/dien-thoai-xiaomi-redmi-note-17-5g-cu-tray-xuoc.html",
+    "status": 200,
+    "secs": 2.84,
+    "kb": 650,
+    "ld": {
+     "name": "Xiaomi Redmi Note 17 5G 6GB 128GB - Cũ trầy xước",
+     "sku": "dien-thoai-xiaomi-redmi-note-17-5g-cu-tray-xuoc",
+     "price": "0",
+     "high": null,
+     "offers": null,
+     "avail": "g/OutOfStock",
+     "rating": null,
+     "reviews": null
+    }
+   },
+   {
+    "url": "https://cellphones.com.vn/may-giat-toshiba-cua-ngang-11kg-tw-t21b120uwvmg.html",
+    "status": 200,
+    "secs": 2.31,
+    "kb": 609,
+    "ld": {
+     "name": "Máy giặt Toshiba cửa ngang 11kg 2025 (TW-T21B120UWV(MG))",
+     "sku": "MG-DRS-TSB-TW-T21B120UWV",
+     "price": "8990000",
+     "high": null,
+     "offers": null,
+     "avail": "g/OutOfStock",
+     "rating": null,
+     "reviews": null
+    }
+   },
+   {
+    "url": "https://cellphones.com.vn/laptop-lenovo-ideapad-slim-3-15iah8-83er000bvn-cu-tray-xuoc.html",
+    "status": 200,
+    "secs": 2.36,
+    "kb": 619,
+    "ld": {
+     "name": "Laptop Lenovo IdeaPad Slim 3 15IAH8 83ER000BVN - Cũ Trầy Xướ",
+     "sku": "laptop-lenovo-ideapad-slim-3-15iah8-83er000bvn-cu-tray-xuoc",
+     "price": "0",
+     "high": null,
+     "offers": null,
+     "avail": "g/OutOfStock",
+     "rating": null,
+     "reviews": null
+    }
+   },
+   {
+    "url": "https://cellphones.com.vn/may-lanh-aux-10hp-inverter-aw10cua4di-5vn.html",
+    "status": 200,
+    "secs": 2.12,
+    "kb": 610,
+    "ld": {
+     "name": "Máy lạnh AUX 1.0HP inverter 2026 (AW10CUA4DI-5VN)",
+     "sku": "ML-DRS-AUX-AW10CUA4DI-5VN",
+     "price": "6990000",
+     "high": null,
+     "offers": null,
+     "avail": "g/OutOfStock",
+     "rating": null,
+     "reviews": null
+    }
+   },
+   {
+    "url": "https://cellphones.com.vn/dien-thoai-samsung-galaxy-a57-5g-8gb-256gb-cu-dep.html",
+    "status": 200,
+    "secs": 2.97,
+    "kb": 643,
+    "ld": {
+     "name": "Samsung Galaxy A57 5G 8GB 256GB - Cũ đẹp",
+     "sku": "dien-thoai-samsung-galaxy-a57-5g-8gb-256gb-cu-dep",
+     "price": "8490000",
+     "high": null,
+     "offers": null,
+     "avail": "g/OutOfStock",
+     "rating": null,
+     "reviews": null
+    }
+   },
+   {
+    "url": "https://cellphones.com.vn/laptop-acer-gaming-nitro-propanel-anv15-42-r9eh.html",
+    "status": 200,
+    "secs": 2.98,
+    "kb": 637,
+    "ld": {
+     "name": "Laptop Acer Gaming Nitro ProPanel ANV15-42-R9EH",
+     "sku": "laptop-acer-gaming-nitro-propanel-anv15-42-r9eh",
+     "price": "35990000",
+     "high": null,
+     "offers": null,
+     "avail": ".org/InStock",
+     "rating": null,
+     "reviews": null
+    }
+   },
+   {
+    "url": "https://cellphones.com.vn/may-don-ve-sinh-cho-meo-purobot-max-pro-2.html",
+    "status": 200,
+    "secs": 3.24,
+    "kb": 613,
+    "ld": {
+     "name": "Máy dọn vệ sinh cho mèo Purobot Max Pro - 2",
+     "sku": "may-don-ve-sinh-cho-meo-purobot-max-pro-2",
+     "price": "0",
+     "high": null,
+     "offers": null,
+     "avail": "g/OutOfStock",
+     "rating": null,
+     "reviews": null
+    }
+   },
+   {
+    "url": "https://cellphones.com.vn/may-giat-lg-cua-ngang-ai-dd-11kg-fx1411n5w.html",
+    "status": 200,
+    "secs": 2.4,
+    "kb": 613,
+    "ld": {
+     "name": "Máy giặt LG cửa ngang AI DD 11kg 2025 (FX1411N5W)",
+     "sku": "MG-DRS-LG-FX1411N5W",
+     "price": "9390000",
+     "high": null,
+     "offers": null,
+     "avail": "g/OutOfStock",
+     "rating": null,
+     "reviews": null
+    }
+   },
+   {
+    "url": "https://cellphones.com.vn/ong-kinh-canon-ef-50mm-f18-stm-cu-xuoc-can.html",
+    "status": 200,
+    "secs": 2.03,
+    "kb": 600,
+    "ld": {
+     "name": "Ống kính Canon EF 50mm f/1.8 STM - Cũ Xước Cấn",
+     "sku": "LENS.C.1081",
+     "price": "1500000",
+     "high": null,
+     "offers": null,
+     "avail": "g/OutOfStock",
+     "rating": null,
+     "reviews": null
+    }
+   }
+  ]
+ },
+ "websosanh": {
+  "sitemap": "https://websosanh.vn/product-dien-thoai-may-tinh-bang-sitemap.xml",
+  "n": 12,
+  "ok": 12,
+  "with_price": 10,
+  "mean_secs": 0.52,
+  "rows": [
+   {
+    "url": "https://websosanh.vn/dien-thoai-mobell-nova-i4-8gb/314303102/so-sanh.htm",
+    "status": 200,
+    "secs": 0.56,
+    "kb": 148,
+    "ld": {
+     "name": "Điện thoại Mobell Nova i4 - 8GB",
+     "sku": 314303102,
+     "price": 0,
+     "high": 0,
+     "offers": 0,
+     "avail": "org/OutStock",
+     "rating": null,
+     "reviews": null
+    }
+   },
+   {
+    "url": "https://websosanh.vn/dien-thoai-xiaomi-redmi-note-11s-6gb128gb/1323480343/so-sanh.htm",
+    "status": 200,
+    "secs": 0.44,
+    "kb": 155,
+    "ld": {
+     "name": "Điện thoại Xiaomi Redmi Note 11S 6GB/128GB",
+     "sku": 1323480343,
+     "price": 6490000,
+     "high": 6490000,
+     "offers": 1,
+     "avail": ".org/InStock",
+     "rating": null,
+     "reviews": null
+    }
+   },
+   {
+    "url": "https://websosanh.vn/tai-nghe-bluetooth-prolink-phb6003e/1987023579/so-sanh.htm",
+    "status": 200,
+    "secs": 0.5,
+    "kb": 142,
+    "ld": {
+     "name": "Tai nghe bluetooth Prolink PHB6003E",
+     "sku": 1987023579,
+     "price": 548900,
+     "high": 548900,
+     "offers": 1,
+     "avail": ".org/InStock",
+     "rating": null,
+     "reviews": null
+    }
+   },
+   {
+    "url": "https://websosanh.vn/may-tinh-bang-mobell-tab-7/1890411858/so-sanh.htm",
+    "status": 200,
+    "secs": 0.41,
+    "kb": 150,
+    "ld": {
+     "name": "Máy tính bảng Mobell Tab 7",
+     "sku": 1890411858,
+     "price": 0,
+     "high": 0,
+     "offers": 0,
+     "avail": "org/OutStock",
+     "rating": null,
+     "reviews": null
+    }
+   },
+   {
+    "url": "https://websosanh.vn/bo-sac-pin-9v-jiabao-a-612/1781485134/so-sanh.htm",
+    "status": 200,
+    "secs": 0.41,
+    "kb": 141,
+    "ld": {
+     "name": "Bộ sạc pin 9V Jiabao A-612",
+     "sku": 1781485134,
+     "price": 67990,
+     "high": 190000,
+     "offers": 11,
+     "avail": ".org/InStock",
+     "rating": null,
+     "reviews": null
+    }
+   },
+   {
+    "url": "https://websosanh.vn/dong-ho-thong-minh-huawei-watch-gt-5-pro-46mm/153054602/so-sanh.htm",
+    "status": 200,
+    "secs": 0.52,
+    "kb": 148,
+    "ld": {
+     "name": "Đồng hồ thông minh Huawei Watch GT 5 Pro 46mm Titanium",
+     "sku": 153054602,
+     "price": 6990000,
+     "high": 12260000,
+     "offers": 8,
+     "avail": ".org/InStock",
+     "rating": null,
+     "reviews": null
+    }
+   },
+   {
+    "url": "https://websosanh.vn/tai-nghe-bluetooth-samsung-galaxy-buds2-pro/587399990/so-sanh.htm",
+    "status": 200,
+    "secs": 0.44,
+    "kb": 151,
+    "ld": {
+     "name": "Tai nghe Bluetooth Samsung Galaxy Buds2 Pro (Buds 2 Pro)",
+     "sku": 587399990,
+     "price": 1016400,
+     "high": 26990000,
+     "offers": 34,
+     "avail": ".org/InStock",
+     "rating": null,
+     "reviews": null
+    }
+   },
+   {
+    "url": "https://websosanh.vn/may-tinh-bang-ipad-air-m3-1tb-wifi-11/286901519/so-sanh.htm",
+    "status": 200,
+    "secs": 0.77,
+    "kb": 154,
+    "ld": {
+     "name": "Máy tính bảng iPad Air M3 - 1TB, Wifi, 11 inch",
+     "sku": 286901519,
+     "price": 18689000,
+     "high": 37389000,
+     "offers": 19,
+     "avail": ".org/InStock",
+     "rating": null,
+     "reviews": null
+    }
+   },
+   {
+    "url": "https://websosanh.vn/dien-thoai-vsmart-joy-1-3gb-ram-32gb-62/1166683774/so-sanh.htm",
+    "status": 200,
+    "secs": 0.52,
+    "kb": 153,
+    "ld": {
+     "name": "Điện thoại Vsmart Joy 1+ - 3GB RAM, 32GB, 6.2 inch",
+     "sku": 1166683774,
+     "price": 2189000,
+     "high": 3729000,
+     "offers": 4,
+     "avail": ".org/InStock",
+     "rating": null,
+     "reviews": null
+    }
+   },
+   {
+    "url": "https://websosanh.vn/dien-thoai-co-dinh-panasonic-kx-ts840/1780497031/so-sanh.htm",
+    "status": 200,
+    "secs": 0.61,
+    "kb": 144,
+    "ld": {
+     "name": "Điện thoại cố định Panasonic KX-TS840",
+     "sku": 1780497031,
+     "price": 539000,
+     "high": 3540900,
+     "offers": 27,
+     "avail": ".org/InStock",
+     "rating": null,
+     "reviews": null
+    }
+   },
+   {
+    "url": "https://websosanh.vn/bo-chuyen-doi-type-c-to-hdmi-orico-xc-111/1046799535/so-sanh.htm",
+    "status": 200,
+    "secs": 0.42,
+    "kb": 142,
+    "ld": {
+     "name": "Bộ chuyển đổi Type-C to HDMI Orico XC-111",
+     "sku": 1046799535,
+     "price": 419000,
+     "high": 764500,
+     "offers": 8,
+     "avail": ".org/InStock",
+     "rating": null,
+     "reviews": null
+    }
+   },
+   {
+    "url": "https://websosanh.vn/dien-thoai-ip-panasonic-kx-nt551/1095510548/so-sanh.htm",
+    "status": 200,
+    "secs": 0.67,
+    "kb": 140,
+    "ld": {
+     "name": "Điện thoại IP Panasonic KX-NT551",
+     "sku": 1095510548,
+     "price": 1030000,
+     "high": 3113000,
+     "offers": 4,
+     "avail": ".org/InStock",
+     "rating": null,
+     "reviews": null
+    }
+   }
+  ]
+ }
+}

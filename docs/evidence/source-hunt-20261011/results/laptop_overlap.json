@@ -1,0 +1,61 @@
+{
+ "phongvu_codes": 22,
+ "per_site": {
+  "fptshop": {
+   "urls": 369,
+   "matched": 16,
+   "sample": [
+    "s5608qa-mb354w",
+    "59g-53rh",
+    "x1404ma-eb027w",
+    "gu605cp-qr141w",
+    "x1404ma-eb028w",
+    "c13wf-421vn",
+    "59g-59rd",
+    "14t235-259vn"
+   ]
+  },
+  "cellphones": {
+   "urls": 7991,
+   "matched": 18,
+   "sample": [
+    "gz302ea-ru232ws",
+    "ga403gm-sy201w",
+    "s5608qa-mb354w",
+    "59g-53rh",
+    "x1404ma-eb027w",
+    "gu605cp-qr141w",
+    "x1404ma-eb028w",
+    "c13wf-421vn"
+   ]
+  },
+  "websosanh": {
+   "urls": 29746,
+   "matched": 16,
+   "sample": [
+    "ux5406aa-su415w",
+    "gz302ea-ru232ws",
+    "p3406ccap-u516s8w",
+    "59g-53rh",
+    "x1404ma-eb027w",
+    "gu605cp-qr141w",
+    "x1404ma-eb028w",
+    "c13wf-421vn"
+   ]
+  }
+ },
+ "all": [
+  "59g-53rh",
+  "x1404ma-eb027w",
+  "gu605cp-qr141w",
+  "x1404ma-eb028w",
+  "c13wf-421vn",
+  "59g-59rd",
+  "sfa14-i31-54a2",
+  "sfa14-i31-52bv",
+  "um3406ga-qd075w",
+  "gu605cp-qr115w",
+  "fx610jm-tu004w",
+  "fx607vjr-tu320w"
+ ]
+}

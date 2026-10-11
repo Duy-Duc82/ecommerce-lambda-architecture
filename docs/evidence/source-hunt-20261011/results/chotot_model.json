@@ -1,0 +1,138 @@
+{
+ "iphone-15-pro-max": {
+  "listings": 100,
+  "dealers": 81,
+  "groups": {
+   "7": {
+    "n": 87,
+    "q1": 13700000.0,
+    "median": 16000000.0,
+    "q3": 17800000.0,
+    "outliers": 1
+   },
+   "9": {
+    "n": 9,
+    "q1": 13395000.0,
+    "median": 15555555.0,
+    "q3": 16500000.0,
+    "outliers": 0
+   }
+  },
+  "outlier_share": 0.01,
+  "outlier_examples": [
+   {
+    "subject": " iPhone 15 Pro Max 256GB VN đẹp 98% lướt web ",
+    "price": 5400000,
+    "cap": 7,
+    "median": 16000000.0
+   },
+   {
+    "subject": " iPhone 15 Pro Max 256GB VN đẹp 98% lướt web ",
+    "price": 5400000,
+    "cap": 7,
+    "median": 16000000.0
+   }
+  ]
+ },
+ "iphone-13": {
+  "listings": 100,
+  "dealers": 71,
+  "groups": {
+   "6": {
+    "n": 73,
+    "q1": 5825000.0,
+    "median": 6555555.0,
+    "q3": 7250000.0,
+    "outliers": 4
+   },
+   "7": {
+    "n": 14,
+    "q1": 6475000.0,
+    "median": 7550000.0,
+    "q3": 8275000.0,
+    "outliers": 0
+   },
+   "None": {
+    "n": 11,
+    "q1": 4500000.0,
+    "median": 5500000.0,
+    "q3": 7500000.0,
+    "outliers": 0
+   }
+  },
+  "outlier_share": 0.041,
+  "outlier_examples": [
+   {
+    "subject": "Apple iPhone 13 128GB Trắng 99%",
+    "price": 2400000,
+    "cap": 6,
+    "median": 6555555.0
+   },
+   {
+    "subject": "Apple iPhone 13 128GB Xanh lá 95%",
+    "price": 2800000,
+    "cap": 6,
+    "median": 6555555.0
+   },
+   {
+    "subject": "Apple iPhone 13 128GB Hồng Màn vàng vỡ lưng",
+    "price": 2999000,
+    "cap": 6,
+    "median": 6555555.0
+   },
+   {
+    "subject": "iPhone 13 thường 128GB",
+    "price": 3000000,
+    "cap": 6,
+    "median": 6555555.0
+   },
+   {
+    "subject": "Apple iPhone 13 128GB Hồng Màn vàng vỡ lưng",
+    "price": 2999000,
+    "cap": 6,
+    "median": 6555555.0
+   },
+   {
+    "subject": "Apple iPhone 13 128GB Xanh lá 95%",
+    "price": 2800000,
+    "cap": 6,
+    "median": 6555555.0
+   }
+  ]
+ },
+ "iphone-16-pro-max": {
+  "listings": 100,
+  "dealers": 74,
+  "groups": {
+   "7": {
+    "n": 84,
+    "q1": 18575000.0,
+    "median": 21150000.0,
+    "q3": 23500000.0,
+    "outliers": 1
+   },
+   "9": {
+    "n": 10,
+    "q1": 18800000.0,
+    "median": 22350000.0,
+    "q3": 25825000.0,
+    "outliers": 0
+   }
+  },
+  "outlier_share": 0.011,
+  "outlier_examples": [
+   {
+    "subject": "iPhone 16 Pro Max 256GB Đen 90%, full chức năng",
+    "price": 9499999,
+    "cap": 7,
+    "median": 21150000.0
+   },
+   {
+    "subject": "iPhone 16 Pro Max 256GB Đen 90%, full chức năng",
+    "price": 9499999,
+    "cap": 7,
+    "median": 21150000.0
+   }
+  ]
+ }
+}

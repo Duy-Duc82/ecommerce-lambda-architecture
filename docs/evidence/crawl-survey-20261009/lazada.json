@@ -1,0 +1,153 @@
+[
+ {
+  "page": 1,
+  "secs": 8.1,
+  "final": "https://www.lazada.vn/dien-thoai-di-dong/",
+  "cards": 40,
+  "new_ids": 40,
+  "with_price": 40,
+  "blocked": false,
+  "pageData": null,
+  "sample": [
+   {
+    "id": "13477830686",
+    "sku": "13477830686_VNAMZ-117389597548",
+    "title": "Điện thoại 0PP0 A6 Pr0 4G (8GB/256GB) | Màn hình 120Hz | Pin",
+    "href": "https://www.lazada.vn/products/pdp-i13477830686.html",
+    "price": "1.250.000 ₫"
+   },
+   {
+    "id": "13477810962",
+    "sku": "13477810962_VNAMZ-117406066093",
+    "title": "Điện Thoại XIAOMI POCO C75 8GB/256GB Chính Hãng",
+    "href": "https://www.lazada.vn/products/pdp-i13477810962.html",
+    "price": "890.000 ₫"
+   }
+  ]
+ },
+ {
+  "page": 2,
+  "secs": 7.7,
+  "final": "https://www.lazada.vn/dien-thoai-di-dong/?page=2",
+  "cards": 40,
+  "new_ids": 40,
+  "with_price": 40,
+  "blocked": false,
+  "pageData": null,
+  "sample": [
+   {
+    "id": "13464741611",
+    "sku": "13464741611_VNAMZ-117353762273",
+    "title": "Điện thoại Samsung Galaxy A06 5G - Hàng chính hãng",
+    "href": "https://www.lazada.vn/products/pdp-i13464741611.html",
+    "price": "3.990.000 ₫"
+   },
+   {
+    "id": "13475553052",
+    "sku": "13475553052_VNAMZ-117389555889",
+    "title": "Điện thoại Xia0mi_P0C0 C71 4GB/128GB Hàng Chính hãng Mới 100",
+    "href": "https://www.lazada.vn/products/pdp-i13475553052.html",
+    "price": "800.000 ₫"
+   }
+  ]
+ },
+ {
+  "page": 3,
+  "secs": 7.7,
+  "final": "https://www.lazada.vn/dien-thoai-di-dong/?page=3",
+  "cards": 40,
+  "new_ids": 40,
+  "with_price": 40,
+  "blocked": false,
+  "pageData": null,
+  "sample": [
+   {
+    "id": "13462645766",
+    "sku": "13462645766_VNAMZ-117327769295",
+    "title": "Điện Thoại Nothing Phone (4b) 5G - Hàng Chính Hãng",
+    "href": "https://www.lazada.vn/products/pdp-i13462645766.html",
+    "price": "10.690.000 ₫"
+   },
+   {
+    "id": "13478708098",
+    "sku": "13478708098_VNAMZ-117392897352",
+    "title": "Điện thoại SAMSUNG Galaxy S25 Ultra 256GB - Độc quyền Online",
+    "href": "https://www.lazada.vn/products/pdp-i13478708098.html",
+    "price": "33.990.000 ₫"
+   }
+  ]
+ },
+ {
+  "page": 4,
+  "secs": 7.6,
+  "final": "https://www.lazada.vn/dien-thoai-di-dong/?page=4",
+  "cards": 40,
+  "new_ids": 40,
+  "with_price": 40,
+  "blocked": false,
+  "pageData": null,
+  "sample": [
+   {
+    "id": "13477862519",
+    "sku": "13477862519_VNAMZ-117406336474",
+    "title": "Điện Thoại  n.u.b.i.a N.e.0 3 GT 5G _ 12GB/256GB Điện Thoại ",
+    "href": "https://www.lazada.vn/products/pdp-i13477862519.html",
+    "price": "896.000 ₫"
+   },
+   {
+    "id": "13475505482",
+    "sku": "13475505482_VNAMZ-117405968970",
+    "title": "Điện thoại siêu bền Ulefone Armor 26 ULTRA 5G (24Gb/512GB) c",
+    "href": "https://www.lazada.vn/products/pdp-i13475505482.html",
+    "price": "910.000 ₫"
+   }
+  ]
+ },
+ {
+  "page": 5,
+  "secs": 7.5,
+  "final": "https://www.lazada.vn/dien-thoai-di-dong/?page=5",
+  "cards": 40,
+  "new_ids": 40,
+  "with_price": 40,
+  "blocked": false,
+  "pageData": null,
+  "sample": [
+   {
+    "id": "13477886140",
+    "sku": "13477886140_VNAMZ-117389731071",
+    "title": "Điện Thoại SS Xcover7 6GB/128GB Hàng Chính hãng Mới 100%",
+    "href": "https://www.lazada.vn/products/pdp-i13477886140.html",
+    "price": "830.000 ₫"
+   },
+   {
+    "id": "13476122790",
+    "sku": "13476122790_VNAMZ-117398514604",
+    "title": "Điện Thoại Xiaomi Redmi 17 5G | Màn Hình 6.9\" 120Hz, Bản Quố",
+    "href": "https://www.lazada.vn/products/pdp-i13476122790.html",
+    "price": "5.850.000 ₫"
+   }
+  ]
+ },
+ {
+  "detail": "https://www.lazada.vn/products/pdp-i13477886140.html",
+  "final": "https://www.lazada.vn/products/pdp-i13477886140.html",
+  "prices": [
+   "830.000₫",
+   "1.660.000 ₫",
+   "37.700 ₫"
+  ],
+  "ld_json_types": [
+   [
+    "Product",
+    "Brand",
+    "AggregateOffer"
+   ],
+   [
+    "BreadcrumbList"
+   ]
+  ],
+  "blocked": false,
+  "has_seller": true
+ }
+]

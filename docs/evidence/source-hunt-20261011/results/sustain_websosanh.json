@@ -1,0 +1,658 @@
+{
+ "summary": {
+  "site": "websosanh",
+  "n": 80,
+  "delay": 2.0,
+  "wall_min": 3.2,
+  "codes": {
+   "200": 80
+  },
+  "mean_secs": 0.43,
+  "max_secs": 1.27,
+  "in_stock_share": 0.86,
+  "priced_share": 0.86,
+  "sold_present": 0
+ },
+ "rows": [
+  {
+   "status": 200,
+   "secs": 0.42,
+   "price": 0,
+   "offers": 0,
+   "avail": "org/OutStock",
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.35,
+   "price": 4950000,
+   "offers": 4,
+   "avail": ".org/InStock",
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.32,
+   "price": 45089000,
+   "offers": 1,
+   "avail": ".org/InStock",
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.3,
+   "price": 17708900,
+   "offers": 32,
+   "avail": ".org/InStock",
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.44,
+   "price": 120000,
+   "offers": 2,
+   "avail": ".org/InStock",
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.39,
+   "price": 1850000,
+   "offers": 4,
+   "avail": ".org/InStock",
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.42,
+   "price": 289000,
+   "offers": 29,
+   "avail": ".org/InStock",
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.44,
+   "price": 11750000,
+   "offers": 3,
+   "avail": ".org/InStock",
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.41,
+   "price": 809000,
+   "offers": 4,
+   "avail": ".org/InStock",
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.29,
+   "price": 2300000,
+   "offers": 6,
+   "avail": ".org/InStock",
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.42,
+   "price": 100000,
+   "offers": 4,
+   "avail": ".org/InStock",
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.41,
+   "price": 140000,
+   "offers": 8,
+   "avail": ".org/InStock",
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.29,
+   "price": 1850000,
+   "offers": 1,
+   "avail": ".org/InStock",
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.41,
+   "price": 220000,
+   "offers": 7,
+   "avail": ".org/InStock",
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.49,
+   "price": 11000000,
+   "offers": 18,
+   "avail": ".org/InStock",
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.26,
+   "price": 3099000,
+   "offers": 15,
+   "avail": ".org/InStock",
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.43,
+   "price": 750000,
+   "offers": 3,
+   "avail": ".org/InStock",
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.35,
+   "price": 4490000,
+   "offers": 4,
+   "avail": ".org/InStock",
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.36,
+   "price": 265000,
+   "offers": 6,
+   "avail": ".org/InStock",
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.48,
+   "price": 160000,
+   "offers": 9,
+   "avail": ".org/InStock",
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.36,
+   "price": 24200000,
+   "offers": 12,
+   "avail": ".org/InStock",
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.51,
+   "price": 28892600,
+   "offers": 6,
+   "avail": ".org/InStock",
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.38,
+   "price": 66000,
+   "offers": 1,
+   "avail": ".org/InStock",
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.58,
+   "price": 0,
+   "offers": 0,
+   "avail": "org/OutStock",
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.29,
+   "price": 5610000,
+   "offers": 3,
+   "avail": ".org/InStock",
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.4,
+   "price": 4599000,
+   "offers": 18,
+   "avail": ".org/InStock",
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.51,
+   "price": 869000,
+   "offers": 1,
+   "avail": ".org/InStock",
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.38,
+   "price": 23199000,
+   "offers": 29,
+   "avail": ".org/InStock",
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.42,
+   "price": 55299000,
+   "offers": 34,
+   "avail": ".org/InStock",
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.48,
+   "price": 86900,
+   "offers": 2,
+   "avail": ".org/InStock",
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.47,
+   "price": 0,
+   "offers": 0,
+   "avail": "org/OutStock",
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.25,
+   "price": 449000,
+   "offers": 9,
+   "avail": ".org/InStock",
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.28,
+   "price": 280000,
+   "offers": 2,
+   "avail": ".org/InStock",
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.4,
+   "price": 18258900,
+   "offers": 19,
+   "avail": ".org/InStock",
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.69,
+   "price": 0,
+   "offers": 0,
+   "avail": "org/OutStock",
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.52,
+   "price": 139000,
+   "offers": 3,
+   "avail": ".org/InStock",
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.36,
+   "price": 4939000,
+   "offers": 7,
+   "avail": ".org/InStock",
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.41,
+   "price": 1888000,
+   "offers": 2,
+   "avail": ".org/InStock",
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.29,
+   "price": 2400000,
+   "offers": 33,
+   "avail": ".org/InStock",
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.35,
+   "price": 38500,
+   "offers": 12,
+   "avail": ".org/InStock",
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.43,
+   "price": 875700,
+   "offers": 54,
+   "avail": ".org/InStock",
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.46,
+   "price": 7689000,
+   "offers": 2,
+   "avail": ".org/InStock",
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.39,
+   "price": 530200,
+   "offers": 4,
+   "avail": ".org/InStock",
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.43,
+   "price": 0,
+   "offers": 0,
+   "avail": "org/OutStock",
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.44,
+   "price": 2490000,
+   "offers": 1,
+   "avail": ".org/InStock",
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.36,
+   "price": 15400000,
+   "offers": 48,
+   "avail": ".org/InStock",
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.37,
+   "price": 9240000,
+   "offers": 11,
+   "avail": ".org/InStock",
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.34,
+   "price": 0,
+   "offers": 0,
+   "avail": "org/OutStock",
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.38,
+   "price": 3289000,
+   "offers": 1,
+   "avail": ".org/InStock",
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.46,
+   "price": 8650000,
+   "offers": 4,
+   "avail": ".org/InStock",
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.33,
+   "price": 0,
+   "offers": 0,
+   "avail": "org/OutStock",
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.29,
+   "price": 10895500,
+   "offers": 1,
+   "avail": ".org/InStock",
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.4,
+   "price": 77000,
+   "offers": 1,
+   "avail": ".org/InStock",
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.48,
+   "price": 4090000,
+   "offers": 64,
+   "avail": ".org/InStock",
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.42,
+   "price": 38990000,
+   "offers": 6,
+   "avail": ".org/InStock",
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.55,
+   "price": 1699500,
+   "offers": 12,
+   "avail": ".org/InStock",
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.41,
+   "price": 23430000,
+   "offers": 28,
+   "avail": ".org/InStock",
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.3,
+   "price": 99000,
+   "offers": 4,
+   "avail": ".org/InStock",
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.36,
+   "price": 2959000,
+   "offers": 21,
+   "avail": ".org/InStock",
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.32,
+   "price": 0,
+   "offers": 0,
+   "avail": "org/OutStock",
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.39,
+   "price": 3250000,
+   "offers": 16,
+   "avail": ".org/InStock",
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.41,
+   "price": 15990000,
+   "offers": 38,
+   "avail": ".org/InStock",
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.6,
+   "price": 1895200,
+   "offers": 5,
+   "avail": ".org/InStock",
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 1.27,
+   "price": 3000000,
+   "offers": 8,
+   "avail": ".org/InStock",
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.45,
+   "price": 7990000,
+   "offers": 7,
+   "avail": ".org/InStock",
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.55,
+   "price": 2959000,
+   "offers": 21,
+   "avail": ".org/InStock",
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.5,
+   "price": 2849000,
+   "offers": 3,
+   "avail": ".org/InStock",
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.77,
+   "price": 420750,
+   "offers": 2,
+   "avail": ".org/InStock",
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.35,
+   "price": 0,
+   "offers": 0,
+   "avail": "org/OutStock",
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.38,
+   "price": 7150000,
+   "offers": 4,
+   "avail": ".org/InStock",
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.7,
+   "price": 2640000,
+   "offers": 23,
+   "avail": ".org/InStock",
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.61,
+   "price": 15015000,
+   "offers": 8,
+   "avail": ".org/InStock",
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.56,
+   "price": 3177000,
+   "offers": 9,
+   "avail": ".org/InStock",
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.4,
+   "price": 999000,
+   "offers": 6,
+   "avail": ".org/InStock",
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.31,
+   "price": 0,
+   "offers": 0,
+   "avail": "org/OutStock",
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.35,
+   "price": 328900,
+   "offers": 5,
+   "avail": ".org/InStock",
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.55,
+   "price": 0,
+   "offers": 0,
+   "avail": "org/OutStock",
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.47,
+   "price": 8390000,
+   "offers": 7,
+   "avail": ".org/InStock",
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.47,
+   "price": 125000,
+   "offers": 4,
+   "avail": ".org/InStock",
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.55,
+   "price": 8990000,
+   "offers": 4,
+   "avail": ".org/InStock",
+   "sold": null
+  }
+ ]
+}

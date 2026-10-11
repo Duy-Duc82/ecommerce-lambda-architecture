@@ -1,0 +1,443 @@
+[
+ {
+  "site": "websosanh",
+  "url": "https://websosanh.vn/s/samsung+galaxy+a27",
+  "status": 200,
+  "ms": 793,
+  "kb": 139,
+  "final": "https://websosanh.vn/s/samsung+galaxy+a27",
+  "vnd": 32,
+  "markers": [
+   "ld_product"
+  ],
+  "block": [],
+  "title": "Samsung Galaxy A27, nơi bán giá rẻ, uy tín, chất lượng nhất ",
+  "robots_status": 200,
+  "sitemaps": [
+   "https://websosanh.vn/sitemap.xml",
+   "https://websosanh.vn/product-sitemap.xml",
+   "https://websosanh.vn/google-news-sitemap.xml"
+  ],
+  "disallow_n": 78,
+  "disallow_all": false
+ },
+ {
+  "site": "chotot",
+  "url": "https://www.chotot.com/mua-ban-dien-thoai",
+  "status": 200,
+  "ms": 351,
+  "kb": 1518,
+  "final": "https://www.chotot.com/mua-ban-dien-thoai",
+  "vnd": 88,
+  "markers": [
+   "ld_itemlist",
+   "next_data"
+  ],
+  "block": [
+   "challenge-platform",
+   "cloudflare"
+  ],
+  "title": "Mua bán điện thoại cũ giá rẻ, giảm đến 70%, máy like new 11/",
+  "robots_status": 200,
+  "sitemaps": [
+   "https://www.chotot.com/sitemap-index.xml"
+  ],
+  "disallow_n": 90,
+  "disallow_all": true
+ },
+ {
+  "site": "hasaki",
+  "url": "https://hasaki.vn/catalogsearch/result/?q=kem+chong+nang",
+  "status": 200,
+  "ms": 393,
+  "kb": 98,
+  "final": "https://hasaki.vn/catalogsearch/result?q=kem%20chong%20nang",
+  "vnd": 0,
+  "markers": [
+   "next_rsc"
+  ],
+  "block": [
+   "cloudflare"
+  ],
+  "title": "Từ khóa “kem chong nang“ chính hãng 100% tại | Hasaki.vn",
+  "robots_status": 200,
+  "sitemaps": [
+   "https://hasaki.vn/sitemap.xml",
+   "https://hasaki.vn/sitemap/image/sitemap-image.xml",
+   "https://hasaki.vn/sitemap-mobile.xml"
+  ],
+  "disallow_n": 31,
+  "disallow_all": false
+ },
+ {
+  "site": "bachhoaxanh",
+  "url": "https://www.bachhoaxanh.com/sua-tuoi",
+  "status": 200,
+  "ms": 249,
+  "kb": 104,
+  "final": "https://www.bachhoaxanh.com/sua-tuoi",
+  "vnd": 0,
+  "markers": [
+   "ld_product",
+   "next_rsc"
+  ],
+  "block": [],
+  "title": "Sữa tươi mua thùng giá bao rẻ - Luôn có khuyến mãi sốc",
+  "robots_status": 200,
+  "sitemaps": [
+   "https://www.bachhoaxanh.com/sitemapnew"
+  ],
+  "disallow_n": 25,
+  "disallow_all": false
+ },
+ {
+  "site": "phongvu",
+  "url": "https://phongvu.vn/c/laptop",
+  "status": 200,
+  "ms": 588,
+  "kb": 1621,
+  "final": "https://phongvu.vn/c/laptop",
+  "vnd": 217,
+  "markers": [
+   "ld_itemlist",
+   "next_data"
+  ],
+  "block": [],
+  "title": "Laptop Phong Vũ | Đổi điểm thi, giảm sâu 5 triệu",
+  "robots_status": 200,
+  "sitemaps": [
+   "https://phongvu.vn/sitemap.xml"
+  ],
+  "disallow_n": 10,
+  "disallow_all": false
+ },
+ {
+  "site": "gearvn",
+  "url": "https://gearvn.com/collections/laptop",
+  "status": 200,
+  "ms": 468,
+  "kb": 981,
+  "final": "https://gearvn.com/collections/laptop",
+  "vnd": 55,
+  "markers": [
+   "ld_product",
+   "next_rsc"
+  ],
+  "block": [
+   "cloudflare"
+  ],
+  "title": "Laptop chính hãng: Dell, Asus, Lenovo, Acer, MSI | GEARVN",
+  "robots_status": 200,
+  "sitemaps": [
+   "https://gearvn.com/sitemap.xml"
+  ],
+  "disallow_n": 5,
+  "disallow_all": false
+ },
+ {
+  "site": "nguyenkim",
+  "url": "https://www.nguyenkim.com/dien-thoai-di-dong/",
+  "status": 200,
+  "ms": 697,
+  "kb": 450,
+  "final": "https://www.nguyenkim.com/dien-thoai.c",
+  "vnd": 50,
+  "markers": [
+   "ld_product",
+   "ld_itemlist",
+   "next_data"
+  ],
+  "block": [
+   "cloudflare"
+  ],
+  "title": "Điện thoại",
+  "robots_status": 200,
+  "sitemaps": [
+   "https://www.nguyenkim.com/sitemap-static.xml",
+   "https://www.nguyenkim.com/sitemap.xml"
+  ],
+  "disallow_n": 12,
+  "disallow_all": false
+ },
+ {
+  "site": "longchau",
+  "url": "https://nhathuoclongchau.com.vn/thuc-pham-chuc-nang",
+  "status": 403,
+  "ms": 110,
+  "kb": 2,
+  "final": "https://nhathuoclongchau.com.vn/thuc-pham-chuc-nang",
+  "vnd": 0,
+  "markers": [],
+  "block": [],
+  "title": "",
+  "robots_status": 200,
+  "sitemaps": [
+   "https://nhathuoclongchau.com.vn/sitemap.xml"
+  ],
+  "disallow_n": 14,
+  "disallow_all": false
+ },
+ {
+  "site": "pharmacity",
+  "url": "https://www.pharmacity.vn/",
+  "status": 200,
+  "ms": 325,
+  "kb": 1775,
+  "final": "https://www.pharmacity.vn/",
+  "vnd": 264,
+  "markers": [
+   "next_rsc"
+  ],
+  "block": [
+   "challenge-platform",
+   "cloudflare"
+  ],
+  "title": "Nhà thuốc Pharmacity | Đúng thuốc, tận tâm, giá tốt",
+  "robots_status": 200,
+  "sitemaps": [
+   "https://www.pharmacity.vn/sitemaps/sitemaps.xml"
+  ],
+  "disallow_n": 1,
+  "disallow_all": false
+ },
+ {
+  "site": "fahasa",
+  "url": "https://www.fahasa.com/sach-trong-nuoc.html",
+  "status": 403,
+  "ms": 127,
+  "kb": 3,
+  "final": "https://www.fahasa.com/sach-trong-nuoc.html",
+  "vnd": 0,
+  "markers": [],
+  "block": [],
+  "title": "",
+  "robots_status": 200,
+  "sitemaps": [],
+  "disallow_n": 13,
+  "disallow_all": false
+ },
+ {
+  "site": "concung",
+  "url": "https://concung.com/",
+  "status": 200,
+  "ms": 692,
+  "kb": 828,
+  "final": "https://concung.com/",
+  "vnd": 108,
+  "markers": [],
+  "block": [],
+  "title": "Con Cưng: Hệ thống cửa hàng Mẹ và Bé lớn nhất Việt Nam",
+  "robots_status": 200,
+  "sitemaps": [
+   "https://concung.com/sitemap.xml"
+  ],
+  "disallow_n": 7,
+  "disallow_all": false
+ },
+ {
+  "site": "dienmaycholon",
+  "url": "https://dienmaycholon.com/tivi",
+  "status": 200,
+  "ms": 569,
+  "kb": 233,
+  "final": "https://dienmaycholon.com/tivi",
+  "vnd": 47,
+  "markers": [
+   "ld_product"
+  ],
+  "block": [],
+  "title": "Tivi giá rẻ, Smart TV 4K, OLED, QLED - Khuyến mãi T10/2026",
+  "robots_status": 200,
+  "sitemaps": [
+   "https://dienmaycholon.com/sitemap.xml",
+   "https://dienmaycholon.com/sitemap/filter-sitemap.xml",
+   "https://dienmaycholon.com/sitemap/sitemap_manu.xml"
+  ],
+  "disallow_n": 14,
+  "disallow_all": false
+ },
+ {
+  "site": "didongviet",
+  "url": "https://didongviet.vn/dien-thoai.html",
+  "status": 200,
+  "ms": 398,
+  "kb": 864,
+  "final": "https://didongviet.vn/dien-thoai.html",
+  "vnd": 247,
+  "markers": [
+   "next_rsc"
+  ],
+  "block": [],
+  "title": "Điện Thoại Di Động, Smartphone Chính Hãng Giá Tốt",
+  "robots_status": 200,
+  "sitemaps": [
+   "https://didongviet.vn/sitemap.xml",
+   "https://didongviet.vn/dchannel/sitemap_index.xml",
+   "https://didongviet.vn/dchannel/news-sitemap.xml"
+  ],
+  "disallow_n": 35,
+  "disallow_all": false
+ },
+ {
+  "site": "winmart",
+  "url": "https://winmart.vn/",
+  "status": 200,
+  "ms": 184,
+  "kb": 19,
+  "final": "https://winmart.vn/",
+  "vnd": 0,
+  "markers": [
+   "next_data"
+  ],
+  "block": [],
+  "title": "Siêu thị WinMart - Tươi ngon thượng hạng!",
+  "robots_status": 200,
+  "sitemaps": [],
+  "disallow_n": 1,
+  "disallow_all": false
+ },
+ {
+  "site": "sendo",
+  "url": "https://www.sendo.vn/",
+  "status": "ERR:<urlopen error [SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed: certi",
+  "ms": 119,
+  "kb": 0,
+  "final": "https://www.sendo.vn/",
+  "vnd": 0,
+  "markers": [],
+  "block": [],
+  "title": "",
+  "robots_status": "ERR:<urlopen error [SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed: certi"
+ },
+ {
+  "site": "cellphones",
+  "url": "https://cellphones.com.vn/mobile.html",
+  "status": 200,
+  "ms": 262,
+  "kb": 1677,
+  "final": "https://cellphones.com.vn/mobile.html",
+  "vnd": 98,
+  "markers": [
+   "ld_product",
+   "nuxt"
+  ],
+  "block": [
+   "captcha"
+  ],
+  "title": "Điện thoại thông minh | Smartphone chính hãng, giá rẻ",
+  "robots_status": 200,
+  "sitemaps": [
+   "https://cellphones.com.vn/sitemap/sitemap_index.xml?v=google"
+  ],
+  "disallow_n": 74,
+  "disallow_all": false
+ },
+ {
+  "site": "tgdd",
+  "url": "https://www.thegioididong.com/dtdd",
+  "status": 200,
+  "ms": 300,
+  "kb": 574,
+  "final": "https://www.thegioididong.com/dtdd",
+  "vnd": 62,
+  "markers": [
+   "ld_product",
+   "ld_itemlist",
+   "next_rsc"
+  ],
+  "block": [],
+  "title": "Điện thoại, smartphone chính hãng giá rẻ, trả góp 0% lãi suấ",
+  "robots_status": 200,
+  "sitemaps": [
+   "https://www.thegioididong.com/newsitemap/sitemap-cate",
+   "https://www.thegioididong.com/newsitemap/sitemap-product",
+   "https://www.thegioididong.com/newsitemap/sitemap-news"
+  ],
+  "disallow_n": 54,
+  "disallow_all": false
+ },
+ {
+  "site": "dmx",
+  "url": "https://www.dienmayxanh.com/tivi",
+  "status": 200,
+  "ms": 336,
+  "kb": 812,
+  "final": "https://www.dienmayxanh.com/tivi",
+  "vnd": 118,
+  "markers": [
+   "ld_product"
+  ],
+  "block": [],
+  "title": "Tivi giá rẻ, Smart Tivi, LED 4K, OLED, QLED trả góp 0% - 10/",
+  "robots_status": 200,
+  "sitemaps": [
+   "https://www.dienmayxanh.com/newsitemap/sitemap-cate",
+   "https://www.dienmayxanh.com/newsitemap/sitemap-product",
+   "https://www.dienmayxanh.com/newsitemap/sitemap-cateknh"
+  ],
+  "disallow_n": 22,
+  "disallow_all": false
+ },
+ {
+  "site": "fptshop",
+  "url": "https://fptshop.com.vn/dien-thoai",
+  "status": 200,
+  "ms": 283,
+  "kb": 2724,
+  "final": "https://fptshop.com.vn/dien-thoai",
+  "vnd": 1829,
+  "markers": [
+   "next_rsc"
+  ],
+  "block": [
+   "captcha",
+   "challenge-platform",
+   "cloudflare"
+  ],
+  "title": "Điện thoại, Smartphone chính hãng, giảm đến 4 triệu, góp 0%",
+  "robots_status": 200,
+  "sitemaps": [
+   "https://fptshop.com.vn/sitemap.xml"
+  ],
+  "disallow_n": 60,
+  "disallow_all": false
+ },
+ {
+  "site": "tiki",
+  "url": "https://tiki.vn/dien-thoai-may-tinh-bang/c1789",
+  "status": 200,
+  "ms": 103,
+  "kb": 524,
+  "final": "https://tiki.vn/dien-thoai-may-tinh-bang/c1789",
+  "vnd": 16,
+  "markers": [
+   "next_data"
+  ],
+  "block": [],
+  "title": "Điện Thoại, Máy Tính Bảng Chính Hãng, Trả Góp 0% | tiki.vn",
+  "robots_status": 200,
+  "sitemaps": [
+   "https://tiki.vn/clover/sitemap_index.xml"
+  ],
+  "disallow_n": 123,
+  "disallow_all": false
+ },
+ {
+  "site": "guardian",
+  "url": "https://www.guardian.com.vn/",
+  "status": 403,
+  "ms": 126,
+  "kb": 3,
+  "final": "https://www.guardian.com.vn/",
+  "vnd": 0,
+  "markers": [],
+  "block": [],
+  "title": "",
+  "robots_status": 200,
+  "sitemaps": [
+   "https://www.guardian.com.vn/sitemaps/sitemap.xml"
+  ],
+  "disallow_n": 23,
+  "disallow_all": false
+ }
+]

@@ -1,0 +1,145 @@
+{
+ "bachhoaxanh": {
+  "snapshots": 307,
+  "valid": 307,
+  "rejects": {},
+  "coverage": {
+   "original_price": 0.28
+  }
+ },
+ "bonbanh": {
+  "snapshots": 120,
+  "valid": 120,
+  "rejects": {},
+  "coverage": {
+   "region": 1.0
+  }
+ },
+ "chotot": {
+  "snapshots": 200,
+  "valid": 200,
+  "rejects": {},
+  "coverage": {
+   "region": 1.0,
+   "condition": 1.0
+  }
+ },
+ "dmx": {
+  "snapshots": 400,
+  "valid": 400,
+  "rejects": {},
+  "coverage": {}
+ },
+ "fptshop": {
+  "snapshots": 282,
+  "valid": 282,
+  "rejects": {},
+  "coverage": {
+   "original_price": 1.0,
+   "sold_cum": 1.0,
+   "rating": 0.95
+  }
+ },
+ "hoanghamobile": {
+  "snapshots": 126,
+  "valid": 126,
+  "rejects": {},
+  "coverage": {
+   "original_price": 0.28
+  }
+ },
+ "kingfoodmart": {
+  "snapshots": 287,
+  "valid": 287,
+  "rejects": {},
+  "coverage": {
+   "original_price": 1.0,
+   "sold_cum": 1.0,
+   "stock": 1.0
+  }
+ },
+ "lazada": {
+  "snapshots": 120,
+  "valid": 120,
+  "rejects": {},
+  "coverage": {
+   "sold_cum": 0.18
+  }
+ },
+ "mediamart": {
+  "snapshots": 266,
+  "valid": 266,
+  "rejects": {},
+  "coverage": {
+   "stock": 1.0,
+   "rating": 1.0,
+   "review_count": 1.0
+  }
+ },
+ "meta": {
+  "snapshots": 224,
+  "valid": 224,
+  "rejects": {},
+  "coverage": {
+   "stock": 1.0,
+   "rating": 1.0,
+   "review_count": 1.0
+  }
+ },
+ "nguyenkim": {
+  "snapshots": 250,
+  "valid": 250,
+  "rejects": {},
+  "coverage": {}
+ },
+ "phongvu": {
+  "snapshots": 400,
+  "valid": 400,
+  "rejects": {},
+  "coverage": {
+   "original_price": 1.0,
+   "stock": 1.0
+  }
+ },
+ "pico": {
+  "snapshots": 175,
+  "valid": 175,
+  "rejects": {},
+  "coverage": {
+   "original_price": 1.0,
+   "sold_cum": 1.0,
+   "stock": 1.0
+  }
+ },
+ "tgdd": {
+  "snapshots": 100,
+  "valid": 100,
+  "rejects": {},
+  "coverage": {
+   "stock": 1.0,
+   "rating": 0.9,
+   "review_count": 0.9
+  }
+ },
+ "tiki": {
+  "snapshots": 1000,
+  "valid": 971,
+  "rejects": {
+   "sold_decreased": 29
+  },
+  "coverage": {
+   "original_price": 1.0,
+   "sold_cum": 0.8,
+   "rating": 1.0,
+   "review_count": 1.0
+  }
+ },
+ "websosanh": {
+  "snapshots": 400,
+  "valid": 400,
+  "rejects": {},
+  "coverage": {
+   "offer_count": 1.0
+  }
+ }
+}

@@ -1,0 +1,876 @@
+{
+ "summary": {
+  "sampled": 100,
+  "live": 96,
+  "dead": 4,
+  "multi_offer": 93,
+  "offers_median": 8.0,
+  "offers_max": 159,
+  "ratio_median": 1.86,
+  "share_ratio_gt2": 0.45,
+  "share_ratio_gt3": 0.22,
+  "share_ratio_gt10": 0.04,
+  "by_cat": {
+   "dien-thoai-may-tinh-bang": {
+    "live": 24,
+    "multi": 23,
+    "gt3": 8
+   },
+   "tin-hoc": {
+    "live": 24,
+    "multi": 22,
+    "gt3": 5
+   },
+   "thiet-bi-gia-dung": {
+    "live": 25,
+    "multi": 25,
+    "gt3": 3
+   },
+   "dien-lanh": {
+    "live": 23,
+    "multi": 23,
+    "gt3": 4
+   }
+  },
+  "extreme_examples": [
+   {
+    "name": "Bàn phím - Keyboard E-Dra EK701 RGB",
+    "low": 150000,
+    "high": 3683900,
+    "offers": 23
+   },
+   {
+    "name": "Điện thoại Samsung Galaxy A04 3GB/32GB",
+    "low": 1705000,
+    "high": 25300000,
+    "offers": 22
+   },
+   {
+    "name": "Điện thoại Vivo S1 6GB/128GB 6.38 inch",
+    "low": 3795000,
+    "high": 48400000,
+    "offers": 6
+   },
+   {
+    "name": "Switch POE Dahua PFS3106-4ET-60 - 4 port",
+    "low": 1265000,
+    "high": 15070000,
+    "offers": 45
+   },
+   {
+    "name": "RAM Pioneer 16GB DDR4 3200Mhz",
+    "low": 489500,
+    "high": 4389000,
+    "offers": 14
+   },
+   {
+    "name": "Tai nghe có dây Baseus Encok C17",
+    "low": 99000,
+    "high": 880000,
+    "offers": 14
+   }
+  ]
+ },
+ "rows": [
+  {
+   "cat": "dien-thoai-may-tinh-bang",
+   "url": "https://websosanh.vn/cap-audio-ugreen-40845/1039472549/so-sanh.htm",
+   "name": "Cáp audio Ugreen 40845",
+   "low": 330000,
+   "high": 381700,
+   "offers": 7
+  },
+  {
+   "cat": "dien-thoai-may-tinh-bang",
+   "url": "https://websosanh.vn/dien-thoai-xiaomi-redmi-note-7-4gb-ram-128gb/2019581889/so-sanh.htm",
+   "name": "Điện thoại Xiaomi Redmi Note 7 4GB/128GB 6.3 inch",
+   "low": 4279000,
+   "high": 7190000,
+   "offers": 2
+  },
+  {
+   "cat": "dien-thoai-may-tinh-bang",
+   "url": "https://websosanh.vn/dien-thoai-samsung-galaxy-a04-3gb32gb/1302147839/so-sanh.htm",
+   "name": "Điện thoại Samsung Galaxy A04 3GB/32GB",
+   "low": 1705000,
+   "high": 25300000,
+   "offers": 22
+  },
+  {
+   "cat": "dien-thoai-may-tinh-bang",
+   "url": "https://websosanh.vn/pin-sac-du-phong-romoss-solo-5-10000-mah-/2004212445/so-sanh.htm",
+   "name": "Pin Sạc Dự Phòng Romoss Solo 5 - 10000mAh",
+   "low": 206250,
+   "high": 401500,
+   "offers": 4
+  },
+  {
+   "cat": "dien-thoai-may-tinh-bang",
+   "url": "https://websosanh.vn/dien-thoai-vivo-y15-4gb-ram-64gb-635-inch/2143755402/so-sanh.htm",
+   "name": "Điện thoại Vivo Y15 4GB/64GB 6.35 inch",
+   "low": 1700000,
+   "high": 4990100,
+   "offers": 4
+  },
+  {
+   "cat": "dien-thoai-may-tinh-bang",
+   "url": "https://websosanh.vn/tai-nghe-xiberia-w3/1835572291/so-sanh.htm",
+   "name": "Tai nghe Xiberia W3",
+   "low": 429000,
+   "high": 799000,
+   "offers": 6
+  },
+  {
+   "cat": "dien-thoai-may-tinh-bang",
+   "url": "https://websosanh.vn/tai-nghe-robot-re20/1105364274/so-sanh.htm",
+   "name": "Tai nghe Robot RE20",
+   "low": 31900,
+   "high": 99000,
+   "offers": 9
+  },
+  {
+   "cat": "dien-thoai-may-tinh-bang",
+   "url": "https://websosanh.vn/tai-nghe-true-wireless-stereo-energizer-ub5001/1038902386/so-sanh.htm",
+   "name": "Tai nghe True Wireless Stereo Energizer - UB5001",
+   "low": 1309000,
+   "high": 2400000,
+   "offers": 3
+  },
+  {
+   "cat": "dien-thoai-may-tinh-bang",
+   "url": "https://websosanh.vn/tai-nghe-bluetooth-soundpeats-air5-lite/1188295736/so-sanh.htm",
+   "name": "Tai nghe Bluetooth SoundPeats Air5 Lite",
+   "low": 699000,
+   "high": 1419000,
+   "offers": 8
+  },
+  {
+   "cat": "dien-thoai-may-tinh-bang",
+   "url": "https://websosanh.vn/tai-nghe-bluetooth-remax-rb-s17/1990275899/so-sanh.htm",
+   "name": "Tai nghe bluetooth Remax RB-S17",
+   "low": 341000,
+   "high": 825000,
+   "offers": 4
+  },
+  {
+   "cat": "dien-thoai-may-tinh-bang",
+   "url": "https://websosanh.vn/tai-bluetooth-remax-cozypods-w30n/1364315271/so-sanh.htm",
+   "name": "Tai Bluetooth Remax Cozypods W30N",
+   "low": 273900,
+   "high": 880000,
+   "offers": 8
+  },
+  {
+   "cat": "dien-thoai-may-tinh-bang",
+   "url": "https://websosanh.vn/man-hinh-cam-ung-dien-thoai-alcatel-one-touch-idol/453366448/so-sanh.htm",
+   "name": "Màn hình cảm ứng điện thoại Alcatel One Touch Idol X 6040D",
+   "low": 0,
+   "high": 0,
+   "offers": 0
+  },
+  {
+   "cat": "dien-thoai-may-tinh-bang",
+   "url": "https://websosanh.vn/dien-thoai-oppo-a3s-2gb-ram-16gb-62-inch/375601245/so-sanh.htm",
+   "name": "Điện thoại Oppo A3s 2GB/16GB 6.2 inch",
+   "low": 1029000,
+   "high": 3900000,
+   "offers": 7
+  },
+  {
+   "cat": "dien-thoai-may-tinh-bang",
+   "url": "https://websosanh.vn/tai-nghe-hoco-es53/1878214900/so-sanh.htm",
+   "name": "Tai nghe HOCO ES53",
+   "low": 135300,
+   "high": 550000,
+   "offers": 8
+  },
+  {
+   "cat": "dien-thoai-may-tinh-bang",
+   "url": "https://websosanh.vn/tai-nghe-co-day-baseus-encok-c17/1184631450/so-sanh.htm",
+   "name": "Tai nghe có dây Baseus Encok C17",
+   "low": 99000,
+   "high": 880000,
+   "offers": 14
+  },
+  {
+   "cat": "dien-thoai-may-tinh-bang",
+   "url": "https://websosanh.vn/cu-sac-ugreen-10216/1077697385/so-sanh.htm",
+   "name": "Củ sạc Ugreen 10216",
+   "low": 323400,
+   "high": 429000,
+   "offers": 8
+  },
+  {
+   "cat": "dien-thoai-may-tinh-bang",
+   "url": "https://websosanh.vn/may-tinh-bang-apple-ipad-air-m4-2026-256gb/1439554923/so-sanh.htm",
+   "name": "Máy tính bảng Apple iPad Air M4 2026 - 256GB, 5G, 11 inch",
+   "low": 19806851,
+   "high": 32659000,
+   "offers": 41
+  },
+  {
+   "cat": "dien-thoai-may-tinh-bang",
+   "url": "https://websosanh.vn/dien-thoai-vivo-s1-6gb-ram-128gb-638-inch/1440016031/so-sanh.htm",
+   "name": "Điện thoại Vivo S1 6GB/128GB 6.38 inch",
+   "low": 3795000,
+   "high": 48400000,
+   "offers": 6
+  },
+  {
+   "cat": "dien-thoai-may-tinh-bang",
+   "url": "https://websosanh.vn/tai-nghe-bluetooth-divoom-spark-air/1782011982/so-sanh.htm",
+   "name": "Tai nghe Bluetooth Divoom Spark Air",
+   "low": 869000,
+   "high": 1210000,
+   "offers": 5
+  },
+  {
+   "cat": "dien-thoai-may-tinh-bang",
+   "url": "https://websosanh.vn/dong-ho-thong-minh-coros-apex-2/447044571/so-sanh.htm",
+   "name": "Đồng hồ thông minh Coros Apex 2",
+   "low": 7990000,
+   "high": 12089000,
+   "offers": 13
+  },
+  {
+   "cat": "dien-thoai-may-tinh-bang",
+   "url": "https://websosanh.vn/cap-chuyen-doi-typec-sang-hdmi-orico-xc-201s/237894983/so-sanh.htm",
+   "name": "Cáp chuyển đổi TypeC sang HDMI Orico XC-201S",
+   "low": 445000,
+   "high": 726000,
+   "offers": 5
+  },
+  {
+   "cat": "dien-thoai-may-tinh-bang",
+   "url": "https://websosanh.vn/may-tinh-bang-samsung-galaxy-tab-s8-256gb/1032282218/so-sanh.htm",
+   "name": "Máy tính bảng Samsung Galaxy Tab S8 - 256GB",
+   "low": 11759000,
+   "high": 17919000,
+   "offers": 2
+  },
+  {
+   "cat": "dien-thoai-may-tinh-bang",
+   "url": "https://websosanh.vn/dien-thoai-oppo-a57-4gb128gb/738627884/so-sanh.htm",
+   "name": "Điện thoại Oppo A57 4GB/128GB",
+   "low": 2638900,
+   "high": 4719000,
+   "offers": 11
+  },
+  {
+   "cat": "dien-thoai-may-tinh-bang",
+   "url": "https://websosanh.vn/dien-thoai-lg-x-screen/342818738/so-sanh.htm",
+   "name": "Điện thoại LG X Screen",
+   "low": 3575000,
+   "high": 3828000,
+   "offers": 1
+  },
+  {
+   "cat": "dien-thoai-may-tinh-bang",
+   "url": "https://websosanh.vn/may-tinh-bang-apple-ipad-gen-6-32gb-wifi/228969703/so-sanh.htm",
+   "name": "Máy tính bảng iPad Gen 6 - 32GB, Wifi, 9.7 inch",
+   "low": 7390000,
+   "high": 25300000,
+   "offers": 14
+  },
+  {
+   "cat": "tin-hoc",
+   "url": "https://websosanh.vn/laptop-hp-pavilion-15-cs2058tx-6yz12pa-intel-core-i7-8565u-8gb/1273474442/so-sanh.htm",
+   "name": "Laptop HP Pavilion 15-cs2058TX 6YZ12PA - Intel Core i7-8565U, 8GB RAM, HDD 1TB, Nvidia GeForce MX250 2GB GDDR5, 15.6 inch",
+   "low": 19250000,
+   "high": 19250000,
+   "offers": 1
+  },
+  {
+   "cat": "tin-hoc",
+   "url": "https://websosanh.vn/ram-pioneer-16gb-ddr4-3200mhz/1931851746/so-sanh.htm",
+   "name": "RAM Pioneer 16GB DDR4 3200Mhz",
+   "low": 489500,
+   "high": 4389000,
+   "offers": 14
+  },
+  {
+   "cat": "tin-hoc",
+   "url": "https://websosanh.vn/laptop-dell-inspiron-16-plus-7610-intel-core-i7-11800h/2114325029/so-sanh.htm",
+   "name": "Laptop Dell Inspiron 16 Plus 7610 - Intel Core i7-11800H, 16GB RAM, SSD 512GB, Intel UHD Graphics, 16 inch, 3K",
+   "low": 17380000,
+   "high": 38500000,
+   "offers": 8
+  },
+  {
+   "cat": "tin-hoc",
+   "url": "https://websosanh.vn/laptop-apple-macbook-pro-m5-apple-m5-10-core-cpu/1635745144/so-sanh.htm",
+   "name": "Laptop Apple Macbook Pro M5 - Apple M5 10-core CPU, 16GB RAM, SSD 512GB, 10-core GPU, 14 inch",
+   "low": 39671000,
+   "high": 106689000,
+   "offers": 80
+  },
+  {
+   "cat": "tin-hoc",
+   "url": "https://websosanh.vn/laptop-asus-d515da-ej845t-amd-r3-3250u-4gb-ram-ssd-512gb/1510220518/so-sanh.htm",
+   "name": "Laptop Asus D515DA-EJ845T -AMD R3 3250U. 4GB RAM, SSD 512GB, 15.6 inch",
+   "low": 9180000,
+   "high": 14575000,
+   "offers": 11
+  },
+  {
+   "cat": "tin-hoc",
+   "url": "https://websosanh.vn/laptop-hp-probook-430-g8-614k8pa-intel-core-i5-1135g7/81283370/so-sanh.htm",
+   "name": "Laptop HP Probook 430 G8 614K8PA - Intel Core i5-1135G7, 4GB RAM, SSD 256GB, Intel Iris Xe Graphics, 13.3 inch",
+   "low": 14289000,
+   "high": 21769000,
+   "offers": 11
+  },
+  {
+   "cat": "tin-hoc",
+   "url": "https://websosanh.vn/may-tinh-de-ban-asus-v161gart-bd024t-intel-celeron-n4020/1411510464/so-sanh.htm",
+   "name": "Máy tính để bàn Asus V161GART-BD024T - Intel Celeron N4020, 4GB RAM, SSD 128GB, Intel UHD Graphics 600, 15.6 inch",
+   "low": 0,
+   "high": 0,
+   "offers": 0
+  },
+  {
+   "cat": "tin-hoc",
+   "url": "https://websosanh.vn/man-hinh-may-tinh-philips-24e1n2100d71-24-inch/942127781/so-sanh.htm",
+   "name": "Màn hình máy tính Philips 24E1N2100D/71 - 24 inch",
+   "low": 1845000,
+   "high": 2593250,
+   "offers": 20
+  },
+  {
+   "cat": "tin-hoc",
+   "url": "https://websosanh.vn/bo-chia-mang-d-link-des-f1006p-6-cong/1055813012/so-sanh.htm",
+   "name": "Bộ chia mạng D-Link DES F1006P 6 cổng",
+   "low": 650000,
+   "high": 1925000,
+   "offers": 13
+  },
+  {
+   "cat": "tin-hoc",
+   "url": "https://websosanh.vn/laptop-msi-venture-a16-ai-a3hmg-017vn-amd-ryzen/1559680935/so-sanh.htm",
+   "name": "Laptop MSI Venture A16 AI+ A3HMG 017VN - AMD Ryzen AI 7 350, 16GB RAM, SSD 512GB, AMD Radeon Graphics, 16 inch",
+   "low": 25350000,
+   "high": 83369000,
+   "offers": 17
+  },
+  {
+   "cat": "tin-hoc",
+   "url": "https://websosanh.vn/cap-dien-cadivi-cvv-295-06/1745211514/so-sanh.htm",
+   "name": "Cáp điện Cadivi  CVV-2×95-0.6",
+   "low": 440770,
+   "high": 1243289,
+   "offers": 12
+  },
+  {
+   "cat": "tin-hoc",
+   "url": "https://websosanh.vn/ban-phim-keyboard-e-dra-ek701-rgb/1454438356/so-sanh.htm",
+   "name": "Bàn phím - Keyboard E-Dra EK701 RGB",
+   "low": 150000,
+   "high": 3683900,
+   "offers": 23
+  },
+  {
+   "cat": "tin-hoc",
+   "url": "https://websosanh.vn/laptop-hp-elitebook-6-g1i-bq9n0pt-intel-core-ultra/1544988163/so-sanh.htm",
+   "name": "Laptop HP EliteBook 6 G1i BQ9N0PT - Intel Core Ultra 5 235U, 16GB RAM, SSD 512GB, Intel Graphics, 14 inch",
+   "low": 28650000,
+   "high": 83369000,
+   "offers": 16
+  },
+  {
+   "cat": "tin-hoc",
+   "url": "https://websosanh.vn/o-cung-hitachi-1tb-5400rpm-notebook/349271708/so-sanh.htm",
+   "name": "Ổ Cứng Hitachi 1TB 5400rpm (Notebook)",
+   "low": 1243000,
+   "high": 2189000,
+   "offers": 4
+  },
+  {
+   "cat": "tin-hoc",
+   "url": "https://websosanh.vn/laptop-asus-vivobook-14se-s3452ma-2026-ai-intel-core/1450881348/so-sanh.htm",
+   "name": "Laptop Asus Vivobook 14SE S3452MA 2026 AI - Intel Core 5 320, 16GB RAM, SSD 512GB, Intel Graphics, 14 inch",
+   "low": 21780000,
+   "high": 23100000,
+   "offers": 8
+  },
+  {
+   "cat": "tin-hoc",
+   "url": "https://websosanh.vn/hp-envy-ultrabook-4-1039tu-14-320gb-den/35861534/so-sanh.htm",
+   "name": "Laptop HP Envy 4-1039TU (B9J51PA) - Intel Core i3-3217U 1.8 GHz, 4GB RAM, 320GB HDD, Intel HD Graphics 4000, 14.0 inch",
+   "low": 14345100,
+   "high": 14345100,
+   "offers": 1
+  },
+  {
+   "cat": "tin-hoc",
+   "url": "https://websosanh.vn/may-tinh-de-ban-dell-vostro-3670mt-mti71118-intel/1977466485/so-sanh.htm",
+   "name": "Máy tính để bàn Dell Vostro 3670MT MTI71118 - Intel Core i7-9700, 8GB RAM, HDD 1TB, Nvidia Geforce GTX 1050 2GB GDDR5",
+   "low": 18619535,
+   "high": 28039000,
+   "offers": 5
+  },
+  {
+   "cat": "tin-hoc",
+   "url": "https://websosanh.vn/tai-nghe-baseus-encok-wireless-headphone-d02-pro/1255609102/so-sanh.htm",
+   "name": "Tai nghe - Headphone Baseus D02 Pro",
+   "low": 390000,
+   "high": 1054587,
+   "offers": 18
+  },
+  {
+   "cat": "tin-hoc",
+   "url": "https://websosanh.vn/switch-poe-dahua-pfs3106-4et-60-4-port/148373659/so-sanh.htm",
+   "name": "Switch POE Dahua PFS3106-4ET-60 - 4 port",
+   "low": 1265000,
+   "high": 15070000,
+   "offers": 45
+  },
+  {
+   "cat": "tin-hoc",
+   "url": "https://websosanh.vn/laptop-lenovo-thinkpad-t14s-gen-5-21ls005uva-intel-core/144986785/so-sanh.htm",
+   "name": "Laptop Lenovo ThinkPad T14s Gen 5 21LS005UVA - Intel Core Ultra 7 155U , 16GB RAM, SSD 1TB, Intel Graphics, 14 inch",
+   "low": 36408900,
+   "high": 83369000,
+   "offers": 8
+  },
+  {
+   "cat": "tin-hoc",
+   "url": "https://websosanh.vn/cap-hdmi-20-dai-15m-ho-tro-ho-tro-do/91134390/so-sanh.htm",
+   "name": "Cáp HDMI 2.0 dài 1,5m hỗ trợ hỗ trợ độ phân giải 4K@60Hz Ugreen 60439",
+   "low": 83600,
+   "high": 143000,
+   "offers": 12
+  },
+  {
+   "cat": "tin-hoc",
+   "url": "https://websosanh.vn/bo-mach-chu-mainboard-gigabyte-z590-aorus-xtreme/444931436/so-sanh.htm",
+   "name": "Bo mạch chủ - Mainboard Gigabyte Z590 Aorus Xtreme",
+   "low": 23089000,
+   "high": 26015000,
+   "offers": 6
+  },
+  {
+   "cat": "tin-hoc",
+   "url": "https://websosanh.vn/laptop-lenovo-ideapad-5-pro-14acn6-82l700m9vn-amd-ryzen/2093875753/so-sanh.htm",
+   "name": "Laptop Lenovo IdeaPad 5 Pro 14ACN6 82L700M9VN - AMD Ryzen R5-5600U, 16GB RAM, SSD 512GB, AMD Radeon Graphics, 14 inch",
+   "low": 19688900,
+   "high": 23089000,
+   "offers": 5
+  },
+  {
+   "cat": "tin-hoc",
+   "url": "https://websosanh.vn/laptop-hp-pavilion-15-eg3033tx-8c5l6pa-intel-core-i5-1335u-16gb/576551047/so-sanh.htm",
+   "name": "Laptop HP Pavilion 15-eg3033TX 8U6L6PA - Intel Core i5-1335U, 16GB RAM, SSD 512GB, Nvidia GeForce MX550 2GB GDDR6, 15.6 inch",
+   "low": 16280000,
+   "high": 83369000,
+   "offers": 37
+  },
+  {
+   "cat": "tin-hoc",
+   "url": "https://websosanh.vn/man-hinh-may-tinh-vsp-vc242i-24-inch/1422359710/so-sanh.htm",
+   "name": "Màn hình máy tính VSP VC242i - 24 inch",
+   "low": 1804000,
+   "high": 2651000,
+   "offers": 20
+  },
+  {
+   "cat": "thiet-bi-gia-dung",
+   "url": "https://websosanh.vn/may-hut-mui-kuchen-ku-foresti-70/45728495/so-sanh.htm",
+   "name": "Máy hút mùi Kuchen KU Foresti 70",
+   "low": 11126500,
+   "high": 13090000,
+   "offers": 5
+  },
+  {
+   "cat": "thiet-bi-gia-dung",
+   "url": "https://websosanh.vn/may-hut-bui-tennant-v5-mv52074/717156496/so-sanh.htm",
+   "name": "Máy hút bụi Tennant V5 (MV52074)",
+   "low": 8850000,
+   "high": 11115500,
+   "offers": 5
+  },
+  {
+   "cat": "thiet-bi-gia-dung",
+   "url": "https://websosanh.vn/den-led-panel-am-tran-18w-kdgt518/504223492/so-sanh.htm",
+   "name": "Đèn LED panel âm trần 18W KDGT518",
+   "low": 112200,
+   "high": 281600,
+   "offers": 24
+  },
+  {
+   "cat": "thiet-bi-gia-dung",
+   "url": "https://websosanh.vn/may-hut-mui-benza-bz-970sbb/668247637/so-sanh.htm",
+   "name": "Máy hút mùi Benza BZ-970SBB",
+   "low": 3645000,
+   "high": 5335000,
+   "offers": 4
+  },
+  {
+   "cat": "thiet-bi-gia-dung",
+   "url": "https://websosanh.vn/ke-da-nang-tokyo-4-tang-inochi/933211455/so-sanh.htm",
+   "name": "Kệ đa năng Tokyo 4 tầng inochi",
+   "low": 100000,
+   "high": 422400,
+   "offers": 8
+  },
+  {
+   "cat": "thiet-bi-gia-dung",
+   "url": "https://websosanh.vn/den-am-tran-led-philips-sport-rs100b-20w/282978388/so-sanh.htm",
+   "name": "Đèn âm trần LED Philips Sport RS100B 20W",
+   "low": 330000,
+   "high": 1208900,
+   "offers": 12
+  },
+  {
+   "cat": "thiet-bi-gia-dung",
+   "url": "https://websosanh.vn/gia-dao-thot-nan-det-inox-mo-eurogold-ep25/817471401/so-sanh.htm",
+   "name": "Giá dao thớt nan dẹt inox mờ Eurogold EP25",
+   "low": 1606800,
+   "high": 3531000,
+   "offers": 63
+  },
+  {
+   "cat": "thiet-bi-gia-dung",
+   "url": "https://websosanh.vn/cau-dao-mitsubishi-nv125-cv-75a-30ma-10ka-3p/374143615/so-sanh.htm",
+   "name": "Cầu dao Mitsubishi NV125-CV - 75A 30mA 10kA 3P",
+   "low": 2438414,
+   "high": 6254600,
+   "offers": 4
+  },
+  {
+   "cat": "thiet-bi-gia-dung",
+   "url": "https://websosanh.vn/bien-ap-lioa-vo-cap-1-pha-sd-2575/988195633/so-sanh.htm",
+   "name": "Biến áp Lioa vô cấp 1 pha SD-2575",
+   "low": 14848900,
+   "high": 17710000,
+   "offers": 5
+  },
+  {
+   "cat": "thiet-bi-gia-dung",
+   "url": "https://websosanh.vn/aptomat-mccb-schneider-4p-32a-36ka-lv429645/422321697/so-sanh.htm",
+   "name": "Aptomat - MCCB Schneider 4P 32A 36kA LV429645",
+   "low": 2699257,
+   "high": 5975200,
+   "offers": 6
+  },
+  {
+   "cat": "thiet-bi-gia-dung",
+   "url": "https://websosanh.vn/may-suoi-gom-ceramic-philips-ahr2242fa/790382500/so-sanh.htm",
+   "name": "Máy sưởi gốm ceramic Philips AHR2242FA",
+   "low": 1350000,
+   "high": 3780000,
+   "offers": 5
+  },
+  {
+   "cat": "thiet-bi-gia-dung",
+   "url": "https://websosanh.vn/khoa-tan-co-dai-sanh-kassler-kl-959g/6648561/so-sanh.htm",
+   "name": "Khóa tân cổ đại sảnh Kassler KL-959G",
+   "low": 25887400,
+   "high": 39809000,
+   "offers": 31
+  },
+  {
+   "cat": "thiet-bi-gia-dung",
+   "url": "https://websosanh.vn/bong-den-led-mpe-lbf-12-12w/1029828853/so-sanh.htm",
+   "name": "Bóng đèn led MPE LBF-12 12W",
+   "low": 60032,
+   "high": 153780,
+   "offers": 29
+  },
+  {
+   "cat": "thiet-bi-gia-dung",
+   "url": "https://websosanh.vn/ke-gia-vi-inox-higold-304099-2-tang/143826338/so-sanh.htm",
+   "name": "Kệ gia vị inox Higold 304099, 2 tầng",
+   "low": 1240000,
+   "high": 2882000,
+   "offers": 9
+  },
+  {
+   "cat": "thiet-bi-gia-dung",
+   "url": "https://websosanh.vn/may-cat-khong-khi-schneider-nt12h23d2/685168977/so-sanh.htm",
+   "name": "Máy cắt không khí Schneider NT12H23D2",
+   "low": 71881425,
+   "high": 174399500,
+   "offers": 8
+  },
+  {
+   "cat": "thiet-bi-gia-dung",
+   "url": "https://websosanh.vn/den-led-am-tran-thach-cao-la-463/988853228/so-sanh.htm",
+   "name": "Đèn led âm trần thạch cao LA-463",
+   "low": 364100,
+   "high": 1705000,
+   "offers": 10
+  },
+  {
+   "cat": "thiet-bi-gia-dung",
+   "url": "https://websosanh.vn/quat-tran-mr-vu-thin-56/426980422/so-sanh.htm",
+   "name": "Quạt trần Mr Vũ Thin 56",
+   "low": 6152300,
+   "high": 7238000,
+   "offers": 8
+  },
+  {
+   "cat": "thiet-bi-gia-dung",
+   "url": "https://websosanh.vn/may-tao-do-am-khong-khi-boneco-u250/635384059/so-sanh.htm",
+   "name": "Máy tạo độ ẩm không khí Boneco U250",
+   "low": 6080000,
+   "high": 7810000,
+   "offers": 8
+  },
+  {
+   "cat": "thiet-bi-gia-dung",
+   "url": "https://websosanh.vn/dia-oval-34-cm-sago-hoa-hong/810941230/so-sanh.htm",
+   "name": "Dĩa oval 34 cm – Sago – Hoa Hồng",
+   "low": 699732,
+   "high": 945648,
+   "offers": 5
+  },
+  {
+   "cat": "thiet-bi-gia-dung",
+   "url": "https://websosanh.vn/bep-dien-tu-doi-sanaky-vh-2500hgt/41296816/so-sanh.htm",
+   "name": "Bếp điện từ đôi Sanaky VH-2500HGT",
+   "low": 2071300,
+   "high": 4000000,
+   "offers": 24
+  },
+  {
+   "cat": "thiet-bi-gia-dung",
+   "url": "https://websosanh.vn/may-loc-nuoc-robot-alpha-939g/1093977737/so-sanh.htm",
+   "name": "Máy lọc nước Robot Alpha 939G",
+   "low": 7300000,
+   "high": 14500000,
+   "offers": 9
+  },
+  {
+   "cat": "thiet-bi-gia-dung",
+   "url": "https://websosanh.vn/man-hinh-hmi-delta-dop-107cv/394991368/so-sanh.htm",
+   "name": "Màn hình HMI Delta DOP-107CV",
+   "low": 3795000,
+   "high": 5208500,
+   "offers": 6
+  },
+  {
+   "cat": "thiet-bi-gia-dung",
+   "url": "https://websosanh.vn/on-ap-robot-3-pha-120kva/481139429/so-sanh.htm",
+   "name": "Ổn áp Robot 3 pha 120KVA",
+   "low": 80080000,
+   "high": 119750400,
+   "offers": 7
+  },
+  {
+   "cat": "thiet-bi-gia-dung",
+   "url": "https://websosanh.vn/noi-com-dien-hyundai-hde-2202r-5-lit/1170659650/so-sanh.htm",
+   "name": "Nồi cơm điện Hyundai HDE 2202R 5 lít",
+   "low": 1490000,
+   "high": 2400000,
+   "offers": 4
+  },
+  {
+   "cat": "thiet-bi-gia-dung",
+   "url": "https://websosanh.vn/may-loc-nuoc-nong-lanh-nguoi-mutosi-9-loi-mp-s98h/333946475/so-sanh.htm",
+   "name": "Máy lọc nước nóng lạnh nguội Mutosi 9 lõi MP-S98H",
+   "low": 6290000,
+   "high": 11539000,
+   "offers": 6
+  },
+  {
+   "cat": "dien-lanh",
+   "url": "https://websosanh.vn/tu-mat-oucboll-1055-lit-lg-1500f/1240593650/so-sanh.htm",
+   "name": "Tủ mát Oucboll 1055 lít LG-1500F",
+   "low": 17050000,
+   "high": 29920000,
+   "offers": 5
+  },
+  {
+   "cat": "dien-lanh",
+   "url": "https://websosanh.vn/tu-lanh-panasonic-nr-cy557gkvn-491-lit-3-cua-inverter/713518806/so-sanh.htm",
+   "name": "Tủ lạnh Panasonic Inverter 491 lít NR-CY557GKVN",
+   "low": 0,
+   "high": 0,
+   "offers": 0
+  },
+  {
+   "cat": "dien-lanh",
+   "url": "https://websosanh.vn/dieu-hoa-gree-inverter-9000-btu-2-chieu-cosmo9hi-gas/90332593/so-sanh.htm",
+   "name": "Điều hòa Gree Inverter 9000 BTU 2 chiều COSMO9HI gas R-32",
+   "low": 9050000,
+   "high": 21720000,
+   "offers": 20
+  },
+  {
+   "cat": "dien-lanh",
+   "url": "https://websosanh.vn/may-say-quan-ao-aqua-inverter-10-kg-aqh-h1000h-ps/165583842/so-sanh.htm",
+   "name": "Máy sấy quần áo Aqua Inverter 10 kg AQH-H1000H PS",
+   "low": 9450000,
+   "high": 35112000,
+   "offers": 58
+  },
+  {
+   "cat": "dien-lanh",
+   "url": "https://websosanh.vn/may-giat-lg-fg1405h3w-long-ngang-105-kg/1353639810/so-sanh.htm",
+   "name": "Máy giặt LG Inverter 10.5 kg FG1405H3W",
+   "low": 15719000,
+   "high": 21560000,
+   "offers": 2
+  },
+  {
+   "cat": "dien-lanh",
+   "url": "https://websosanh.vn/dieu-hoa-nagakawa-24000-btu-1-chieu-nmt2-c506-gas-r-22/1819667194/so-sanh.htm",
+   "name": "Điều hòa Nagakawa 24000 BTU 1 chiều NMT2-C506 gas R-22",
+   "low": 29370000,
+   "high": 55000000,
+   "offers": 6
+  },
+  {
+   "cat": "dien-lanh",
+   "url": "https://websosanh.vn/tu-lanh-lg-inverter-459-lit-ltd46blma/265773521/so-sanh.htm",
+   "name": "Tủ lạnh LG Inverter 459 lít LTD46BLMA",
+   "low": 9990000,
+   "high": 23639000,
+   "offers": 159
+  },
+  {
+   "cat": "dien-lanh",
+   "url": "https://websosanh.vn/dieu-hoa-nagakawa-12000-btu-1-chieu-ns-c12ak-gas-r-22/959440671/so-sanh.htm",
+   "name": "Điều hòa Nagakawa 12000 BTU 1 chiều NS-C12AK gas R-22",
+   "low": 7090000,
+   "high": 9471000,
+   "offers": 5
+  },
+  {
+   "cat": "dien-lanh",
+   "url": "https://websosanh.vn/dieu-hoa-ecool-ecl-1e12st-1-chieu-12000btu/265584996/so-sanh.htm",
+   "name": "Điều hòa EcooL 12000 BTU 1 chiều ECL-1E12ST gas R-410A",
+   "low": 5660000,
+   "high": 8899000,
+   "offers": 14
+  },
+  {
+   "cat": "dien-lanh",
+   "url": "https://websosanh.vn/may-nuoc-nong-truc-tiep-ariston-aures-premium-45p-co/2051157452/so-sanh.htm",
+   "name": "Bình nóng lạnh trực tiếp Ariston Aures Premium 4.5P có bơm",
+   "low": 1866000,
+   "high": 10857000,
+   "offers": 63
+  },
+  {
+   "cat": "dien-lanh",
+   "url": "https://websosanh.vn/dieu-hoa-casper-2-chieu-18000-btu-sh-18fs32-gas-r-32/663811603/so-sanh.htm",
+   "name": "Điều hòa Casper 18000 BTU 2 chiều SH-18FS32 gas R-32",
+   "low": 5934060,
+   "high": 14241744,
+   "offers": 44
+  },
+  {
+   "cat": "dien-lanh",
+   "url": "https://websosanh.vn/may-giat-hisense-9kg-wt90f30/870111925/so-sanh.htm",
+   "name": "Máy giặt Hisense 9kg WT90F30",
+   "low": 3100000,
+   "high": 9790000,
+   "offers": 82
+  },
+  {
+   "cat": "dien-lanh",
+   "url": "https://websosanh.vn/dieu-hoa-daikin-48000-btu-1-chieu-inverter-fhfc140dv1rzfc140dy1-dieu/150978675/so-sanh.htm",
+   "name": "Điều hòa Daikin Inverter 48000 BTU 1 chiều FHFC140DV1/RZFC140DY1 gas R-32 - Điều khiển dây BRC2E61",
+   "low": 38850000,
+   "high": 52466700,
+   "offers": 16
+  },
+  {
+   "cat": "dien-lanh",
+   "url": "https://websosanh.vn/dieu-hoa-hitachi-1-chieu-9000btu-racras-ej10ckv1/63204160/so-sanh.htm",
+   "name": "Điều hòa Hitachi 9000 BTU 1 chiều RAC/RAS-EJ10CKV1",
+   "low": 5200000,
+   "high": 7150000,
+   "offers": 25
+  },
+  {
+   "cat": "dien-lanh",
+   "url": "https://websosanh.vn/dieu-hoa-casper-12000-btu-1-chieu-kc-12fs32/2054636994/so-sanh.htm",
+   "name": "Điều hòa Casper 12000 BTU 1 chiều KC-12FS32 gas R-32",
+   "low": 4770000,
+   "high": 7645000,
+   "offers": 4
+  },
+  {
+   "cat": "dien-lanh",
+   "url": "https://websosanh.vn/may-giat-hitachi-inverter-95-kg-bd-954hvos/1656818691/so-sanh.htm",
+   "name": "Máy giặt Hitachi Inverter 9.5 Kg BD-954HVOS",
+   "low": 4700000,
+   "high": 15103200,
+   "offers": 119
+  },
+  {
+   "cat": "dien-lanh",
+   "url": "https://websosanh.vn/quat-dieu-hoa-goldsun-gpac-n22r/920335/so-sanh.htm",
+   "name": "Quạt điều hòa Goldsun GPAC-N22R",
+   "low": 3289000,
+   "high": 4532000,
+   "offers": 4
+  },
+  {
+   "cat": "dien-lanh",
+   "url": "https://websosanh.vn/tu-mat-sanaky-inverter-2-canh-240-lit-vh-308w3/535385778/so-sanh.htm",
+   "name": "Tủ mát Sanaky Inverter 2 cánh 240 lít VH-308W3",
+   "low": 6740050,
+   "high": 13992000,
+   "offers": 31
+  },
+  {
+   "cat": "dien-lanh",
+   "url": "https://websosanh.vn/tu-dong-denver-as-700mdi-long-chong-dinh/495761781/so-sanh.htm",
+   "name": "Tủ đông Denver 1 ngăn 580 lít AS 700MDI - Lòng chống dính",
+   "low": 8200000,
+   "high": 13750000,
+   "offers": 15
+  },
+  {
+   "cat": "dien-lanh",
+   "url": "https://websosanh.vn/may-nuoc-nong-rheem-25-lit-rh-rheem25hpl/145107624/so-sanh.htm",
+   "name": "Máy nước nóng Rheem 25 lít RH-RHEEM25H/PL",
+   "low": 4895000,
+   "high": 6391000,
+   "offers": 6
+  },
+  {
+   "cat": "dien-lanh",
+   "url": "https://websosanh.vn/tu-lanh-aqua-inverter-205-lit-aqr-i209dndc/1133645538/so-sanh.htm",
+   "name": "Tủ lạnh Aqua Inverter 205 lít AQR-I209DNDC",
+   "low": 0,
+   "high": 0,
+   "offers": 0
+  },
+  {
+   "cat": "dien-lanh",
+   "url": "https://websosanh.vn/may-lanh-giau-tran-daikin-150000-btu-1-chieu-fdn150hy1rcn150hy19/26873349/so-sanh.htm",
+   "name": "Điều hòa Daikin 150000 BTU 1 chiều FDN150HY1/RCN150HY19 gas R-410A",
+   "low": 129890000,
+   "high": 149792500,
+   "offers": 16
+  },
+  {
+   "cat": "dien-lanh",
+   "url": "https://websosanh.vn/dieu-hoa-may-lanh-gree-gwh12qc-k3nnc2h-2-chieu/1713558919/so-sanh.htm",
+   "name": "Điều hòa Gree 12000 BTU 2 chiều GWH12QC-K3NNC2H gas R-410A",
+   "low": 7975000,
+   "high": 9339000,
+   "offers": 4
+  },
+  {
+   "cat": "dien-lanh",
+   "url": "https://websosanh.vn/dieu-hoa-may-lanh-sharp-ay-a12uew-treo-tuong/980023454/so-sanh.htm",
+   "name": "Điều hòa Sharp 12000 BTU 2 chiều AY-A12UEW gas R-32",
+   "low": 5720000,
+   "high": 9250000,
+   "offers": 2
+  },
+  {
+   "cat": "dien-lanh",
+   "url": "https://websosanh.vn/dieu-hoa-daikin-43000btu-2-chieu-inverter-fva125amvmrza125dy1-gas-r-32/1009545051/so-sanh.htm",
+   "name": "Điều hòa Daikin Inverter 43000 BTU 2 chiều FVA125AMVM/RZA125DY1 gas R-32 - Điều khiển dây BRC1E63",
+   "low": 60831000,
+   "high": 71725500,
+   "offers": 34
+  }
+ ]
+}

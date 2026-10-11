@@ -1,0 +1,231 @@
+{
+ "core": {
+  "tiki": {
+   "rounds": 20,
+   "success_rate": 1.0,
+   "items_per_round": 50.0,
+   "secs_per_page": 0.388,
+   "id_jaccard": 0.876,
+   "price_changed_share": 0.005,
+   "new_ids_per_round": 3.944,
+   "extra_fields": [
+    "orig",
+    "rating",
+    "reviews",
+    "seller",
+    "sold"
+   ]
+  },
+  "chotot": {
+   "rounds": 10,
+   "success_rate": 1.0,
+   "items_per_round": 20.0,
+   "secs_per_page": 0.875,
+   "id_jaccard": 0.0,
+   "price_changed_share": 0.0,
+   "new_ids_per_round": 20.0,
+   "extra_fields": [
+    "age",
+    "cond",
+    "model",
+    "region"
+   ]
+  },
+  "tgdd": {
+   "rounds": 10,
+   "success_rate": 1.0,
+   "items_per_round": 10.0,
+   "secs_per_page": 0.436,
+   "id_jaccard": 1.0,
+   "price_changed_share": 0.0,
+   "new_ids_per_round": 0.0,
+   "extra_fields": [
+    "avail",
+    "rating",
+    "reviews"
+   ]
+  },
+  "dmx": {
+   "rounds": 10,
+   "success_rate": 1.0,
+   "items_per_round": 40.0,
+   "secs_per_page": 0.478,
+   "id_jaccard": 1.0,
+   "price_changed_share": 0.036,
+   "new_ids_per_round": 0.0,
+   "extra_fields": [
+    "brand",
+    "cate"
+   ]
+  },
+  "phongvu": {
+   "rounds": 10,
+   "success_rate": 1.0,
+   "items_per_round": 40.0,
+   "secs_per_page": 0.512,
+   "id_jaccard": 1.0,
+   "price_changed_share": 0.0,
+   "new_ids_per_round": 0.0,
+   "extra_fields": [
+    "retail",
+    "stock"
+   ]
+  },
+  "fptshop": {
+   "rounds": 10,
+   "success_rate": 1.0,
+   "items_per_round": 28.2,
+   "secs_per_page": 0.879,
+   "id_jaccard": 0.886,
+   "price_changed_share": 0.079,
+   "new_ids_per_round": 1.667,
+   "extra_fields": [
+    "orig",
+    "rating",
+    "sold"
+   ]
+  },
+  "nguyenkim": {
+   "rounds": 10,
+   "success_rate": 1.0,
+   "items_per_round": 25.0,
+   "secs_per_page": 0.782,
+   "id_jaccard": 1.0,
+   "price_changed_share": 0.0,
+   "new_ids_per_round": 0.0,
+   "extra_fields": []
+  },
+  "websosanh": {
+   "rounds": 10,
+   "success_rate": 1.0,
+   "items_per_round": 40.0,
+   "secs_per_page": 0.661,
+   "id_jaccard": 0.537,
+   "price_changed_share": 0.0,
+   "new_ids_per_round": 16.667,
+   "extra_fields": [
+    "merchants"
+   ]
+  },
+  "bachhoaxanh": {
+   "rounds": 10,
+   "success_rate": 1.0,
+   "items_per_round": 30.7,
+   "secs_per_page": 13.238,
+   "id_jaccard": 0.929,
+   "price_changed_share": 0.0,
+   "new_ids_per_round": 1.222,
+   "extra_fields": [
+    "orig"
+   ]
+  }
+ },
+ "extra": {
+  "meta": {
+   "rounds": 7,
+   "success_rate": 1.0,
+   "items_per_round": 32.0,
+   "secs_per_page": 0.211,
+   "id_jaccard": 1.0,
+   "price_changed_share": 0.0,
+   "new_ids_per_round": 0.0,
+   "extra_fields": [
+    "avail",
+    "rating",
+    "reviews",
+    "url"
+   ]
+  },
+  "mediamart": {
+   "rounds": 7,
+   "success_rate": 1.0,
+   "items_per_round": 38.0,
+   "secs_per_page": 0.273,
+   "id_jaccard": 1.0,
+   "price_changed_share": 0.0,
+   "new_ids_per_round": 0.0,
+   "extra_fields": [
+    "avail",
+    "rating",
+    "reviews",
+    "url"
+   ]
+  },
+  "pico": {
+   "rounds": 7,
+   "success_rate": 1.0,
+   "items_per_round": 25.0,
+   "secs_per_page": 1.06,
+   "id_jaccard": 1.0,
+   "price_changed_share": 0.0,
+   "new_ids_per_round": 0.0,
+   "extra_fields": [
+    "orderQty",
+    "orig",
+    "stock"
+   ]
+  },
+  "kingfoodmart": {
+   "rounds": 7,
+   "success_rate": 1.0,
+   "items_per_round": 41.0,
+   "secs_per_page": 0.523,
+   "id_jaccard": 1.0,
+   "price_changed_share": 0.0,
+   "new_ids_per_round": 0.0,
+   "extra_fields": [
+    "inStock",
+    "ordered",
+    "orig"
+   ]
+  },
+  "hoanghamobile": {
+   "rounds": 7,
+   "success_rate": 1.0,
+   "items_per_round": 18.0,
+   "secs_per_page": 0.206,
+   "id_jaccard": 1.0,
+   "price_changed_share": 0.0,
+   "new_ids_per_round": 0.0,
+   "extra_fields": [
+    "orig"
+   ]
+  },
+  "bonbanh": {
+   "rounds": 7,
+   "success_rate": 0.857,
+   "items_per_round": 17.143,
+   "secs_per_page": 0.27,
+   "id_jaccard": 0.0,
+   "price_changed_share": 0.0,
+   "new_ids_per_round": 20.0,
+   "extra_fields": [
+    "loc"
+   ]
+  },
+  "tiki_product": {
+   "rounds": 7,
+   "success_rate": 0.857,
+   "items_per_round": 0.857,
+   "secs_per_page": 0.201,
+   "id_jaccard": 1.0,
+   "price_changed_share": 0.0,
+   "new_ids_per_round": 0.0,
+   "extra_fields": [
+    "kb"
+   ]
+  },
+  "lazada": {
+   "rounds": 3,
+   "success_rate": 1.0,
+   "items_per_round": 40.0,
+   "secs_per_page": 12.787,
+   "id_jaccard": 0.5,
+   "price_changed_share": 0.0,
+   "new_ids_per_round": 20.0,
+   "extra_fields": [
+    "sold"
+   ]
+  }
+ }
+}

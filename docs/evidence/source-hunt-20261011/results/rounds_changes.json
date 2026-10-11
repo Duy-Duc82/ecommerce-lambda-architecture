@@ -1,0 +1,172 @@
+{
+ "tiki c1789": {
+  "span": "11:04->13:21 UTC",
+  "common": 42,
+  "price_changes": [],
+  "n_price_changes": 0,
+  "sold_deltas": [
+   [
+    "Điện thoại Samsung Galaxy A27 5G (6GB + ",
+    83,
+    82
+   ]
+  ],
+  "n_sold_changed": 1
+ },
+ "tiki c8322": {
+  "span": "11:04->13:21 UTC",
+  "common": 43,
+  "price_changes": [
+   [
+    "Sách Giáo Trình Chuẩn HSK 1 - Bài Học (Kèm fi",
+    158000,
+    154000
+   ],
+   [
+    "Sách Con Đường Chẳng Mấy Ai Đi",
+    132000,
+    129000
+   ],
+   [
+    "Combo Giáo Trình Chuẩn HSK 1 - Sách Bài Học v",
+    277000,
+    283000
+   ]
+  ],
+  "n_price_changes": 3,
+  "sold_deltas": [
+   [
+    "Sách Người Đàn Ông Mang Tên Ove (Tái Bản",
+    7051,
+    7052
+   ],
+   [
+    "Sách Dragon Ball - 7 Viên Ngọc Rồng [Chọ",
+    391,
+    409
+   ],
+   [
+    "Sách Con Đường Chẳng Mấy Ai Đi",
+    6625,
+    6626
+   ],
+   [
+    "Sách Boxset Harry Potter - Tiếng Việt (T",
+    10888,
+    10889
+   ],
+   [
+    "Sách Tâm Lý Học Về Tiền",
+    29126,
+    29127
+   ],
+   [
+    "Series các tập Claymore",
+    892,
+    904
+   ],
+   [
+    "Hoa Thơm Kiêu Hãnh (Chọn tập lẻ)",
+    747,
+    744
+   ],
+   [
+    "Ship of Theseus - NXB Trẻ",
+    367,
+    378
+   ]
+  ],
+  "n_sold_changed": 8
+ },
+ "chotot mua-ban-dien-thoai": {
+  "span": "11:04->13:21 UTC",
+  "common": 0,
+  "price_changes": [],
+  "n_price_changes": 0,
+  "sold_deltas": [],
+  "n_sold_changed": 0
+ },
+ "tgdd dtdd": {
+  "span": "11:04->13:21 UTC",
+  "common": 10,
+  "price_changes": [],
+  "n_price_changes": 0,
+  "sold_deltas": [],
+  "n_sold_changed": 0
+ },
+ "dmx tivi": {
+  "span": "11:04->13:21 UTC",
+  "common": 34,
+  "price_changes": [
+   [
+    "Smart Tivi Mini LED Samsung AI 4K 65 inch UA6",
+    19790000.0,
+    21900000.0
+   ]
+  ],
+  "n_price_changes": 1,
+  "sold_deltas": [],
+  "n_sold_changed": 0
+ },
+ "phongvu laptop": {
+  "span": "11:04->13:21 UTC",
+  "common": 40,
+  "price_changes": [],
+  "n_price_changes": 0,
+  "sold_deltas": [],
+  "n_sold_changed": 0
+ },
+ "fptshop dien-thoai": {
+  "span": "11:04->13:21 UTC",
+  "common": 25,
+  "price_changes": [
+   [
+    "iPhone 17 Pro Max",
+    34490000,
+    42490000
+   ],
+   [
+    "iPhone Duo",
+    84490000,
+    71490000
+   ],
+   [
+    "iPhone 17",
+    24990000,
+    25490000
+   ],
+   [
+    "iPhone 18 Pro Max",
+    61490000,
+    41990000
+   ]
+  ],
+  "n_price_changes": 4,
+  "sold_deltas": [],
+  "n_sold_changed": 0
+ },
+ "nguyenkim ": {
+  "span": "11:04->13:21 UTC",
+  "common": 25,
+  "price_changes": [],
+  "n_price_changes": 0,
+  "sold_deltas": [],
+  "n_sold_changed": 0
+ },
+ "websosanh cat-88.htm": {
+  "span": "11:04->13:21 UTC",
+  "common": 0,
+  "price_changes": [],
+  "n_price_changes": 0,
+  "sold_deltas": [],
+  "n_sold_changed": 0
+ },
+ "bachhoaxanh sua-tuoi": {
+  "span": "11:04->13:21 UTC",
+  "common": 29,
+  "price_changes": [],
+  "n_price_changes": 0,
+  "sold_deltas": [],
+  "n_sold_changed": 0
+ }
+}

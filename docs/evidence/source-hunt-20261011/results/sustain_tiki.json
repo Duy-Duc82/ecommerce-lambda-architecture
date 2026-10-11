@@ -1,0 +1,978 @@
+{
+ "summary": {
+  "site": "tiki",
+  "n": 120,
+  "delay": 2.0,
+  "wall_min": 4.2,
+  "codes": {
+   "200": 120
+  },
+  "mean_secs": 0.09,
+  "max_secs": 0.53,
+  "in_stock_share": 0.0,
+  "priced_share": 0.0,
+  "sold_present": 10
+ },
+ "rows": [
+  {
+   "status": 200,
+   "secs": 0.27,
+   "price": null,
+   "offers": null,
+   "avail": null,
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.31,
+   "price": null,
+   "offers": null,
+   "avail": null,
+   "sold": 69
+  },
+  {
+   "status": 200,
+   "secs": 0.3,
+   "price": null,
+   "offers": null,
+   "avail": null,
+   "sold": 28
+  },
+  {
+   "status": 200,
+   "secs": 0.21,
+   "price": null,
+   "offers": null,
+   "avail": null,
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.24,
+   "price": null,
+   "offers": null,
+   "avail": null,
+   "sold": 1
+  },
+  {
+   "status": 200,
+   "secs": 0.37,
+   "price": null,
+   "offers": null,
+   "avail": null,
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.39,
+   "price": null,
+   "offers": null,
+   "avail": null,
+   "sold": 134
+  },
+  {
+   "status": 200,
+   "secs": 0.23,
+   "price": null,
+   "offers": null,
+   "avail": null,
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.32,
+   "price": null,
+   "offers": null,
+   "avail": null,
+   "sold": 125
+  },
+  {
+   "status": 200,
+   "secs": 0.52,
+   "price": null,
+   "offers": null,
+   "avail": null,
+   "sold": 198
+  },
+  {
+   "status": 200,
+   "secs": 0.25,
+   "price": null,
+   "offers": null,
+   "avail": null,
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.24,
+   "price": null,
+   "offers": null,
+   "avail": null,
+   "sold": 48
+  },
+  {
+   "status": 200,
+   "secs": 0.53,
+   "price": null,
+   "offers": null,
+   "avail": null,
+   "sold": 20
+  },
+  {
+   "status": 200,
+   "secs": 0.23,
+   "price": null,
+   "offers": null,
+   "avail": null,
+   "sold": 3
+  },
+  {
+   "status": 200,
+   "secs": 0.19,
+   "price": null,
+   "offers": null,
+   "avail": null,
+   "sold": 1
+  },
+  {
+   "status": 200,
+   "secs": 0.11,
+   "price": null,
+   "offers": null,
+   "avail": null,
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.04,
+   "price": null,
+   "offers": null,
+   "avail": null,
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.05,
+   "price": null,
+   "offers": null,
+   "avail": null,
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.06,
+   "price": null,
+   "offers": null,
+   "avail": null,
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.05,
+   "price": null,
+   "offers": null,
+   "avail": null,
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.06,
+   "price": null,
+   "offers": null,
+   "avail": null,
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.07,
+   "price": null,
+   "offers": null,
+   "avail": null,
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.06,
+   "price": null,
+   "offers": null,
+   "avail": null,
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.07,
+   "price": null,
+   "offers": null,
+   "avail": null,
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.07,
+   "price": null,
+   "offers": null,
+   "avail": null,
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.05,
+   "price": null,
+   "offers": null,
+   "avail": null,
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.03,
+   "price": null,
+   "offers": null,
+   "avail": null,
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.06,
+   "price": null,
+   "offers": null,
+   "avail": null,
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.05,
+   "price": null,
+   "offers": null,
+   "avail": null,
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.05,
+   "price": null,
+   "offers": null,
+   "avail": null,
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.08,
+   "price": null,
+   "offers": null,
+   "avail": null,
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.05,
+   "price": null,
+   "offers": null,
+   "avail": null,
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.06,
+   "price": null,
+   "offers": null,
+   "avail": null,
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.06,
+   "price": null,
+   "offers": null,
+   "avail": null,
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.03,
+   "price": null,
+   "offers": null,
+   "avail": null,
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.05,
+   "price": null,
+   "offers": null,
+   "avail": null,
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.08,
+   "price": null,
+   "offers": null,
+   "avail": null,
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.07,
+   "price": null,
+   "offers": null,
+   "avail": null,
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.04,
+   "price": null,
+   "offers": null,
+   "avail": null,
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.07,
+   "price": null,
+   "offers": null,
+   "avail": null,
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.04,
+   "price": null,
+   "offers": null,
+   "avail": null,
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.06,
+   "price": null,
+   "offers": null,
+   "avail": null,
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.08,
+   "price": null,
+   "offers": null,
+   "avail": null,
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.05,
+   "price": null,
+   "offers": null,
+   "avail": null,
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.05,
+   "price": null,
+   "offers": null,
+   "avail": null,
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.07,
+   "price": null,
+   "offers": null,
+   "avail": null,
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.05,
+   "price": null,
+   "offers": null,
+   "avail": null,
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.08,
+   "price": null,
+   "offers": null,
+   "avail": null,
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.06,
+   "price": null,
+   "offers": null,
+   "avail": null,
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.05,
+   "price": null,
+   "offers": null,
+   "avail": null,
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.05,
+   "price": null,
+   "offers": null,
+   "avail": null,
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.04,
+   "price": null,
+   "offers": null,
+   "avail": null,
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.05,
+   "price": null,
+   "offers": null,
+   "avail": null,
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.07,
+   "price": null,
+   "offers": null,
+   "avail": null,
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.04,
+   "price": null,
+   "offers": null,
+   "avail": null,
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.03,
+   "price": null,
+   "offers": null,
+   "avail": null,
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.08,
+   "price": null,
+   "offers": null,
+   "avail": null,
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.05,
+   "price": null,
+   "offers": null,
+   "avail": null,
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.05,
+   "price": null,
+   "offers": null,
+   "avail": null,
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.08,
+   "price": null,
+   "offers": null,
+   "avail": null,
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.06,
+   "price": null,
+   "offers": null,
+   "avail": null,
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.05,
+   "price": null,
+   "offers": null,
+   "avail": null,
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.05,
+   "price": null,
+   "offers": null,
+   "avail": null,
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.03,
+   "price": null,
+   "offers": null,
+   "avail": null,
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.05,
+   "price": null,
+   "offers": null,
+   "avail": null,
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.07,
+   "price": null,
+   "offers": null,
+   "avail": null,
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.13,
+   "price": null,
+   "offers": null,
+   "avail": null,
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.06,
+   "price": null,
+   "offers": null,
+   "avail": null,
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.08,
+   "price": null,
+   "offers": null,
+   "avail": null,
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.05,
+   "price": null,
+   "offers": null,
+   "avail": null,
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.05,
+   "price": null,
+   "offers": null,
+   "avail": null,
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.06,
+   "price": null,
+   "offers": null,
+   "avail": null,
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.03,
+   "price": null,
+   "offers": null,
+   "avail": null,
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.05,
+   "price": null,
+   "offers": null,
+   "avail": null,
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.07,
+   "price": null,
+   "offers": null,
+   "avail": null,
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.05,
+   "price": null,
+   "offers": null,
+   "avail": null,
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.05,
+   "price": null,
+   "offers": null,
+   "avail": null,
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.08,
+   "price": null,
+   "offers": null,
+   "avail": null,
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.05,
+   "price": null,
+   "offers": null,
+   "avail": null,
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.05,
+   "price": null,
+   "offers": null,
+   "avail": null,
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.08,
+   "price": null,
+   "offers": null,
+   "avail": null,
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.05,
+   "price": null,
+   "offers": null,
+   "avail": null,
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.07,
+   "price": null,
+   "offers": null,
+   "avail": null,
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.04,
+   "price": null,
+   "offers": null,
+   "avail": null,
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.04,
+   "price": null,
+   "offers": null,
+   "avail": null,
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.08,
+   "price": null,
+   "offers": null,
+   "avail": null,
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.1,
+   "price": null,
+   "offers": null,
+   "avail": null,
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.05,
+   "price": null,
+   "offers": null,
+   "avail": null,
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.08,
+   "price": null,
+   "offers": null,
+   "avail": null,
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.05,
+   "price": null,
+   "offers": null,
+   "avail": null,
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.03,
+   "price": null,
+   "offers": null,
+   "avail": null,
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.05,
+   "price": null,
+   "offers": null,
+   "avail": null,
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.05,
+   "price": null,
+   "offers": null,
+   "avail": null,
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.04,
+   "price": null,
+   "offers": null,
+   "avail": null,
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.05,
+   "price": null,
+   "offers": null,
+   "avail": null,
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.04,
+   "price": null,
+   "offers": null,
+   "avail": null,
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.12,
+   "price": null,
+   "offers": null,
+   "avail": null,
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.08,
+   "price": null,
+   "offers": null,
+   "avail": null,
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.05,
+   "price": null,
+   "offers": null,
+   "avail": null,
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.04,
+   "price": null,
+   "offers": null,
+   "avail": null,
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.08,
+   "price": null,
+   "offers": null,
+   "avail": null,
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.05,
+   "price": null,
+   "offers": null,
+   "avail": null,
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.04,
+   "price": null,
+   "offers": null,
+   "avail": null,
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.08,
+   "price": null,
+   "offers": null,
+   "avail": null,
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.06,
+   "price": null,
+   "offers": null,
+   "avail": null,
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.03,
+   "price": null,
+   "offers": null,
+   "avail": null,
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.07,
+   "price": null,
+   "offers": null,
+   "avail": null,
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.04,
+   "price": null,
+   "offers": null,
+   "avail": null,
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.04,
+   "price": null,
+   "offers": null,
+   "avail": null,
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.09,
+   "price": null,
+   "offers": null,
+   "avail": null,
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.05,
+   "price": null,
+   "offers": null,
+   "avail": null,
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.06,
+   "price": null,
+   "offers": null,
+   "avail": null,
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.09,
+   "price": null,
+   "offers": null,
+   "avail": null,
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.04,
+   "price": null,
+   "offers": null,
+   "avail": null,
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.05,
+   "price": null,
+   "offers": null,
+   "avail": null,
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.08,
+   "price": null,
+   "offers": null,
+   "avail": null,
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.05,
+   "price": null,
+   "offers": null,
+   "avail": null,
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.05,
+   "price": null,
+   "offers": null,
+   "avail": null,
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.08,
+   "price": null,
+   "offers": null,
+   "avail": null,
+   "sold": null
+  },
+  {
+   "status": 200,
+   "secs": 0.03,
+   "price": null,
+   "offers": null,
+   "avail": null,
+   "sold": null
+  }
+ ]
+}

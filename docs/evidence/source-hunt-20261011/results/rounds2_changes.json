@@ -1,0 +1,84 @@
+{
+ "meta tivi-c3256": {
+  "span": "11:51->13:22 UTC",
+  "common": 32,
+  "price_changes": [],
+  "n_price_changes": 0,
+  "sold_deltas": [],
+  "n_sold_changed": 0
+ },
+ "mediamart tivi": {
+  "span": "11:51->13:22 UTC",
+  "common": 38,
+  "price_changes": [],
+  "n_price_changes": 0,
+  "sold_deltas": [],
+  "n_sold_changed": 0
+ },
+ "pico tivi.c": {
+  "span": "11:51->13:22 UTC",
+  "common": 25,
+  "price_changes": [],
+  "n_price_changes": 0,
+  "sold_deltas": [
+   [
+    "{'vi': 'Tivi Sony Bravia 3 Led 4K  65 in",
+    1994,
+    1996
+   ],
+   [
+    "{'vi': 'Tivi Led TCL 55P638 55 inch 4K-U",
+    2775,
+    2776
+   ],
+   [
+    "{'vi': 'Smart Tivi LG QNED AI 4K 65 Inch",
+    312,
+    314
+   ],
+   [
+    "{'vi': 'Google Tivi TCL QD-Mini LED 4K 5",
+    204,
+    206
+   ],
+   [
+    "{'vi': 'Smart Tivi OLED LG AI 4K 55 inch",
+    82,
+    83
+   ]
+  ],
+  "n_sold_changed": 5
+ },
+ "kingfoodmart trai-cay": {
+  "span": "11:51->13:22 UTC",
+  "common": 41,
+  "price_changes": [],
+  "n_price_changes": 0,
+  "sold_deltas": [],
+  "n_sold_changed": 0
+ },
+ "hoanghamobile dien-thoai-di-dong": {
+  "span": "11:51->13:22 UTC",
+  "common": 18,
+  "price_changes": [],
+  "n_price_changes": 0,
+  "sold_deltas": [],
+  "n_sold_changed": 0
+ },
+ "bonbanh oto": {
+  "span": "11:51->13:22 UTC",
+  "common": 0,
+  "price_changes": [],
+  "n_price_changes": 0,
+  "sold_deltas": [],
+  "n_sold_changed": 0
+ },
+ "tiki_product sach-khu-vuon-bi-mat-p277362886.html": {
+  "span": "12:01->13:22 UTC",
+  "common": 1,
+  "price_changes": [],
+  "n_price_changes": 0,
+  "sold_deltas": [],
+  "n_sold_changed": 0
+ }
+}

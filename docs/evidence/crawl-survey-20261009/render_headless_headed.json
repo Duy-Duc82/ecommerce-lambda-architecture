@@ -1,0 +1,150 @@
+[
+ {
+  "site": "lazada",
+  "kind": "listing",
+  "mode": "headless",
+  "final": "https://www.lazada.vn/dien-thoai-di-dong/",
+  "title": "Điện Thoại, Smartphone Chính Hãng, Giá Tốt | Lazada",
+  "prices": 40,
+  "sample": [
+   "1.250.000 ₫",
+   "890.000 ₫",
+   "875.000 ₫"
+  ],
+  "xhr_total": 19,
+  "xhr_blocked": 0,
+  "text": "GÓP Ý TIẾT KIỆM HƠN VỚI ỨNG DỤNG BÁN HÀNG CÙNG LAZADA CHĂM SÓC KHÁCH HÀNG KIỂM TRA ĐƠN HÀNG ĐĂNG NHẬP ĐĂNG KÝ CHANGE LANGUAGE Tìm kiếm áo dài dầu gội bưởi khăn "
+ },
+ {
+  "site": "lazada",
+  "kind": "search",
+  "mode": "headless",
+  "final": "https://www.lazada.vn/catalog/?q=iphone",
+  "title": "iphone- Giá Tốt & Ưu Đãi | Lazada Việt Nam",
+  "prices": 11,
+  "sample": [
+   "37.999.000 ₫",
+   "34.999.000 ₫",
+   "34.999.000 ₫"
+  ],
+  "xhr_total": 13,
+  "xhr_blocked": 0,
+  "text": "GÓP Ý TIẾT KIỆM HƠN VỚI ỨNG DỤNG BÁN HÀNG CÙNG LAZADA CHĂM SÓC KHÁCH HÀNG KIỂM TRA ĐƠN HÀNG ĐĂNG NHẬP ĐĂNG KÝ CHANGE LANGUAGE Tìm kiếm áo dài dầu gội bưởi khăn "
+ },
+ {
+  "site": "tiktokshop",
+  "kind": "listing",
+  "mode": "headless",
+  "final": "https://shop.tiktok.com/vn",
+  "title": "Security Check",
+  "prices": 0,
+  "sample": [],
+  "xhr_total": 20,
+  "xhr_blocked": 0,
+  "text": "Verify to continue: Drag the puzzle piece into place 20261009203515E5C3AB51F2E5470693F5 "
+ },
+ {
+  "site": "sendo",
+  "kind": "home",
+  "mode": "headless",
+  "final": "https://www.sendo.vn/",
+  "title": "500 Internal Server Error",
+  "prices": 0,
+  "sample": [],
+  "xhr_total": 0,
+  "xhr_blocked": 0,
+  "text": "500 Internal Server Error nginx"
+ },
+ {
+  "site": "hoangha",
+  "kind": "listing",
+  "mode": "headless",
+  "final": "https://hoanghamobile.com/dien-thoai-di-dong",
+  "title": "Điện thoại chính hãng, giá tốt tháng 8/2026 | Hoàng Hà Mobil",
+  "prices": 16,
+  "sample": [
+   "500.000đ",
+   "500.000đ",
+   "500.000đ"
+  ],
+  "xhr_total": 32,
+  "xhr_blocked": 0,
+  "text": "Previous Thu cũ giá cao toàn bộ sản phẩm SẢN PHẨM CHÍNH HÃNG CAM KẾT LỖI ĐỔI LIỀN (*) HOTLINE 1900.2091 MIỄN PHÍ VẬN CHUYỂN TOÀN QUỐC Thu cũ giá cao toàn bộ sản"
+ },
+ {
+  "site": "bachhoaxanh",
+  "kind": "listing",
+  "mode": "headless",
+  "final": "https://www.bachhoaxanh.com/sua-tuoi",
+  "title": "Sữa tươi mua thùng giá bao rẻ - Luôn có khuyến mãi sốc",
+  "prices": 104,
+  "sample": [
+   "5.000đ",
+   "345.000đ",
+   "380.000đ"
+  ],
+  "xhr_total": 31,
+  "xhr_blocked": 0,
+  "text": "DANH MỤC SẢN PHẨM Rau lá đồng giá 5.000đ/gói Chọn vị trí giao gần bạn Đăng nhập KHUYẾN MÃI SỐC THỊT, CÁ, TRỨNG, HẢI SẢN Thịt heo Thịt bò Thịt gà, vịt Cá, hải sả"
+ },
+ {
+  "site": "tiki",
+  "kind": "listing",
+  "mode": "headless",
+  "final": "https://tiki.vn/dien-thoai-may-tinh-bang/c1789",
+  "title": "Điện Thoại, Máy Tính Bảng Chính Hãng, Trả Góp 0% | tiki.vn",
+  "prices": 47,
+  "sample": [
+   "7.990.000₫",
+   "17.990.000₫",
+   "5.990.000₫"
+  ],
+  "xhr_total": 65,
+  "xhr_blocked": 0,
+  "text": "Freeship đơn từ 45k, giảm nhiều hơn cùng Tốt & Nhanh Tìm kiếm Trang chủ Tài khoản 0 điện gia dụng xe cộ mẹ & bé khỏe đẹp nhà cửa sách thể thao iphone 15 máy đọc"
+ },
+ {
+  "site": "lazada",
+  "kind": "listing",
+  "mode": "headed",
+  "final": "https://www.lazada.vn/dien-thoai-di-dong/",
+  "title": "Điện Thoại, Smartphone Chính Hãng, Giá Tốt | Lazada",
+  "prices": 40,
+  "sample": [
+   "1.250.000 ₫",
+   "890.000 ₫",
+   "875.000 ₫"
+  ],
+  "xhr_total": 19,
+  "xhr_blocked": 0,
+  "text": "GÓP Ý TIẾT KIỆM HƠN VỚI ỨNG DỤNG BÁN HÀNG CÙNG LAZADA CHĂM SÓC KHÁCH HÀNG KIỂM TRA ĐƠN HÀNG ĐĂNG NHẬP ĐĂNG KÝ CHANGE LANGUAGE Tìm kiếm áo dài dầu gội bưởi khăn "
+ },
+ {
+  "site": "lazada",
+  "kind": "search",
+  "mode": "headed",
+  "final": "https://www.lazada.vn/catalog/?q=iphone",
+  "title": "iphone- Giá Tốt & Ưu Đãi | Lazada Việt Nam",
+  "prices": 11,
+  "sample": [
+   "37.999.000 ₫",
+   "34.999.000 ₫",
+   "34.999.000 ₫"
+  ],
+  "xhr_total": 16,
+  "xhr_blocked": 0,
+  "text": "GÓP Ý TIẾT KIỆM HƠN VỚI ỨNG DỤNG BÁN HÀNG CÙNG LAZADA CHĂM SÓC KHÁCH HÀNG KIỂM TRA ĐƠN HÀNG ĐĂNG NHẬP ĐĂNG KÝ CHANGE LANGUAGE Tìm kiếm áo dài dầu gội bưởi khăn "
+ },
+ {
+  "site": "tiktokshop",
+  "kind": "listing",
+  "mode": "headed",
+  "final": "https://shop.tiktok.com/vn",
+  "title": "Security Check",
+  "prices": 0,
+  "sample": [],
+  "xhr_total": 34,
+  "xhr_blocked": 0,
+  "text": "Verify to continue: Unable to verify. Please try again. 202610092037063B8D2169524DA503265E "
+ }
+]

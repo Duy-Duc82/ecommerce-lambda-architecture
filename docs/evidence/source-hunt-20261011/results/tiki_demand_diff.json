@@ -1,0 +1,84 @@
+{
+ "window": "19:44:17 -> 20:15:30",
+ "products_A": 1193,
+ "products_B": 1193,
+ "common": 1188,
+ "with_sold": 832,
+ "sold_up": 7,
+ "sold_up_share": 0.008,
+ "units_sold_total": 537,
+ "sold_down": 3,
+ "price_changed": 5,
+ "price_changed_share": 0.004,
+ "top_movers": [
+  {
+   "name": "Siêu Quậy Teppei Tập 1 – Tập 31",
+   "cat": "c8322",
+   "delta": 446,
+   "price": 22500
+  },
+  {
+   "name": "Dép tổ ong VAC nhựa EVA siêu bền, siêu nhẹ, chống ",
+   "cat": "c1686",
+   "delta": 52,
+   "price": 72000
+  },
+  {
+   "name": "Bộ Sách Quiz! Khoa Học Kì Thú [Chọn Tập Lẻ",
+   "cat": "c8322",
+   "delta": 18,
+   "price": 55200
+  },
+  {
+   "name": "Series các tập Claymore",
+   "cat": "c8322",
+   "delta": 12,
+   "price": 35000
+  },
+  {
+   "name": "Đồng Hồ Trẻ Em Thể Thao Cao Cấp Chính hãng MR 8212",
+   "cat": "c8371",
+   "delta": 6,
+   "price": 150000
+  },
+  {
+   "name": "Dầu Ăn Meizan Gold 1L / 2L / 5L",
+   "cat": "c4384",
+   "delta": 2,
+   "price": 105000
+  },
+  {
+   "name": "Sách Boxset Harry Potter - Tiếng Việt (Trọn Bộ 7 T",
+   "cat": "c8322",
+   "delta": 1,
+   "price": 1374000
+  }
+ ],
+ "price_examples": [
+  {
+   "name": "Mascara Dài Mi và Cong Mi Maybelline New York Hype",
+   "old": 192000,
+   "new": 188000
+  },
+  {
+   "name": "Sách Con Đường Chẳng Mấy Ai Đi",
+   "old": 132000,
+   "new": 129000
+  },
+  {
+   "name": "Ly nhựa 2 lớp LocknLock kèm ống hút Dream star Dou",
+   "old": 124320,
+   "new": 150220
+  },
+  {
+   "name": "Sách Giáo Trình Chuẩn HSK 1 - Bài Học (Kèm file MP",
+   "old": 158000,
+   "new": 154000
+  },
+  {
+   "name": "Combo Giáo Trình Chuẩn HSK 1 - Sách Bài Học và Bài",
+   "old": 277000,
+   "new": 283000
+  }
+ ]
+}

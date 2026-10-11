@@ -1,0 +1,22 @@
+TARGETS = [
+ # (site, kind, url)
+ ("tiki","listing","https://tiki.vn/dien-thoai-may-tinh-bang/c1789"),
+ ("tiki","product","https://tiki.vn/dien-thoai-samsung-galaxy-a16-p277954483.html"),
+ ("lazada","listing","https://www.lazada.vn/dien-thoai-di-dong/"),
+ ("lazada","search","https://www.lazada.vn/catalog/?q=iphone"),
+ ("tiktokshop","listing","https://www.tiktok.com/shop/vn"),
+ ("sendo","listing","https://www.sendo.vn/dien-thoai"),
+ ("shopee","home","https://shopee.vn/"),
+ ("shopee","mall","https://shopee.vn/mall"),
+ ("tgdd","listing","https://www.thegioididong.com/dtdd"),
+ ("dmx","listing","https://www.dienmayxanh.com/tivi"),
+ ("fptshop","listing","https://fptshop.com.vn/dien-thoai"),
+ ("cellphones","listing","https://cellphones.com.vn/mobile.html"),
+ ("hoangha","listing","https://hoanghamobile.com/dien-thoai-di-dong"),
+ ("nguyenkim","listing","https://www.nguyenkim.com/dien-thoai-di-dong/"),
+ ("phongvu","listing","https://phongvu.vn/c/laptop"),
+ ("dienmaycholon","listing","https://dienmaycholon.com/tivi"),
+ ("bachhoaxanh","listing","https://www.bachhoaxanh.com/sua-tuoi"),
+ ("gearvn","listing","https://gearvn.com/collections/laptop"),
+ ("websosanh","listing","https://websosanh.vn/dien-thoai-di-dong/cat-87.htm"),
+]

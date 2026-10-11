@@ -1,0 +1,306 @@
+[
+ {
+  "site": "tiki",
+  "kind": "listing",
+  "url": "https://tiki.vn/dien-thoai-may-tinh-bang/c1789",
+  "status": 200,
+  "final": "https://tiki.vn/dien-thoai-may-tinh-bang/c1789",
+  "server": "Byte-nginx",
+  "ms": 168,
+  "kb": 526,
+  "vnd_text": 7,
+  "markers": [
+   "next_data"
+  ],
+  "block": [],
+  "title": "Điện Thoại, Máy Tính Bảng Chính Hãng, Trả Góp 0% | tiki.vn"
+ },
+ {
+  "site": "tiki",
+  "kind": "product",
+  "url": "https://tiki.vn/dien-thoai-samsung-galaxy-a16-p277954483.html",
+  "status": 404,
+  "final": "https://tiki.vn/dien-thoai-samsung-galaxy-a16-p277954483.html",
+  "server": "Byte-nginx",
+  "ms": 141,
+  "kb": 32,
+  "vnd_text": 0,
+  "markers": [],
+  "block": [],
+  "title": ""
+ },
+ {
+  "site": "lazada",
+  "kind": "listing",
+  "url": "https://www.lazada.vn/dien-thoai-di-dong/",
+  "status": 200,
+  "final": "https://www.lazada.vn/dien-thoai-di-dong/",
+  "server": "Tengine",
+  "ms": 556,
+  "kb": 60,
+  "vnd_text": 0,
+  "markers": [],
+  "block": [
+   "baxia"
+  ],
+  "title": "Điện Thoại, Smartphone Chính Hãng, Giá Tốt | Lazada"
+ },
+ {
+  "site": "lazada",
+  "kind": "search",
+  "url": "https://www.lazada.vn/catalog/?q=iphone",
+  "status": 200,
+  "final": "https://www.lazada.vn/catalog/?q=iphone",
+  "server": "Tengine",
+  "ms": 382,
+  "kb": 60,
+  "vnd_text": 0,
+  "markers": [],
+  "block": [
+   "baxia"
+  ],
+  "title": "iphone- Giá Tốt &amp; Ưu Đãi | Lazada Việt Nam"
+ },
+ {
+  "site": "tiktokshop",
+  "kind": "listing",
+  "url": "https://www.tiktok.com/shop/vn",
+  "status": 200,
+  "final": "https://shop.tiktok.com/vn",
+  "server": "TLB",
+  "ms": 389,
+  "kb": 5,
+  "vnd_text": 0,
+  "markers": [],
+  "block": [
+   "captcha"
+  ],
+  "title": "Security Check"
+ },
+ {
+  "site": "sendo",
+  "kind": "listing",
+  "url": "https://www.sendo.vn/dien-thoai",
+  "status": 500,
+  "final": "https://www.sendo.vn/dien-thoai",
+  "server": "nginx",
+  "ms": 206,
+  "kb": 0,
+  "vnd_text": 0,
+  "markers": [],
+  "block": [],
+  "title": "500 Internal Server Error"
+ },
+ {
+  "site": "shopee",
+  "kind": "home",
+  "url": "https://shopee.vn/",
+  "status": 200,
+  "final": "https://shopee.vn/",
+  "server": "SGW",
+  "ms": 310,
+  "kb": 158,
+  "vnd_text": 0,
+  "markers": [],
+  "block": [
+   "captcha"
+  ],
+  "title": ""
+ },
+ {
+  "site": "shopee",
+  "kind": "mall",
+  "url": "https://shopee.vn/mall",
+  "status": 200,
+  "final": "https://shopee.vn/mall",
+  "server": "SGW",
+  "ms": 264,
+  "kb": 158,
+  "vnd_text": 0,
+  "markers": [],
+  "block": [
+   "captcha"
+  ],
+  "title": ""
+ },
+ {
+  "site": "tgdd",
+  "kind": "listing",
+  "url": "https://www.thegioididong.com/dtdd",
+  "status": 200,
+  "final": "https://www.thegioididong.com/dtdd",
+  "server": null,
+  "ms": 297,
+  "kb": 571,
+  "vnd_text": 45,
+  "markers": [
+   "ld_product",
+   "ld_itemlist",
+   "next_rsc"
+  ],
+  "block": [],
+  "title": "Điện thoại, smartphone chính hãng, trả góp 0% lãi suất"
+ },
+ {
+  "site": "dmx",
+  "kind": "listing",
+  "url": "https://www.dienmayxanh.com/tivi",
+  "status": 200,
+  "final": "https://www.dienmayxanh.com/tivi",
+  "server": null,
+  "ms": 252,
+  "kb": 802,
+  "vnd_text": 120,
+  "markers": [
+   "ld_product"
+  ],
+  "block": [],
+  "title": "Tivi giá rẻ, Smart Tivi, LED 4K, OLED, QLED trả góp 0% - 10/2026"
+ },
+ {
+  "site": "fptshop",
+  "kind": "listing",
+  "url": "https://fptshop.com.vn/dien-thoai",
+  "status": 200,
+  "final": "https://fptshop.com.vn/dien-thoai",
+  "server": "cloudflare",
+  "ms": 306,
+  "kb": 2722,
+  "vnd_text": 691,
+  "markers": [
+   "next_rsc"
+  ],
+  "block": [
+   "captcha",
+   "challenge-platform"
+  ],
+  "title": "Điện thoại, Smartphone chính hãng, giảm đến 4 triệu, góp 0%"
+ },
+ {
+  "site": "cellphones",
+  "kind": "listing",
+  "url": "https://cellphones.com.vn/mobile.html",
+  "status": 200,
+  "final": "https://cellphones.com.vn/mobile.html",
+  "server": "Byte-nginx",
+  "ms": 321,
+  "kb": 1678,
+  "vnd_text": 95,
+  "markers": [
+   "ld_product",
+   "nuxt"
+  ],
+  "block": [
+   "captcha"
+  ],
+  "title": "Điện thoại thông minh | Smartphone chính hãng, giá rẻ"
+ },
+ {
+  "site": "hoangha",
+  "kind": "listing",
+  "url": "https://hoanghamobile.com/dien-thoai-di-dong",
+  "status": "ERR",
+  "err": "<urlopen error [SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed: certificate has expired (_ssl.c:1006)>"
+ },
+ {
+  "site": "nguyenkim",
+  "kind": "listing",
+  "url": "https://www.nguyenkim.com/dien-thoai-di-dong/",
+  "status": 200,
+  "final": "https://www.nguyenkim.com/dien-thoai.c",
+  "server": "cloudflare",
+  "ms": 749,
+  "kb": 454,
+  "vnd_text": 50,
+  "markers": [
+   "ld_product",
+   "ld_itemlist",
+   "next_data"
+  ],
+  "block": [],
+  "title": "Điện thoại"
+ },
+ {
+  "site": "phongvu",
+  "kind": "listing",
+  "url": "https://phongvu.vn/c/laptop",
+  "status": 200,
+  "final": "https://phongvu.vn/c/laptop",
+  "server": "cloudflare",
+  "ms": 461,
+  "kb": 1619,
+  "vnd_text": 199,
+  "markers": [
+   "ld_itemlist",
+   "next_data"
+  ],
+  "block": [],
+  "title": "Laptop Phong Vũ | Đổi điểm thi, giảm sâu 5 triệu"
+ },
+ {
+  "site": "dienmaycholon",
+  "kind": "listing",
+  "url": "https://dienmaycholon.com/tivi",
+  "status": 200,
+  "final": "https://dienmaycholon.com/tivi",
+  "server": "nginx",
+  "ms": 510,
+  "kb": 234,
+  "vnd_text": 31,
+  "markers": [
+   "ld_product"
+  ],
+  "block": [],
+  "title": "Tivi giá rẻ, Smart TV 4K, OLED, QLED - Khuyến mãi T10/2026"
+ },
+ {
+  "site": "bachhoaxanh",
+  "kind": "listing",
+  "url": "https://www.bachhoaxanh.com/sua-tuoi",
+  "status": 200,
+  "final": "https://www.bachhoaxanh.com/sua-tuoi",
+  "server": null,
+  "ms": 194,
+  "kb": 93,
+  "vnd_text": 0,
+  "markers": [
+   "ld_product",
+   "next_rsc"
+  ],
+  "block": [],
+  "title": "Sữa tươi mua thùng giá bao rẻ - Luôn có khuyến mãi sốc"
+ },
+ {
+  "site": "gearvn",
+  "kind": "listing",
+  "url": "https://gearvn.com/collections/laptop",
+  "status": 200,
+  "final": "https://gearvn.com/collections/laptop",
+  "server": "cloudflare",
+  "ms": 897,
+  "kb": 1008,
+  "vnd_text": 56,
+  "markers": [
+   "ld_product",
+   "next_rsc"
+  ],
+  "block": [],
+  "title": "Laptop chính hãng: Dell, Asus, Lenovo, Acer, MSI | GEARVN"
+ },
+ {
+  "site": "websosanh",
+  "kind": "listing",
+  "url": "https://websosanh.vn/dien-thoai-di-dong/cat-87.htm",
+  "status": 200,
+  "final": "https://websosanh.vn/dien-thoai-nokia/cat-87.htm",
+  "server": null,
+  "ms": 920,
+  "kb": 182,
+  "vnd_text": 40,
+  "markers": [
+   "ld_product"
+  ],
+  "block": [],
+  "title": "Mua Điện thoại Nokia Chính Hãng Giá Tốt | Khuyến Mãi Hấp Dẫn 2026"
+ }
+]

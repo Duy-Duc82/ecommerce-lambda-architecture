@@ -1,0 +1,101 @@
+[
+ {
+  "model": "samsung galaxy a27 6gb 128gb",
+  "wss_name": "Điện thoại Samsung Galaxy A27 6GB/128GB",
+  "wss_low": 5999000,
+  "wss_high": 32989000,
+  "wss_offers": 44,
+  "tgdd_name": "Samsung Galaxy A27 8GB/128GB",
+  "tgdd_price": 8480000
+ },
+ {
+  "model": "samsung galaxy a37 8gb 128gb",
+  "wss_name": "Điện thoại Samsung Galaxy A37 5G 8GB/128GB",
+  "wss_low": 6299000,
+  "wss_high": 11869000,
+  "wss_offers": 39,
+  "tgdd_name": "Samsung Galaxy A37 5G 8GB/128GB",
+  "tgdd_price": 9600000
+ },
+ {
+  "model": "samsung galaxy a57 8gb 256gb",
+  "wss_name": "Điện thoại Samsung Galaxy A57 8GB/256GB",
+  "wss_low": 9999000,
+  "wss_high": 15490000,
+  "wss_offers": 19,
+  "tgdd_name": "Samsung Galaxy A57 5G 8GB/256GB",
+  "tgdd_price": 11610000
+ },
+ {
+  "model": "samsung galaxy s26 ultra 12gb 256gb",
+  "wss_name": "Điện thoại Samsung Galaxy S26 Ultra 5G 12GB/256GB",
+  "wss_low": 21999000,
+  "wss_high": 47850000,
+  "wss_offers": 76,
+  "tgdd_name": "Samsung Galaxy S26 Ultra 5G 12GB/512GB",
+  "tgdd_price": 35640000
+ },
+ {
+  "model": "iphone 17 256gb",
+  "wss_name": "Điện thoại iPhone 17 256GB",
+  "wss_low": 17490000,
+  "wss_high": 44550000,
+  "wss_offers": 204,
+  "tgdd_name": "iPhone 17 512GB",
+  "tgdd_price": 31990000
+ },
+ {
+  "model": "iphone 17 pro 256gb",
+  "wss_name": "Điện thoại iPhone 17 Pro 256GB",
+  "wss_low": 19855000,
+  "wss_high": 49489000,
+  "wss_offers": 215,
+  "tgdd_name": "iPhone 17 Pro 256GB",
+  "tgdd_price": 31990000
+ },
+ {
+  "model": "iphone 17 pro max 256gb",
+  "wss_name": "Điện thoại iPhone 17 Pro Max 256GB",
+  "wss_low": 25300000,
+  "wss_high": 52789000,
+  "wss_offers": 227,
+  "tgdd_name": "iPhone 17 Pro Max 256GB",
+  "tgdd_price": 34490000
+ },
+ {
+  "model": "iphone 18 pro 256gb",
+  "wss_name": "Điện thoại iPhone 18 Pro 256GB",
+  "wss_low": 35199000,
+  "wss_high": 50039000,
+  "wss_offers": 71,
+  "tgdd_name": "iPhone 18 Pro 1TB",
+  "tgdd_price": 58490000
+ },
+ {
+  "model": "iphone 18 pro max 256gb",
+  "wss_name": "Điện thoại iPhone 18 Pro Max 256GB",
+  "wss_low": 39699000,
+  "wss_high": 185900000,
+  "wss_offers": 71,
+  "tgdd_name": "iPhone 18 Pro Max 2TB",
+  "tgdd_price": 80990000
+ },
+ {
+  "model": "oppo reno16 f",
+  "wss_name": "Điện thoại Oppo Reno16 F 5G 8GB/128GB",
+  "wss_low": 9399000,
+  "wss_high": 32989000,
+  "wss_offers": 16,
+  "tgdd_name": "OPPO Reno16F 5G 8GB/128GB",
+  "tgdd_price": 13190000
+ },
+ {
+  "model": "xiaomi 17 12gb 512gb",
+  "wss_name": "Điện thoại Xiaomi 17T 5G 12GB/512GB",
+  "wss_low": 12299000,
+  "wss_high": 20990000,
+  "wss_offers": 26,
+  "tgdd_name": "Xiaomi 17 5G 12GB/256GB",
+  "tgdd_price": 18950000
+ }
+]

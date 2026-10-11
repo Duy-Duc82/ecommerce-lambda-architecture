@@ -1,0 +1,211 @@
+{
+ "summary": {
+  "n": 25,
+  "with_items": 20,
+  "mean_items": 37.6,
+  "total_items": 753,
+  "challenged": 0
+ },
+ "rows": [
+  {
+   "url": "https://tiki.vn/towers-may-chu-server/c29014",
+   "status": 200,
+   "kb": 298,
+   "n": 9,
+   "secs": 0.38,
+   "sold": 0
+  },
+  {
+   "url": "https://tiki.vn/dung-cu-mai-dao/c4342",
+   "status": 200,
+   "kb": 539,
+   "n": 45,
+   "secs": 1.06,
+   "sold": 35
+  },
+  {
+   "url": "https://tiki.vn/dung-cu-ve-sinh-may-anh/c20260",
+   "status": 200,
+   "kb": 228,
+   "n": 0,
+   "secs": 0.31,
+   "sold": 0
+  },
+  {
+   "url": "https://tiki.vn/xe-day-du-lich-cho-be/c10497",
+   "status": 200,
+   "kb": 421,
+   "n": 21,
+   "secs": 0.71,
+   "sold": 6
+  },
+  {
+   "url": "https://tiki.vn/ao-khoac-ni/c49460",
+   "status": 200,
+   "kb": 418,
+   "n": 40,
+   "secs": 0.47,
+   "sold": 17
+  },
+  {
+   "url": "https://tiki.vn/ta-giay/c10415",
+   "status": 200,
+   "kb": 299,
+   "n": 0,
+   "secs": 0.41,
+   "sold": 0
+  },
+  {
+   "url": "https://tiki.vn/dung-cu-xay-gia/c2513",
+   "status": 200,
+   "kb": 628,
+   "n": 55,
+   "secs": 0.88,
+   "sold": 47
+  },
+  {
+   "url": "https://tiki.vn/mut-trai-cay/c53556",
+   "status": 200,
+   "kb": 400,
+   "n": 30,
+   "secs": 0.67,
+   "sold": 28
+  },
+  {
+   "url": "https://tiki.vn/ban-phong-an/c23638",
+   "status": 200,
+   "kb": 447,
+   "n": 40,
+   "secs": 0.53,
+   "sold": 14
+  },
+  {
+   "url": "https://tiki.vn/phu-kien-giat-ui/c23044",
+   "status": 200,
+   "kb": 623,
+   "n": 55,
+   "secs": 0.86,
+   "sold": 55
+  },
+  {
+   "url": "https://tiki.vn/noi-dien-cac-loai/c1892",
+   "status": 200,
+   "kb": 688,
+   "n": 55,
+   "secs": 1.07,
+   "sold": 54
+  },
+  {
+   "url": "https://tiki.vn/ong-hut/c27150",
+   "status": 200,
+   "kb": 415,
+   "n": 37,
+   "secs": 0.6,
+   "sold": 26
+  },
+  {
+   "url": "https://tiki.vn/dich-vu-lap-dat/c17208",
+   "status": 200,
+   "kb": 271,
+   "n": 5,
+   "secs": 0.33,
+   "sold": 0
+  },
+  {
+   "url": "https://tiki.vn/bo-thia-nao-trai-cay/c10439",
+   "status": 200,
+   "kb": 272,
+   "n": 0,
+   "secs": 0.63,
+   "sold": 0
+  },
+  {
+   "url": "https://tiki.vn/cac-loai-ruou-khac/c53604",
+   "status": 200,
+   "kb": 421,
+   "n": 39,
+   "secs": 0.45,
+   "sold": 15
+  },
+  {
+   "url": "https://tiki.vn/may-may-dien-tu/c1998",
+   "status": 200,
+   "kb": 282,
+   "n": 0,
+   "secs": 0.47,
+   "sold": 0
+  },
+  {
+   "url": "https://tiki.vn/thiet-bi-dieu-khien-thong-minh/c20492",
+   "status": 200,
+   "kb": 457,
+   "n": 40,
+   "secs": 0.49,
+   "sold": 23
+  },
+  {
+   "url": "https://tiki.vn/bong-va-linh-kien-den/c53044",
+   "status": 200,
+   "kb": 462,
+   "n": 41,
+   "secs": 0.71,
+   "sold": 34
+  },
+  {
+   "url": "https://tiki.vn/card-mang/c7361",
+   "status": 200,
+   "kb": 475,
+   "n": 43,
+   "secs": 0.73,
+   "sold": 21
+  },
+  {
+   "url": "https://tiki.vn/nuoc-hoa-hong-toner/c2347",
+   "status": 200,
+   "kb": 549,
+   "n": 46,
+   "secs": 0.85,
+   "sold": 40
+  },
+  {
+   "url": "https://tiki.vn/den-xe-dap/c45528",
+   "status": 200,
+   "kb": 466,
+   "n": 41,
+   "secs": 0.65,
+   "sold": 33
+  },
+  {
+   "url": "https://tiki.vn/may-lam-sua-dau-nanh/c2025",
+   "status": 200,
+   "kb": 602,
+   "n": 48,
+   "secs": 0.7,
+   "sold": 38
+  },
+  {
+   "url": "https://tiki.vn/bao-dung-chong-soc-chong-nuoc/c20270",
+   "status": 200,
+   "kb": 283,
+   "n": 8,
+   "secs": 0.48,
+   "sold": 5
+  },
+  {
+   "url": "https://tiki.vn/bach-hoa-online/c4384",
+   "status": 200,
+   "kb": 736,
+   "n": 55,
+   "secs": 0.84,
+   "sold": 54
+  },
+  {
+   "url": "https://tiki.vn/thiet-bi-phan-sang-va-phu-kien/c28820",
+   "status": 200,
+   "kb": 232,
+   "n": 0,
+   "secs": 0.56,
+   "sold": 0
+  }
+ ]
+}
