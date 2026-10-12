@@ -30,6 +30,7 @@ from crawler.contracts import (
     decode_listing_page_task_target,
 )
 from crawler.sites.tiki import TikiCrawler
+from crawler.sites.tiki_html import TikiCategoryHtmlCrawler
 
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
@@ -38,9 +39,12 @@ logger = logging.getLogger(__name__)
 
 SITE_CRAWLERS = {
     "tiki": TikiCrawler,
+    # Same marketplace code ("tiki"), read from the public category page.
+    "tiki-html": TikiCategoryHtmlCrawler,
 }
 SITE_CATEGORIES = {
     "tiki": TIKI_CATEGORIES,
+    "tiki-html": TIKI_CATEGORIES,
 }
 
 
