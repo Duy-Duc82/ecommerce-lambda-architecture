@@ -52,7 +52,7 @@ ul,ol{margin:0;padding-left:1.3em;display:flex;flex-direction:column;gap:7px}
 
 <header>
   <h1>Khảo sát nguồn dữ liệu crawl cho pipeline</h1>
-  <p class="sub">Yêu cầu: nguồn dễ crawl, lấy được liên tục và ổn định, không gọi API · Thử nghiệm 11/10/2026, 17:30–20:25 · Python 3.11 <code>urllib.request</code> + <code>re</code>/<code>json</code>; Playwright 1.57 (Chromium headless) · Đã thử 40+ website</p>
+  <p class="sub">Yêu cầu: nguồn dễ crawl, lấy được liên tục và ổn định, không gọi API · Thử nghiệm 11/10/2026, 17:30–20:25; đo rate limit 12/10/2026, 10:45–11:12 · Python 3.11 <code>urllib.request</code> + <code>re</code>/<code>json</code>; Playwright 1.57 (Chromium headless) · Đã thử 40+ website</p>
 </header>
 
 <section class="box">
@@ -71,11 +71,18 @@ ul,ol{margin:0;padding-left:1.3em;display:flex;flex-direction:column;gap:7px}
     <li><b>Kết quả đo:</b> <!--SUMMARY-->144/145 lần tải danh mục thành công (99%) trên 16 nguồn trong khoảng 18:04–20:22. Không có 403/429/captcha. Lỗi duy nhất: Bonbanh trả trang "máy chủ quá tải" với HTTP 200 ở 1 lần tải (mục 3.6). Parser không phải sửa lần nào. Thời gian tải 0,1–1 giây/trang với HTTP, 9–16 giây với Playwright. <!--/SUMMARY--></li>
     <li><b>Hai giới hạn quan trọng:</b>
       <ul>
-        <li><b>Tiki:</b> trang <i>sản phẩm</i> chuyển sang trang thử thách JavaScript (mã đã làm rối) sau khoảng 25 request trong vài phút, mỗi request cách 2–3 giây, và tự gỡ sau 10–15 phút. Ở tốc độ 15 giây/request thì không bị chặn (24/24). Trang <i>danh mục</i> không bị ảnh hưởng.</li>
+        <li><b>Tiki:</b> trang <i>sản phẩm</i> chuyển sang trang thử thách JavaScript (mã đã làm rối) khi tải nhanh hơn khoảng 12–20 request/phút. Đo theo bậc ngày 12/10 (mục 3.13):
+          <ul>
+            <li>75/75 OK ở các bậc 10s, 7s, 5s;</li>
+            <li>bị chặn sau 9 request ở bậc 3s.</li>
+          </ul>
+          Hồi phục sau khoảng 6 phút. Tốc độ khuyến nghị: 1 request/7–10s. Trang <i>danh mục</i> không bị giới hạn: 100/100 OK, kể cả 1 request/giây.</li>
+        <li><b>Chợ Tốt:</b> không có rate limit theo tốc độ (1–10s đều như nhau). Khoảng 5–6% trang tin bị Cloudflare challenge <b>cố định theo URL</b>. robots.txt hiện cấm <code>?page=</code>, nên chỉ lấy trang 1 mỗi danh mục (mục 3.13).</li>
+        <li><b>Websosanh:</b> 125/125 OK, kể cả 1 request/giây.</li>
         <li><b>Websosanh:</b> danh sách giá từng shop nằm sau <code>/compare-api/*</code>, mà robots.txt cấm. Chỉ dùng mức tổng hợp trong JSON-LD.</li>
       </ul>
     </li>
-    <li><b>Phân trang:</b> trong 6 nguồn chính chỉ có Chợ Tốt phân trang được qua URL; các trang khác tải trang 2 bằng JS. Muốn phủ rộng thì đi theo <b>sitemap + trang sản phẩm</b> hoặc theo <b>nhiều danh mục con</b>. Nhóm nguồn bổ sung (meta, MediaMart, Pico, Hoàng Hà, Kingfoodmart, Bonbanh) thì phân trang URL được.</li>
+    <li><b>Phân trang:</b> trong 6 nguồn chính chỉ có Chợ Tốt phân trang được qua URL, nhưng robots.txt của Chợ Tốt hiện cấm <code>/*page=</code> (kiểm tra 12/10), nên chỉ lấy trang 1; các trang khác tải trang 2 bằng JS. Muốn phủ rộng thì đi theo <b>sitemap + trang sản phẩm</b> hoặc theo <b>nhiều danh mục con</b>. Nhóm nguồn bổ sung (meta, MediaMart, Pico, Hoàng Hà, Kingfoodmart, Bonbanh) thì phân trang URL được.</li>
     <li><b>Biến động đo được trong 2,3 giờ:</b>
       <ul>
         <li>ĐMX xoay vòng giá flash sale, mỗi TV tăng 9–37% trong 30–45 phút rồi về lại;</li>
@@ -110,12 +117,12 @@ ul,ol{margin:0;padding-left:1.3em;display:flex;flex-direction:column;gap:7px}
     <thead><tr><th>Nguồn</th><th>Loại</th><th>Cách lấy · SP/trang</th><th>Trang 2 qua URL</th><th>Quy mô</th><th>Trường đáng giá</th><th>Ghi chú</th></tr></thead>
     <tbody>
       <tr class="tier"><td colspan="7">Nhóm A: nguồn chính</td></tr>
-      <tr><td class="site">tiki.vn</td><td>Sàn</td><td>HTTP, <code>__NEXT_DATA__</code> · 42–55</td><td><span class="chip bad">không</span></td><td class="r">≈ 420.000 URL SP<br><span class="sub">233 file sitemap</span></td><td><code>price</code>, <code>original_price</code>, <code>discount_rate</code>, <code>quantity_sold</code>, <code>rating_average</code>, <code>review_count</code>, <code>seller_name</code></td><td>Trang SP bị thử thách JS khi tải dồn; dùng trang danh mục</td></tr>
+      <tr><td class="site">tiki.vn</td><td>Sàn</td><td>HTTP, <code>__NEXT_DATA__</code> · 42–55</td><td><span class="chip bad">không</span></td><td class="r">≈ 420.000 URL SP<br><span class="sub">233 file sitemap</span></td><td><code>price</code>, <code>original_price</code>, <code>discount_rate</code>, <code>quantity_sold</code>, <code>rating_average</code>, <code>review_count</code>, <code>seller_name</code></td><td>Trang SP bị thử thách JS khi &gt; 12–20 req/phút (hồi phục ~6 phút); trang danh mục chịu được 1 req/s</td></tr>
       <tr><td class="site">websosanh.vn</td><td>So sánh giá</td><td>HTTP, HTML card · 40; trang so sánh: JSON-LD</td><td><span class="chip bad">không</span></td><td class="r">273.922 trang so sánh</td><td>Giá thấp nhất, <code>highPrice</code>, <code>offerCount</code></td><td>80/80 trang SP OK khi cách 2s; 86% còn hàng</td></tr>
       <tr><td class="site">fptshop.com.vn</td><td>Bán lẻ</td><td>HTTP, RSC · 28</td><td><span class="chip bad">không</span></td><td class="r">49 file sitemap SP</td><td><code>currentPrice</code>, <code>originalPrice</code>, <code>sold.realQuantity</code>, <code>averageScore</code></td><td>Trang SP có JSON-LD + review</td></tr>
       <tr><td class="site">thegioididong.com<br>dienmayxanh.com</td><td>Bán lẻ</td><td>HTTP, JSON-LD (10) / <code>data-*</code> (40)</td><td><span class="chip bad">không</span></td><td class="r">TGDD ≈ 17.800<br>ĐMX 389 file</td><td><code>price</code>, <code>ratingCount</code>, <code>availability</code>, brand, cate</td><td>Crawl-delay 5s; sitemap có nhiều SP ngừng bán</td></tr>
       <tr><td class="site">phongvu.vn</td><td>Bán lẻ</td><td>HTTP, <code>__NEXT_DATA__</code> · 40</td><td><span class="chip bad">không</span></td><td class="r">theo danh mục</td><td><code>latestPrice</code>, <code>supplierRetailPrice</code>, <code>stockQuantity</code></td><td></td></tr>
-      <tr><td class="site">chotot.com</td><td>Rao vặt</td><td>HTTP, <code>__NEXT_DATA__</code> · 20</td><td><span class="chip ok">có</span> <code>?page=N</code></td><td class="r">~230 tin ĐT/giờ</td><td><code>price</code>, <code>region_name</code>, <code>elt_condition</code>, <code>mobile_model</code>, tuổi tin</td><td>Bỏ trường cá nhân</td></tr>
+      <tr><td class="site">chotot.com</td><td>Rao vặt</td><td>HTTP, <code>__NEXT_DATA__</code> · 20</td><td><span class="chip warn">robots cấm</span> <code>?page=N</code> (12/10)</td><td class="r">~230 tin ĐT/giờ</td><td><code>price</code>, <code>region_name</code>, <code>elt_condition</code>, <code>mobile_model</code>, tuổi tin</td><td>Bỏ trường cá nhân. ~5–6% trang tin bị Cloudflare challenge cố định; không có rate limit theo tốc độ (mục 3.13)</td></tr>
       <tr class="tier"><td colspan="7">Nhóm B: bổ sung (dò thêm ngày 11/10)</td></tr>
       <tr><td class="site">meta.vn</td><td>Bán lẻ đa ngành</td><td>HTTP, JSON-LD ItemList · 32</td><td><span class="chip ok">có</span> <code>?p=N</code> (cộng dồn)</td><td class="r">chưa đếm</td><td>sku, giá, tồn kho, rating, review (vd 531)</td><td></td></tr>
       <tr><td class="site">mediamart.vn</td><td>Điện máy</td><td>HTTP, JSON-LD ItemList · 38</td><td><span class="chip ok">có</span> <code>?page=N</code></td><td class="r">≥ 3.799</td><td>sku, giá, tồn kho</td><td>reviewCount hầu hết bằng 1</td></tr>
@@ -268,7 +275,7 @@ ul,ol{margin:0;padding-left:1.3em;display:flex;flex-direction:column;gap:7px}
       <tr><td class="site">mua-ban (tất cả)</td><td class="r">82</td><td class="r">4 phút</td><td class="r">≈ 1.200</td></tr>
     </tbody>
   </table></div>
-  <p class="sub" style="margin-top:10px">Poll trang 1–3 mỗi 5 phút là đủ bắt gần hết tin điện thoại mới. Cùng với Bonbanh (mục 3.6), đây là nguồn cho dòng sự kiện thật với tần suất cao, hợp với speed layer (Kafka + Spark Streaming).</p>
+  <p class="sub" style="margin-top:10px">Ngày 11/10 poll trang 1–5 qua <code>?page=</code>. robots.txt hiện cấm tham số này (mục 3.13), nên trong pipeline chỉ poll trang 1 (20 tin) mỗi 3–5 phút. Cùng với Bonbanh (mục 3.6), đây là nguồn cho dòng sự kiện thật với tần suất cao, hợp với speed layer (Kafka + Spark Streaming).</p>
 
   <h4>3.8 Chợ Tốt: phân phối giá theo model và tin giá bất thường</h4>
   <p>Lấy trang 1–5 của URL lọc theo model (từ <code>sitemap-dien-thoai-model-*.xml</code>, vd <code>/mua-ban-dien-thoai-apple-iphone-15-pro-max-sdmd1ml2483</code>), nhóm theo <code>mobile_capacity</code>, đánh dấu outlier bằng IQR (ngoài [Q1 − 1,5·IQR, Q3 + 1,5·IQR]).</p>
@@ -342,6 +349,54 @@ ul,ol{margin:0;padding-left:1.3em;display:flex;flex-direction:column;gap:7px}
   <h4>3.12 Prototype schema chung và kiểm tra chất lượng</h4>
   <p><code>snapshot_adapter.py</code> đưa item của mọi nguồn về <code>PRICE_SNAPSHOT</code> (<code>crawl_ts, site, product_id, name, price, original_price, sold_cum, stock, rating, review_count, offer_count, region, condition</code>) và loại bản ghi theo các luật: thiếu id/tên, giá ≤ 0 hoặc vượt trần (5 tỷ; ô tô 100 tỷ), giá gốc &lt; 50% giá bán, số đã bán giảm so với snapshot trước. <!--ADAPTER-->Trên 4.657 snapshot từ 16 nguồn: 4.628 hợp lệ (99,4%).<!--/ADAPTER--></p>
   <!--ADAPTERTABLE--><div class="tw" style="margin-top:10px"><table><thead><tr><th>Nguồn</th><th>Snapshot</th><th>Hợp lệ</th><th>giá gốc</th><th>đã bán</th><th>tồn kho</th><th>rating</th><th>review</th><th>số shop</th><th>khu vực</th><th>tình trạng</th><th>Bị loại</th></tr></thead><tbody><tr><td class="site">Bách Hóa Xanh (Playwright)</td><td class="r">307</td><td class="r">307</td><td class="r">28%</td><td class="r"></td><td class="r"></td><td class="r"></td><td class="r"></td><td class="r"></td><td class="r"></td><td class="r"></td><td>—</td></tr><tr><td class="site">Bonbanh</td><td class="r">120</td><td class="r">120</td><td class="r"></td><td class="r"></td><td class="r"></td><td class="r"></td><td class="r"></td><td class="r"></td><td class="r">100%</td><td class="r"></td><td>—</td></tr><tr><td class="site">Chợ Tốt</td><td class="r">200</td><td class="r">200</td><td class="r"></td><td class="r"></td><td class="r"></td><td class="r"></td><td class="r"></td><td class="r"></td><td class="r">100%</td><td class="r">100%</td><td>—</td></tr><tr><td class="site">ĐMX</td><td class="r">400</td><td class="r">400</td><td class="r"></td><td class="r"></td><td class="r"></td><td class="r"></td><td class="r"></td><td class="r"></td><td class="r"></td><td class="r"></td><td>—</td></tr><tr><td class="site">FPT Shop</td><td class="r">282</td><td class="r">282</td><td class="r">100%</td><td class="r">100%</td><td class="r"></td><td class="r">95%</td><td class="r"></td><td class="r"></td><td class="r"></td><td class="r"></td><td>—</td></tr><tr><td class="site">Hoàng Hà</td><td class="r">126</td><td class="r">126</td><td class="r">28%</td><td class="r"></td><td class="r"></td><td class="r"></td><td class="r"></td><td class="r"></td><td class="r"></td><td class="r"></td><td>—</td></tr><tr><td class="site">Kingfoodmart</td><td class="r">287</td><td class="r">287</td><td class="r">100%</td><td class="r">100%</td><td class="r">100%</td><td class="r"></td><td class="r"></td><td class="r"></td><td class="r"></td><td class="r"></td><td>—</td></tr><tr><td class="site">Lazada (Playwright)</td><td class="r">120</td><td class="r">120</td><td class="r"></td><td class="r">18%</td><td class="r"></td><td class="r"></td><td class="r"></td><td class="r"></td><td class="r"></td><td class="r"></td><td>—</td></tr><tr><td class="site">MediaMart</td><td class="r">266</td><td class="r">266</td><td class="r"></td><td class="r"></td><td class="r">100%</td><td class="r">100%</td><td class="r">100%</td><td class="r"></td><td class="r"></td><td class="r"></td><td>—</td></tr><tr><td class="site">meta.vn</td><td class="r">224</td><td class="r">224</td><td class="r"></td><td class="r"></td><td class="r">100%</td><td class="r">100%</td><td class="r">100%</td><td class="r"></td><td class="r"></td><td class="r"></td><td>—</td></tr><tr><td class="site">Nguyễn Kim</td><td class="r">250</td><td class="r">250</td><td class="r"></td><td class="r"></td><td class="r"></td><td class="r"></td><td class="r"></td><td class="r"></td><td class="r"></td><td class="r"></td><td>—</td></tr><tr><td class="site">Phong Vũ</td><td class="r">400</td><td class="r">400</td><td class="r">100%</td><td class="r"></td><td class="r">100%</td><td class="r"></td><td class="r"></td><td class="r"></td><td class="r"></td><td class="r"></td><td>—</td></tr><tr><td class="site">Pico</td><td class="r">175</td><td class="r">175</td><td class="r">100%</td><td class="r">100%</td><td class="r">100%</td><td class="r"></td><td class="r"></td><td class="r"></td><td class="r"></td><td class="r"></td><td>—</td></tr><tr><td class="site">TGDD</td><td class="r">100</td><td class="r">100</td><td class="r"></td><td class="r"></td><td class="r">100%</td><td class="r">90%</td><td class="r">90%</td><td class="r"></td><td class="r"></td><td class="r"></td><td>—</td></tr><tr><td class="site">Tiki (2 danh mục)</td><td class="r">1000</td><td class="r">971</td><td class="r">100%</td><td class="r">80%</td><td class="r"></td><td class="r">100%</td><td class="r">100%</td><td class="r"></td><td class="r"></td><td class="r"></td><td>sold_decreased: 29</td></tr><tr><td class="site">Websosanh</td><td class="r">400</td><td class="r">400</td><td class="r"></td><td class="r"></td><td class="r"></td><td class="r"></td><td class="r"></td><td class="r">100%</td><td class="r"></td><td class="r"></td><td>—</td></tr></tbody></table></div><p class="sub" style="margin-top:8px">Ô số là tỷ lệ snapshot có trường đó (từ trang danh mục; trang SP của TGDD/ĐMX/Nguyễn Kim có thêm rating/review). Lỗi <code>sold_decreased</code> của Tiki là listing nhiều biến thể đổi biến thể đại diện.</p><!--/ADAPTERTABLE-->
+
+  <h4>3.13 Đo rate limit theo bậc (12/10/2026)</h4>
+  <p>Đo trên 3 nguồn xếp hạng cao nhất: Tiki (tách trang danh mục và trang sản phẩm), Websosanh, Chợ Tốt. Script: <code>scripts/ratelimit.py</code>, chạy lúc 10:45–11:06 (giờ VN).</p>
+  <ul>
+    <li><b>Cách đo:</b> mỗi nguồn một tiến trình, request tuần tự, không song song, không proxy, cùng một User-Agent. Giãn cách cố định trong mỗi bậc, giảm dần: 10s → 5s → 3s → 2s → 1s, mỗi bậc 25 request.</li>
+    <li><b>URL:</b> lấy ngẫu nhiên từ sitemap, không lặp lại URL.</li>
+    <li><b>Điều kiện dừng:</b> request bị coi là hỏng khi status khác 200/404/410, hoặc khi thiếu marker dữ liệu (<code>__NEXT_DATA__</code>, JSON-LD). Gặp 2 request hỏng liên tiếp thì dừng tăng tốc. Sau đó thử 1 request mỗi 2 phút để đo thời gian hồi phục.</li>
+    <li><b>Header:</b> ghi lại <code>Retry-After</code>, <code>X-RateLimit-*</code>, <code>cf-mitigated</code>.</li>
+  </ul>
+  <!--RATELIMIT--><div class="tw" style="margin-top:10px"><table>
+    <thead><tr><th>Nguồn</th><th>10s</th><th>7s</th><th>5s</th><th>3s</th><th>2s</th><th>1s</th><th>Thời gian phản hồi (trung vị)</th><th>Kết luận</th></tr></thead>
+    <tbody>
+      <tr><td class="site">Tiki – trang danh mục</td><td class="r">—</td><td class="r">—</td><td class="r">25/25</td><td class="r">25/25</td><td class="r">25/25</td><td class="r">25/25</td><td class="r">0,55–0,67s</td><td><span class="chip ok">không bị chặn</span> 100/100, kể cả ở mức 1 request/giây. Không có header rate-limit.</td></tr>
+      <tr><td class="site">Tiki – trang sản phẩm</td><td class="r">25/25</td><td class="r">25/25</td><td class="r">25/25</td><td class="r"><b>8/10</b></td><td class="r">—</td><td class="r">—</td><td class="r">0,30s</td><td><span class="chip bad">chặn ở 3s</span> Sau 75 request OK ở bậc 10/7/5s, bậc 3s trả trang thử thách JS từ request thứ 9. Trang vẫn là HTTP 200 nhưng chỉ 18 KB thay vì khoảng 235 KB. <!--TIKIRECOVERY-->Thăm dò hồi phục: còn bị chặn ở phút 2 và phút 4, bình thường lại ở <b>phút 6</b> (ngày 11/10 là 10–15 phút, khi đó bị tải dồn lâu hơn).<!--/TIKIRECOVERY--></td></tr>
+      <tr><td class="site">Websosanh – trang so sánh</td><td class="r">25/25</td><td class="r">—</td><td class="r">25/25</td><td class="r">25/25</td><td class="r">25/25</td><td class="r">25/25</td><td class="r">0,41–0,58s</td><td><span class="chip ok">không bị chặn</span> 125/125. Không có header rate-limit hay Cloudflare.</td></tr>
+      <tr><td class="site">Chợ Tốt – trang tin + danh mục</td><td class="r">23/25</td><td class="r">—</td><td class="r">25/25</td><td class="r">22/25</td><td class="r">25/25</td><td class="r">23/25</td><td class="r">0,89–1,14s</td><td><span class="chip warn">không có rate limit theo tốc độ</span> 118/125. Có 7 lần 403 (Cloudflare challenge). Tỷ lệ này không tăng khi tăng tốc.</td></tr>
+    </tbody>
+  </table></div><!--/RATELIMIT-->
+  <div class="why" style="margin-top:12px">
+    <p><b>Tiki trang sản phẩm: ngưỡng nằm giữa 12 và 20 request/phút.</b></p>
+    <ul>
+      <li>Ở bậc 5s (12 request/phút): 25/25 OK.</li>
+      <li>Ở bậc 3s (20 request/phút): bị chặn sau khoảng 27 giây (9 request). Tính đến lúc bị chặn: 85 request trong 10 phút, 83 OK.</li>
+      <li>Ngày 11/10, ở mức 2s (30 request/phút), bị chặn sau khoảng 15 request.</li>
+    </ul>
+    <p>Như vậy giới hạn tính theo <b>tốc độ trong một cửa sổ ngắn</b>, không theo tổng số request: 75 request liên tục ở 5–10s vẫn không bị chặn. Trang danh mục cùng host không bị giới hạn này.</p>
+    <p><b>Tốc độ khuyến nghị:</b> trang sản phẩm Tiki ≤ 1 request/7–10s (6–8 request/phút, chừa biên an toàn 1,5–2 lần so với ngưỡng). Mức 5s mới chỉ được kiểm chứng trong 2 phút.</p>
+  </div>
+  <div class="why bad" style="margin-top:12px">
+    <p><b>Chợ Tốt: 403 là luật Cloudflare gắn với từng tin, không phải rate limit.</b></p>
+    <ul>
+      <li>7/125 request trả 403 với header <code>cf-mitigated: challenge</code> (trang khoảng 5,8 KB), rải ở các bậc 10s, 3s, 1s. Bậc 5s và 2s không có lần nào.</li>
+      <li>Cả 7 đều là trang chi tiết tin <code>/{list_id}.htm</code>.</li>
+      <li>Thử lại đúng 7 URL đó, mỗi request cách 10 giây: <b>7/7 vẫn 403</b>. Trong cùng lúc, các URL khác trả 200.</li>
+    </ul>
+    <p>Vậy là một số tin bị Cloudflare đặt challenge cố định (tỷ lệ ≈ 5–6% số trang tin), không phụ thuộc tốc độ. Pipeline nên ghi các tin này là <code>challenged</code> và bỏ qua, không thử lại và không giải challenge. Trang danh mục (nguồn chính cho luồng tin mới) 5/5 OK.</p>
+    <p>Ngoài ra có 2 trang tin trả <b>410 Gone</b> (tin đã gỡ), đúng với nhãn "đã bán/gỡ tin" ở mục 3.8.</p>
+  </div>
+  <div class="why" style="margin-top:12px">
+    <p><b>Chợ Tốt: robots.txt hiện có <code>Disallow: /*page=</code> cho <code>User-agent: *</code></b> (kiểm tra ngày 12/10). Vì vậy:</p>
+    <ul>
+      <li>Không dùng <code>?page=N</code> nữa. Mục 3.3, 3.7, 3.8 dùng tham số này ngày 11/10.</li>
+      <li>Luồng tin mới chỉ lấy trang 1 của từng danh mục (20 tin), poll dày hơn. Với khoảng 230 tin điện thoại/giờ, trang 1 mỗi 3–5 phút bắt được phần lớn tin mới.</li>
+      <li>Có thể chia nhỏ theo danh mục con hoặc trang model (URL <code>…-sdmd…</code>, không phải tham số) để tăng độ phủ.</li>
+    </ul>
+    <p>Cũng cấm các tham số lọc như <code>price=</code>, <code>sort=</code>, <code>mobile_capacity=</code>.</p>
+  </div>
+  <p class="sub" style="margin-top:10px">Kết quả tổng hợp: <code>results/ratelimit_20261012.json</code>. Dữ liệu thô (URL, status, kích thước từng request) chỉ giữ ở máy local.</p>
 </section>
 
 <section>
@@ -401,7 +456,8 @@ ul,ol{margin:0;padding-left:1.3em;display:flex;flex-direction:column;gap:7px}
     <div class="method">
       <h3><span class="num">6</span>Chợ Tốt</h3>
       <dl class="row">
-        <dt>Parse</dt><dd><code>__NEXT_DATA__</code> → list dict có <code>list_id</code>; phân trang <code>?page=N</code></dd>
+        <dt>Parse</dt><dd><code>__NEXT_DATA__</code> → list dict có <code>list_id</code>; chỉ trang 1 (robots.txt cấm <code>/*page=</code>)</dd>
+        <dt>Rate limit</dt><dd>Không giới hạn theo tốc độ trong khoảng 1–10s/request. ~5–6% trang tin <code>/{list_id}.htm</code> trả 403 <code>cf-mitigated: challenge</code> cố định theo URL: ghi nhận và bỏ qua</dd>
         <dt>Trường giữ</dt><dd><code>list_id</code>, <code>subject</code>, <code>price</code>, <code>region_name</code>, <code>elt_condition</code>, <code>mobile_brand/model/capacity</code>, <code>date</code></dd>
         <dt>Trường bỏ</dt><dd><code>phone</code>, <code>account_name</code>, <code>full_name</code>, <code>latitude/longitude</code></dd>
         <dt>Dùng cho</dt><dd>Phát hiện tin có giá bất thường so với cùng model và tình trạng; so giá đồ cũ với giá mới trên TGDD/FPT</dd>
@@ -450,7 +506,7 @@ ul,ol{margin:0;padding-left:1.3em;display:flex;flex-direction:column;gap:7px}
       <div class="tw" style="margin-top:8px"><table class="narrow">
         <thead><tr><th>Nguồn</th><th>Việc</th><th>Tần suất</th><th>Request/ngày</th><th>Snapshot/ngày (ước)</th></tr></thead>
         <tbody>
-          <tr><td class="site">Chợ Tốt</td><td>trang 1–3 danh mục điện thoại, laptop, đồ điện tử</td><td>5 phút</td><td class="r">≈ 2.600</td><td class="r">≈ 6.000–9.000 tin mới</td></tr>
+          <tr><td class="site">Chợ Tốt</td><td>trang 1 danh mục điện thoại, laptop, đồ điện tử (robots cấm <code>?page=</code>)</td><td>3–5 phút</td><td class="r">≈ 860–1.440</td><td class="r">≈ 6.000–9.000 tin mới</td></tr>
           <tr><td class="site">Tiki</td><td>toàn bộ 4.237 danh mục, cách 5s</td><td>1 lần/ngày</td><td class="r">≈ 4.200</td><td class="r">≈ 130.000</td></tr>
           <tr><td class="site">Tiki</td><td>100 danh mục trọng tâm</td><td>1 giờ</td><td class="r">2.400</td><td class="r">≈ 96.000</td></tr>
           <tr><td class="site">Websosanh</td><td>panel 1.000 trang so sánh, cách 10s</td><td>1 lần/ngày</td><td class="r">1.000</td><td class="r">1.000</td></tr>
@@ -468,10 +524,10 @@ ul,ol{margin:0;padding-left:1.3em;display:flex;flex-direction:column;gap:7px}
 <section>
   <h2>7. Tuân thủ</h2>
   <ul>
-    <li><b>robots.txt:</b> mọi URL dùng trong khảo sát đều được phép với <code>User-agent: *</code>. Không dùng các đường dẫn bị Disallow (<code>/compare-api/*</code>, <code>/search-api/*</code> của Websosanh; <code>/*?*</code> của Bibomart, CellphoneS; <code>*?p=*</code> của An Khang). Tuân thủ <code>Crawl-delay</code> (TGDD 5s, Pharmacity 20s, Thiên Nam Hòa 120s).</li>
+    <li><b>robots.txt:</b> mọi URL dùng trong khảo sát đều được phép với <code>User-agent: *</code>. Không dùng các đường dẫn bị Disallow (<code>/compare-api/*</code>, <code>/search-api/*</code> của Websosanh; <code>/*?*</code> của Bibomart, CellphoneS; <code>*?p=*</code> của An Khang). Tuân thủ <code>Crawl-delay</code> (TGDD 5s, Pharmacity 20s, Thiên Nam Hòa 120s). Kiểm tra lại ngày 12/10: Chợ Tốt có <code>Disallow: /*page=</code>, <code>/*sort=</code>, <code>/*price=</code> cho <code>User-agent: *</code>, nên bỏ phân trang qua URL. robots.txt có thể đổi, nên pipeline cần đọc lại robots.txt mỗi ngày.</li>
     <li><b>Điều khoản sử dụng:</b> thoả thuận của TGDD (điều 3.2 k) cấm "sao chép, truyền bá, phân phối, cung cấp … cho bên thứ ba nếu không được sự đồng ý". Vì vậy dữ liệu crawl chỉ dùng nội bộ cho nghiên cứu và <b>không đưa dữ liệu thô lên repo public</b>; repo chỉ chứa script và số liệu tổng hợp. Trang điều khoản của Tiki render bằng JS nên chưa đọc được nội dung.</li>
     <li><b>Dữ liệu cá nhân (Nghị định 13/2023/NĐ-CP):</b> bỏ <code>phone</code>, <code>account_name</code>, <code>full_name</code>, toạ độ của tin Chợ Tốt ngay ở bước parse, không lưu.</li>
-    <li><b>Không vượt anti-bot:</b> khi Tiki trả trang thử thách JS thì dừng và giãn tần suất, không giải. sosanhgia.vn bị loại vì giá thật bị mã hoá có chủ đích.</li>
+    <li><b>Không vượt anti-bot:</b> khi Tiki trả trang thử thách JS thì dừng và giãn tần suất, không giải. Trang tin Chợ Tốt bị Cloudflare challenge thì bỏ qua, không dùng trình duyệt hay solver để vượt. sosanhgia.vn bị loại vì giá thật bị mã hoá có chủ đích.</li>
   </ul>
 </section>
 

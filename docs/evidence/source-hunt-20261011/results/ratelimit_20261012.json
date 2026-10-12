@@ -1,0 +1,295 @@
+{
+ "run": "2026-10-12 10:45-11:12 ICT",
+ "script": "scripts/ratelimit.py",
+ "sources": {
+  "tiki_cat": {
+   "source": "tiki_cat",
+   "started": "2026-10-12T03:45:23+00:00",
+   "pool": 2000,
+   "steps": [
+    {
+     "delay_s": 5,
+     "requests": 25,
+     "ok": 25,
+     "codes": {
+      "200": 25
+     },
+     "median_secs": 0.55,
+     "max_secs": 0.85,
+     "median_size": 458256,
+     "rate_headers": []
+    },
+    {
+     "delay_s": 3,
+     "requests": 25,
+     "ok": 25,
+     "codes": {
+      "200": 25
+     },
+     "median_secs": 0.67,
+     "max_secs": 1.18,
+     "median_size": 489930,
+     "rate_headers": []
+    },
+    {
+     "delay_s": 2,
+     "requests": 25,
+     "ok": 25,
+     "codes": {
+      "200": 25
+     },
+     "median_secs": 0.61,
+     "max_secs": 0.83,
+     "median_size": 460210,
+     "rate_headers": []
+    },
+    {
+     "delay_s": 1,
+     "requests": 25,
+     "ok": 25,
+     "codes": {
+      "200": 25
+     },
+     "median_secs": 0.6,
+     "max_secs": 1.23,
+     "median_size": 450542,
+     "rate_headers": []
+    }
+   ],
+   "blocked": null,
+   "recovery": null,
+   "fastest_clean_delay": 1
+  },
+  "tiki_prod": {
+   "source": "tiki_prod",
+   "started": "2026-10-12T03:56:10+00:00",
+   "pool": 1803,
+   "steps": [
+    {
+     "delay_s": 10,
+     "requests": 25,
+     "ok": 25,
+     "codes": {
+      "200": 24,
+      "404": 1
+     },
+     "median_secs": 0.3,
+     "max_secs": 2.08,
+     "median_size": 233342,
+     "rate_headers": []
+    },
+    {
+     "delay_s": 7,
+     "requests": 25,
+     "ok": 25,
+     "codes": {
+      "200": 24,
+      "404": 1
+     },
+     "median_secs": 0.36,
+     "max_secs": 2.63,
+     "median_size": 237889,
+     "rate_headers": []
+    },
+    {
+     "delay_s": 5,
+     "requests": 25,
+     "ok": 25,
+     "codes": {
+      "200": 25
+     },
+     "median_secs": 0.33,
+     "max_secs": 0.68,
+     "median_size": 240494,
+     "rate_headers": []
+    },
+    {
+     "delay_s": 3,
+     "requests": 10,
+     "ok": 8,
+     "codes": {
+      "200": 10
+     },
+     "median_secs": 0.28,
+     "max_secs": 0.46,
+     "median_size": 233476,
+     "rate_headers": []
+    }
+   ],
+   "blocked": {
+    "delay": 3,
+    "at_request_in_step": 10,
+    "total_requests_before": 85,
+    "status": 200,
+    "size": 18106,
+    "note": "challenge page",
+    "headers": {
+     "server": "Byte-nginx"
+    },
+    "ts": "2026-10-12T04:06:12+00:00"
+   },
+   "recovery": {
+    "minutes_after_block": 6.0,
+    "ts": "2026-10-12T04:12:13+00:00"
+   },
+   "fastest_clean_delay": 5
+  },
+  "wss": {
+   "source": "wss",
+   "started": "2026-10-12T03:45:27+00:00",
+   "pool": 37336,
+   "steps": [
+    {
+     "delay_s": 10,
+     "requests": 25,
+     "ok": 25,
+     "codes": {
+      "200": 25
+     },
+     "median_secs": 0.51,
+     "max_secs": 0.67,
+     "median_size": 149807,
+     "rate_headers": []
+    },
+    {
+     "delay_s": 5,
+     "requests": 25,
+     "ok": 25,
+     "codes": {
+      "200": 25
+     },
+     "median_secs": 0.47,
+     "max_secs": 0.74,
+     "median_size": 150515,
+     "rate_headers": []
+    },
+    {
+     "delay_s": 3,
+     "requests": 25,
+     "ok": 25,
+     "codes": {
+      "200": 25
+     },
+     "median_secs": 0.58,
+     "max_secs": 16.86,
+     "median_size": 152901,
+     "rate_headers": []
+    },
+    {
+     "delay_s": 2,
+     "requests": 25,
+     "ok": 25,
+     "codes": {
+      "200": 25
+     },
+     "median_secs": 0.41,
+     "max_secs": 1.06,
+     "median_size": 151175,
+     "rate_headers": []
+    },
+    {
+     "delay_s": 1,
+     "requests": 25,
+     "ok": 25,
+     "codes": {
+      "200": 25
+     },
+     "median_secs": 0.51,
+     "max_secs": 0.98,
+     "median_size": 149110,
+     "rate_headers": []
+    }
+   ],
+   "blocked": null,
+   "recovery": null,
+   "fastest_clean_delay": 1
+  },
+  "chotot": {
+   "source": "chotot",
+   "started": "2026-10-12T03:46:48+00:00",
+   "pool": 233,
+   "steps": [
+    {
+     "delay_s": 10,
+     "requests": 25,
+     "ok": 23,
+     "codes": {
+      "200": 22,
+      "410": 1,
+      "403": 2
+     },
+     "median_secs": 0.96,
+     "max_secs": 2.5,
+     "median_size": 264732,
+     "rate_headers": []
+    },
+    {
+     "delay_s": 5,
+     "requests": 25,
+     "ok": 25,
+     "codes": {
+      "200": 24,
+      "410": 1
+     },
+     "median_secs": 1.14,
+     "max_secs": 2.9,
+     "median_size": 267625,
+     "rate_headers": []
+    },
+    {
+     "delay_s": 3,
+     "requests": 25,
+     "ok": 22,
+     "codes": {
+      "200": 22,
+      "403": 3
+     },
+     "median_secs": 0.89,
+     "max_secs": 1.98,
+     "median_size": 263123,
+     "rate_headers": []
+    },
+    {
+     "delay_s": 2,
+     "requests": 25,
+     "ok": 25,
+     "codes": {
+      "200": 25
+     },
+     "median_secs": 0.89,
+     "max_secs": 1.66,
+     "median_size": 269903,
+     "rate_headers": []
+    },
+    {
+     "delay_s": 1,
+     "requests": 25,
+     "ok": 23,
+     "codes": {
+      "200": 23,
+      "403": 2
+     },
+     "median_secs": 0.89,
+     "max_secs": 2.07,
+     "median_size": 262074,
+     "rate_headers": []
+    }
+   ],
+   "blocked": null,
+   "recovery": null,
+   "fastest_clean_delay": 2
+  }
+ },
+ "chotot_challenge_retry": {
+  "urls": 7,
+  "delay_s": 10,
+  "still_403": 7,
+  "header": "cf-mitigated: challenge",
+  "conclusion": "per-URL Cloudflare rule, not rate based"
+ },
+ "chotot_robots_20261012": [
+  "Disallow: /*page=",
+  "Disallow: /*sort=",
+  "Disallow: /*price="
+ ]
+}
