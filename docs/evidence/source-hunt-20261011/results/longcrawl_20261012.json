@@ -1,0 +1,20 @@
+{
+ "source": "tiki category pages (TikiCategoryHtmlCrawler, adapter_version tiki-category-html-v1)",
+ "stack": "mp-tikihtml (crawl, ingest, speed, batch; no Kibana/Superset)",
+ "config": {"categories": 60, "cadence_minutes": 30, "request_delay_seconds": 2.0},
+ "window_utc": {"start": "2026-10-12T07:14:25Z", "stop": "2026-10-12T10:02:56Z", "stop_reason": "watchdog: C: below 2 GB during the Spark batch"},
+ "crawl_as_of_0947Z": {"attempts": 323, "failed": 0, "challenge_pages": 0, "parsed_products": 12407, "raw_mb": 177.9, "latency_ms_p50": 3634, "latency_ms_max": 16781, "pages_per_hour": 120, "raw_mb_per_hour": 65.8},
+ "speed_at_1002Z": {"micro_batches": 369, "failed": 0, "es_offers_current": 2288, "es_changes": 2468},
+ "batch": {
+  "manual_run": {"run_id": "mp-20261012T0958Z", "status": "SUCCEEDED", "silver_rows": 16177, "quality_status": "PASS", "mandatory_failure_count": 0, "manifest_promoted": true, "cache_published": true,
+   "dataset_counts": {"category_price_daily": 236, "counter_delta_daily": 6864, "crawl_reliability_daily": 1, "offer_change_daily": 2288, "offer_current": 2288, "offer_freshness": 2288, "offer_price_history_daily": 2288, "price_anomaly_daily": 2288, "seller_current": 474, "source_coverage_daily": 1}},
+  "scheduler_startup_run": {"run_id": "mp-20261012T0000Z", "status": "QUALITY_FAILED", "silver_rows": 0, "failing_checks": ["silver_parse_attempt_reconciliation"], "note": "as_of 00:00Z precedes all data; empty attempt audit makes the mandatory check SKIPPED, which fails the gate by design"}
+ },
+ "validate_final": "not run: the watchdog stopped the stack while validate started",
+ "issues": [
+  "worker crashed twice (07:18Z, 08:17Z): Docker VM clock stepped back, completed_at < started_at; fixed by non_decreasing_clock (commit b5644f4), 0 crashes in 83 attempts after the fix",
+  "4 audit.crawl_run rows left RUNNING (05:24Z stop, 2 crashes, 08:49Z restart)",
+  "crawler/reparse.py and ops/backup.py do not know adapter tiki-category-html-v1",
+  "WSL swap.vhdx on C: grew 1.5 GB during the Spark batch"
+ ]
+}

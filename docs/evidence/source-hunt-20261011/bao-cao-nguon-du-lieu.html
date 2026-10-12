@@ -52,7 +52,7 @@ ul,ol{margin:0;padding-left:1.3em;display:flex;flex-direction:column;gap:7px}
 
 <header>
   <h1>Khảo sát nguồn dữ liệu crawl cho pipeline</h1>
-  <p class="sub">Yêu cầu: nguồn dễ crawl, lấy được liên tục và ổn định, không gọi API · Thử nghiệm 11/10/2026, 17:30–20:25; đo rate limit 12/10/2026, 10:45–11:12 · Python 3.11 <code>urllib.request</code> + <code>re</code>/<code>json</code>; Playwright 1.57 (Chromium headless) · Đã thử 40+ website</p>
+  <p class="sub">Yêu cầu: nguồn dễ crawl, lấy được liên tục và ổn định, không gọi API · Thử nghiệm 11/10/2026, 17:30–20:25; đo rate limit 12/10/2026, 10:45–11:12; crawl dài Tiki trong pipeline 12/10/2026, 14:14–17:02 · Python 3.11 <code>urllib.request</code> + <code>re</code>/<code>json</code>; Playwright 1.57 (Chromium headless) · Đã thử 40+ website</p>
 </header>
 
 <section class="box">
@@ -69,6 +69,7 @@ ul,ol{margin:0;padding-left:1.3em;display:flex;flex-direction:column;gap:7px}
       </ul>
     </li>
     <li><b>Kết quả đo:</b> <!--SUMMARY-->144/145 lần tải danh mục thành công (99%) trên 16 nguồn trong khoảng 18:04–20:22. Không có 403/429/captcha. Lỗi duy nhất: Bonbanh trả trang "máy chủ quá tải" với HTTP 200 ở 1 lần tải (mục 3.6). Parser không phải sửa lần nào. Thời gian tải 0,1–1 giây/trang với HTTP, 9–16 giây với Playwright. <!--/SUMMARY--></li>
+    <li><b>Crawl dài trong pipeline (mục 3.14):</b> Tiki trang danh mục chạy liên tục khoảng 2 giờ 48 phút trong hệ thống Lambda hiện có: 323/323 lượt crawl thành công, 12.407 sản phẩm, 0 lần bị chặn. Dữ liệu đi hết đường từ bronze → Kafka → Silver → speed (369 micro-batch, 0 lỗi) → batch (quality PASS, Gold 10 dataset, cache được publish). Adapter mới đọc trang HTML thay cho API nội bộ và tương thích với pipeline, không phải sửa phần ingest, speed hay batch.</li>
     <li><b>Hai giới hạn quan trọng:</b>
       <ul>
         <li><b>Tiki:</b> trang <i>sản phẩm</i> chuyển sang trang thử thách JavaScript (mã đã làm rối) khi tải nhanh hơn khoảng 12–20 request/phút. Đo theo bậc ngày 12/10 (mục 3.13):
@@ -397,6 +398,53 @@ ul,ol{margin:0;padding-left:1.3em;display:flex;flex-direction:column;gap:7px}
     <p>Cũng cấm các tham số lọc như <code>price=</code>, <code>sort=</code>, <code>mobile_capacity=</code>.</p>
   </div>
   <p class="sub" style="margin-top:10px">Kết quả tổng hợp: <code>results/ratelimit_20261012.json</code>. Dữ liệu thô (URL, status, kích thước từng request) chỉ giữ ở máy local.</p>
+
+  <h4>3.14 Crawl dài Tiki trang danh mục trong pipeline (12/10/2026)</h4>
+  <p style="margin:10px 0">Mục đích: kiểm tra nguồn được đề xuất nhiều nhất (Tiki trang danh mục) có chạy được liên tục trong hệ thống Lambda hiện có không, từ crawl tới Gold. Adapter cũ của hệ thống gọi API nội bộ <code>/api/personalish/v1/blocks/listings</code>, trái với yêu cầu không gọi API, nên đã viết adapter mới <code>TikiCategoryHtmlCrawler</code>:</p>
+  <ul>
+    <li><b>Nguồn dữ liệu:</b> tải trang <code>https://tiki.vn/&lt;slug&gt;/c&lt;id&gt;</code> và đọc danh sách sản phẩm trong <code>__NEXT_DATA__</code> ở <code>props.initialState.catalog.data</code>. Các dòng này có cùng tên trường với API, nên tái dùng được phần ánh xạ dòng → sự kiện của adapter cũ.</li>
+    <li><b>Lọc:</b> bỏ sản phẩm quảng cáo (trường <code>advertisement</code> khác rỗng), còn khoảng 40 sản phẩm thường mỗi trang.</li>
+    <li><b>Nhận diện trang thử thách:</b> trang không có <code>__NEXT_DATA__</code> thì cả trang bị tính là lỗi parse, worker sẽ thử lại sau.</li>
+    <li><b>Định danh:</b> giữ mã sàn <code>tiki</code> nên <code>offer_id</code> liên tục với dữ liệu cũ. <code>adapter_version</code> mới là <code>tiki-category-html-v1</code>.</li>
+    <li><b>Cấu hình:</b> 60 danh mục, mỗi danh mục quét lại sau 30 phút, cách nhau 2s giữa các request.</li>
+    <li><b>Môi trường:</b> chạy trên stack riêng <code>mp-tikihtml</code>, không đụng stack <code>mp-live</code>.</li>
+  </ul>
+  <!--LONGCRAWL--><div class="tw" style="margin-top:10px"><table class="narrow">
+    <thead><tr><th>Hạng mục</th><th>Kết quả</th></tr></thead>
+    <tbody>
+      <tr><td class="site">Thời gian</td><td>07:14–10:02 UTC (≈ 2 giờ 48 phút), cộng một đợt 40 trang lúc 05:2x UTC</td></tr>
+      <tr><td class="site">Lượt crawl trang danh mục</td><td><span class="chip ok">323/323 thành công</span> tính đến 09:47 UTC; 0 lỗi, 0 lần bị trang thử thách JS, 0 lần 403/429</td></tr>
+      <tr><td class="site">Sản phẩm parse được</td><td>12.407 (≈ 38 sản phẩm/trang); nhịp ổn định 120 trang/giờ, ≈ 4.600 sản phẩm/giờ</td></tr>
+      <tr><td class="site">Thời gian mỗi lượt</td><td>p50 3,6s, max 16,8s (gồm tải trang, ghi bronze và publish Kafka)</td></tr>
+      <tr><td class="site">Dữ liệu thô</td><td>178 MB, ≈ 65,8 MB/giờ (≈ 0,55 MB/trang)</td></tr>
+      <tr><td class="site">Speed layer (Spark → Elasticsearch, Redis)</td><td>369 micro-batch, 0 lỗi; Elasticsearch có 2.288 offer hiện tại, 2.468 bản ghi trong <code>marketplace-changes-v1</code></td></tr>
+      <tr><td class="site">Batch layer</td><td>Run <code>mp-20261012T0958Z</code>: <span class="chip ok">SUCCEEDED</span>, 16.177 dòng Silver, quality PASS (0 check bắt buộc fail), manifest được promote, cache được publish</td></tr>
+      <tr><td class="site">Gold</td><td>10 dataset: <code>offer_current</code>, <code>offer_freshness</code>, <code>offer_change_daily</code>, <code>offer_price_history_daily</code>, <code>price_anomaly_daily</code> (mỗi dataset 2.288 dòng); <code>counter_delta_daily</code> 6.864; <code>seller_current</code> 474; <code>category_price_daily</code> 236; <code>crawl_reliability_daily</code>, <code>source_coverage_daily</code> (mỗi dataset 1 dòng)</td></tr>
+    </tbody>
+  </table></div><!--/LONGCRAWL-->
+  <div class="why" style="margin-top:12px">
+    <p><b>Kết luận: adapter trang danh mục tương thích với pipeline hiện tại</b> (crawl → bronze → Kafka → Silver → speed → batch, Gold, cache), không phải sửa phần ingest, speed hay batch.</p>
+    <ul>
+      <li>Tiki không chặn ở nhịp 120 trang/giờ, khớp với kết quả đo rate limit ở trên: trang danh mục chịu được tới 1 request/giây.</li>
+      <li>Số offer gần như không tăng sau vòng quét đầu (2.264 → 2.288), vì chỉ lấy được trang 1 của mỗi danh mục. Muốn có thêm sản phẩm thì phải thêm danh mục, không thể thêm trang.</li>
+      <li>Batch chạy tự động lúc scheduler khởi động (<code>mp-20261012T0000Z</code>) báo QUALITY_FAILED. Đây là hành vi đúng thiết kế: mốc thời gian 00:00 UTC có trước mọi dữ liệu, nên audit crawl trong khoảng đó trống, và check bắt buộc <code>silver_parse_attempt_reconciliation</code> bị bỏ qua thì tính là fail.</li>
+    </ul>
+  </div>
+  <div class="why bad" style="margin-top:12px">
+    <p><b>Vấn đề phát hiện trong lúc chạy</b></p>
+    <ul>
+      <li><b>Worker crash khi đồng hồ Docker VM nhảy lùi</b> (2 lần trong 90 phút): <code>completed_at</code> sớm hơn <code>started_at</code>, audit báo <code>ValueError</code> làm sập tiến trình worker. Không mất dữ liệu vì task được tự lấy lại khi hết hạn lease. Đã sửa bằng một đồng hồ không bao giờ đi lùi (<code>non_decreasing_clock</code> trong <code>crawler/service.py</code>). Sau khi áp bản sửa: 83 lượt crawl, 0 crash.</li>
+      <li>Còn 4 dòng <code>audit.crawl_run</code> kẹt ở trạng thái <code>RUNNING</code>, do 2 lần crash và 2 lần dừng worker giữa chừng. Worker chưa tự đóng các dòng này.</li>
+      <li><code>crawler/reparse.py</code> và <code>ops/backup.py</code> chưa đăng ký adapter mới. Nếu reparse file thô của trang HTML, chúng sẽ báo <code>ADAPTER_VERSION_CHANGED</code>.</li>
+      <li><b>Tài nguyên máy dev</b> (RAM 15 GB, ổ C: nhỏ):
+        <ul>
+          <li>Đủ 12 container, có Kibana và Superset, làm pagefile phình tới 8,8 GB và ổ C: gần đầy. Vì vậy đợt crawl dài chạy không có Kibana và Superset.</li>
+          <li>Lúc batch Spark chạy, file swap của WSL phình thêm 1,5 GB và watchdog dừng stack khi C: dưới 2 GB. Vì vậy <code>validate</code> cuối cùng không chạy được; kết quả batch ở trên lấy từ output của lệnh batch và bảng <code>audit.marketplace_batch_run</code>.</li>
+        </ul>
+      </li>
+    </ul>
+  </div>
+  <p class="sub" style="margin-top:10px">Kết quả tổng hợp: <code>results/longcrawl_20261012.json</code>. Code: branch <code>phase-9-tiki-category-html</code> (commit <code>b4e6e3c</code> adapter, <code>b5644f4</code> sửa đồng hồ).</p>
 </section>
 
 <section>
@@ -409,7 +457,7 @@ ul,ol{margin:0;padding-left:1.3em;display:flex;flex-direction:column;gap:7px}
         <dt>URL</dt><dd>Trang danh mục <code>/&lt;slug&gt;/c&lt;id&gt;</code>. Để phủ rộng, đi theo cây danh mục con (<code>sitemap_categories_index.xml</code>), không dùng <code>?page=</code></dd>
         <dt>Parse</dt><dd><code>re.search(r'&lt;script id="__NEXT_DATA__"…')</code> → <code>json.loads</code> → duyệt đệ quy lấy list dict dài nhất có khóa <code>price</code></dd>
         <dt>Lọc</dt><dd>5/45 item trên mỗi trang có trường <code>advertisement</code> (SP quảng cáo, xoay vòng giữa các lần tải). Đây là nguyên nhân của ~6 ID mới mỗi vòng. Bỏ các item này thì còn 40 SP hữu cơ (<code>params.limit = 40</code> trong <code>impression_info</code>)</dd>
-        <dt>Tần suất</dt><dd>Trang danh mục: 1–2 giờ/lần. Trang sản phẩm: panel cố định, ≥ 15 giây/request (đã kiểm chứng 24/24 không bị chặn)</dd>
+        <dt>Tần suất</dt><dd>Trang danh mục: 1–2 giờ/lần (đã chạy thử 60 danh mục × 30 phút/lần trong pipeline, 0 lần bị chặn, mục 3.14). Trang sản phẩm: panel cố định, ≥ 15 giây/request (đã kiểm chứng 24/24 không bị chặn)</dd>
         <dt>Dùng cho</dt><dd>Ước lượng nhu cầu từ Δ<code>quantity_sold</code>, độ co giãn theo <code>discount_rate</code>, giá bất thường trong danh mục</dd>
       </dl>
 <pre>{"id": 278505394, "price": 5990000, "original_price": 6990000, "quantity_sold": {"value": 255},
@@ -535,6 +583,7 @@ ul,ol{margin:0;padding-left:1.3em;display:flex;flex-direction:column;gap:7px}
   <h2>8. Việc tiếp theo và câu hỏi cho thầy</h2>
   <ol>
     <li>Chạy kiểm tra liên tục 3–5 ngày (Windows Task Scheduler, mỗi 1–2 giờ) để đo tỷ lệ đổi giá theo ngày và độ bền của parser.</li>
+    <li>Sửa các việc còn treo từ đợt crawl dài (mục 3.14): đóng các dòng <code>crawl_run</code> kẹt ở <code>RUNNING</code>, đăng ký adapter mới cho reparse và backup, chạy lại <code>validate</code> khi đủ tài nguyên máy, rồi mở rộng từ 60 lên vài trăm danh mục.</li>
     <li>Chốt panel ~200 model (điện thoại + laptop) có mặt ở ≥ 3 site để so giá chéo.</li>
     <li>Câu hỏi: dùng mức tổng hợp của Websosanh (lowPrice/highPrice/offerCount) thay vì danh sách từng shop có được không?</li>
     <li>Câu hỏi: tập trung một ngành hẹp (điện thoại + laptop, nơi 4–5 nguồn trùng nhau) hay phủ rộng nhiều ngành (thêm thực phẩm qua Kingfoodmart)?</li>
