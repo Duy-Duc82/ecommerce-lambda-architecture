@@ -183,8 +183,21 @@ def send(events: Iterable[MarketplaceObservationV1], producer: Any, pacer: Pacer
 
 
 def refuse_live() -> None:
-    if os.environ.get("COMPOSE_PROJECT_NAME", "") == LIVE_PROJECT:
+    """Run only when an isolated project's environment is loaded.
+
+    Refusing just ``COMPOSE_PROJECT_NAME=mp-live`` is not enough: with nothing
+    loaded (the shell's state after ``mp.ps1`` restores it) the producer falls
+    back to ``localhost:9092``, which is the live stack's Kafka. So the project,
+    the container prefix and the Kafka address must all be set explicitly, as
+    ``env/bench.env`` and ``env/demo.env`` do."""
+    project = os.environ.get("COMPOSE_PROJECT_NAME", "").strip()
+    if project == LIVE_PROJECT:
         raise SystemExit(f"bench_load refuses {LIVE_PROJECT}: replayed load would contaminate live collection")
+    missing = [name for name in ("COMPOSE_PROJECT_NAME", "MP_CONTAINER_PREFIX", "KAFKA_BOOTSTRAP_SERVERS")
+               if not os.environ.get(name, "").strip()]
+    if missing:
+        raise SystemExit(f"bench_load runs only in an isolated project; {', '.join(missing)} not set "
+                         "(load env/bench.env, e.g. .\\scripts\\mp.ps1 -EnvFile env/bench.env ...)")
 
 
 def main(argv: list[str] | None = None) -> int:
