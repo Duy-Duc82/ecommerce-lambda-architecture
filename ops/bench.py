@@ -222,9 +222,15 @@ def render_report(results: list[dict[str, Any]]) -> str:
         lines += [f"## {scenario}", "", "| dataset | variant | metric | median | min | max | runs |",
                   "|---|---|---|---:|---:|---:|---:|"]
         for r in rows:
+            variant = r.get("variant", "")
+            if r.get("failed"):
+                variant += f" (failed after {r.get('completed_runs', len(r.get('runs', [])))} of {r.get('repeat')} runs)"
             for metric, s in sorted(r["summary"].items()):
                 cells = ["" if s[k] is None else f"{s[k]:.4g}" for k in ("median", "min", "max")]
-                lines.append(f"| {r['dataset']} | {r.get('variant', '')} | {metric} | {' | '.join(cells)} | {s['runs']} |")
+                lines.append(f"| {r['dataset']} | {variant} | {metric} | {' | '.join(cells)} | {s['runs']} |")
+        gates = {run["metrics"].get("quality_gate") for r in rows for run in r.get("runs", [])} - {None, "passed"}
+        if gates:
+            lines += ["", f"Quality gate: {', '.join(sorted(gates))} (the replayed load has no crawl audit)."]
         lines.append("")
     return "\n".join(lines)
 
@@ -429,14 +435,37 @@ def run_batch(stack: Stack, *, count: int, seed: int) -> dict[str, Any]:
          env=stack.env, check=False, timeout=7200)
     rows = stack.query("SELECT status, quality_status, started_at, completed_at, silver_rows, gold_rows, dataset_counts "
                        "FROM audit.marketplace_batch_run WHERE run_id = %s", (run_id,))
-    if not rows or rows[0]["completed_at"] is None:
-        raise BenchFailed(f"batch {run_id} did not finish: {rows}")
-    row = rows[0]
+    failing = [r["check_name"] for r in stack.query(
+        "SELECT check_name FROM audit.marketplace_quality_result "
+        "WHERE run_id = %s AND severity = 'MANDATORY' AND status <> 'PASS'", (run_id,))]
+    return {**batch_outcome(run_id, rows[0] if rows else None, failing),
+            "ingest_silver_records_per_second": ingest["silver_records_per_second"]}
+
+
+# The replayed load comes from the generator, not the crawler, so it leaves no
+# crawl attempt to reconcile Silver against, and this mandatory rule fails on
+# every replayed batch. Any other failing check, or a crash, fails the run.
+REPLAY_EXPECTED_FAILURES = frozenset({"silver_parse_attempt_reconciliation"})
+
+
+def batch_outcome(run_id: str, row: dict[str, Any] | None, failing_checks: Sequence[str]) -> dict[str, Any]:
+    """Metrics of one batch run, or ``BenchFailed`` when its time is not a
+    batch's time: the job did not finish, crashed, or failed a quality check
+    the replayed dataset does not explain."""
+    if row is None or row["completed_at"] is None:
+        raise BenchFailed(f"batch {run_id} did not finish: {row}")
+    failing = sorted(failing_checks)
+    if row["status"] == "SUCCEEDED":
+        gate = "passed"
+    elif row["status"] == "QUALITY_FAILED" and failing and set(failing) <= REPLAY_EXPECTED_FAILURES:
+        gate = "failed_as_expected_on_replayed_data"
+    else:
+        raise BenchFailed(f"batch {run_id} ended {row['status']} with failing mandatory checks {failing}")
     seconds = (row["completed_at"] - row["started_at"]).total_seconds()
     return {"silver_rows": row["silver_rows"], "gold_rows": row["gold_rows"], "seconds": round(seconds, 3),
             "silver_rows_per_second": (row["silver_rows"] or 0) / seconds if seconds else None,
-            "status": row["status"], "quality_status": row["quality_status"],
-            "ingest_silver_records_per_second": ingest["silver_records_per_second"]}
+            "status": row["status"], "quality_status": row["quality_status"], "quality_gate": gate,
+            "quality_failing_checks": failing}
 
 
 def run_speed(stack: Stack, *, rate: float, seconds: int, seed: int) -> dict[str, Any]:
@@ -510,36 +539,56 @@ def variants(scenario: str, args: argparse.Namespace) -> list[tuple[str, dict[st
 RUNNERS = {"crawl": run_crawl, "ingest": run_ingest, "batch": run_batch, "speed": run_speed}
 
 
-def run_scenario(scenario: str, args: argparse.Namespace) -> list[Path]:
+def variant_result(*, scenario: str, variant: str, env: dict[str, Any], params: dict[str, Any], seed: int,
+                   repeat: int, runs: list[dict[str, Any]], failure: str | None) -> dict[str, Any]:
+    """One variant's file. A variant whose repeat failed keeps the runs it
+    finished, marked ``failed``; its summary covers only those runs."""
+    return {"scenario": scenario, "variant": variant, "dataset": DATASET, "environment": env,
+            "params": params, "seed": seed, "repeat": repeat, "single_run": repeat == 1,
+            "runs": runs, "completed_runs": len(runs), "failed": failure is not None, "failure": failure,
+            "summary": summarise_runs(runs)}
+
+
+def run_scenario(scenario: str, args: argparse.Namespace) -> tuple[list[Path], list[str]]:
+    """Every variant of a scenario. A failed repeat ends its variant, which is
+    still written with the runs already done, and the next variant goes on:
+    one bad run must not throw away hours of finished ones."""
     refuse_live()
     env = environment()
     RESULTS.mkdir(parents=True, exist_ok=True)
-    written = []
+    written, failures = [], []
     for variant, params in variants(scenario, args):
-        runs = []
+        runs, failure = [], None
+        started = datetime.now(timezone.utc)
         for repeat in range(args.repeat):
             stack = Stack()
             run_params = dict(params)
             if scenario in ("ingest", "batch", "speed"):
                 run_params["seed"] = args.seed + repeat
-            started = datetime.now(timezone.utc)
+            run_started = datetime.now(timezone.utc)
             try:
                 with ResourceSampler() as sampler:
                     metrics = RUNNERS[scenario](stack, **run_params)
-                runs.append({"repeat": repeat, "started_at": started.isoformat(), "params": run_params,
+                runs.append({"repeat": repeat, "started_at": run_started.isoformat(), "params": run_params,
                              "metrics": metrics, "resources": resource_summary(sampler.samples)})
                 print(json.dumps({"event": "bench_run", "scenario": scenario, "variant": variant, "repeat": repeat,
                                   "metrics": metrics}, default=str), flush=True)
+            except BenchFailed as error:
+                failure = f"repeat {repeat}: {error}"
+                print(json.dumps({"event": "bench_failed", "scenario": scenario, "variant": variant,
+                                  "error": failure}), flush=True)
             finally:
                 if not args.keep:
                     stack.down()
-        result = {"scenario": scenario, "variant": variant, "dataset": DATASET, "environment": env,
-                  "params": params, "seed": args.seed, "repeat": args.repeat,
-                  "single_run": args.repeat == 1, "runs": runs, "summary": summarise_runs(runs)}
+            if failure:
+                failures.append(f"{scenario} {variant} {failure}")
+                break
+        result = variant_result(scenario=scenario, variant=variant, env=env, params=params, seed=args.seed,
+                                repeat=args.repeat, runs=runs, failure=failure)
         path = RESULTS / f"{scenario}-{variant.replace('/', 'per').replace('=', '-')}-{started:%Y%m%dT%H%M%SZ}.json"
         path.write_text(json.dumps(result, indent=2, sort_keys=True, default=str) + "\n", encoding="utf-8")
         written.append(path)
-    return written
+    return written, failures
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -562,14 +611,17 @@ def main(argv: list[str] | None = None) -> int:
         results = [json.loads(p.read_text(encoding="utf-8")) for p in sorted(RESULTS.glob("*.json"))]
         print(render_report(results))
         return 0
+    failures = []
     try:
         for scenario in (SCENARIOS if args.scenario == "all" else (args.scenario,)):
-            for path in run_scenario(scenario, args):
+            paths, failed = run_scenario(scenario, args)
+            failures += failed
+            for path in paths:
                 print(json.dumps({"event": "bench_written", "path": str(path)}), flush=True)
-    except BenchFailed as error:
+    except BenchFailed as error:  # refused or misconfigured before any run
         print(json.dumps({"event": "bench_failed", "error": str(error)}), flush=True)
         return 1
-    return 0
+    return 1 if failures else 0
 
 
 if __name__ == "__main__":
