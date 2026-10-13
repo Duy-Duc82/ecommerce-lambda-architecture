@@ -160,6 +160,10 @@ MARKETPLACE_LARGE_DROP_RELATIVE = _env_decimal("MARKETPLACE_LARGE_DROP_RELATIVE"
 MARKETPLACE_STALE_AFTER_SECONDS = int(os.getenv("MARKETPLACE_STALE_AFTER_SECONDS", "21600"))
 MARKETPLACE_STREAM_WATERMARK = os.getenv("MARKETPLACE_STREAM_WATERMARK", "2 hours")
 MARKETPLACE_STREAM_TRIGGER = os.getenv("MARKETPLACE_STREAM_TRIGGER", "30 seconds")
+# Upper bound on Kafka records one speed micro-batch reads; 0 means no bound
+# (Spark's default). The speed-cost benchmark sets it to hold the batch size
+# fixed while it measures what a batch of that size costs.
+MARKETPLACE_SPEED_MAX_OFFSETS_PER_TRIGGER = int(os.getenv("MARKETPLACE_SPEED_MAX_OFFSETS_PER_TRIGGER", "0"))
 # Where the speed query's checkpoint lives; empty means data/checkpoints/
 # marketplace_speed. The version directory is appended either way, so bumping
 # MARKETPLACE_STREAM_CHECKPOINT_VERSION always starts a fresh checkpoint.
@@ -331,6 +335,8 @@ def validate_marketplace_settings() -> None:
     if MARKETPLACE_OPS_PROJECT_OVERLAP_SECONDS <= MARKETPLACE_OPS_PROJECT_INTERVAL_SECONDS:
         # The pass after an outage must re-read everything the outage hid.
         raise ValueError("MARKETPLACE_OPS_PROJECT_OVERLAP_SECONDS must exceed MARKETPLACE_OPS_PROJECT_INTERVAL_SECONDS")
+    if MARKETPLACE_SPEED_MAX_OFFSETS_PER_TRIGGER < 0:
+        raise ValueError("MARKETPLACE_SPEED_MAX_OFFSETS_PER_TRIGGER must be 0 (no bound) or positive")
     if MARKETPLACE_ANOMALY_MAD_THRESHOLD <= 0:
         raise ValueError("MARKETPLACE_ANOMALY_MAD_THRESHOLD must be positive")
     if MARKETPLACE_ANOMALY_IQR_MULTIPLIER <= 0:

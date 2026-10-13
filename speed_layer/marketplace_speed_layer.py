@@ -6,6 +6,7 @@ batch test use exactly the same ordering and identities.
 from __future__ import annotations
 import json
 import os
+import time
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Iterable
@@ -17,7 +18,7 @@ from pyspark.sql.types import LongType, StringType, StructField, StructType, Tim
 from config.marketplace_wire import marketplace_observation_from_wire
 from config.settings import (
     CHECKPOINTS_DIR, KAFKA_BOOTSTRAP_SERVERS, MARKETPLACE_CHANGE_RULE_VERSION, MARKETPLACE_SPEED_CHECKPOINT_ROOT,
-    MARKETPLACE_LARGE_DROP_ABSOLUTE, MARKETPLACE_LARGE_DROP_RELATIVE,
+    MARKETPLACE_LARGE_DROP_ABSOLUTE, MARKETPLACE_LARGE_DROP_RELATIVE, MARKETPLACE_SPEED_MAX_OFFSETS_PER_TRIGGER,
     MARKETPLACE_STALE_AFTER_SECONDS, MARKETPLACE_STREAM_CHECKPOINT_VERSION,
     MARKETPLACE_STREAM_TRIGGER, MARKETPLACE_STREAM_WATERMARK,
 )
@@ -62,8 +63,11 @@ def checkpoint_path() -> str:
 
 
 def read_marketplace_observations(spark: SparkSession) -> DataFrame:
-    return (spark.readStream.format("kafka").option("kafka.bootstrap.servers", KAFKA_BOOTSTRAP_SERVERS)
-            .option("subscribe", MARKETPLACE_OBSERVATIONS.name).option("startingOffsets", "earliest").load()
+    reader = (spark.readStream.format("kafka").option("kafka.bootstrap.servers", KAFKA_BOOTSTRAP_SERVERS)
+              .option("subscribe", MARKETPLACE_OBSERVATIONS.name).option("startingOffsets", "earliest"))
+    if MARKETPLACE_SPEED_MAX_OFFSETS_PER_TRIGGER > 0:
+        reader = reader.option("maxOffsetsPerTrigger", str(MARKETPLACE_SPEED_MAX_OFFSETS_PER_TRIGGER))
+    return (reader.load()
             .select(F.col("topic").alias("source_topic"), F.col("partition").cast("long").alias("source_partition"), F.col("offset").cast("long").alias("source_offset"), F.col("key").cast("string").alias("source_key"), F.col("value").cast("string").alias("value"), F.col("timestamp").alias("kafka_timestamp")))
 
 
@@ -189,24 +193,43 @@ def _sink_clients():
     return create_change_producer(), Elasticsearch(ES_HOST), Redis(host=REDIS_HOST, port=REDIS_PORT, db=REDIS_DB)
 
 
+# The query writes one micro-batch per trigger, for days, and foreachBatch
+# runs on the driver one batch at a time, so one set of clients serves every
+# batch. Reopening them cost ~110 ms a batch.
+_clients: tuple | None = None
+
+
+def close_sink_clients() -> None:
+    """Close and forget the kept clients. Closing a closed client is a no-op."""
+    global _clients
+    clients, _clients = _clients, None
+    for client in clients or ():
+        try: client.close()
+        except Exception: pass
+
+
 def write_marketplace_batch(batch_df: DataFrame, batch_id: int) -> None:
+    global _clients
     from common import postgres
-    from speed_layer.marketplace_sinks import MarketplaceSpeedAudit, MarketplaceSpeedSinks
+    from speed_layer.marketplace_sinks import BatchStages, MarketplaceSpeedAudit, MarketplaceSpeedSinks
     # Spark sets the query id, which lives in the checkpoint, as a local
     # property of every micro-batch. Batch IDs are unique only within it.
     query_id = batch_df.sparkSession.sparkContext.getLocalProperty("sql.streaming.queryId")
     if not query_id: raise ValueError("micro-batch carries no streaming query id; refusing to audit it as another run's batch")
-    producer, es, redis = _sink_clients()
+    began = time.monotonic()
+    if _clients is None: _clients = _sink_clients()
+    producer, es, redis = _clients
+    clients_ms, began = round((time.monotonic() - began) * 1000), time.monotonic()
     try:
         # A closing factory: the query runs for days, one micro-batch every
         # trigger, and a bare psycopg2 connection would leak on every audit call.
         audit = MarketplaceSpeedAudit(postgres.postgres_connection_factory())
         outputs = [SpeedOutput(**row.asDict()) for row in batch_df.collect()]
-        MarketplaceSpeedSinks(producer=producer, es=es, redis=redis, audit=audit).write_batch(outputs, batch_id, query_id=query_id)
-    finally:
-        # The same holds for the three sink clients: a producer left open per
-        # batch keeps its network thread and sockets alive. Closing an already
-        # closed client (the sink closes them on failure) is a no-op.
-        for client in (producer, es, redis):
-            try: client.close()
-            except Exception: pass
+        stages = BatchStages(clients_ms=clients_ms, collect_ms=round((time.monotonic() - began) * 1000))
+        MarketplaceSpeedSinks(producer=producer, es=es, redis=redis, audit=audit).write_batch(
+            outputs, batch_id, query_id=query_id, stages=stages)
+    except BaseException:
+        # The sink closes its clients on failure, and a client that failed
+        # may be in any state: the next batch starts from new ones.
+        close_sink_clients()
+        raise

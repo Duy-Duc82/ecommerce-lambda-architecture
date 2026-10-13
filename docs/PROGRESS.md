@@ -2848,6 +2848,298 @@ User đã lên lịch `mp-shutdown` lúc 08:50 giờ máy hôm nay: dừng `mp-l
    (2026-11-03) tính từ ngày thu thập bắt đầu, nên sẽ dời nếu thu thập bị gián
    đoạn khi chuyển host.
 
+## 29. 2026-10-05 (chiều, máy dev) — chi phí một speed batch, năng lực biên, soak
+
+User hỏi chi phí xử lý một batch của speed layer, năng lực biên và độ ổn
+định. Đây là phép đo, không phải tối ưu (plan §3 "Tuning for speed" vẫn giữ).
+Nhánh `phase-9-speed-batch-cost`, tách từ `phase-9-evaluation-plan`.
+
+### 29.1 Thêm gì
+
+- `MARKETPLACE_SPEED_MAX_OFFSETS_PER_TRIGGER` (mặc định 0 = không giới hạn) gắn
+  vào `maxOffsetsPerTrigger` của nguồn Kafka. Compose truyền nó và
+  `MARKETPLACE_STREAM_TRIGGER` vào container `speed`; mặc định không đổi.
+- `audit.marketplace_speed_batch` thêm 5 cột `stage_clients_ms`,
+  `stage_collect_ms`, `stage_kafka_ms`, `stage_es_ms`, `stage_redis_ms` (đồng
+  hồ monotonic). Phần `addBatch` còn lại là ghi audit.
+- `bench speed-cost`: nạp sẵn backlog khi speed tắt, rồi xả với batch đúng K
+  record và trigger 0, lần lượt từng K; bỏ 2 batch đầu sau mỗi lần khởi động.
+  Fit `thời gian = cố định + K × mỗi record` trên trung vị từng K.
+- `bench speed-soak`: một tốc độ giữ lâu ở một trigger, cắt thành cửa sổ; ổn
+  định = xả hết, 0 batch lỗi, batch p50 và RAM container speed không tăng quá
+  25 % từ cửa sổ đầy đủ đầu tới cuối. Hai kịch bản này không nằm trong `all`.
+- `numInputRows` của Spark gấp đôi số record (nguồn Kafka được đọc ở hai nhánh
+  valid/invalid rồi union), nên cả hai kịch bản đếm theo `input_rows` của audit.
+
+### 29.2 Số đo
+
+Máy dev (VM Docker 12 CPU, 7,4 GiB), `replayed_fixture`, mỗi kịch bản 1 lần,
+không chạy kèm stack nào khác của dự án. Ổ C: chỉ còn ~11 GB nên chạy bản rút
+gọn, có canh đĩa. Không so thẳng với §27 (máy 16 GB, ~430 record/s).
+
+`speed-cost`, trung vị 6 batch mỗi K (ms):
+
+| K | tổng | record/s | plan+commit | client | Spark collect | Kafka | ES | Redis | audit |
+|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 1 | 1.149 | 0,9 | 205 | 110 | 623 | 7 | 17 | 2 | 169 |
+| 10 | 1.264 | 1,7 | 204 | 109 | 686 | 28 | 18 | 6 | 178 |
+| 100 | 2.120 | 43 | 243 | 110 | 985 | 371 | 54 | 64 | 204 |
+| 1.000 | 7.103 | 145 | 217 | 109 | 3.240 | 2.164 | 141 | 354 | 195 |
+| 3.000 | 12.656 | 181 | 185 | 110 | 4.100 | 7.197 | 395 | 1.159 | 233 |
+
+- Sàn cố định khoảng 1,15 s/batch. Fit trên trung vị: 1,7 s + 3,8 ms/record
+  (R² 0,97), nhưng chi phí không thật tuyến tính: collect theo số offer khác
+  nhau, Kafka theo số change.
+- Kafka là nút thắt khi batch lớn: ~2,4 ms mỗi change, vì sink gửi từng change
+  rồi chờ ack. Client mở lại mỗi batch (110 ms). Redis `GET` mỗi state nằm ngoài
+  pipeline.
+- Bão hoà ~180 record/s. Theo mô hình, theo kịp ở trigger 30 s ~250/s, 10 s
+  ~215/s, 5 s ~170/s, 2 s ~37/s.
+
+`speed-soak`, 15 phút, cửa sổ 3 phút:
+
+| tải, trigger | batch p50/p95 | latency p50 (đã trừ lệch đồng hồ) | lỗi | xả | drift batch p50 | drift RAM |
+|---|---|---|---:|---:|---:|---:|
+| 50/s, 30 s | 11,0 / 14,9 s | ~24 s | 0 | 30 s | −27 % | +3,5 % |
+| 10/s, 2 s | 1,6 / 2,2 s | ~2,2 s | 0 | 5 s | −11 % | +2,2 % |
+
+Cả hai `stable`. 15 phút chưa đủ để loại trừ rò rỉ bộ nhớ nhiều giờ.
+
+### 29.3 Đồng hồ VM Docker trên máy dev
+
+Đồng hồ container nhanh hơn Windows ~30 s (trung vị 61 mẫu, 15 s một mẫu), có
+mẫu 0,25 s và 28 s, tức là nhảy chứ không lệch cố định. Hệ quả:
+
+- Latency soak đo thô (54 s, 32 s) gồm cả ~30 s lệch, vì `produced_at` ghi ở host
+  và `completed_at` ở container. Số ở §29.2 đã trừ lệch trung vị, chỉ gần đúng.
+- Hai batch 31 s (K=10) và 45 s (K=3.000) có các stage cộng lại ~1 s và ~13 s:
+  Spark đo thời lượng bằng wall clock, nên một cú nhảy rơi trọn vào một batch.
+  Fit dùng trung vị nên không bị kéo.
+- Máy thu thập lệch dưới 0,1 s lúc kiểm (§28.4), nên chưa có bằng chứng hai
+  lỗi đồng hồ ở §27.3 và §28.1 chung gốc này.
+
+### 29.4 Test
+
+Test liên quan pass (157). Suite đầy đủ trên máy dev kẹt ở
+`tests/test_marketplace_quality.py` (~20 s mỗi test rồi đứng ở test thứ 13–14),
+**cả khi đã stash thay đổi của nhánh này**, nên không do nhánh này gây ra. Trên
+máy thu thập suite chạy hết (§28.3). Chưa điều tra.
+
+### 29.5 Việc tiếp theo
+
+Nếu user muốn tối ưu (ngoài phạm vi Phase 9): gửi Kafka async và flush một lần
+mỗi batch, giữ client giữa các batch, đưa `GET` Redis vào pipeline, đo latency
+hoàn toàn bằng đồng hồ container. Chạy bản đầy đủ (`--repeat 3`, soak dài hơn)
+trên máy thu thập khi có thể.
+
+## 30. 2026-10-05 (chiều, máy dev) — sink Kafka của speed gửi async
+
+Nhánh `phase-9-speed-kafka-async`, tách từ `phase-9-speed-batch-cost`. User yêu
+cầu, dù plan Phase 9 §3 ghi "Tuning for speed" là ngoài phạm vi: đây là sửa
+có chủ đích, ghi lại ở đây để khỏi lẫn với phép đo.
+
+### 30.1 Sửa gì
+
+`publish_changes` (`data_ingestion/marketplace_change_producer.py`): gửi mọi
+change của batch, `flush` một lần, rồi `get` ack của **từng** change trước khi
+trả về. Trước đây sink chờ ack từng change rồi mới gửi change kế tiếp. Ngữ
+nghĩa giữ nguyên: batch chỉ được audit `SUCCEEDED` khi Kafka đã giữ đủ, một ack
+mất làm fail cả batch, và thứ tự theo offer vẫn do producer giữ
+(`max_in_flight_requests_per_connection=1`). `publish_change` (một change)
+vẫn còn. Test: gửi hết trước khi chờ ack, ack mất làm fail, batch rỗng không
+gửi và không flush, timeout không dương bị từ chối.
+
+### 30.2 Trước và sau
+
+Cùng máy, cùng tham số `speed-cost --cost-sizes 1 10 100 1000 3000
+--cost-batches 6 --repeat 1`. Trung vị ms.
+
+| K | tổng trước → sau | Kafka trước → sau | record/s trước → sau |
+|---:|---:|---:|---:|
+| 1 | 1.149 → 1.155 | 7 → 6 | 0,9 → 0,9 |
+| 10 | 1.264 → 1.278 | 28 → 12 | 1,7 → 7,0 |
+| 100 | 2.120 → 1.586 | 371 → 69 | 43 → 59 |
+| 1.000 | 7.103 → 5.419 | 2.164 → 325 | 145 → 181 |
+| 3.000 | 12.656 → 8.291 | 7.197 → 1.228 | 181 → **347** |
+
+- Bão hoà gần gấp đôi: 181 → 347 record/s. Fit trên trung vị: 1,7 s + 3,8
+  ms/record → 1,6 s + 2,4 ms/record (R² 0,94). Theo mô hình, tốc độ còn theo
+  kịp ở trigger 30 s ~395/s, 10 s ~350/s, 5 s ~285/s, 2 s ~90/s.
+- Batch nhỏ không đổi: sàn ~1,15 s là của Spark, không phải của Kafka.
+- Lần này không có batch ~30 s nào (§29.3).
+
+Phân bổ mới của batch K=3.000 (8,3 s): Spark collect 3.656 (44 %), Redis
+1.640 (20 %), Kafka 1.228 (15 %), ES 447, phần còn lại là plan/commit, client
+và audit.
+
+### 30.3 Việc tiếp theo (cũ, nay resume ở §31.5)
+
+Tối ưu speed, theo thứ tự lợi ích ước lượng trên số đo trên:
+
+1. **Redis**: `GET rt:source:<marketplace>:last_observation` chạy một lần cho
+   mỗi state, ngoài pipeline (`speed_layer/marketplace_sinks.py`, vòng
+   `state_rows`). Chỉ cần đọc một lần mỗi batch và giữ max trong bộ nhớ. Hiện
+   1,6 s ở K=3.000.
+2. **Spark collect**: tăng theo số offer khác nhau (~1.000 nhóm ≈ 3,5 s), tức
+   chi phí mỗi nhóm của `applyInPandasWithState`. Chưa đo tách; cần profile
+   trước khi sửa.
+3. **Client**: mở lại Kafka/ES/Redis mỗi batch (~110 ms, ~10 % sàn của batch
+   nhỏ). Giữ client trong process giữa các batch.
+4. **Latency đo bằng một đồng hồ**: hiện trộn đồng hồ host và container
+   (§29.3).
+5. Chạy bản đầy đủ `speed-cost --repeat 3` và `speed-soak` dài hơn trên máy
+   thu thập, rồi thay số máy dev ở §29–30.
+
+Còn mở từ trước: suite đầy đủ kẹt ở `test_marketplace_quality.py` trên máy dev
+(§29.4); các việc ở §28.5.
+
+## 31. 2026-10-05 (chiều, máy dev) — Redis đọc một lần mỗi batch, giữ client giữa các batch
+
+Làm mục 1 và 3 của §30.3. Hai nhánh xếp chồng lên nhau:
+`phase-9-speed-redis-read` (tách từ `phase-9-speed-kafka-async`), rồi
+`phase-9-speed-keep-clients` (tách từ nhánh trước). Cũng là tối ưu ngoài phạm
+vi plan Phase 9 §3, giống §30.
+
+### 31.1 Sửa gì
+
+- **Redis** (`speed_layer/marketplace_sinks.py`, test `71fa3ee`, fix
+  `bfbcc2e`). Trước đây sink `GET rt:source:<marketplace>:last_observation`
+  một lần cho mỗi state, ngoài pipeline. Nay sink lấy `observed_at` lớn nhất
+  của batch theo từng marketplace trước, rồi mỗi marketplace chỉ một `GET` và
+  tối đa một `SET`. **Kèm sửa một lỗi đúng/sai:** các `SET` trong pipeline chỉ
+  chạy lúc `execute`, nên mỗi state được so với giá trị *đang lưu*, không phải
+  với state trước trong cùng batch. Nếu hai state đều mới hơn giá trị đang lưu
+  mà state cũ hơn xếp sau, thì nó thắng, và watermark lùi lại. `es-projector`
+  đọc key này để tính freshness của nguồn (`ops/es_projector.py`).
+- **Client** (`speed_layer/marketplace_speed_layer.py`, test `26b18ba`, fix
+  `7a6eb96`). Producer Kafka, client ES và Redis được giữ ở mức module, dùng
+  chung cho mọi batch. `foreachBatch` chạy trên driver, mỗi lần một batch, nên
+  không có tranh chấp. Batch fail thì client bị đóng và bỏ (sink đã đóng chúng
+  rồi, và trạng thái client sau lỗi không chắc chắn), batch sau mở bộ mới.
+  `marketplace_speed_service.main` đóng client khi query dừng. Test cũ "đóng
+  mọi client sau mỗi batch" được thay bằng: dùng lại sau batch thành công,
+  đóng rồi mở mới sau batch fail (cả khi fail ở sink lẫn ở collect), đóng một
+  lần khi tắt.
+- `0977de0`: hai fake trong `test_marketplace_speed_service.py` chưa nhận
+  `stages=` từ `a66a024`, nên đã fail sẵn với `TypeError`. Đã sửa chữ ký.
+
+### 31.2 Số đo
+
+Cùng máy dev, cùng tham số `speed-cost --cost-sizes 1 10 100 1000 3000
+--cost-batches 6 --repeat 1` như §30.2. Trung vị, ms. Ba cột: sau async Kafka
+(§30.2), sau sửa Redis, sau giữ client.
+
+| K | tổng | client | Redis | record/s |
+|---:|---:|---:|---:|---:|
+| 1 | 1.155 → 1.413 → 1.140 | 110 → 112 → 0 | 2 → 3 → 1 | 0,9 → 0,7 → 0,6 |
+| 10 | 1.278 → 1.648 → 1.176 | ~110 → 111 → 0 | — → 4 → 3 | 7,0 → 6,1 → 8,2 |
+| 100 | 1.586 → 1.991 → 1.662 | ~110 → 111 → 0 | — → 15 → 11 | 59 → 49 → 56 |
+| 1.000 | 5.419 → 5.281 → 4.365 | ~110 → 110 → 0 | — → 74 → 76 | 181 → 186 → 220 |
+| 3.000 | 8.291 → 7.232 → 7.030 | ~110 → 111 → 0 | 1.640 → 294 → 260 | 347 → 396 → **440** |
+
+("—": §30.2 chỉ ghi phân bổ đầy đủ cho K=3.000.)
+
+- Redis ở K=3.000 giảm 1.640 → ~260–294 ms. Phần còn lại là pipeline ghi
+  thật (hset/expire/setex/zadd cho mỗi state và change).
+- `clients_ms` về 0 ở mọi K. Bench bỏ 2 batch đầu sau mỗi lần khởi động, nên
+  batch mở client không nằm trong số đo. Trên `mp-live` thì chỉ batch đầu sau
+  khởi động hoặc sau một batch fail mới tốn ~110 ms.
+- Bão hoà 347 → 396 → **440 record/s**. Fit sau cùng: 1,46 s + 1,96 ms/record
+  (R² 0,96).
+- **Lần chạy giữa (sau sửa Redis) bị nhiễu ở batch nhỏ.** K=1 và K=10 chậm hơn
+  §30.2 ~250–370 ms, toàn bộ ở Spark collect và audit, là những phần hai thay
+  đổi không đụng tới. Mỗi kịch bản chỉ chạy 1 lần nên không tách được nhiễu
+  máy; lần chạy cuối lại về mức §30.2. Đừng đọc số batch nhỏ của cột giữa như
+  một hồi quy.
+
+Phân bổ mới của batch K=3.000 (7,0 s): Spark collect 4.069 (58 %), Kafka
+1.435 (20 %), ES 400, Redis 260, phần còn lại là plan/commit và audit.
+
+### 31.3 Đĩa
+
+Ổ C: còn 6,5 GB trước và sau hai lần chạy. Script chạy có canh đĩa: dừng
+`ops.bench` nếu C: còn dưới 2 GB. Không lần nào chạm ngưỡng.
+
+### 31.4 Test
+
+`test_marketplace_speed_sinks.py`, `test_marketplace_speed_service.py`,
+`test_marketplace_speed_layer.py`: 79 pass. Suite đầy đủ chưa chạy (§29.4:
+kẹt trên máy dev).
+
+### 31.5 Việc tiếp theo (cũ, nay resume ở §32.4)
+
+1. **Spark collect** giờ chiếm hơn nửa batch lớn (~4 s ở K=3.000), và cũng là
+   phần lớn sàn ~1,1 s của batch nhỏ. Chi phí theo số offer khác nhau
+   (`applyInPandasWithState`). Cần profile trước khi sửa (§30.3 mục 2).
+2. **Kafka** (~1,4 s ở K=3.000) đứng thứ hai: producer giữ thứ tự bằng
+   `max_in_flight_requests_per_connection=1`. Nới nó thì mất thứ tự theo offer
+   khi retry, nên đây là quyết định thiết kế, không phải sửa nhanh.
+3. Latency đo bằng một đồng hồ (§30.3 mục 4).
+4. Chạy `speed-cost --repeat 3` và `speed-soak` dài hơn trên máy thu thập.
+   Soak cũng là nơi xác nhận client giữ lâu không rò rỉ (RAM container `speed`).
+5. Còn mở: §28.5, suite kẹt §29.4.
+
+## 32. 2026-10-05 (chiều, máy dev) — sửa scheduler bỏ qua cửa sổ (§28.1)
+
+Mục 1 của §28.5. Nhánh `phase-9-scheduler-wall-clock`, tách từ
+`phase-9-speed-keep-clients` (xếp chồng tiếp; sửa không phụ thuộc gì vào hai
+nhánh speed). Lịch sử git đã được viết lại trước đó trong ngày (bỏ trailer
+co-author), nên mọi hash cũ hơn hôm nay đã đổi; bảng đổi ở
+`D:\code\data\ela-history-backup\commit-map.txt` trên máy dev.
+
+### 32.1 Sửa gì
+
+`run_scheduler` (`batch_layer/marketplace_scheduler.py`, test `4b6d7a1`, fix
+`1ddcec9`):
+
+- Giữ **giờ đến hạn** của cửa sổ kế tiếp, tính từ cửa sổ *vừa chạy*
+  (`as_of + interval + lag`), không từ đồng hồ sau khi batch xong. Batch chạy
+  qua mốc kế tiếp thì cửa sổ đó chạy ngay, không bị bỏ.
+- Thức dậy mà wall clock còn trước giờ đến hạn (ngủ theo monotonic, lệch với
+  wall clock sau một ngày) thì **ngủ tiếp phần còn thiếu**, không tick lại cửa
+  sổ cũ.
+- Mỗi tick vẫn chỉ chạy cửa sổ mới nhất đã đóng, vẫn không backfill. Stack tắt
+  qua nhiều cửa sổ thì khi bật lại chỉ chạy cửa sổ mới nhất; những cửa sổ giữa
+  là việc backfill tay. RUNBOOK mục Backfill đã ghi điều này.
+
+Ba test dựng lại đúng §28.1: thức sớm 50 s (trước đây chạy lại 10-04), tick
+bắt đầu 00:29:59,99 và kéo 20 s (trước đây nhảy sang 10-06), và mốc sau đó vẫn
+đúng 00:30 ngày kế tiếp. Cả ba fail trước khi sửa, pass sau khi sửa.
+
+### 32.2 Chạy thật
+
+Vòng lặp thật với `threading.Event` và đồng hồ thật, interval 60 s, lag 5 s,
+tick lẻ kéo 62 s (vượt mốc kế tiếp như batch §28.1):
+
+| cửa sổ | bắt đầu (UTC) | kết thúc |
+|---|---|---|
+| 07:47 | 07:47:37,708 | 07:48:39,709 |
+| 07:48 | 07:48:39,709 (ngay, vì đã quá hạn 07:48:05) | 07:48:40,710 |
+| 07:49 | 07:49:05,010 (đúng mốc + lag) | 07:50:07,010 |
+| 07:50 | 07:50:07,010 (ngay) | 07:50:08,011 |
+
+Bốn cửa sổ liên tiếp, cách nhau đúng 60 s, không bỏ, không lặp. Chưa chạy trên
+stack thu thập (máy đó đang chuyển host, §28.4).
+
+### 32.3 Test
+
+`test_marketplace_scheduler.py`: 31 pass (thêm 3).
+
+### 32.4 Việc tiếp theo (resume ở đây)
+
+1. **Triển khai lên stack thu thập** khi host mới chạy: restart
+   `batch-scheduler` với code này. Nghiệm thu WP0 lại như §28.5 mục 4 (một
+   batch `SUCCEEDED` trên dữ liệu thật, con trỏ có giá trị, `validate` pass),
+   rồi chạy lại `evidence`, mục 15 phải thành PRESENT.
+2. Cửa sổ 2026-10-05 (§28.5 mục 2): scheduler sẽ không tự chạy bù. Nếu cần,
+   chạy tay `mp -EnvFile env/live.env batch -AsOf 2026-10-05T00:00:00Z
+   -AllowBackfill`. Chờ user quyết.
+3. Trang `1882` p3 (§27.3): attempt fail vì hai mốc thời gian từ hai đồng hồ
+   lệch nhau, và frontier không có occurrence kế tiếp. Chờ user quyết có retry
+   lỗi này không.
+4. Speed: các mục ở §31.5 (profile Spark collect trước).
+5. Còn mở: suite kẹt §29.4; các việc chờ user/thầy ở §26.6 bước 3.
+
 ## 33. 2026-10-13 — review PR #13 (Phase 9 → `develop`)
 
 Số mục là 33 vì §29–§32 đã có trên `phase-9-scheduler-wall-clock`, nhánh sẽ
@@ -2879,3 +3171,33 @@ mở lại.
 **Còn phải làm:** chạy lại `bench ingest` và `bench speed` bằng bench đã sửa để
 có latency đã hiệu chỉnh, rồi thay các cột latency của §27.2. Stack phải chạy
 trên host có đủ RAM.
+
+## 34. 2026-10-13 — merge `develop` vào `phase-9-scheduler-wall-clock`, hiệu chỉnh đồng hồ cho soak
+
+Merge `develop` (đã có PR #13) vào nhánh trước khi mở PR. Ba file xung đột:
+
+- `ops/bench.py`, `run_scenario`: giữ cách của `develop` (`run_started` cho mỗi
+  lượt, `BenchFailed` giữ các lượt đã xong, `variant_result`, trả về
+  `(paths, failures)`), thêm `sampler` cho `speed-soak` và bỏ dấu cách trong tên
+  file của nhánh này.
+- `tests/test_bench_report.py`, `docs/PROGRESS.md`: hai bên chỉ thêm, giữ cả hai.
+
+`speed-soak` lặp lại lỗi PR #13 đã sửa cho `speed`: latency audit là giờ VM trừ
+`produced_at` giờ host, và cửa sổ lấy `start` giờ host nhưng xếp `progress_at`,
+`completed_at` giờ VM vào đó, nên mỗi cửa sổ lệch ~30 s. Nay `run_speed_soak` đọc
+`clock_offset()` ở đầu và cuối lượt như `run_speed`. `soak_metrics` trừ độ lệch
+khỏi các mốc VM trước khi xếp cửa sổ và khỏi latency, kết quả ghi thêm
+`clock_offset_*` và `clock_step_suspected`. Mẫu tài nguyên vẫn ở giờ host, cùng
+đồng hồ với `start`. `speed-cost` chỉ đo thời lượng trên một đồng hồ, không cần sửa.
+
+Số soak ở §29.2 đo trước khi sửa: latency đã trừ lệch trung vị bằng tay, còn
+drift theo cửa sổ thì tính trên cửa sổ lệch ~30 s (10 % của cửa sổ 3 phút).
+Chạy lại soak trước khi dùng các số đó.
+
+Test liên quan pass (246), gồm một test mới cho cửa sổ và latency của soak khi
+đồng hồ VM nhanh 30 s.
+
+### 34.1 Việc tiếp theo (resume ở đây)
+
+Các mục §32.4 và phần "còn phải làm" của §33 vẫn giữ. Thêm: chạy lại
+`bench speed-soak` bằng bench đã sửa.
