@@ -292,26 +292,35 @@ def _window_of(at: datetime, start: datetime, window_seconds: int) -> int:
 
 def soak_metrics(batches: list[dict[str, Any]], progress: list[dict[str, Any]], resources: list[dict[str, Any]], *,
                  start: datetime, window_seconds: int, trigger_seconds: float, sent: int, send_seconds: float,
-                 drain_seconds: float | None, failed_batches: int, speed_container: str) -> dict[str, Any]:
+                 drain_seconds: float | None, failed_batches: int, speed_container: str,
+                 clock_offset_seconds: float = 0.0) -> dict[str, Any]:
     """A long run cut into windows of ``window_seconds``.
+
+    ``start`` and the resource samples are on the host's clock; Spark's
+    ``progress_at`` and the audit's ``completed_at`` are on the Docker VM's,
+    so ``clock_offset_seconds`` (VM minus host) is taken off them before they
+    are placed in a window, and off the audit latencies as in ``speed_metrics``.
 
     Stable means: it drained, no batch failed, and neither the batch duration
     p50 nor the speed container's memory grew by more than 25 % from the first
     full window to the last. The thresholds are stated in the result."""
+    vm_shift = timedelta(seconds=clock_offset_seconds)
+    shift = clock_offset_seconds * 1000
     windows: dict[int, dict[str, list]] = {}
     for p in progress:
         if (p.get("num_input_rows") or 0) > 0 and p.get("trigger_execution_ms") is not None:
-            w = windows.setdefault(_window_of(p["progress_at"], start, window_seconds), {"d": [], "rows": [], "lat50": [],
+            w = windows.setdefault(_window_of(p["progress_at"] - vm_shift, start, window_seconds), {"d": [], "rows": [], "lat50": [],
                                                                                          "lat95": [], "mem": []})
             w["d"].append(p["trigger_execution_ms"])
     # Rows from the audit: Spark's numInputRows counts each record twice (see COST_SQL).
     for b in batches:
         if (b.get("input_rows") or 0) > 0 and b.get("latency_p50_ms") is not None and b.get("completed_at"):
-            w = windows.get(_window_of(b["completed_at"], start, window_seconds))
+            w = windows.get(_window_of(b["completed_at"] - vm_shift, start, window_seconds))
             if w is not None:
                 w["rows"].append(b["input_rows"])
-                w["lat50"].append(b["latency_p50_ms"])
-                w["lat95"].append(b["latency_p95_ms"])
+                w["lat50"].append(b["latency_p50_ms"] - shift)
+                if b.get("latency_p95_ms") is not None:
+                    w["lat95"].append(b["latency_p95_ms"] - shift)
     for r in resources:
         if r["name"] == speed_container and r.get("at"):
             w = windows.get(_window_of(r["at"], start, window_seconds))
@@ -336,7 +345,7 @@ def soak_metrics(batches: list[dict[str, Any]], progress: list[dict[str, Any]], 
         return full[-1][key] / full[0][key] - 1
 
     durations = [p["trigger_execution_ms"] for p in progress if (p.get("num_input_rows") or 0) > 0]
-    latencies = [b["latency_p95_ms"] for b in batches if b.get("latency_p95_ms") is not None]
+    latencies = [b["latency_p95_ms"] - shift for b in batches if b.get("latency_p95_ms") is not None]
     duration_drift, memory_drift = drift("duration_p50_ms"), drift("speed_mem_max_mib")
     limit = 0.25
     stable = (drain_seconds is not None and failed_batches == 0
@@ -723,6 +732,7 @@ def run_speed_soak(stack: Stack, *, rate: float, seconds: int, trigger: str, win
     stack.fresh("speed")
     _wait_first_progress(stack)
     since = stack.db_now()
+    offset_start = stack.clock_offset()
     start = datetime.now(timezone.utc)
     sent, send_seconds = _send_load(seed=seed, count=int(rate * seconds), offers=max(1000, int(rate * 60)), rate=rate)
 
@@ -740,10 +750,12 @@ def run_speed_soak(stack: Stack, *, rate: float, seconds: int, trigger: str, win
     failed = stack.query("SELECT count(*) AS n FROM audit.marketplace_speed_batch WHERE started_at >= %s "
                          "AND status = 'FAILED'", (since,))[0]["n"]
     progress = stack.query("SELECT * FROM audit.marketplace_stream_progress WHERE progress_at >= %s", (since,))
-    return soak_metrics(batches, progress, list(sampler.samples) if sampler else [], start=start,
-                        window_seconds=window, trigger_seconds=trigger_seconds(trigger), sent=sent,
-                        send_seconds=send_seconds, drain_seconds=drain, failed_batches=int(failed),
-                        speed_container=container("speed"))
+    clock = clock_fields(offset_start, stack.clock_offset())
+    return {**soak_metrics(batches, progress, list(sampler.samples) if sampler else [], start=start,
+                           window_seconds=window, trigger_seconds=trigger_seconds(trigger), sent=sent,
+                           send_seconds=send_seconds, drain_seconds=drain, failed_batches=int(failed),
+                           speed_container=container("speed"), clock_offset_seconds=clock["clock_offset_ms"] / 1000),
+            **clock}
 
 
 # Pages crawled in a run: a PARTIAL attempt fetched and parsed its page too.
