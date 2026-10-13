@@ -62,13 +62,23 @@ $LiveProject = "mp-live"
 # A script run as .\scripts\mp.ps1 shares the caller's process, so every
 # variable set here is put back in the final `finally`.
 $SavedEnv = @{}
+
+# A value as Compose reads it from an env file: surrounding quotes are
+# removed, and an unquoted value ends where " #" starts an inline comment.
+function ConvertFrom-EnvValue([string]$Raw) {
+    $value = $Raw.Trim()
+    if ($value -match '^"([^"]*)"' -or $value -match "^'([^']*)'") { return $Matches[1] }
+    return ($value -replace '\s+#.*$', '').Trim()
+}
+
 if ($EnvFile) {
     $envPath = if ([System.IO.Path]::IsPathRooted($EnvFile)) { $EnvFile } else { Join-Path $ProjectRoot $EnvFile }
     if (-not (Test-Path $envPath)) { Write-Host "no such env file: $EnvFile" -ForegroundColor Red; Pop-Location; exit 1 }
     foreach ($line in Get-Content $envPath) {
         if ($line -match '^\s*([A-Za-z_][A-Za-z0-9_]*)=(.*)$') {
-            $SavedEnv[$Matches[1]] = [Environment]::GetEnvironmentVariable($Matches[1], "Process")
-            [Environment]::SetEnvironmentVariable($Matches[1], $Matches[2].Trim(), "Process")
+            $name, $raw = $Matches[1], $Matches[2]
+            $SavedEnv[$name] = [Environment]::GetEnvironmentVariable($name, "Process")
+            [Environment]::SetEnvironmentVariable($name, (ConvertFrom-EnvValue $raw), "Process")
         }
     }
 }

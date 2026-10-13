@@ -135,3 +135,25 @@ def test_the_generator_refuses_the_live_project(monkeypatch):
 
     with pytest.raises(SystemExit):
         bench_load.main(["--count", "1"])
+
+
+ISOLATED = {"COMPOSE_PROJECT_NAME": "mp-bench", "MP_CONTAINER_PREFIX": "bench-",
+            "KAFKA_BOOTSTRAP_SERVERS": "localhost:9192"}
+
+
+@pytest.mark.parametrize("unset", sorted(ISOLATED))
+def test_the_generator_refuses_a_shell_without_an_isolated_environment(monkeypatch, unset):
+    # With nothing loaded, the producer's default localhost:9092 is mp-live's Kafka.
+    for name, value in ISOLATED.items():
+        monkeypatch.setenv(name, value)
+    monkeypatch.delenv(unset)
+
+    with pytest.raises(SystemExit, match=unset):
+        bench_load.main(["--count", "1"])
+
+
+def test_the_generator_accepts_the_bench_environment(monkeypatch):
+    for name, value in ISOLATED.items():
+        monkeypatch.setenv(name, value)
+
+    bench_load.refuse_live()

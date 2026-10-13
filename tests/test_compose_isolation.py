@@ -200,3 +200,36 @@ def test_a_drill_runs_on_an_isolated_stack(monkeypatch):
     from ops import drills
 
     drills.refuse_live(_stack_owned_by(monkeypatch, "mp-bench"))
+
+
+def _mp_env_value(raw: str) -> str:
+    """Run mp.ps1's own ConvertFrom-EnvValue on one raw value."""
+    import base64
+    import shutil
+
+    shell = shutil.which("powershell") or shutil.which("pwsh")
+    if shell is None:
+        pytest.skip("PowerShell is not installed")
+    script = (ROOT / "scripts" / "mp.ps1").read_text(encoding="utf-8")
+    function = re.search(r"^function ConvertFrom-EnvValue.*?^\}", script, re.S | re.M).group(0)
+    literal = raw.replace("'", "''")
+    command = f"{function}\n[Console]::Out.Write((ConvertFrom-EnvValue '{literal}'))"
+    # Encoded, so no quote in the value is lost on the way (PowerShell 5.1 drops inner '"').
+    encoded = base64.b64encode(command.encode("utf-16-le")).decode("ascii")
+    result = subprocess.run([shell, "-NoProfile", "-NonInteractive", "-EncodedCommand", encoded],
+                            capture_output=True, text=True, timeout=60, check=True)
+    return result.stdout
+
+
+@pytest.mark.parametrize("raw,value", [
+    ("localhost:9192", "localhost:9192"),
+    ("  mp-bench  ", "mp-bench"),
+    ('"bench-"', "bench-"),
+    ("'a value # kept'", "a value # kept"),
+    ('"quoted"  # note', "quoted"),
+    ("2.0  # seconds", "2.0"),
+    ("http://stub-source:8000/api#frag", "http://stub-source:8000/api#frag"),
+    ("", ""),
+])
+def test_mp_reads_an_env_value_as_compose_does(raw, value):
+    assert _mp_env_value(raw) == value

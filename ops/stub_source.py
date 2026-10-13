@@ -48,11 +48,18 @@ def listing_id(fixture_id: int, category: str, page: int, copy: int = 0) -> int:
     """Distinct per (fixture row, category, page, copy), and stable across runs.
 
     ``copy`` numbers the repetitions of a fixture row on a page wider than the
-    fixture (``rows_per_page``). Copy 0 keeps the ID it always had.
+    fixture (``rows_per_page``). Copy 0 leaves ``copy`` out of the hash key,
+    so widening a page does not change the IDs of the rows already on it.
+    Every ID did change once, from the Phase 8 arithmetic to this hash.
 
     A 60-bit slice of a SHA-256. The Phase 8 arithmetic packed the category
     into ``crc32 % 100``, so two categories in one bucket, or a page past 99,
     shared IDs once a load run went beyond the smoke's universe.
+
+    60 bits is above 2**53, the largest integer a JavaScript number holds
+    exactly. Only the stub's JSON carries the ID as a number, and Python reads
+    it exactly; the adapter turns it into the string ``platform_listing_id``,
+    which is all Kafka, Silver, Elasticsearch and Kibana ever see.
     """
     key = f"{fixture_id}:{category}:{page}" + (f":{copy}" if copy else "")
     digest = hashlib.sha256(key.encode("utf-8")).hexdigest()

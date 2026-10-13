@@ -185,6 +185,19 @@ def test_the_projection_grows_observations_at_the_measured_rate():
     assert "not a measurement" in report["projection_note"]
 
 
+def test_kafka_levels_off_at_its_retention_window_and_the_cache_is_held():
+    # 1,000 observations a day; Kafka holds 10 bytes of each; the cache is 500 bytes.
+    rows = _snapshot(4, bronze=0, silver=0, observations=1000, gold=0, cache=500, audit=0, es=0, kafka=10_000) +         _snapshot(6, bronze=0, silver=3000, observations=3000, gold=0, cache=500, audit=0, es=0, kafka=30_000)
+
+    report = storage.growth_report(rows)
+
+    assert report["bytes_per_observation_total"] == 1.0              # silver only; kafka and cache are not scaled
+    assert report["bounded_stores"]["kafka"]["steady_bytes_at_measured_rate"] == 10 * 1000 * 7
+    # day 30: 3,000 + 28 x 1,000 = 31,000 observations; Kafka capped at 7 days' worth
+    assert report["projection_total_bytes"]["day_30"] == 31_000 + 70_000 + 500
+    assert "levels off" in report["projection_note"]
+
+
 def test_days_until_full_uses_total_growth():
     rows = _snapshot(4, bronze=0, silver=0, observations=0, gold=0, cache=0, audit=0, es=0, kafka=0) + \
         _snapshot(5, bronze=500, silver=500, observations=5, gold=0, cache=0, audit=0, es=0, kafka=0)

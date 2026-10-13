@@ -2677,6 +2677,18 @@ Job chạy không người trông lúc 2026-10-04 22:43 UTC. Không sửa code, 
 
 ### 27.2 Số chính (trung vị của 3 lần, kèm min–max)
 
+> **Latency trong mục này CHƯA hiệu chỉnh đồng hồ (review PR #13, §33).**
+> Bench đóng dấu `produced_at` trên Windows host, còn `LastModified` của MinIO
+> và thời điểm speed ghi xong lấy từ đồng hồ Docker VM. Đồng hồ VM chạy nhanh
+> hơn host khoảng 30 s và có lúc nhảy (đo 2026-10-05, trung vị 29,98 s trên 61
+> mẫu). Vì vậy các cột *Silver latency* (ingest), *latency batch* và *latency
+> max* (speed) dưới đây có thể **cao hơn thực tế khoảng 30 s**. Không đưa các
+> cột này vào báo cáo hay evidence trước khi chạy lại bằng bench đã sửa
+> (`2d0a68c`). Thời gian chạy, throughput, batch duration (Spark đo hai đầu
+> trên cùng đồng hồ VM) và các số crawl không bị ảnh hưởng. Batch duration
+> gần 30 s vẫn có thể là một lần đồng hồ nhảy; xem các cột stage trước khi
+> trích dẫn.
+
 Crawl, 120 request, 3.240 dòng parse, mỗi lần:
 
 | delay | thời gian (s) | request/s | parse/s | latency p50 (ms) | p95 (ms) | failed |
@@ -3127,3 +3139,36 @@ stack thu thập (máy đó đang chuyển host, §28.4).
    lỗi này không.
 4. Speed: các mục ở §31.5 (profile Spark collect trước).
 5. Còn mở: suite kẹt §29.4; các việc chờ user/thầy ở §26.6 bước 3.
+
+## 33. 2026-10-13 — review PR #13 (Phase 9 → `develop`)
+
+Số mục là 33 vì §29–§32 đã có trên `phase-9-scheduler-wall-clock`, nhánh sẽ
+merge sau PR này.
+
+Review có 3 comment P1 của Codex và 8 comment inline của user. Mỗi mục bug có
+commit test riêng, rồi commit fix.
+
+| Comment | Xử lý | Commit |
+|---|---|---|
+| `bench_load` chạy được khi chưa nạp env nào; producer khi đó rơi về `localhost:9092`, tức Kafka của `mp-live` | Bắt buộc có `COMPOSE_PROJECT_NAME` (khác `mp-live`), `MP_CONTAINER_PREFIX` và `KAFKA_BOOTSTRAP_SERVERS` | `5530dcd`, `6591edb` |
+| Latency speed và Silver trộn đồng hồ host và VM (lệch ~30 s) | Mỗi lượt ingest/speed đọc `clock_timestamp()` của PostgreSQL (trong VM) kẹp giữa hai lần đọc đồng hồ host, ở đầu và cuối lượt; trừ độ lệch trung bình; ghi `clock_offset_*` và `clock_step_suspected` khi độ lệch đổi quá 1 s. §27.2 được đánh dấu chưa hiệu chỉnh | `0cc5873`, `2d0a68c` |
+| Batch benchmark chạy với `check=False`, nên một batch crash vẫn ra throughput | Chỉ nhận `SUCCEEDED`, hoặc `QUALITY_FAILED` mà check bắt buộc fail duy nhất là `silver_parse_attempt_reconciliation` (dữ liệu phát lại không có audit crawl). Kết quả ghi rõ `quality_gate` | `7b0cd5f`, `3e14a79` |
+| Một repeat lỗi làm mất cả variant và dừng `bench all` | Variant vẫn được ghi với các lượt đã xong và `failed: true`, variant sau vẫn chạy, lệnh trả exit 1 ở cuối | cùng hai commit trên |
+| `evaluate` chỉ đếm `SUCCEEDED`, còn benchmark đếm cả `PARTIAL` | `crawled = SUCCEEDED + PARTIAL`, dùng cho `crawl_rate` và khoảng cách giữa hai lần crawl một trang; `success_rate` vẫn là tỉ lệ `SUCCEEDED`; `partial` báo riêng | `8223dfd`, `4c4a486` |
+| Dự báo dung lượng nhân tuyến tính cả Kafka (có retention) | Chỉ Bronze, Silver, Gold, quarantine, audit, Elasticsearch (cận trên) nhân theo observation; Kafka dừng ở 7 ngày retention mặc định; cache giữ nguyên | `200c035`, `7812be6` |
+| Comment latency trong sink và SQL nói "lúc crawler gửi" | Ghi rõ giả định chung đồng hồ, và bench tự hiệu chỉnh | `d7953c9` |
+| Comment "copy 0 giữ ID cũ" của stub; ID 60 bit > 2^53 | Sửa comment. ID chỉ là số trong JSON của stub; adapter đổi sang chuỗi `platform_listing_id` trước khi tới Kafka, ES hay Kibana | `d7953c9` |
+| Parser env của `mp.ps1` không bỏ dấu nháy và comment cuối dòng | Theo quy tắc của Compose; test chạy chính hàm trong `mp.ps1` qua PowerShell | `4941382`, `089e460` |
+
+**Không sửa:** Codex P1 "kịch bản speed chờ micro-batch đầu tiên mãi không
+tới, vì volume Kafka vừa xoá". Run `bench all --repeat 3` (§27) có 9/9 lượt
+speed chạy trên commit đã có bộ lọc `addBatch` (`99bd092`), nên điều kiện chờ
+đó đã được thoả trong thực tế. Lý giải hợp lý nhất: khi chưa có offset nào
+được commit, Spark vẫn chạy batch 0 (có `addBatch`, 0 dòng), kể cả khi topic
+rỗng. Chưa đọc mã Spark để xác minh. Nếu kịch bản này timeout trên máy khác thì
+mở lại.
+
+**Còn phải làm:** chạy lại `bench ingest` và `bench speed` bằng bench đã sửa để
+có latency đã hiệu chỉnh, rồi thay các cột latency của §27.2. Stack phải chạy
+trên host có đủ RAM.
+

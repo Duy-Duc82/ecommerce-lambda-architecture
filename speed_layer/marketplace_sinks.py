@@ -54,7 +54,9 @@ class BatchLatency:
     Each value is the batch's completion, with every sink written, minus an
     applied observation's ``produced_at``: the instant the crawler sent it to
     Kafka, which kafka-python also stamps as the record's CreateTime. It
-    therefore includes the time the record waited for the next trigger.
+    therefore includes the time the record waited for the next trigger. The
+    value assumes the producer and this service share a clock; see the note
+    where it is measured.
     """
     p50_ms: int
     p95_ms: int
@@ -222,7 +224,10 @@ class MarketplaceSpeedSinks:
             redis_ms = _elapsed_ms(began)
             counts = BatchCounts(**{**counts.__dict__, "input_rows": sum(r.output_kind != "CHANGE" for r in rows), "change_rows": len(changes), "kafka_rows": len(changes), "es_rows": len(changes) + len(states), "redis_rows": len(changes) + len(states)})
             # Measured only now, with every sink written: a batch that fails
-            # part-way has no latency to report.
+            # part-way has no latency to report. It assumes produced_at was
+            # stamped on this clock, true for live data (the crawler runs in
+            # the same Docker VM) but not for the bench's host-side load
+            # generator, whose latencies ops.bench corrects for the offset.
             completed = datetime.now(timezone.utc)
             latency = batch_latency((state.produced_at for state in states), completed)
             measured = BatchStages(**{**(stages or BatchStages()).__dict__, "kafka_ms": kafka_ms, "es_ms": es_ms,

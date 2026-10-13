@@ -122,23 +122,56 @@ def crawl_metrics(attempts: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
-def silver_latency_metrics(samples: list[tuple[datetime, datetime]]) -> dict[str, Any]:
+def clock_offset_seconds(host_before: datetime, vm: datetime, host_after: datetime) -> float:
+    """Docker VM clock minus host clock, from one VM reading bracketed by two
+    host readings (the midpoint is the host instant of the VM reading)."""
+    midpoint = host_before + (host_after - host_before) / 2
+    return (vm - midpoint).total_seconds()
+
+
+def clock_fields(start_offset: float, end_offset: float, *, step_threshold: float = 1.0) -> dict[str, Any]:
+    """The offset applied to a run's cross-clock latencies, and how much it moved.
+
+    The mean of the two readings is applied. A move larger than
+    ``step_threshold`` seconds means the VM clock stepped during the run, so
+    latencies sampled on either side of the step are off by up to the step."""
+    return {"clock_offset_ms": round((start_offset + end_offset) / 2 * 1000, 1),
+            "clock_offset_start_ms": round(start_offset * 1000, 1), "clock_offset_end_ms": round(end_offset * 1000, 1),
+            "clock_step_suspected": abs(end_offset - start_offset) > step_threshold}
+
+
+def silver_latency_metrics(samples: list[tuple[datetime, datetime]], *, clock_offset_seconds: float = 0.0) -> dict[str, Any]:
     """``(LastModified, produced_at)`` pairs, in milliseconds. LastModified has
-    one-second resolution, so these are accurate to a second at best."""
-    values = [(written - produced).total_seconds() * 1000 for written, produced in samples]
+    one-second resolution, so these are accurate to a second at best.
+
+    LastModified is MinIO's, so the Docker VM's clock, while the bench stamps
+    ``produced_at`` on the host; ``clock_offset_seconds`` (VM minus host) is
+    subtracted to put both on the host's clock."""
+    values = [(written - produced).total_seconds() * 1000 - clock_offset_seconds * 1000 for written, produced in samples]
     return {"silver_latency_p50_ms": percentile(values, 0.50), "silver_latency_p95_ms": percentile(values, 0.95),
             "silver_latency_max_ms": max(values) if values else None, "silver_latency_samples": len(values),
             "silver_latency_resolution_ms": 1000}
 
 
 def speed_metrics(batches: list[dict[str, Any]], progress: list[dict[str, Any]], *, sent: int,
-                  send_seconds: float, drain_seconds: float | None) -> dict[str, Any]:
+                  send_seconds: float, drain_seconds: float | None, clock_offset_seconds: float = 0.0) -> dict[str, Any]:
     """From ``marketplace_speed_batch`` and ``marketplace_stream_progress`` rows
     of one rate step.
 
     Latency percentiles do not compose across batches, so the step reports
     the median of the batches' p50 and the worst batch's p95 and max, each
-    weighted by nothing and named for what it is."""
+    weighted by nothing and named for what it is.
+
+    The audit's latency is the speed service's completion time (Docker VM
+    clock) minus ``produced_at``, which the bench stamps on the host; the VM
+    minus host offset is subtracted from each. Batch durations need no
+    correction: Spark times both ends on the VM clock, though a clock step
+    inside a batch still lands in its duration."""
+    shift = clock_offset_seconds * 1000
+
+    def corrected(value):
+        return None if value is None else value - shift
+
     with_rows = [b for b in batches if (b.get("input_rows") or 0) > 0]
     input_rows = sum(b.get("input_rows") or 0 for b in batches)
     if with_rows:
@@ -153,9 +186,9 @@ def speed_metrics(batches: list[dict[str, Any]], progress: list[dict[str, Any]],
         "input_rows": input_rows, "batches_with_rows": len(with_rows),
         "processed_rows_per_second": input_rows / busy if busy else None,
         "batch_duration_p50_ms": percentile(durations, 0.50), "batch_duration_p95_ms": percentile(durations, 0.95),
-        "latency_batch_p50_median_ms": spread(b.get("latency_p50_ms") for b in with_rows)["median"],
-        "latency_batch_p95_max_ms": max((b["latency_p95_ms"] for b in with_rows if b.get("latency_p95_ms") is not None), default=None),
-        "latency_max_ms": max((b["latency_max_ms"] for b in with_rows if b.get("latency_max_ms") is not None), default=None),
+        "latency_batch_p50_median_ms": corrected(spread(b.get("latency_p50_ms") for b in with_rows)["median"]),
+        "latency_batch_p95_max_ms": corrected(max((b["latency_p95_ms"] for b in with_rows if b.get("latency_p95_ms") is not None), default=None)),
+        "latency_max_ms": corrected(max((b["latency_max_ms"] for b in with_rows if b.get("latency_max_ms") is not None), default=None)),
         "drain_seconds": drain_seconds, "kept_up": drain_seconds is not None,
     }
 
@@ -352,9 +385,15 @@ def render_report(results: list[dict[str, Any]]) -> str:
         lines += [f"## {scenario}", "", "| dataset | variant | metric | median | min | max | runs |",
                   "|---|---|---|---:|---:|---:|---:|"]
         for r in rows:
+            variant = r.get("variant", "")
+            if r.get("failed"):
+                variant += f" (failed after {r.get('completed_runs', len(r.get('runs', [])))} of {r.get('repeat')} runs)"
             for metric, s in sorted(r["summary"].items()):
                 cells = ["" if s[k] is None else f"{s[k]:.4g}" for k in ("median", "min", "max")]
-                lines.append(f"| {r['dataset']} | {r.get('variant', '')} | {metric} | {' | '.join(cells)} | {s['runs']} |")
+                lines.append(f"| {r['dataset']} | {variant} | {metric} | {' | '.join(cells)} | {s['runs']} |")
+        gates = {run["metrics"].get("quality_gate") for r in rows for run in r.get("runs", [])} - {None, "passed"}
+        if gates:
+            lines += ["", f"Quality gate: {', '.join(sorted(gates))} (the replayed load has no crawl audit)."]
         lines.append("")
     return "\n".join(lines)
 
@@ -470,6 +509,14 @@ class Stack:
     def db_now(self) -> datetime:
         return self.query("SELECT now() AS now")[0]["now"]
 
+    def clock_offset(self) -> float:
+        """Docker VM clock minus host clock, in seconds. PostgreSQL runs in the
+        VM, and every container shares the VM's kernel clock."""
+        self.query("SELECT 1")  # connect first, so the bracket times only the query
+        before = datetime.now(timezone.utc)
+        vm = self.query("SELECT clock_timestamp() AS t")[0]["t"]
+        return clock_offset_seconds(before, vm, datetime.now(timezone.utc))
+
 
 def wait_until(check: Callable[[], bool], *, timeout: float, what: str, poll: float = 1.0) -> float:
     began = time.monotonic()
@@ -531,13 +578,16 @@ def _silver_latency_sample(limit: int = 300) -> list[tuple[datetime, datetime]]:
 
 def run_ingest(stack: Stack, *, count: int, seed: int) -> dict[str, Any]:
     stack.fresh("silver-sink")
+    offset_start = stack.clock_offset()
     began = time.monotonic()
     sent, send_seconds = _send_load(seed=seed, count=count, offers=1000, rate=0)
     wait_until(lambda: _silver_lag() == 0, timeout=3600, what="the Silver sink to drain", poll=1)
     total = time.monotonic() - began
+    clock = clock_fields(offset_start, stack.clock_offset())
     return {"sent": sent, "send_seconds": round(send_seconds, 3), "total_seconds": round(total, 3),
             "produce_per_second": sent / send_seconds, "silver_records_per_second": sent / total,
-            **silver_latency_metrics(_silver_latency_sample())}
+            **silver_latency_metrics(_silver_latency_sample(), clock_offset_seconds=clock["clock_offset_ms"] / 1000),
+            **clock}
 
 
 def run_batch(stack: Stack, *, count: int, seed: int) -> dict[str, Any]:
@@ -549,14 +599,37 @@ def run_batch(stack: Stack, *, count: int, seed: int) -> dict[str, Any]:
          env=stack.env, check=False, timeout=7200)
     rows = stack.query("SELECT status, quality_status, started_at, completed_at, silver_rows, gold_rows, dataset_counts "
                        "FROM audit.marketplace_batch_run WHERE run_id = %s", (run_id,))
-    if not rows or rows[0]["completed_at"] is None:
-        raise BenchFailed(f"batch {run_id} did not finish: {rows}")
-    row = rows[0]
+    failing = [r["check_name"] for r in stack.query(
+        "SELECT check_name FROM audit.marketplace_quality_result "
+        "WHERE run_id = %s AND severity = 'MANDATORY' AND status <> 'PASS'", (run_id,))]
+    return {**batch_outcome(run_id, rows[0] if rows else None, failing),
+            "ingest_silver_records_per_second": ingest["silver_records_per_second"]}
+
+
+# The replayed load comes from the generator, not the crawler, so it leaves no
+# crawl attempt to reconcile Silver against, and this mandatory rule fails on
+# every replayed batch. Any other failing check, or a crash, fails the run.
+REPLAY_EXPECTED_FAILURES = frozenset({"silver_parse_attempt_reconciliation"})
+
+
+def batch_outcome(run_id: str, row: dict[str, Any] | None, failing_checks: Sequence[str]) -> dict[str, Any]:
+    """Metrics of one batch run, or ``BenchFailed`` when its time is not a
+    batch's time: the job did not finish, crashed, or failed a quality check
+    the replayed dataset does not explain."""
+    if row is None or row["completed_at"] is None:
+        raise BenchFailed(f"batch {run_id} did not finish: {row}")
+    failing = sorted(failing_checks)
+    if row["status"] == "SUCCEEDED":
+        gate = "passed"
+    elif row["status"] == "QUALITY_FAILED" and failing and set(failing) <= REPLAY_EXPECTED_FAILURES:
+        gate = "failed_as_expected_on_replayed_data"
+    else:
+        raise BenchFailed(f"batch {run_id} ended {row['status']} with failing mandatory checks {failing}")
     seconds = (row["completed_at"] - row["started_at"]).total_seconds()
     return {"silver_rows": row["silver_rows"], "gold_rows": row["gold_rows"], "seconds": round(seconds, 3),
             "silver_rows_per_second": (row["silver_rows"] or 0) / seconds if seconds else None,
-            "status": row["status"], "quality_status": row["quality_status"],
-            "ingest_silver_records_per_second": ingest["silver_records_per_second"]}
+            "status": row["status"], "quality_status": row["quality_status"], "quality_gate": gate,
+            "quality_failing_checks": failing}
 
 
 def run_speed(stack: Stack, *, rate: float, seconds: int, seed: int) -> dict[str, Any]:
@@ -564,6 +637,7 @@ def run_speed(stack: Stack, *, rate: float, seconds: int, seed: int) -> dict[str
     wait_until(lambda: bool(stack.query("SELECT 1 FROM audit.marketplace_stream_progress LIMIT 1")),
                timeout=600, what="the speed query's first micro-batch", poll=5)
     since = stack.db_now()
+    offset_start = stack.clock_offset()
     sent, send_seconds = _send_load(seed=seed, count=int(rate * seconds), offers=max(1000, int(rate * 60)), rate=rate)
 
     def applied() -> int:
@@ -579,7 +653,9 @@ def run_speed(stack: Stack, *, rate: float, seconds: int, seed: int) -> dict[str
     batches = stack.query("SELECT * FROM audit.marketplace_speed_batch WHERE started_at >= %s AND status = 'SUCCEEDED'",
                           (since,))
     progress = stack.query("SELECT * FROM audit.marketplace_stream_progress WHERE progress_at >= %s", (since,))
-    return speed_metrics(batches, progress, sent=sent, send_seconds=send_seconds, drain_seconds=drain)
+    clock = clock_fields(offset_start, stack.clock_offset())
+    return {**speed_metrics(batches, progress, sent=sent, send_seconds=send_seconds, drain_seconds=drain,
+                            clock_offset_seconds=clock["clock_offset_ms"] / 1000), **clock}
 
 
 # Spark's numInputRows counts the Kafka source once per branch that reads it
@@ -723,38 +799,58 @@ RUNNERS = {"crawl": run_crawl, "ingest": run_ingest, "batch": run_batch, "speed"
            "speed-cost": run_speed_cost, "speed-soak": run_speed_soak}
 
 
-def run_scenario(scenario: str, args: argparse.Namespace) -> list[Path]:
+def variant_result(*, scenario: str, variant: str, env: dict[str, Any], params: dict[str, Any], seed: int,
+                   repeat: int, runs: list[dict[str, Any]], failure: str | None) -> dict[str, Any]:
+    """One variant's file. A variant whose repeat failed keeps the runs it
+    finished, marked ``failed``; its summary covers only those runs."""
+    return {"scenario": scenario, "variant": variant, "dataset": DATASET, "environment": env,
+            "params": params, "seed": seed, "repeat": repeat, "single_run": repeat == 1,
+            "runs": runs, "completed_runs": len(runs), "failed": failure is not None, "failure": failure,
+            "summary": summarise_runs(runs)}
+
+
+def run_scenario(scenario: str, args: argparse.Namespace) -> tuple[list[Path], list[str]]:
+    """Every variant of a scenario. A failed repeat ends its variant, which is
+    still written with the runs already done, and the next variant goes on:
+    one bad run must not throw away hours of finished ones."""
     refuse_live()
     env = environment()
     RESULTS.mkdir(parents=True, exist_ok=True)
-    written = []
+    written, failures = [], []
     for variant, params in variants(scenario, args):
-        runs = []
+        runs, failure = [], None
+        started = datetime.now(timezone.utc)
         for repeat in range(args.repeat):
             stack = Stack()
             run_params = dict(params)
             if scenario in ("ingest", "batch", "speed", *EXTRA_SCENARIOS):
                 run_params["seed"] = args.seed + repeat
-            started = datetime.now(timezone.utc)
+            run_started = datetime.now(timezone.utc)
             try:
                 with ResourceSampler() as sampler:
                     # The soak cuts the resource trace into its windows.
                     extra = {"sampler": sampler} if scenario == "speed-soak" else {}
                     metrics = RUNNERS[scenario](stack, **run_params, **extra)
-                runs.append({"repeat": repeat, "started_at": started.isoformat(), "params": run_params,
+                runs.append({"repeat": repeat, "started_at": run_started.isoformat(), "params": run_params,
                              "metrics": metrics, "resources": resource_summary(sampler.samples)})
                 print(json.dumps({"event": "bench_run", "scenario": scenario, "variant": variant, "repeat": repeat,
                                   "metrics": metrics}, default=str), flush=True)
+            except BenchFailed as error:
+                failure = f"repeat {repeat}: {error}"
+                print(json.dumps({"event": "bench_failed", "scenario": scenario, "variant": variant,
+                                  "error": failure}), flush=True)
             finally:
                 if not args.keep:
                     stack.down()
-        result = {"scenario": scenario, "variant": variant, "dataset": DATASET, "environment": env,
-                  "params": params, "seed": args.seed, "repeat": args.repeat,
-                  "single_run": args.repeat == 1, "runs": runs, "summary": summarise_runs(runs)}
+            if failure:
+                failures.append(f"{scenario} {variant} {failure}")
+                break
+        result = variant_result(scenario=scenario, variant=variant, env=env, params=params, seed=args.seed,
+                                repeat=args.repeat, runs=runs, failure=failure)
         path = RESULTS / f"{scenario}-{variant.replace('/', 'per').replace('=', '-').replace(' ', '')}-{started:%Y%m%dT%H%M%SZ}.json"
         path.write_text(json.dumps(result, indent=2, sort_keys=True, default=str) + "\n", encoding="utf-8")
         written.append(path)
-    return written
+    return written, failures
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -785,14 +881,17 @@ def main(argv: list[str] | None = None) -> int:
         results = [json.loads(p.read_text(encoding="utf-8")) for p in sorted(RESULTS.glob("*.json"))]
         print(render_report(results))
         return 0
+    failures = []
     try:
         for scenario in (SCENARIOS if args.scenario == "all" else (args.scenario,)):
-            for path in run_scenario(scenario, args):
+            paths, failed = run_scenario(scenario, args)
+            failures += failed
+            for path in paths:
                 print(json.dumps({"event": "bench_written", "path": str(path)}), flush=True)
-    except BenchFailed as error:
+    except BenchFailed as error:  # refused or misconfigured before any run
         print(json.dumps({"event": "bench_failed", "error": str(error)}), flush=True)
         return 1
-    return 0
+    return 1 if failures else 0
 
 
 if __name__ == "__main__":

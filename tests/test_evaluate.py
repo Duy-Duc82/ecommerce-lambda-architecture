@@ -90,6 +90,23 @@ def test_seeded_occurrences_are_left_out_of_lateness_and_pages_are_timed_between
     assert interval["share_within_110pct_of_cadence"] == 0.5
 
 
+def test_a_partial_page_is_crawled_reported_apart_and_keeps_its_page_interval():
+    # One rejected row makes an attempt PARTIAL: the page was still fetched,
+    # stored and published, so it is no gap in that page's crawl intervals.
+    attempts = [dict(_attempt(0, task="a"), target="p1"), dict(_attempt(60, task="b", status="PARTIAL"), target="p1"),
+                dict(_attempt(120, task="c"), target="p1"),
+                dict(_attempt(121, task="d", status="FAILED", error="SERVER_ERROR", http=500, parsed=0), target="p2")]
+
+    report = evaluate.reliability_report(attempts, [], [], [], cadence_seconds=HOUR)
+
+    total = report["total"]
+    assert (total["succeeded"], total["partial"], total["crawled"]) == (2, 1, 3)
+    assert (total["success_rate"], total["crawl_rate"]) == (0.5, 0.75)
+    assert report["crawl_interval_per_page_seconds"]["intervals"] == 2
+    assert report["crawl_interval_per_page_seconds"]["max"] == 3600
+    assert "| 75.00% | 50.00% | 1 |" in evaluate.to_markdown(report)
+
+
 def test_a_window_of_thirty_days_meets_the_threshold():
     assert Window(T0, T0 + timedelta(days=30)).describe()["threshold_met"] is True
     assert Window(T0, T0 + timedelta(days=29, hours=23)).describe()["threshold_met"] is False

@@ -268,3 +268,112 @@ def test_a_soak_counts_batches_longer_than_its_trigger():
 def test_the_new_scenarios_stay_out_of_all():
     assert "speed-cost" not in bench.SCENARIOS and "speed-soak" not in bench.SCENARIOS
     assert {"speed-cost", "speed-soak"} <= set(bench.RUNNERS)
+
+
+def test_the_clock_offset_is_the_vm_reading_against_the_host_midpoint():
+    # VM reads 30 s ahead of the midpoint of two host readings 2 s apart.
+    offset = bench.clock_offset_seconds(T0, T0 + timedelta(seconds=31), T0 + timedelta(seconds=2))
+
+    assert offset == pytest.approx(30.0)
+
+
+def test_a_moving_offset_is_flagged_as_a_clock_step():
+    steady = bench.clock_fields(29.98, 30.01)
+    stepped = bench.clock_fields(30.0, 0.25)
+
+    assert steady["clock_offset_ms"] == pytest.approx(29995.0) and steady["clock_step_suspected"] is False
+    assert stepped["clock_step_suspected"] is True
+
+
+def test_silver_latency_is_put_on_the_host_clock():
+    # MinIO (VM clock, 30 s ahead) wrote 2 s after the host stamped produced_at.
+    pairs = [(T0 + timedelta(seconds=32), T0)]
+
+    m = bench.silver_latency_metrics(pairs, clock_offset_seconds=30)
+
+    assert m["silver_latency_p50_ms"] == pytest.approx(2000)
+
+
+def test_speed_latency_is_put_on_the_host_clock_but_batch_duration_is_not():
+    batches = [{"input_rows": 10, "started_at": T0, "completed_at": T0 + timedelta(seconds=2),
+                "latency_p50_ms": 34000, "latency_p95_ms": 38000, "latency_max_ms": 40000}]
+    progress = [{"num_input_rows": 10, "trigger_execution_ms": 2000}]
+
+    m = bench.speed_metrics(batches, progress, sent=10, send_seconds=1, drain_seconds=3, clock_offset_seconds=30)
+
+    assert (m["latency_batch_p50_median_ms"], m["latency_batch_p95_max_ms"], m["latency_max_ms"]) == (4000, 8000, 10000)
+    assert m["batch_duration_p50_ms"] == 2000
+
+
+def _batch_row(status):
+    return {"status": status, "quality_status": "PASS" if status == "SUCCEEDED" else "FAIL", "started_at": T0,
+            "completed_at": T0 + timedelta(seconds=40), "silver_rows": 10_000, "gold_rows": 8011}
+
+
+def test_a_succeeded_batch_reports_its_time():
+    m = bench.batch_outcome("bench-1", _batch_row("SUCCEEDED"), [])
+
+    assert m["seconds"] == 40 and m["silver_rows_per_second"] == 250 and m["quality_gate"] == "passed"
+
+
+def test_a_batch_failing_only_the_reconciliation_replay_cannot_pass_is_reported_and_labelled():
+    m = bench.batch_outcome("bench-1", _batch_row("QUALITY_FAILED"), ["silver_parse_attempt_reconciliation"])
+
+    assert m["quality_gate"] == "failed_as_expected_on_replayed_data"
+    assert m["quality_failing_checks"] == ["silver_parse_attempt_reconciliation"]
+
+
+@pytest.mark.parametrize("status,failing", [
+    ("QUALITY_FAILED", ["silver_parse_attempt_reconciliation", "gold_offer_current_unique"]),
+    ("QUALITY_FAILED", []),
+    ("FAILED", []),
+])
+def test_a_batch_that_failed_for_any_other_reason_fails_the_run(status, failing):
+    with pytest.raises(bench.BenchFailed, match=status):
+        bench.batch_outcome("bench-1", _batch_row(status), failing)
+
+
+def test_an_unfinished_batch_fails_the_run():
+    with pytest.raises(bench.BenchFailed, match="did not finish"):
+        bench.batch_outcome("bench-1", None, [])
+
+
+def test_a_failed_repeat_keeps_the_finished_runs_and_the_next_variant_still_runs(monkeypatch, tmp_path):
+    calls = []
+
+    def runner(stack, *, count, seed):
+        calls.append((count, seed))
+        if count == 10 and seed == 2:
+            raise bench.BenchFailed("speed layer never caught up")
+        return {"seconds": count}
+
+    class FakeStack:
+        def down(self):
+            pass
+
+    class FakeSampler:
+        samples = []
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+    monkeypatch.setattr(bench, "refuse_live", lambda: None)
+    monkeypatch.setattr(bench, "environment", lambda: {})
+    monkeypatch.setattr(bench, "RESULTS", tmp_path)
+    monkeypatch.setattr(bench, "Stack", FakeStack)
+    monkeypatch.setattr(bench, "ResourceSampler", FakeSampler)
+    monkeypatch.setitem(bench.RUNNERS, "ingest", runner)
+    args = bench.argparse.Namespace(sizes=[10, 20], repeat=3, seed=1, keep=False)
+
+    paths, failures = bench.run_scenario("ingest", args)
+
+    assert calls == [(10, 1), (10, 2), (20, 1), (20, 2), (20, 3)]
+    first, second = (json.loads(p.read_text(encoding="utf-8")) for p in paths)
+    assert first["failed"] is True and first["completed_runs"] == 1 and "never caught up" in first["failure"]
+    assert first["summary"]["seconds"]["runs"] == 1
+    assert second["failed"] is False and second["completed_runs"] == 3
+    assert len(failures) == 1
+    assert "(failed after 1 of 3 runs)" in bench.render_report([first, second])

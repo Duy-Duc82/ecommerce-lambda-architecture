@@ -1,423 +1,410 @@
-# E-commerce Behavioral Analytics — Lambda Architecture
+# Marketplace Price Intelligence — Lambda Architecture
 
-An end-to-end data platform built around a **Lambda architecture**: one canonical
-event contract feeds a *speed path* (low-latency, approximate) and a *batch path*
-(accurate, replayable, dimensionally modelled), each with its own serving store
-and its own BI surface.
+A data platform that tracks **public catalog and price state on a Vietnamese
+marketplace (Tiki)**, reports changes within seconds of a crawl, and builds a
+versioned, quality-gated price history for BI.
 
-The platform is deliberately **scope-honest**. The source contains exactly three
-facts — product **views**, **cart** additions and **purchases** — plus users,
-products, categories and sessions. There are no orders, payments, reviews, fraud
-signals or geography in the data, and no layer of this system invents them.
+> Status: Phases 1–8 are merged into `develop`. Phase 9 (benchmarks, 30-day
+> live collection, demo) is in progress on `phase-9-*` branches. Session log:
+> [`docs/PROGRESS.md`](docs/PROGRESS.md).
 
 ---
 
-## 1. Data source
+## 1. The end-to-end problem
 
-**Kaggle — [eCommerce behavior data from multi-category store](https://www.kaggle.com/datasets/mkechinov/ecommerce-behavior-data-from-multi-category-store)**
-(published by `mkechinov`) — real clickstream from a large multi-category online
-store, not synthetic data.
+The platform answers three questions about public listings:
 
-### Volume and coverage
+1. **How does an offer's advertised price move over time?** This needs a
+   complete, correct daily history, plus anomaly verdicts against the offer's
+   own past.
+2. **How complete and how fresh is the collection?** This needs the coverage
+   of each source and the reliability of each crawl, reconciled against what
+   the crawler says it published.
+3. **When a listing changes, how soon do we know?** This needs a change event
+   within seconds of the crawl that saw it.
 
-Measured directly on the local copy of the files, not quoted from the dataset page:
+No single path does all three well. Questions 1 and 2 need **completeness and
+reproducibility**: every observation, late ones included, cut at a fixed
+instant and checked before anyone sees it. Question 3 needs **low latency**:
+react to each observation as it arrives, with only the state of that offer.
+That split is the Lambda architecture.
 
-| File | Rows | Size | Period covered |
-|---|---:|---:|---|
-| `2019-Oct.csv` | **42,448,764** | 5.67 GB | 2019-10-01 00:00:00 → 2019-10-31 23:59:59 UTC |
-| `2019-Nov.csv` | **67,501,979** | 9.01 GB | 2019-11-01 00:00:00 → 2019-11-30 23:59:59 UTC |
-| **Total** | **109,950,743** | **≈ 14.7 GB** | 61 consecutive days |
+The constraints that shaped everything:
 
-```bash
-# how the figures above were obtained
-awk -F, 'NR>1{n++; t[$2]++} END{printf "TOTAL=%d\n", n; for (k in t) printf "%s=%d\n", k, t[k]}' 2019-Oct.csv
-```
+- **Only public state is observable.** The platform sees price, list price,
+  availability, rating and the counters a page displays. It sees no orders,
+  carts or users. A change in a displayed "sold" counter is a number changing,
+  not a sale, and no table calls it demand.
+- **The source is undocumented and unreliable.** The Tiki listing endpoint
+  behaves like a recommender: ordering changes between requests, pages overlap,
+  and `total` is not trustworthy (about 2,000 products per category at most).
+  A full 9-category crawl gave 14,117 unique products in 17 m 22 s with 0
+  failures, throttled to 2 s plus jitter per request.
+- **Raw evidence must survive anything downstream.** If Kafka, MinIO or a
+  parser fails, what was fetched must still be recoverable and re-parseable.
 
-### Schema (9 columns, exactly as shipped)
+## 2. Architecture
 
 ```text
-event_time,event_type,product_id,category_id,category_code,brand,price,user_id,user_session
-2019-10-01 00:00:00 UTC,view,44600062,2103807459595387724,,shiseido,35.79,541312140,72d76fde-8bb3-4e00-8c23-a032dfed738c
+                     Tiki listing API  (ops/stub_source.py offline)
+                                   │  frontier lease · robots.txt · rate limit · circuit breaker
+                     ┌─────────────┴─────────────┐
+ ACQUISITION         │   crawler/service.py      │
+                     └─────────────┬─────────────┘
+                                   │ 1. raw body + sidecar (sha256)     ← written FIRST
+                     Bronze  s3a://…/bronze   append-only
+                                   │ 2. canonical observation, acks=all
+                     Kafka  marketplace.observations.v1  (3 partitions, key = marketplace+listing)
+                  ┌────────────────┴──────────────────────────────┐
+ SPEED            │                                               │            BATCH
+ Spark Structured Streaming                         marketplace_silver_service.py
+ trigger 30 s · state per offer_id                  Kafka → Silver, 1 object / observation
+ observation → 7 change types                       (undecodable / invalid → .dlq)
+   ├→ Kafka  marketplace.changes.v1                               │
+   ├→ Elasticsearch  changes · current offers       marketplace_scheduler.py (daily, lag 30 min)
+   └→ Redis  rt:offer · rt:changes · rt:source        → Silver ─(as_of)→ Gold run (10 datasets)
+                  │                                    → 17 quality rules (13 mandatory)
+       ops/es_projector.py                             → publish PostgreSQL cache (one transaction)
+       (audit, DLQ → ES)                               → promote gold/current.json (compare-and-swap)
+                  │                                               │
+ SERVING       Kibana  (seconds old,                    Superset  (one validated version,
+               operational)                             the last good as_of)
 ```
 
-Note the empty `category_code` in that very first row — missing category codes,
-missing brands and a dotted-hierarchy category format are all handled explicitly
-by the pipeline rather than assumed away.
+Two rules hold across the whole picture:
 
-### Event distribution — the analytical challenge (`2019-Oct.csv`)
+- **Bronze before Kafka, Kafka before anything else.** A crawl that fetched and
+  parsed but could not publish is audited `PUBLISH_ERROR`, and its raw body is
+  already in Bronze. `crawler/reparse.py` rebuilds observations from Bronze
+  after verifying the checksum.
+- **The two paths share nothing but the topic and the frozen contracts.** The
+  speed path cannot corrupt Gold, and a refused batch cannot touch realtime
+  state.
 
-| `event_type` | Rows | Share |
-|---|---:|---:|
-| `view` | 40,779,399 | 96.07 % |
-| `cart` | 926,516 | 2.18 % |
-| `purchase` | 742,849 | 1.75 % |
+## 3. Layers and their configuration
 
-This ~55 : 1 view-to-purchase imbalance is precisely what makes the funnel worth
-modelling, and it is why the batch layer computes conversion as **same-day
-population ratios** over distinct users rather than naive event ratios.
+Every value below is an environment variable read by `config/settings.py`,
+shown with its default. `validate_marketplace_settings()` refuses
+combinations that cannot work.
 
-### Why this dataset drives the design
+### 3.1 Acquisition: `crawler/`
 
-- **Scale forces real distributed processing.** 42 M rows in a single monthly
-  file rules out a pandas-in-memory approach; Spark and a partitioned lake are a
-  requirement, not decoration.
-- **Its grain is one behavioral event.** One `purchase` row is one purchase
-  **event/item** — *never* an order. Every metric in this repository respects
-  that: `revenue` is the sum of `price` over purchase events and is never
-  presented as an order metric.
-- **`user_session` is source-provided**, so sessionization is a fact of the data,
-  not a heuristic this project invented.
+A **frontier** in PostgreSQL holds one task per (marketplace, resource, target,
+scheduled time). Workers lease tasks, crawl them, write Bronze, publish to
+Kafka, and record every attempt with its `error_kind`.
 
-### Getting the data
+| Setting | Default | Why |
+|---|---|---|
+| `CRAWL_ACTIVE / NORMAL / COLD_CADENCE_MINUTES` | 60 / 240 / 720 | recrawl tiers; the ACTIVE cadence bounds how fresh anything downstream can be |
+| `CRAWL_REQUEST_DELAY_SECONDS` + `CRAWL_JITTER_SECONDS` | 2.0 + 1.0 | politeness; Tiki sets no `Crawl-delay` |
+| `CRAWL_LEASE_SECONDS` | 300 | a dead worker's tasks return after the lease; a late completion raises `LeaseLostError` |
+| `CRAWL_MAX_ATTEMPTS`, `CRAWL_RETRY_BASE/MAX_SECONDS` | 5, 30 / 1800 | exponential backoff with 20 % jitter |
+| `CRAWL_CIRCUIT_FAILURE_THRESHOLD`, `CRAWL_CIRCUIT_OPEN_SECONDS` | 5, 900 | after N consecutive failures the source is left alone |
+| `CRAWL_MAX_PAGES` | 50 | pages per category; the endpoint's `last_page` cuts earlier |
 
-The CSVs are far too large for Git and are excluded via `.gitignore`. Download
-from the link above, unzip, and place the files at:
+A page shape that drifts becomes `PARSE_ERROR`: terminal, raw body kept, and
+the circuit does not open, because drift is not an outage.
+
+### 3.2 Ingestion: Kafka and Silver
+
+| Topic | Key | Content |
+|---|---|---|
+| `marketplace.observations.v1` | `(marketplace, platform_listing_id)` | one observation per sighting of an offer |
+| `marketplace.observations.v1.dlq` | | only records that failed `DECODE` or `CONTRACT_VALIDATION` |
+| `marketplace.changes.v1` | `offer_id` | change events from the speed layer |
+
+Producers use `acks=all` and `max_in_flight_requests_per_connection=1`, so the
+order of one listing's observations is kept across retries. `kafka-python-ng`
+has no idempotent producer, so delivery is **at-least-once**, made safe by
+**deterministic identity**: `observation_id` is a hash of marketplace, listing,
+`observed_at` and raw hash; `offer_id` of marketplace and listing; `event_id`
+of offer, observation, change type and rule version. A redelivery overwrites
+itself.
+
+The Silver sink writes **one object per observation**, at a path computed
+from the observation, and commits the offset only after the write. A crash
+between the two re-delivers the record, which rewrites the same bytes. A
+storage outage stops the sink and grows lag; it never sends a valid record to
+the DLQ.
+
+### 3.3 Speed layer: `speed_layer/`
+
+A Spark Structured Streaming query reads the observations topic, decodes and
+validates each record, groups by `offer_id`, and runs
+`applyInPandasWithState`. The state is the offer's last applied observation.
+
+For each observation, in event-time order within the trigger:
+
+| Disposition | When | Effect |
+|---|---|---|
+| `APPLIED` | newer than the state | new state; zero or more change events |
+| `DUPLICATE` | same `observation_id` as the state | nothing |
+| `LATE` | older than the state | nothing in speed; **batch still sees it** in Silver |
+
+Change rules (`speed-rules.v1`) produce exactly seven types: `NEW_OFFER`,
+`PRICE_CHANGED`, `LARGE_PRICE_DROP` (a drop of at least 100,000 VND or 20 %),
+`RATING_CHANGED`, `COUNTER_CHANGED`, `AVAILABILITY_CHANGED`, and
+`OFFER_STALE`. `OFFER_STALE` is raised by a processing-time timeout when no
+observation has arrived for 6 hours. It means "not seen", not "delisted".
+
+| Setting | Default | Why |
+|---|---|---|
+| `MARKETPLACE_STREAM_TRIGGER` | 30 seconds | the micro-batch interval, and the largest part of speed latency |
+| `MARKETPLACE_STALE_AFTER_SECONDS` | 21600 | the timeout behind `OFFER_STALE` |
+| `MARKETPLACE_LARGE_DROP_ABSOLUTE / RELATIVE` | 100000 / 0.20 | the `LARGE_PRICE_DROP` threshold |
+| `MARKETPLACE_SPEED_SHUFFLE_PARTITIONS` | 4 | state partitions; small on purpose for one machine |
+| `MARKETPLACE_STREAM_CHECKPOINT_VERSION` | v1 | a new version replays from `earliest` to the same document set |
+| `REDIS_MARKETPLACE_OFFER_TTL_SECONDS`, `…_RECENT_CHANGES_MAX` | 86400, 5000 | realtime state is bounded |
+
+Each micro-batch writes Kafka, then Elasticsearch, then Redis, and is audited
+in `audit.marketplace_speed_batch`, keyed by `(query_name, query_id,
+batch_id)`. A batch that fails any sink is audited `FAILED` and retried as
+the same batch. Because every document `_id` and sorted-set member is
+deterministic, the retry creates no duplicates.
+
+### 3.4 Batch layer: `batch_layer/`
+
+`marketplace_scheduler.py` is a plain loop (not Airflow), so a crash leaves
+only an audit row to resume. Once per interval it cuts a window and runs
+`marketplace_warehouse.py`:
 
 ```text
-data/data_kaggle/2019-Oct.csv
-data/data_kaggle/2019-Nov.csv
+Silver (observed_at ≤ as_of) + audit (crawl runs finished ≤ as_of)
+   → 10 Gold datasets in gold/marketplace/runs/run_id=<run>/
+   → 17 quality rules        (any mandatory failure → QUALITY_FAILED, nothing published)
+   → staging tables → one transaction: TRUNCATE + refill cache.*
+   → current.json ← run manifest   (compare-and-swap; only after the cache is published)
 ```
 
-A small fixture (`tests/fixtures/`) ships with the repo, so the test suite and a
-smoke run work without downloading anything.
+| Setting | Default | Why |
+|---|---|---|
+| `MARKETPLACE_BATCH_INTERVAL_SECONDS` | 86400 | one window a day; windows are aligned to the Unix epoch in UTC |
+| `MARKETPLACE_BATCH_AS_OF_LAG_SECONDS` | 1800 | a window is cut 30 min after it closes, so crawl runs settle first |
+| `MARKETPLACE_QUALITY_RECONCILIATION_SETTLE / LOOKBACK_SECONDS` | 900 / 172800 | the lookback must exceed interval + settle, or a crawl run could age out unreconciled (enforced) |
+| `MARKETPLACE_FRESHNESS_SECONDS` | 21600 | `FRESH` / `STALE` at the run's `as_of` |
+| `MARKETPLACE_ANOMALY_WINDOW_DAYS`, `…_MIN_SAMPLES` | 14, 7 | the history an anomaly verdict needs |
+| `MARKETPLACE_ANOMALY_MAD_THRESHOLD`, `…_IQR_MULTIPLIER` | 3.5, 1.5 | robust outlier fences |
+| `MARKETPLACE_COUNTER_MAX_GAP_SECONDS` | 86400 | a counter transition over a longer gap is not trusted |
+| `MARKETPLACE_BATCH_SHUFFLE_PARTITIONS` | 8 | |
+| `MARKETPLACE_BATCH_LOCK_KEY` | 820801 | PostgreSQL advisory lock: one batch at a time; a second exits 75 and writes nothing |
 
----
+The scheduler never backfills. An old window is an operator command
+(`mp batch -AsOf … -AllowBackfill`), and a manifest older than the live
+pointer is refused unless backfill is explicit.
 
-## 2. Architecture at a glance
+### 3.5 Serving
 
-```mermaid
-flowchart TB
-    SRC["Kaggle CSV — 42.4M behavioral events"]
+| Store | Role | Holds |
+|---|---|---|
+| MinIO Gold | **authoritative** | every run, its manifest, and `current.json` (the last good version) |
+| PostgreSQL `cache` | BI serving | exactly the version `current.json` names: 10 marts |
+| PostgreSQL `audit` | operational record | frontier, crawl runs and attempts, batch runs, quality results, speed batches |
+| Elasticsearch | recent operational and realtime state | changes, current offers, plus source health, crawl attempts, speed batches and DLQ (from `ops/es_projector.py`) |
+| Redis | latest realtime state | `rt:offer:<id>`, `rt:changes:recent`, `rt:source:<m>:last_observation` |
 
-    subgraph ING["Ingestion"]
-        P["producer.py<br/>normalize → canonical contract<br/>rate-limited replay"]
-        KAFKA{{"Kafka (KRaft)<br/>topic: ecommerce_events"}}
-    end
+Superset reads only `cache` (validated, as of the last good run). Kibana reads
+only Elasticsearch (seconds old, not validated). The dashboards say which is
+which.
 
-    subgraph SPEED["Speed path — seconds"]
-        SS["Spark Structured Streaming<br/>1-min windows · 2-min watermark"]
-        ESI["es_indexer.py<br/>raw-event drill-down"]
-        ES[("Elasticsearch")]
-        RD[("Redis rt:kpi:*")]
-        KB["Kibana"]
-    end
+## 4. Data model
 
-    subgraph BATCH["Batch path — accurate & replayable"]
-        WJ["warehouse_job.py — Spark EtLT<br/>Bronze → Silver (+quarantine) → Gold"]
-        LAKE[("MinIO S3A<br/>authoritative warehouse")]
-        QG{"Data-quality gate<br/>5 mandatory checks"}
-        ML["ml_job.py<br/>N-BEATS · LSTM · AutoEncoder"]
-        PG[("PostgreSQL<br/>BI cache + audit")]
-        SUP["Superset"]
-    end
+### 4.1 Medallion zones
 
-    SRC --> P --> KAFKA
-    KAFKA --> SS --> ES & RD
-    KAFKA --> ESI --> ES
-    ES --> KB
-    SRC --> WJ --> LAKE
-    WJ --> QG -->|pass| PG
-    QG -->|fail — publish blocked| PG
-    PG --> ML --> PG --> SUP
+| Zone | Grain | Write policy |
+|---|---|---|
+| Bronze `raw/marketplace=/observed_date=/hour=/crawl_run_id=/raw_artifact_id=` | one HTTP response + metadata sidecar | append-only, never rewritten |
+| Silver `offer_observations/marketplace=/observed_date=/observation_id=.json` | one observation | idempotent by path |
+| Gold `runs/run_id=<run>/<dataset>/` | one directory per run | never overwritten; the pointer chooses which is served |
+
+### 4.2 Gold and the cache: a star around the offer
+
+The marts are a **dimensional model centred on the offer**. Two "current"
+tables act as dimensions, and the daily marts are facts at an explicit grain
+that join to them on natural keys.
+
+```text
+                         ┌──────────────────────────┐
+                         │   seller_current  (dim)  │
+                         │ PK (seller_id,marketplace)│
+                         └────────────▲─────────────┘
+                                      │ seller_id
+ ┌─────────────────────────┐   ┌──────┴───────────────────┐   ┌──────────────────────────┐
+ │ offer_price_history_daily│   │    offer_current  (dim)  │   │   offer_change_daily      │
+ │ (marketplace, offer_id, ├──►│ PK offer_id               │◄──┤ (marketplace, offer_id,   │
+ │  observed_date, currency)│   │ title, brand,             │   │  observed_date, currency) │
+ └─────────────────────────┘   │ category_path, seller_id, │   └──────────────────────────┘
+ ┌─────────────────────────┐   │ latest price/rating/      │   ┌──────────────────────────┐
+ │ price_anomaly_daily      ├──►│ counters, raw lineage     │◄──┤ counter_delta_daily       │
+ │ (… , currency)           │   └──────▲───────────────────┘   │ (… , counter_name)        │
+ └─────────────────────────┘          │                        └──────────────────────────┘
+                              ┌───────┴──────────┐
+                              │ offer_freshness   │  PK offer_id, judged at the run's as_of
+                              └──────────────────┘
+
+ Aggregate facts, no offer key:
+   category_price_daily      (marketplace, category_path, observed_date, currency)
+   source_coverage_daily     (marketplace, observed_date)
+   crawl_reliability_daily   (marketplace, request_date)
 ```
 
-**Storage roles are explicit and enforced in code**
+| Table | Type | Grain | Measures |
+|---|---|---|---|
+| `offer_current` | dimension (current state) | `offer_id` | title, brand, category path, seller; latest price, list price, rating, counters, availability; Bronze lineage |
+| `seller_current` | dimension | `(seller_id, marketplace)` | first/last seen, observed offer count |
+| `offer_price_history_daily` | periodic snapshot fact | offer × day × currency | first/last/min/max/avg price, observation and distinct-price counts |
+| `offer_change_daily` | transaction summary fact | offer × day × currency | price changes, drops, increases, signed and absolute change, rating/counter/availability changes |
+| `counter_delta_daily` | fact | offer × day × counter | raw and valid delta, invalid transitions with reasons, velocity proxy |
+| `price_anomaly_daily` | fact | offer × day × currency | baseline median/MAD/IQR, fences, robust score, status |
+| `offer_freshness` | snapshot at `as_of` | `offer_id` | age, `FRESH` / `STALE` / `FUTURE` |
+| `category_price_daily` | aggregate fact | category × day × currency | min, p25, median, p75, max, avg |
+| `source_coverage_daily` | aggregate fact | marketplace × day | eligible / observed / missing offers, coverage and rejection rates |
+| `crawl_reliability_daily` | aggregate fact | marketplace × request day | success rate, latency avg/p95, raw bytes, five error-kind counts |
 
-| Store | Role | Not |
+Design choices, and why:
+
+- **Natural, deterministic keys instead of surrogate keys.** `offer_id` is a
+  hash of marketplace and listing ID, so Gold built from a replay, a restore
+  or a rebuild joins exactly as the original did. Surrogate keys would differ
+  per run.
+- **`currency` is part of every price grain.** An offer that switches
+  currency mid-day yields one row per currency, not an average across
+  currencies.
+- **No `dim_date`.** `observed_date` is a degenerate date column. Calendars
+  carry no business attributes here (no fiscal periods, no store hours).
+- **Dimensions hold current state (SCD type 1); history lives in the facts and
+  Silver.** Price history is the fact itself. Attribute history (a renamed
+  title, a moved category) stays recoverable from Silver, so a type-2
+  dimension would duplicate what the lake already keeps.
+- **The category hierarchy is kept whole.** Tiki categories are a ragged tree
+  4–8 levels deep (964 distinct paths in one crawl), so `category_path` is
+  stored as the full path rather than fixed `level_1…level_n` columns.
+- **Verdicts carry their rules.** Freshness, counter and anomaly rows store
+  their rule version and parameters, so a stored verdict can still be checked
+  after the configuration changes.
+
+Grading rules that are easy to misread:
+
+- a **negative counter delta is never clamped to zero**: it is kept and
+  flagged `counter_reset_or_invalid`;
+- a **price anomaly compares an offer only with its own 14-day history**, and
+  `INSUFFICIENT_HISTORY` / `INSUFFICIENT_DISPERSION` mean "no verdict", not
+  "normal";
+- `rating = 0` with `review_count = 0` (about 47 % of products) means "no
+  reviews yet", so an average rating must leave those rows out.
+
+The full column lists, the contracts and the audit tables are in
+[`docs/DATA_MODEL.md`](docs/DATA_MODEL.md).
+
+## 5. Speed latency and batch strength
+
+### 5.1 Where speed latency comes from
+
+From a change on the site to a change event in Kibana:
+
+| Hop | Typical cost | What controls it |
 |---|---|---|
-| **MinIO (S3A)** | Authoritative warehouse — Bronze / Silver / Gold, replayable history | — |
-| **PostgreSQL** | *BI cache only* — compact marts + ML outputs + audit trail | Not the system of record |
-| **Elasticsearch** | Realtime search & time-series store behind Kibana | Not queried by the batch path |
-| **Redis** | Latest realtime KPI counters for a low-latency API surface | Not a dashboard source |
+| change on site → next crawl | up to the cadence (60 min ACTIVE) | `CRAWL_*_CADENCE_MINUTES`; **the dominant term** |
+| crawl attempt | ~2.9 s p50, ~3.7 s p95 (live Tiki) | the source and the throttle |
+| parse → Kafka ack | ~30 ms p50 | `acks=all` on one broker |
+| wait for the trigger | 0–30 s | `MARKETPLACE_STREAM_TRIGGER` |
+| micro-batch | ~1.1 s fixed + per-record cost | Spark planning and state, then Kafka / ES / Redis writes |
 
----
+Measured in Phase 9 (live collection and benchmarks; see PROGRESS §26–31):
+speed latency from produce to all sinks written is **8–24 s p50** at a 30 s
+trigger, so the trigger, not processing, sets it. A micro-batch costs about
+1.1 s however small it is, which is why the trigger is not lowered blindly:
+at a 2 s trigger that fixed cost leaves room for only tens of observations
+per second.
 
-## 3. Technology stack
+How the design keeps latency low without giving up correctness:
 
-| Concern | Choice | Version |
+- **State per offer, not per window.** A change needs only the offer's last
+  observation, so there is no join, no lookback and no wait for a window to
+  close.
+- **Ordering comes from the key, not from waiting.** All observations of one
+  listing share a partition and are sorted by event time within a trigger.
+  An out-of-order observation is marked `LATE` and left to batch, rather than
+  holding the stream open with a watermark.
+- **Bounded sinks.** Elasticsearch takes one bulk request per micro-batch,
+  Redis one pipeline. On `phase-9-*` branches, Kafka sends are also batched,
+  the source watermark is read once per batch, and sink clients are reused
+  across batches. That raised saturation from ~180 to ~440 records/s per
+  micro-batch.
+- **Idempotent retries.** A failed micro-batch is retried whole, and
+  deterministic IDs make the retry invisible downstream.
+
+### 5.2 What batch can do that speed cannot
+
+| | Speed | Batch |
 |---|---|---|
-| Streaming bus | Apache Kafka (KRaft, no ZooKeeper) | 4.2.0 |
-| Distributed processing | Apache Spark (batch + Structured Streaming) | 3.5.1 |
-| Object store / lakehouse | MinIO (S3A) | 2025-09 release |
-| BI serving DB | PostgreSQL | 18.3 |
-| Realtime KPI cache | Redis | 8.6.2 |
-| Search & realtime analytics | Elasticsearch + Kibana | 8.18.0 |
-| Batch BI | Apache Superset | 4.1.1 |
-| Forecasting | Darts (N-BEATS, LSTM/RNN) + PyTorch | ≥ 0.27 |
-| Anomaly detection | PyOD AutoEncoder, scikit-learn fallback | ≥ 1.1 |
-| Orchestration (current) | Idempotent PowerShell runner + Compose profiles | — |
+| Input | each observation once, in arrival order | **every** Silver row observed ≤ `as_of`, late ones included |
+| Context | one offer's last state | full history: 14-day baselines, daily distributions, cross-offer aggregates |
+| Checked against | its own contract | the crawl audit (Silver must reconcile with what the crawler says it published) and 17 rules |
+| Replayable | no (arrival-dependent) | yes: a run is a function of `as_of`, Silver and the audit, and its manifest reads no wall clock. A rebuild can see more rows only if they landed in Silver after the first run read it |
+| Versioned | latest state only | every run kept in Gold; the pointer moves only to a run that passed |
+| Failure visible as | a `FAILED` micro-batch, retried | `QUALITY_FAILED` with all 17 results stored; the previous version keeps serving |
 
----
+The quality gate checks Silver (raw lineage complete, unique
+`observation_id`, non-negative prices, valid currency, no observation from
+the future), the audit (Silver reconciles with crawl attempts), and Gold
+(daily row counts and price aggregates reconcile with Silver, one current row
+per offer, freshness judged at `as_of`). Counter-transition and anomaly-coverage
+rates are advisory.
 
-## 4. What each layer actually does
+Measured on replayed data (Phase 9, PROGRESS §27): a batch over 200,000 Silver
+rows takes about 6 minutes on one machine (~530 rows/s), and the cost is
+stable to within 2 % between runs. The current bottleneck of the batch path
+is upstream. The Silver sink writes one object per observation and drains
+80–116 records/s. That is ample for the current collection rate (a few
+hundred observations an hour) but is the first thing to change at a larger
+scale.
 
-### 4.1 Contract & configuration layer — `config/`
+## 6. Failure behaviour
 
-The foundation the rest of the system is built on: **one contract, one place for
-runtime configuration.**
+Every row below was established by a drill (`mp drill d1 … d11`) against the
+running stack.
 
-- **`schema.py` — the canonical event contract.** Nine fields
-  (`event_time, event_type, user_id, user_session, product_id, category_id,
-  category_code, brand, price`). `normalize_event()` maps raw source columns *and*
-  already-canonical keys onto that shape, resolving event-type aliases
-  (`page_view → view`, `add_to_cart → cart`) and defaulting a missing
-  `category_code` to `unknown` rather than dropping the row.
-  `validate_event()` rejects unsupported event types, missing identifiers and
-  negative prices.
-  The producer, the speed layer and the ES indexer all import this module, so
-  **the layers cannot drift apart on event shape.** The Spark batch job
-  implements the identical rules column-wise for scale, and a dedicated test
-  pins the two implementations to the same behavior.
-- **`settings.py`.** All runtime configuration is env-driven with safe local
-  defaults, so identical code runs on a laptop, inside Docker and in CI.
-  `DATA_LAKE_MODE` switches every lake write between local Parquet (dev/tests)
-  and MinIO S3A (Docker) through a single `data_lake_uri(zone, dataset)` helper.
+| Lost | Result | After recovery |
+|---|---|---|
+| the source | attempts audited by `error_kind`; circuit opens | tasks resume when it closes |
+| Kafka | `PUBLISH_ERROR`; raw body in Bronze | the window reconciles |
+| MinIO | Silver sink stops committing; lag grows; no DLQ | lag returns to 0, Silver matches the audit |
+| Elasticsearch / Redis | micro-batch `FAILED`, retried | no duplicate IDs or members |
+| speed killed | checkpoint holds offsets | no change lost or duplicated |
+| a crawl worker | leases expire | another worker takes the tasks |
+| page shape | `PARSE_ERROR`, raw kept, circuit unchanged | reparse after the adapter is fixed |
+| Silver vs audit | `QUALITY_FAILED`; cache and pointer unchanged | resume the run |
+| cache publish | run `FAILED`; previous version intact | resume; pointer and cache move together |
+| a second batch | exits 75, no audit row | — |
+| the whole stack | `mp backup` / `mp restore` into a new project | pointer and cache agree; reparse sample identical |
 
-### 4.2 Ingestion layer — `data_ingestion/`
+## 7. Technology
 
-- **`producer.py`** streams the CSV into Kafka at a configurable rate (`--eps`),
-  with bounded connection retries (5 attempts), `acks=all`, batching and
-  partition keying by `user_session` (falling back to `user_id`) so all events of
-  one session land on the same partition and stay ordered. Rows the contract
-  rejects are dropped at the edge rather than being carried downstream.
-  Supports `--loop` for continuous replay and `--test-mode` for a dry print.
-- **`es_indexer.py`** is a separate consumer that bulk-indexes *raw* events into
-  `ecommerce-events` (batch size 200, dedicated consumer group, deterministic
-  `event_id`) so Kibana can drill down to individual events. This is intentionally
-  split from the speed layer: aggregation and drill-down have different failure
-  modes and different retention needs.
-- **`schemas.py`** exposes the canonical contract as a Spark `StructType` used by
-  the streaming reader.
+Kafka 4.2 (KRaft) · Spark 4.0 / PySpark 4.0.4 · MinIO (S3A) · PostgreSQL 18 ·
+Elasticsearch and Kibana 8.18 · Redis 8.6 · Superset 4.1 · Python 3.12 ·
+Docker Compose with profiles. Two pinned images:
+`ecommerce/marketplace-python` and `ecommerce/spark-marketplace:4.0.1`.
 
-### 4.3 Speed layer — `speed_layer/`
-
-Spark Structured Streaming over the canonical topic:
-
-- **1-minute tumbling windows** grouped by `event_type`, with a **2-minute
-  watermark** to bound state and tolerate late arrivals; `update` output mode on a
-  10-second processing trigger.
-- Metrics per window: event count, `approx_count_distinct(user_id)`
-  (HyperLogLog — the right accuracy/cost trade-off for a speed view), and summed
-  amount, with revenue attributed only to `purchase` events.
-- A single `foreachBatch` sink fans out to **both** serving stores in one pass:
-  bulk upsert into Elasticsearch (`ecommerce-metrics`, deterministic
-  `window:event_type` document id → idempotent re-delivery) and a pipelined Redis
-  write of `rt:kpi:{event_type}` hashes (1-hour TTL) plus a trimmed
-  `rt:kpi:revenue_series` list (last 240 points).
-- Checkpointing is configured for restart-safe offsets.
-
-### 4.4 Batch layer — `batch_layer/warehouse_job.py`
-
-The heart of the project: a Spark **EtLT** pipeline composed of small, pure,
-independently testable stages orchestrated by `run_warehouse()`.
-
-| Stage | What it guarantees |
-|---|---|
-| `read_source` | CSV or JSON/JSONL, with source-file lineage attached |
-| `write_bronze` | Append-only raw landing, partitioned by ingest date + run id |
-| `normalize_events` | Canonical contract applied column-wise; **deterministic `event_key = SHA-256(event_type ‖ user_id ‖ product_id ‖ session_id ‖ event_time)`** |
-| `split_valid_events` | Valid rows deduplicated by `event_key`; rejects **quarantined with a reason** (`unsupported_event_type`, `missing_user_id`, `negative_price`, …) instead of dropped |
-| `read_canonical_silver` | Reprocessing-safe read: latest record wins per `event_key` |
-| `build_dimensions` | `dim_date`, `dim_user`, `dim_product`, `dim_category` (SCD-1; surrogate keys via `xxhash64`; category hierarchy split from the dotted code) |
-| `build_fact` | `fact_behavior_event` — exactly one row per valid source event |
-| `build_marts` | Five BI marts (below) |
-| `quality_checks` | Five mandatory gates |
-| `write_gold` | Star schema + marts written to the MinIO Gold zone |
-| `publish_postgres` | Atomic staging → cache swap |
-
-**Idempotency.** Because `event_key` is content-derived, replaying the same file
-never duplicates a fact — the same run can be re-executed safely after a failure.
-
-**Data-quality gate (blocking).** The job **refuses to publish** if any of these
-fail: Silver non-empty · `event_key` unique · required identifiers/timestamps
-complete · zero dimension orphans in the fact · product dimension non-empty.
-Every check — pass or fail, with its observed value and its expectation — is
-persisted to `audit.data_quality_result`, and every run to `audit.pipeline_run`
-(status, row counts per zone, rejected rows, error message). **A failed run is
-therefore as observable as a successful one.**
-
-**Atomic publish.** Marts are written to a `staging` schema over JDBC, then a
-single transaction truncates and refills `cache`. Superset always sees either
-the last good version or the complete new version — **never a half-loaded
-dashboard.**
-
-**Marts produced:** `funnel_daily` (viewers → cart users → buyers with
-view→cart, cart→purchase, conversion and abandonment rates), `product_daily`,
-`category_daily`, `session_daily` (duration, counts, and an outcome label of
-`converted` / `abandoned_cart` / `browsing`) and `daily_revenue` — the feature
-table consumed by the ML job.
-
-### 4.5 Batch ML layer — `batch_layer/analytics/`, `ml_job.py`
-
-Two production concerns modelled as extensible strategies, not as notebook code.
-
-- **Forecasting — Strategy + Template Method.** `Forecaster` (abstract) owns the
-  shared workflow: history preparation, series construction, scaling, covariate
-  building, prediction inverse-transform and fallback. Concrete strategies
-  (`NBeatsForecaster`, `LstmForecaster`) implement only `_train()`.
-  `TrendPredictor` orchestrates any set of strategies — **open for extension,
-  closed for modification**: adding a model touches neither the orchestrator nor
-  any caller.
-- **Numerical engineering, documented in code.** Revenue is raw-scale, which made
-  the RNN collapse toward zero on a short series; a Darts `Scaler` fit at train
-  time and inverted at predict time fixes it. N-BEATS additionally enables
-  **RevIN** for level/variance shift. Each strategy declares which covariate kind
-  its Darts class actually supports (`past` vs `future`), resolved through a
-  single helper so `fit()` and `predict()` cannot disagree.
-- **Feature engineering under data scarcity.** The daily aggregation of a single
-  monthly file yields only ~31 points, so cyclical day-of-week (`sin`/`cos`) plus
-  a weekend flag squeeze extra signal out of the existing window rather than
-  demanding a longer history.
-- **Honest evaluation.** `backtest()` runs a **rolling-origin (walk-forward)**
-  evaluation — expanding train window, origin moved forward per fold — and
-  averages MAE / MSE / RMSE / MAPE per model across folds, degrading to a single
-  split when history is too short. Per-fold detail is retained for inspection.
-  This avoids drawing conclusions from one lucky split.
-- **Anomaly detection.** PyOD **AutoEncoder** over
-  `(revenue, purchase_events, avg_purchase_value)` with standardized features and
-  a batch size capped for short daily series (PyOD's loader drops the last partial
-  batch and would otherwise train on zero batches).
-- **Graceful degradation as a design rule.** If `darts` / `pyod` / `torch` are
-  unavailable, forecasting falls back to a naive baseline and detection to
-  `IsolationForest`, and the active backend is reported. **The pipeline always
-  completes and always says what it actually ran.**
-
-### 4.6 Serving layer — `serving_layer/`, `batch_layer/postgres_cache.py`
-
-Storage access sits behind small, intention-revealing gateways rather than being
-scattered across jobs.
-
-- `PostgresCacheSync` — reads the `daily_revenue` feature table, writes
-  `predictions` / `anomalies` with truncate-and-insert so consumers never see a
-  partially refreshed model output.
-- `postgres_views.py` — reshaping views over the cache for common charts
-  (`v_revenue_forecast` for actual-vs-forecast, `v_anomaly_days`, `v_top_products`),
-  managed by a `create` / `drop` CLI.
-- `redis_cache.py` — typed read helpers over `rt:kpi:*` for a low-latency KPI/API
-  surface.
-
-### 4.7 Presentation layer — `display/`
-
-Dashboards are **provisioned as code**, not clicked together by hand.
-
-- **Superset (batch BI)** — automated bootstrap (`setup_superset.sh`), runtime
-  patching, declarative database + dataset registration (`datasources.yaml`),
-  and scripted dashboard creation for both the descriptive marts and the ML
-  outputs (forecast comparison + anomalies).
-- **Kibana (realtime)** — data views and a speed-layer dashboard created through
-  the Saved Objects API. Classic aggregation-based visualizations were chosen
-  over Lens **deliberately**: their saved-object schema is stable across Kibana
-  versions, avoiding migration-sensitive internal state.
-
-### 4.8 Infrastructure & operations
-
-- **`docker-compose.yml`** — the full stack with health checks and
-  `depends_on: service_healthy` conditions so start-up ordering is real rather
-  than hopeful; buckets auto-created by an init container; heavy one-shot jobs
-  behind a `jobs` **profile** so they never run resident.
-- **`docker/spark-warehouse/Dockerfile`** — a pinned Spark 3.5.1 image with the
-  PostgreSQL JDBC and S3A jars baked in. Dependency resolution is kept *out* of
-  application code, so batch runs are reproducible and work offline.
-- **`scripts/init_postgres.sql`** — idempotent DDL for the `cache`, `staging` and
-  `audit` schemas, applied at container init *and* before every publish.
-- **`scripts/start_all.ps1`** — one-command runner with composable switches
-  (`-RunEverything`, `-RunRealtime`, `-RunBatch`, `-RefreshBI`, `-SmokeCheck`,
-  `-BuildWarehouseImage`, …), plus `smoke_fullstack.ps1` and
-  `validate_warehouse.sql` for post-run verification.
-
-### 4.9 Quality assurance — `tests/`
-
-**27 tests, all passing** (`pytest tests/ -q`), covering the parts most likely to
-break silently:
-
-| Area | What is asserted |
-|---|---|
-| Canonical contract | Normalization, alias mapping, validation rules, wire serialization |
-| Ingestion contract | The source mapping preserves **only** facts the data actually contains |
-| Spark warehouse transforms | Normalization preserves source grain · star schema has **no orphans** · funnel and session marts are correct |
-| Speed layer | Windowed aggregation by event type |
-| ML | Forecast shape per strategy, backtest metrics per model, anomaly labelling |
-| Cache gateway | Prediction/anomaly write contract |
-| Lake I/O | Local and S3A path resolution |
-
----
-
-## 5. Data model
-
-Full detail — canonical contract, medallion zones, star-schema ERD, mart grains,
-ML output tables and audit tables — lives in
-**[docs/DATA_MODEL.md](docs/DATA_MODEL.md)**; architecture rationale and design
-patterns in **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)**.
-
-Summary of the Gold star schema:
-
-- `fact_behavior_event` — one row per valid source event, keyed by a
-  content-derived `event_key`.
-- `dim_date`, `dim_user`, `dim_product`, `dim_category` — SCD Type 1.
-
-Semantics are stated precisely: `revenue` is the sum of `price` over purchase
-events and is **never** described as an order metric; funnel rates are same-day
-population ratios, **not** ordered-path attribution.
-
----
-
-## 6. Quick start
-
-Requires Docker Desktop (≥ 8 GB RAM) and the Kaggle CSV at
-`data/data_kaggle/2019-Oct.csv` (see §1). Runtime configuration is read from
-`.env` at the repository root; every value has a working local default in
-`config/settings.py`.
+## 8. Running it
 
 ```powershell
-# Full stack: infra + realtime + producer + batch EtLT + ML + BI
-.\scripts\start_all.ps1 -RunEverything -Source .\data\data_kaggle\2019-Oct.csv -BuildWarehouseImage
-
-# Batch + ML + BI only (warehouse image already built)
-.\scripts\start_all.ps1 -RunBatch -RefreshBI -Source .\data\data_kaggle\2019-Oct.csv
-
-# Smoke run on the bundled fixture — no dataset download required
-.\scripts\start_all.ps1 -RunBatch -Source .\tests\fixtures\events.csv
-
-# Test suite
-.\.venv\Scripts\python.exe -m pytest tests\ -q
+copy .env.example .env
+.\scripts\mp.ps1 up -With crawl,ingest,speed,batch,serve
+.\scripts\mp.ps1 smoke        # the full slice against the offline stub; never contacts Tiki
+.\scripts\mp.ps1 validate     # 11 read-only checks over the running stack
 ```
 
-| Service | URL | Credentials |
-|---|---|---|
-| Superset (batch BI) | http://localhost:8088 | `admin` / `admin` |
-| Kibana (realtime) | http://localhost:5601 | — |
-| MinIO console | http://localhost:9001 | `minioadmin` / `minioadmin` |
-| Spark master UI | http://localhost:8080 | — |
-| Elasticsearch | http://localhost:9200 | — |
-| PostgreSQL | `localhost:5433` | `admin` / `admin123` |
+Superset is at http://localhost:8088, Kibana at http://localhost:5601, and
+the MinIO console at http://localhost:9001. Tests: `python -m pytest`
+(1,006 offline tests; the drills need the stack: `-m drill`).
 
----
+| Document | For |
+|---|---|
+| [ARCHITECTURE.md](docs/ARCHITECTURE.md) | the design in depth |
+| [DATA_MODEL.md](docs/DATA_MODEL.md) | every contract, table, index and key |
+| [RUNBOOK.md](docs/RUNBOOK.md) | operating the stack: seeding, backfill, drills, backup |
+| [PHASE_INDEX.md](docs/PHASE_INDEX.md) | phases, frozen contracts, branching model |
 
-## 7. Repository layout
-
-```text
-config/
-  schema.py                 Canonical event contract (normalize · validate · wire)
-  settings.py               Env-driven runtime configuration (local ⇄ S3A)
-data_ingestion/
-  producer.py               Kaggle CSV → Kafka (canonical events)
-  schemas.py                Spark StructType for the contract
-  es_indexer.py             Kafka → Elasticsearch raw events
-speed_layer/
-  speed_layer.py            Structured Streaming → Elasticsearch + Redis
-batch_layer/
-  warehouse_job.py          Spark EtLT, quality gate, atomic cache publish
-  ml_job.py                 Forecasting + anomaly detection orchestration
-  postgres_cache.py         ML cache gateway
-  analytics/                base.py · forecasters.py · trend_predictor.py · anomaly_detector.py
-serving_layer/
-  postgres_views.py         Convenience views over the BI cache
-  redis_cache.py            Realtime KPI read helpers
-display/
-  superset/                 Superset provisioning + dashboards as code
-  kibana/                   Kibana data views + speed dashboard
-docker/spark-warehouse/     Pinned Spark 3.5.1 batch image (JDBC + S3A jars)
-scripts/                    init_postgres.sql · start_all.ps1 · smoke & validation
-docs/                       ARCHITECTURE.md · DATA_MODEL.md
-tests/                      Contract, Spark transform, streaming, ML tests
-```
+The repository also keeps its original Kaggle clickstream demo (a classic star
+schema over views, carts and purchases) under the `legacy` profile. It is
+independent of everything above; see [ARCHITECTURE.md §11](docs/ARCHITECTURE.md).

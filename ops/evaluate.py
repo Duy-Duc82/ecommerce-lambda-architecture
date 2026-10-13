@@ -109,6 +109,14 @@ def drill_recovery(records: Iterable[Mapping[str, Any]]) -> list[dict[str, Any]]
     return sorted(rows, key=lambda r: int(str(r["drill"]).lstrip("d") or 0))
 
 
+# A page counts as crawled when it was fetched, stored and parsed: SUCCEEDED,
+# or PARTIAL, where some of its rows failed validation but the rest were
+# published. The crawl benchmark counts pages the same way. ``success_rate``
+# stays the strict share of attempts with no rejected row, and ``partial`` is
+# reported beside it, so a single bad row neither hides nor drops a page.
+CRAWLED_STATUSES = ("SUCCEEDED", "PARTIAL")
+
+
 def reliability_report(attempts: Sequence[Mapping[str, Any]], tasks: Sequence[Mapping[str, Any]],
                        source_state: Sequence[Mapping[str, Any]], drills: Sequence[Mapping[str, Any]],
                        *, cadence_seconds: int) -> dict[str, Any]:
@@ -122,7 +130,10 @@ def reliability_report(attempts: Sequence[Mapping[str, Any]], tasks: Sequence[Ma
     def summary(rows: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
         latencies = [r["latency_ms"] for r in rows if r.get("latency_ms") is not None]
         succeeded = sum(r["status"] == "SUCCEEDED" for r in rows)
-        return {"attempts": len(rows), "succeeded": succeeded, "success_rate": round(succeeded / len(rows), 4),
+        partial = sum(r["status"] == "PARTIAL" for r in rows)
+        return {"attempts": len(rows), "succeeded": succeeded, "partial": partial,
+                "crawled": succeeded + partial, "crawl_rate": round((succeeded + partial) / len(rows), 4),
+                "success_rate": round(succeeded / len(rows), 4),
                 "error_kinds": dict(sorted(Counter(r["error_kind"] for r in rows if r.get("error_kind")).items())),
                 "http_statuses": dict(sorted(Counter(str(r["http_status"]) for r in rows
                                                      if r.get("http_status") is not None).items())),
@@ -143,10 +154,10 @@ def reliability_report(attempts: Sequence[Mapping[str, Any]], tasks: Sequence[Ma
     seeded = sum(t["scheduled_for"] == SEED_SCHEDULED_FOR for t in tasks if t["task_id"] in first_start)
     lateness = [(first_start[t["task_id"]] - t["scheduled_for"]).total_seconds()
                 for t in tasks if t["task_id"] in first_start and t["scheduled_for"] != SEED_SCHEDULED_FOR]
-    # Cadence adherence: between two successful crawls of the same page.
+    # Cadence adherence: between two crawls of the same page.
     by_target: dict[str, list[datetime]] = defaultdict(list)
     for a in attempts:
-        if a["status"] == "SUCCEEDED" and a.get("target"):
+        if a["status"] in CRAWLED_STATUSES and a.get("target"):
             by_target[a["target"]].append(a["started_at"])
     intervals = [(later - earlier).total_seconds() for starts in by_target.values()
                  for earlier, later in zip(sorted(starts), sorted(starts)[1:])]
@@ -222,9 +233,11 @@ def to_markdown(report: Mapping[str, Any]) -> str:
              f"Window {w['start']} to {w['end']}: {w['days']} days; 30-day threshold "
              f"{'met' if w['threshold_met'] else 'NOT met'}.", ""]
     if report["report"] == "crawl_reliability":
-        lines += ["| day | attempts | success rate | p50 ms | p95 ms | p99 ms | parsed | errors |", "|---|---:|---:|---:|---:|---:|---:|---|"]
+        lines += ["| day | attempts | crawl rate | success rate | partial | p50 ms | p95 ms | p99 ms | parsed | errors |",
+                  "|---|---:|---:|---:|---:|---:|---:|---:|---:|---|"]
         for day, s in report["per_day"].items():
-            lines.append(f"| {day} | {s['attempts']} | {s['success_rate']:.2%} | {s['latency_p50_ms']} | "
+            lines.append(f"| {day} | {s['attempts']} | {s['crawl_rate']:.2%} | {s['success_rate']:.2%} | {s['partial']} | "
+                         f"{s['latency_p50_ms']} | "
                          f"{s['latency_p95_ms']} | {s['latency_p99_ms']} | {s['parsed']} | {s['error_kinds'] or ''} |")
         lines += ["", f"Gaps longer than twice the cadence: {len(report['gaps'])}."]
         lines += [f"- {g['start']} to {g['end']} ({g['hours']} h), cause {g['cause']}" for g in report["gaps"]]
