@@ -3172,3 +3172,32 @@ mở lại.
 có latency đã hiệu chỉnh, rồi thay các cột latency của §27.2. Stack phải chạy
 trên host có đủ RAM.
 
+## 34. 2026-10-13 — merge `develop` vào `phase-9-scheduler-wall-clock`, hiệu chỉnh đồng hồ cho soak
+
+Merge `develop` (đã có PR #13) vào nhánh trước khi mở PR. Ba file xung đột:
+
+- `ops/bench.py`, `run_scenario`: giữ cách của `develop` (`run_started` cho mỗi
+  lượt, `BenchFailed` giữ các lượt đã xong, `variant_result`, trả về
+  `(paths, failures)`), thêm `sampler` cho `speed-soak` và bỏ dấu cách trong tên
+  file của nhánh này.
+- `tests/test_bench_report.py`, `docs/PROGRESS.md`: hai bên chỉ thêm, giữ cả hai.
+
+`speed-soak` lặp lại lỗi PR #13 đã sửa cho `speed`: latency audit là giờ VM trừ
+`produced_at` giờ host, và cửa sổ lấy `start` giờ host nhưng xếp `progress_at`,
+`completed_at` giờ VM vào đó, nên mỗi cửa sổ lệch ~30 s. Nay `run_speed_soak` đọc
+`clock_offset()` ở đầu và cuối lượt như `run_speed`. `soak_metrics` trừ độ lệch
+khỏi các mốc VM trước khi xếp cửa sổ và khỏi latency, kết quả ghi thêm
+`clock_offset_*` và `clock_step_suspected`. Mẫu tài nguyên vẫn ở giờ host, cùng
+đồng hồ với `start`. `speed-cost` chỉ đo thời lượng trên một đồng hồ, không cần sửa.
+
+Số soak ở §29.2 đo trước khi sửa: latency đã trừ lệch trung vị bằng tay, còn
+drift theo cửa sổ thì tính trên cửa sổ lệch ~30 s (10 % của cửa sổ 3 phút).
+Chạy lại soak trước khi dùng các số đó.
+
+Test liên quan pass (246), gồm một test mới cho cửa sổ và latency của soak khi
+đồng hồ VM nhanh 30 s.
+
+### 34.1 Việc tiếp theo (resume ở đây)
+
+Các mục §32.4 và phần "còn phải làm" của §33 vẫn giữ. Thêm: chạy lại
+`bench speed-soak` bằng bench đã sửa.
