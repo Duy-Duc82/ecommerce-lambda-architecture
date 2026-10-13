@@ -18,12 +18,21 @@
 #   .\scripts\mp.ps1 batch -AsOf 2026-10-02T00:00:00Z [-AllowBackfill] [-QualityOnly]
 #   .\scripts\mp.ps1 backup
 #   .\scripts\mp.ps1 restore -BackupId bk-... -Project mp-restore
+#
+# -EnvFile env/<stack>.env loads that stack's variables for this one call
+# (project name, container prefix, ports) and restores the caller's
+# environment afterwards. Phase 9 plan section 5:
+#   env/live.env    live collection; smoke, drill and `down -Volumes` refuse it;
+#                   `evaluate reliability|freshness|storage` and `evidence` read it
+#   env/bench.env   benchmarks (`bench crawl|ingest|speed|batch|all|report`),
+#                   smoke and drills, beside the live stack
+#   env/demo.env    the offline demo: `demo [--auto] [--snapshot] [--skip-faults] [--without-serve]`
 # ============================================================
 
 param(
     [Parameter(Position = 0, Mandatory = $true)]
     [ValidateSet("up", "down", "status", "migrate", "seed", "smoke", "validate", "batch", "drill",
-                 "backup", "restore")]
+                 "backup", "restore", "bench", "evaluate", "demo", "evidence")]
     [string]$Command,
     [string[]]$With = @("crawl", "ingest", "speed", "batch"),
     [switch]$Volumes,
@@ -34,6 +43,7 @@ param(
     [switch]$QualityOnly,
     [string]$BackupId,
     [string]$Project,
+    [string]$EnvFile,
     [Parameter(ValueFromRemainingArguments = $true)]
     [string[]]$Rest = @()
 )
@@ -45,6 +55,59 @@ $ErrorActionPreference = "Continue"
 $ProjectRoot = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 # Popped before the single exit at the end: the caller's shell keeps its directory.
 Push-Location $ProjectRoot
+
+# The live collection stack (Phase 9 plan section 4, decision D1).
+$LiveProject = "mp-live"
+
+# A script run as .\scripts\mp.ps1 shares the caller's process, so every
+# variable set here is put back in the final `finally`.
+$SavedEnv = @{}
+
+# A value as Compose reads it from an env file: surrounding quotes are
+# removed, and an unquoted value ends where " #" starts an inline comment.
+function ConvertFrom-EnvValue([string]$Raw) {
+    $value = $Raw.Trim()
+    if ($value -match '^"([^"]*)"' -or $value -match "^'([^']*)'") { return $Matches[1] }
+    return ($value -replace '\s+#.*$', '').Trim()
+}
+
+if ($EnvFile) {
+    $envPath = if ([System.IO.Path]::IsPathRooted($EnvFile)) { $EnvFile } else { Join-Path $ProjectRoot $EnvFile }
+    if (-not (Test-Path $envPath)) { Write-Host "no such env file: $EnvFile" -ForegroundColor Red; Pop-Location; exit 1 }
+    foreach ($line in Get-Content $envPath) {
+        if ($line -match '^\s*([A-Za-z_][A-Za-z0-9_]*)=(.*)$') {
+            $name, $raw = $Matches[1], $Matches[2]
+            $SavedEnv[$name] = [Environment]::GetEnvironmentVariable($name, "Process")
+            [Environment]::SetEnvironmentVariable($name, (ConvertFrom-EnvValue $raw), "Process")
+        }
+    }
+}
+
+function Get-CurrentProject {
+    if ($env:COMPOSE_PROJECT_NAME) { return $env:COMPOSE_PROJECT_NAME }
+    return (Split-Path -Leaf $ProjectRoot).ToLower()
+}
+
+# Refuses a command that injects faults or stub traffic, or deletes data,
+# when it would act on the live stack: by the project this call targets, and
+# by the project label of the containers it would actually reach -- without
+# -EnvFile, an unprefixed `kafka` is the live stack's.
+function Assert-NotLive([string]$What) {
+    $project = Get-CurrentProject
+    $kafka = "$($env:MP_CONTAINER_PREFIX)kafka"
+    # Labels as JSON: Windows PowerShell 5.1 strips the inner double quotes of
+    # a native argument, so an `index ... "com.docker.compose.project"`
+    # template never reaches docker intact.
+    $owner = ""
+    $labels = & docker inspect -f '{{json .Config.Labels}}' $kafka 2>$null
+    if ($LASTEXITCODE -eq 0 -and $labels) {
+        $owner = (($labels -join "") | ConvertFrom-Json)."com.docker.compose.project"
+    }
+    if ($project -eq $LiveProject -or "$owner".Trim() -eq $LiveProject) {
+        throw [System.InvalidOperationException]::new(
+            "refusing '$What': it would act on '$LiveProject', the live collection stack. Use -EnvFile env/bench.env")
+    }
+}
 
 # Explicit file: an old untracked docker-compose.override.yml must not apply.
 $Compose = @("compose", "-f", "docker-compose.yml")
@@ -215,6 +278,7 @@ try {
         }
         "down" {
             if ($Volumes) {
+                Assert-NotLive "down -Volumes"
                 $answer = Read-Host "Delete every named volume (Kafka, MinIO, PostgreSQL, Elasticsearch, Redis, checkpoints)? Type 'yes'"
                 if ($answer -ne "yes") { Write-Host "Aborted."; $ExitCode = 1 }
                 else { Invoke-Docker ($Compose + @("--profile", "*", "down", "--volumes")) }
@@ -251,15 +315,72 @@ try {
             if ($QualityOnly) { $extra += "--quality-only" }
             $ExitCode = Invoke-Batch $runId $AsOf $extra
         }
-        "smoke" { $ExitCode = Invoke-Smoke }
+        "smoke" { Assert-NotLive "smoke"; $ExitCode = Invoke-Smoke }
         "backup" {
             New-Item -ItemType Directory -Force -Path (Join-Path $ProjectRoot "data/ops/backups") | Out-Null
             $ExitCode = Invoke-Ops @("backup")
         }
         "restore" { $ExitCode = Invoke-Restore $BackupId $Project }
+        "evidence" {
+            # Phase 9 plan section 12.1: collects, never measures anew. On the
+            # host: it runs git, docker and the test suite, and reads the
+            # live stack through its published ports.
+            $python = Join-Path $ProjectRoot ".venv\Scripts\python.exe"
+            if (-not (Test-Path $python)) { $python = "python" }
+            & $python -m ops.evidence @Rest | Write-Host
+            $ExitCode = $LASTEXITCODE
+        }
+        "demo" {
+            # Phase 9 plan section 11.2: the smoke brings the pipeline up and
+            # publishes one batch, then ops.demo narrates what it proves.
+            # --without-serve leaves Kibana and Superset out, for a machine
+            # whose memory is already shared with the live stack.
+            Assert-NotLive "demo"
+            $demoArgs = @($Rest | Where-Object { $_ -ne "--without-serve" })
+            if (-not ($Rest -contains "--without-serve")) {
+                Invoke-Docker ($Compose + @("--profile", "demo", "up", "-d", "--build",
+                    "es-projector", "kibana", "kibana-marketplace-setup", "superset", "superset-init"))
+            }
+            $ExitCode = Invoke-Smoke
+            if ($ExitCode -eq 0) {
+                $python = Join-Path $ProjectRoot ".venv\Scripts\python.exe"
+                if (-not (Test-Path $python)) { $python = "python" }
+                $savedProfile = $env:DATA_LAKE_PROFILE
+                $env:DATA_LAKE_PROFILE = "minio"
+                try {
+                    & $python -m ops.demo @demoArgs
+                    $ExitCode = $LASTEXITCODE
+                } finally {
+                    $env:DATA_LAKE_PROFILE = $savedProfile
+                }
+            }
+        }
+        "evaluate" {
+            # Phase 9 plan section 9: read-only, meant for the live stack. The
+            # frozen universe comes from the env file, so stub traffic in the
+            # audit is refused rather than evaluated.
+            New-Item -ItemType Directory -Force -Path (Join-Path $ProjectRoot "data\ops\evaluation") | Out-Null
+            $ExitCode = Invoke-Ops (@("evaluate") + $Rest + @("--universe", "$env:TIKI_CATEGORIES"))
+        }
+        "bench" {
+            # Phase 9 plan section 8. Like the drills: on the host, through the
+            # isolated project's published ports, with the lake on MinIO.
+            Assert-NotLive "bench"
+            $python = Join-Path $ProjectRoot ".venv\Scripts\python.exe"
+            if (-not (Test-Path $python)) { $python = "python" }
+            $savedProfile = $env:DATA_LAKE_PROFILE
+            $env:DATA_LAKE_PROFILE = "minio"
+            try {
+                & $python -m ops.bench @Rest | Write-Host
+                $ExitCode = $LASTEXITCODE
+            } finally {
+                $env:DATA_LAKE_PROFILE = $savedProfile
+            }
+        }
         "drill" {
             # Drills drive Docker, so they run on the host, against the
             # published ports from .env, with the lake on MinIO.
+            Assert-NotLive "drill"
             $name = if ($Rest.Count -gt 0) { $Rest[0] } else { "all" }
             $python = Join-Path $ProjectRoot ".venv\Scripts\python.exe"
             if (-not (Test-Path $python)) { $python = "python" }
@@ -273,10 +394,16 @@ try {
             }
         }
     }
+} catch [System.InvalidOperationException] {
+    Write-Host $_ -ForegroundColor Red
+    $ExitCode = 2
 } catch {
     Write-Host $_ -ForegroundColor Red
     $ExitCode = 1
 } finally {
+    foreach ($name in $SavedEnv.Keys) {
+        [Environment]::SetEnvironmentVariable($name, $SavedEnv[$name], "Process")
+    }
     Pop-Location
 }
 exit $ExitCode

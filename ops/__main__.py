@@ -210,6 +210,10 @@ def main(argv: list[str] | None = None) -> int:
         sys.argv = ["crawler.seed_frontier", *argv[1:]]
         seed_frontier.main()
         return 0
+    if argv[:1] == ["evaluate"]:
+        # Phase 9 plan section 9: its own arguments, like seed.
+        from ops.evaluate import main as evaluate
+        return evaluate(argv[1:])
     parser = argparse.ArgumentParser(prog="python -m ops", description="Marketplace operations commands")
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("migrate")
@@ -236,6 +240,7 @@ def main(argv: list[str] | None = None) -> int:
     restore_parser.add_argument("--path", default=DEFAULT_BACKUP_ROOT)
     restore_parser.add_argument("--sample", type=int, default=None,
                                 help="raw artifacts to reparse (default 5)")
+    sub.add_parser("storage-snapshot", help="record what each store holds, once per UTC day (read-only)")
     backups_parser = sub.add_parser("backups")
     backups_parser.add_argument("--path", default=DEFAULT_BACKUP_ROOT)
     args = parser.parse_args(argv)
@@ -261,6 +266,9 @@ def main(argv: list[str] | None = None) -> int:
         from ops.backup import DEFAULT_REPARSE_SAMPLE
         return run_restore(args.path, args.backup_id,
                            DEFAULT_REPARSE_SAMPLE if args.sample is None else args.sample)
+    if args.command == "storage-snapshot":
+        from ops.storage import run_snapshot
+        return 0 if run_snapshot()["measured"] else 1
     if args.command == "backups":
         return list_backups(args.path)
     return status()

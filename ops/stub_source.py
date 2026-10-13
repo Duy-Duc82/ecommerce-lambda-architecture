@@ -13,9 +13,9 @@ What it serves:
   ``drift``, which switches every later listing response;
 - ``GET /_stub/state``: the mode and the serve counters, for drills.
 
-Determinism. Each ``(category, page)`` gets its own listing IDs, derived from
-the fixture IDs, the category and the page, so every page holds distinct
-offers. Each successful serve of a page advances that page's counter, and the
+Determinism. Each ``(category, page)`` gets its own listing IDs, a hash of
+the fixture ID, the category and the page, so every page holds distinct
+offers at any scale. Each successful serve of a page advances that page's counter, and the
 served price is the fixture price scaled by ``PRICE_STEPS[counter % 4]``.
 The second serve is a small cut (``PRICE_CHANGED``), the third a cut deep
 enough for ``LARGE_PRICE_DROP``, the fourth a return to the fixture price.
@@ -25,10 +25,10 @@ new observations.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import threading
 import time
-import zlib
 from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -44,15 +44,35 @@ PRICE_STEPS = (100, 95, 60, 100)
 RETRY_AFTER_SECONDS = 1
 
 
-def listing_id(fixture_id: int, category: str, page: int) -> int:
-    """Distinct per (fixture row, category, page), and stable across runs."""
-    return fixture_id * 10_000 + (zlib.crc32(category.encode("utf-8")) % 100) * 100 + page
+def listing_id(fixture_id: int, category: str, page: int, copy: int = 0) -> int:
+    """Distinct per (fixture row, category, page, copy), and stable across runs.
+
+    ``copy`` numbers the repetitions of a fixture row on a page wider than the
+    fixture (``rows_per_page``). Copy 0 leaves ``copy`` out of the hash key,
+    so widening a page does not change the IDs of the rows already on it.
+    Every ID did change once, from the Phase 8 arithmetic to this hash.
+
+    A 60-bit slice of a SHA-256. The Phase 8 arithmetic packed the category
+    into ``crc32 % 100``, so two categories in one bucket, or a page past 99,
+    shared IDs once a load run went beyond the smoke's universe.
+
+    60 bits is above 2**53, the largest integer a JavaScript number holds
+    exactly. Only the stub's JSON carries the ID as a number, and Python reads
+    it exactly; the adapter turns it into the string ``platform_listing_id``,
+    which is all Kafka, Silver, Elasticsearch and Kibana ever see.
+    """
+    key = f"{fixture_id}:{category}:{page}" + (f":{copy}" if copy else "")
+    digest = hashlib.sha256(key.encode("utf-8")).hexdigest()
+    return int(digest[:15], 16)
 
 
 @dataclass
 class StubState:
     rows: list[dict[str, Any]]
     last_page: int = 2
+    # Rows per listing page; None serves the fixture once, as Phase 8 did.
+    # Wider pages repeat the fixture, the invalid row included, with new IDs.
+    rows_per_page: int | None = None
     timeout_seconds: float = 0.0
     mode: str = "ok"
     served: dict[str, int] = field(default_factory=dict)
@@ -69,11 +89,14 @@ class StubState:
             return {"mode": self.mode, "served": dict(sorted(self.served.items()))}
 
 
-def load_state(path: Path = FIXTURE, *, last_page: int = 2, timeout_seconds: float = 0.0) -> StubState:
+def load_state(path: Path = FIXTURE, *, last_page: int = 2, timeout_seconds: float = 0.0,
+               rows_per_page: int | None = None) -> StubState:
     rows = json.loads(path.read_text(encoding="utf-8"))["data"]
     if not rows:
         raise ValueError(f"{path} holds no listing rows")
-    return StubState(rows=rows, last_page=last_page, timeout_seconds=timeout_seconds)
+    if rows_per_page is not None and rows_per_page < 1:
+        raise ValueError("rows_per_page must be at least 1")
+    return StubState(rows=rows, last_page=last_page, timeout_seconds=timeout_seconds, rows_per_page=rows_per_page)
 
 
 def _scaled(value: Any, percent: int) -> Any:
@@ -105,15 +128,17 @@ def listing_page(state: StubState, category: str, page: int) -> tuple[int, dict[
         state.served[key] = counter + 1
     percent = PRICE_STEPS[counter % len(PRICE_STEPS)]
     rows = []
+    width = state.rows_per_page or len(state.rows)
     if 1 <= page <= state.last_page:
-        for row in state.rows:
+        for index in range(width):
+            row = state.rows[index % len(state.rows)]
             served = dict(row)
             # The fixture's deliberately invalid row has no id; it stays invalid.
             if isinstance(row.get("id"), int):
-                served["id"] = listing_id(row["id"], category, page)
+                served["id"] = listing_id(row["id"], category, page, index // len(state.rows))
             served["price"] = _scaled(row.get("price"), percent)
             rows.append(served)
-    body = {"data": rows, "paging": {"current_page": page, "last_page": state.last_page, "per_page": len(state.rows)}}
+    body = {"data": rows, "paging": {"current_page": page, "last_page": state.last_page, "per_page": width}}
     return 200, {"Content-Type": "application/json"}, json.dumps(body, ensure_ascii=False, sort_keys=True).encode("utf-8")
 
 
@@ -171,8 +196,11 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Offline Tiki listing stub for the smoke and the drills")
     parser.add_argument("--port", type=int, default=8000)
     parser.add_argument("--last-page", type=int, default=2)
+    parser.add_argument("--rows-per-page", type=int, default=None,
+                        help="repeat the fixture to this many rows per page (default: the fixture once)")
     args = parser.parse_args()
-    state = load_state(last_page=args.last_page, timeout_seconds=CRAWL_HTTP_TIMEOUT_SECONDS + 2)
+    state = load_state(last_page=args.last_page, timeout_seconds=CRAWL_HTTP_TIMEOUT_SECONDS + 2,
+                       rows_per_page=args.rows_per_page)
     server = serve(state, port=args.port)
     print(json.dumps({"event": "stub_listening", "port": args.port}), flush=True)
     server.serve_forever()

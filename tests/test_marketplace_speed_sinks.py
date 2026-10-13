@@ -113,8 +113,9 @@ class RecordingAudit:
         self.query_ids = getattr(self, "query_ids", []) + [query_id]
         return self.begin
 
-    def mark_succeeded(self, *, query_name, query_id, batch_id, completed_at, counts):
+    def mark_succeeded(self, *, query_name, query_id, batch_id, completed_at, counts, latency=None):
         self.calls.append(("succeeded", query_name, batch_id, counts))
+        self.latency, self.completed_at = latency, completed_at
 
     def mark_failed(self, *, query_name, query_id, batch_id, completed_at, error):
         self.calls.append(("failed", query_name, batch_id, str(error)))
@@ -553,3 +554,77 @@ def test_the_migration_puts_query_id_in_the_primary_key():
     assert "ALTER TABLE audit.marketplace_speed_batch ADD COLUMN IF NOT EXISTS query_id" in sql
     assert "ALTER TABLE audit.marketplace_speed_batch DROP CONSTRAINT IF EXISTS marketplace_speed_batch_pkey" in sql
     assert "ADD CONSTRAINT marketplace_speed_batch_pkey PRIMARY KEY (query_name, query_id, batch_id)" in sql
+
+
+# -- Phase 9 plan section 6.1: processing latency per micro-batch --
+
+def test_batch_latency_is_exact_nearest_rank_over_produced_at():
+    from datetime import datetime, timedelta, timezone
+
+    from speed_layer.marketplace_sinks import BatchLatency, batch_latency
+
+    done = datetime(2026, 10, 4, 12, tzinfo=timezone.utc)
+    produced = [done - timedelta(milliseconds=ms) for ms in (40, 10, 30, 20, 100, 50, 60, 70, 80, 90)]
+
+    assert batch_latency(produced, done) == BatchLatency(p50_ms=50, p95_ms=100, max_ms=100)
+    assert batch_latency([done - timedelta(seconds=2)], done) == BatchLatency(2000, 2000, 2000)
+
+
+def test_a_batch_with_nothing_applied_has_no_latency():
+    from datetime import datetime, timezone
+
+    from speed_layer.marketplace_sinks import batch_latency
+
+    assert batch_latency([], datetime(2026, 10, 4, tzinfo=timezone.utc)) is None
+
+
+def test_a_succeeded_batch_reports_latency_from_its_applied_states():
+    """Measured against the completion the audit row records, after the sinks."""
+    from speed_layer.marketplace_sinks import batch_latency
+
+    outputs, _, state = _batch()
+    sinks, parts = _sinks()
+
+    sinks.write_batch(outputs, batch_id=1, query_id=QUERY_ID)
+
+    audit = parts["audit"]
+    assert audit.latency == batch_latency([state.produced_at], audit.completed_at)
+    assert audit.latency is not None
+
+
+def test_a_failed_batch_reports_no_latency():
+    outputs, _, _ = _batch()
+    sinks, parts = _sinks(redis=FakeRedis(fail_on_execute=True))
+
+    with pytest.raises(RuntimeError):
+        sinks.write_batch(outputs, batch_id=1, query_id=QUERY_ID)
+
+    assert parts["audit"].kinds() == ["begin", "failed"]
+    assert not hasattr(parts["audit"], "latency")
+
+
+def test_the_audit_writes_the_latency_columns_and_nulls_them_on_failure():
+    from speed_layer.marketplace_sinks import BatchLatency
+
+    factory = _connection_factory()
+    audit = MarketplaceSpeedAudit(factory)
+
+    audit.mark_succeeded(query_name=MARKETPLACE_SPEED_QUERY_NAME, query_id=QUERY_ID, batch_id=7, completed_at=None,
+                         counts=BatchCounts(), latency=BatchLatency(11, 22, 33))
+    audit.mark_failed(query_name=MARKETPLACE_SPEED_QUERY_NAME, query_id=QUERY_ID, batch_id=8, completed_at=None,
+                      error=RuntimeError("x"))
+
+    (ok_sql, ok_params), (_, failed_params) = factory.connection.cur.executed
+    assert "latency_p50_ms=%s,latency_p95_ms=%s,latency_max_ms=%s" in ok_sql
+    assert ok_params[-6:-3] == (11, 22, 33)
+    assert failed_params[-6:-3] == (None, None, None)
+
+
+def test_the_migration_adds_nullable_latency_columns_and_the_progress_table():
+    from pathlib import Path
+
+    sql = (Path(__file__).parent.parent / "scripts" / "init_postgres.sql").read_text(encoding="utf-8")
+    for column in ("latency_p50_ms", "latency_p95_ms", "latency_max_ms"):
+        assert f"ALTER TABLE audit.marketplace_speed_batch ADD COLUMN IF NOT EXISTS {column} BIGINT;" in sql
+    assert "CREATE TABLE IF NOT EXISTS audit.marketplace_stream_progress" in sql
+    assert "CREATE TABLE IF NOT EXISTS audit.storage_snapshot" in sql

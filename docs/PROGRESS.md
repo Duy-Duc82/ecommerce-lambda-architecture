@@ -2403,3 +2403,479 @@ xanh và offline.
    từ Phase 8 các record drill làm bằng chứng tin cậy, `mp smoke` làm nền cho
    benchmark, stub source làm bộ sinh tải *có nhãn là fixture phát lại*, và
    các index của projector làm chuỗi thời gian vận hành.
+
+## 24. Session 2026-10-04 (tiếp) — Phase 9: plan, và WP0 thu thập thật
+
+Plan: `docs/PHASE_9_EVALUATION_FEATURE_FREEZE_IMPLEMENTATION_PLAN.md`, user
+duyệt cả sáu quyết định D1–D6 ngày 2026-10-04. Nhánh `phase-9-evaluation-plan`.
+
+### 24.1 Vì sao WP0 đi trước mọi thứ
+
+Khảo sát lúc viết plan: `audit.crawl_request_attempt` của stack đang chạy chỉ
+có 476 attempt trong hai ngày, toàn bộ là smoke/drill gọi stub. **Chưa từng có
+thu thập liên tục trên Tiki thật**, trong khi Brief §23 đòi tối thiểu 30 ngày.
+Ngày nào chưa thu là mất hẳn ngày đó.
+
+### 24.2 Stack `mp-live`
+
+- Bắt đầu: **2026-10-04 10:16:08 UTC**. Ngày 30 sớm nhất: **2026-11-03**.
+- Tập theo dõi đóng băng trong `env/live.env`: category `1846, 8322, 1882,
+  1520, 931`, mỗi cái 3 trang, tier `ACTIVE` (60 phút), delay 2 s.
+  Tức 15 request/giờ, khoảng 600 offer.
+- Chu kỳ đầu: 15/15 `SUCCEEDED`, 600 parsed, 0 rejected, latency p50
+  3,674 ms, 2,365,145 byte raw; speed layer 600 change (`NEW_OFFER`).
+  Frontier đã tự xếp chu kỳ sau lúc 11:16 UTC.
+- Project `mp-smoke` đã `down` (giữ volume) để nhường tên container. Volume
+  của `mp-live` là volume mới, không lẫn traffic stub.
+- **Quy tắc D1:** không smoke, drill, benchmark hay demo nào chạy trong
+  `mp-live`. Cho tới khi WP1 (tiền tố `container_name`) xong, máy này
+  **không chạy smoke/drill**, vì chúng cần dừng `mp-live`.
+
+Mỗi lệnh `mp.ps1`/`docker compose` cho stack này phải nạp `env/live.env`
+trước (WP1 sẽ thêm `-Env`):
+
+```powershell
+Get-Content env/live.env | Where-Object { $_ -match '^[A-Z_]+=' } |
+  ForEach-Object { $k, $v = $_ -split '=', 2; Set-Item "env:$k" $v }
+.\scripts\mp.ps1 status
+.\scripts\mp.ps1 validate -Json data/ops/live/validate-<date>.json   # mỗi ngày
+```
+
+### 24.3 Một lỗ hổng tìm được khi bật stack: core không tự khởi động lại
+
+Năm service core (`kafka`, `minio`, `redis`, `postgres-dw`,
+`elasticsearch`) không có restart policy, còn các service ứng dụng thì có.
+Sau khi máy hoặc Docker khởi động lại, worker lên lại nhưng không có gì để nối
+vào, và việc thu thập dừng mà không để lại dấu vết. Đã thêm
+`restart: unless-stopped` (commit test `a51aaa0`, commit fix `97460f8`). Drill
+chỉ `stop` core, mà `unless-stopped` tôn trọng `stop`, nên không drill nào
+đổi hành vi.
+
+### 24.4 Hai cài đặt máy host, nằm ngoài repo
+
+Kiểm 2026-10-04:
+
+- Windows đặt **sleep sau 30 phút** khi cắm điện (`STANDBYIDLE` AC = 1800 s).
+  Máy ngủ thì không crawl.
+- Docker Desktop **`AutoStart: false`**. Sau khi máy khởi động lại, không có
+  gì chạy cho tới khi có người mở Docker.
+
+Cả hai cần user tự đổi. Khoảng trống do chúng gây ra sẽ hiện trong báo cáo
+P2-02 như mọi khoảng trống khác, và không được làm sạch đi.
+
+### 24.5 Việc tiếp theo
+
+1. Ngày mai (2026-10-05): kiểm batch theo lịch đầu tiên `SUCCEEDED`, con trỏ
+   có giá trị, `validate` pass. Đó là tiêu chí nghiệm thu WP0 (plan §4).
+2. WP1: tiền tố `container_name`, `env/bench.env`, `env/demo.env`,
+   `mp.ps1 -Env`, chặn smoke/drill/demo trong `mp-live`.
+
+## 25. Session 2026-10-04 (tiếp) — Phase 9 WP1: stack cô lập chạy cạnh `mp-live`
+
+### 25.1 Những gì được thêm
+
+- `container_name: ${MP_CONTAINER_PREFIX:-}<service>` cho cả 21 service. Mặc
+  định rỗng, nên tên cũ và stack `mp-live` không đổi.
+- `env/bench.env` (`mp-bench`, `bench-`) và `env/demo.env` (`mp-demo`,
+  `demo-`). Mỗi file có bộ port riêng, không trùng nhau, và đặt cả địa chỉ
+  client phía host mà drill dùng.
+- `mp.ps1 -EnvFile <file>`: nạp biến cho đúng một lệnh, rồi trả lại môi
+  trường cũ của shell gọi.
+- `smoke`, `drill` và `down -Volumes` từ chối `mp-live` với exit 2.
+  `ops.drills` có thêm `container()` và `refuse_live()`.
+- `tests/test_compose_isolation.py`: 27 test offline.
+- RUNBOOK có thêm mục "Four stacks on one machine".
+
+### 25.2 Ba chỗ chỉ lộ ra khi chạy thật
+
+1. **Chặn theo tên project là không đủ.** Không có `-EnvFile` thì tên không
+   tiền tố *chính là* container của `mp-live`, và drill kết nối qua port 5433
+   của nó. Vì vậy lớp chặn đọc nhãn `com.docker.compose.project` của container
+   `kafka` mà lệnh sẽ chạm vào. `ops.drills` kiểm lại trước baseline, trước
+   drill và trước bước restore trong `finally`.
+2. **PowerShell 5.1 làm mất dấu `"` bên trong tham số truyền cho chương trình
+   ngoài.** Template `{{index .Config.Labels "com.docker.compose.project"}}`
+   bị hỏng, nên lần thử đầu lớp chặn trong `mp.ps1` để lọt. Drill vẫn bị chặn,
+   nhưng là nhờ lớp Python. Đã đổi sang đọc nhãn dạng JSON. Đây cũng là nguyên
+   nhân lỗi `function "com" not defined` gặp ở WP0.
+3. Nếu env file chỉ đổi `*_HOST_PORT`, drill trên host vẫn truy vấn PostgreSQL
+   của `mp-live`. Vì vậy mỗi file đặt cả `POSTGRES_PORT`,
+   `KAFKA_BOOTSTRAP_SERVERS`, `MINIO_ENDPOINT`, `REDIS_PORT` và `ES_HOST`.
+
+### 25.3 Nghiệm thu (plan §5), chạy thật 2026-10-04
+
+- `mp -EnvFile env/live.env smoke`, `mp smoke` không env, `mp drill d1` không
+  env, `mp -EnvFile env/live.env down -Volumes`: cả bốn exit 2 và không chạm
+  vào gì.
+- `mp -EnvFile env/bench.env smoke`: **SMOKE PASSED**, `validate` 11/11, batch
+  `mp-20261004T1205Z` `SUCCEEDED`, trong khi `mp-live` vẫn chạy.
+- `StartedAt` của 10 container `mp-live` trước và sau giống hệt nhau
+  (`data/ops/live/startedat-{before,after}-wp1.txt`). Audit live không có
+  attempt nào của task smoke. Chu kỳ live lúc 12:17 vẫn chạy đúng lịch:
+  45/45 attempt, 1.800 parsed.
+- Sau đó `mp-bench` được `down --volumes`.
+
+### 25.4 Trạng thái test
+
+Suite mặc định: **1038 pass**, 11 deselected (D1–D11), 16m28s. Chạy chậm vì
+`mp-live` dùng chung CPU (lúc máy rảnh là 2m25s). Tăng 27 so với 1011.
+
+### 25.5 Việc tiếp theo
+
+1. 2026-10-05: nghiệm thu WP0, tức batch theo lịch đầu tiên của `mp-live`.
+2. WP2: `audit.marketplace_stream_progress`, ba cột latency,
+   `audit.storage_snapshot`.
+
+## 26. Session 2026-10-04 (chiều) — Phase 9 WP2–WP8: viết xong và chạy thật
+
+User đi vắng khoảng 2 tiếng và bảo làm tiếp. Mỗi WP đều có test offline và
+một lần chạy thật trên stack cô lập cạnh `mp-live`.
+
+| WP | Commit | Chạy thật |
+|---|---|---|
+| WP2 progress, latency, snapshot | `b6360de`, test `1b9c233` + fix `99bd092` | bench smoke; rồi triển khai lên `mp-live` (migrate, restart `speed`, tạo lại `es-projector`) |
+| WP3 stub ID + load generator | test `fe6656f` + fix `78e0b15`, `ba4578b` | qua bench ingest |
+| WP4 benchmark runner | `475902e` | `bench ingest --repeat 1 --sizes 10000` |
+| WP5 reliability + freshness | `b0360eb` | `evaluate reliability\|freshness` trên `mp-live` |
+| WP6 storage growth | `5c5f93f` | trên `mp-live` bị từ chối đúng (mới 1 ngày snapshot) |
+| WP7 demo | `1886457` | `demo --without-serve --auto --snapshot`: 7/7 bước PASS, cả D3 và D8 |
+| WP8 evidence | `e12a45c` | `evidence --skip-tests`: còn MISSING đúng những mục chưa có |
+
+### 26.1 Sáu chỗ chỉ lộ ra khi chạy thật
+
+1. **Spark phát idle progress mang batchId của batch sắp chạy.** Khi lưu
+   event đó, recorder chiếm chỗ batch thật, và số liệu thật bị primary key từ
+   chối. Tìm được trên `mp-live` (batch 238). Đã sửa: chỉ lưu event có
+   `durationMs.addBatch`. Test và fix ở hai commit riêng. Dòng sai đã xoá.
+2. **Kafka 4 bỏ `DescribeLogDirs` v0/v1 (KIP-896).** kafka-python không đo
+   được log dir nữa. Đã đổi sang mount read-only volume `kafka_data` và cộng
+   dung lượng thư mục partition.
+3. **File index của Kafka là sparse, tạo trước 10 MiB.** Đo theo kích thước
+   logic, `__consumer_offsets` hiện thành 1 GB, trong khi thực dùng 400 KB.
+   Đã đổi sang đo theo `st_blocks`.
+4. **`reltuples` bằng 0 khi bảng chưa ANALYZE.** Postgres chuyển sang dùng
+   `n_live_tup`.
+5. **Occurrence seed có `scheduled_for = 1970-01-01` (có chủ ý).** Đo độ trễ
+   lịch theo cột này cho ra 1,79 tỷ giây. Đã loại occurrence seed, và thêm
+   phép đo khoảng cách giữa hai lần crawl thành công của cùng một trang.
+6. **Latency đo từ `produced_at`, không từ Kafka timestamp.** Giữ
+   `kafka_timestamp` qua operator có state sẽ làm đổi schema output mà
+   checkpoint `v2` của `mp-live` đang dùng. Hai mốc này trùng nhau tới vài ms
+   (CreateTime). Plan §6.1 đã ghi lại thay đổi này.
+
+### 26.2 Số đo đầu tiên trên `mp-live` (cửa sổ 0,13 ngày, chưa là kết quả)
+
+- Crawl: 60/60 attempt thành công. Latency p50 3.060 ms, p95 3.910 ms.
+  Khoảng cách giữa hai lần crawl một trang có p50 3.624 s, 100 % trong 110 %
+  cadence. Độ trễ lịch p50 21 s, tối đa 32 s.
+- Từ crawl tới Kafka (`produced_at − fetched_at`): p50 29 ms, p95 445 ms.
+- Latency speed (tới khi sink ghi xong): p50 8–24 s, p95 tới khoảng 30 s.
+  Con số này chủ yếu là trigger 30 s.
+- Bench ingest 10.000 (replayed_fixture, 1 lần, máy đang bận): Silver xả
+  khoảng **100 record/s**. Sink ghi mỗi observation một object JSON lên MinIO,
+  có thể là nút thắt. Cần `--repeat 3` lúc máy rảnh mới thành kết quả.
+
+### 26.3 Batch theo lịch đầu tiên của `mp-live`
+
+`mp-20261004T0000Z` chạy lúc 10:21 cho cửa sổ trước khi thu thập bắt đầu.
+Silver có 0 dòng, nên `silver_parse_attempt_reconciliation` (MANDATORY) bị
+SKIPPED, và theo thiết kế Phase 7 điều đó tính là fail. Kết quả
+`QUALITY_FAILED`, không publish. Đúng hành vi. Run có dữ liệu đầu tiên là
+`mp-20261005T0000Z`, sau 00:30 UTC ngày 2026-10-05.
+
+### 26.4 Trạng thái test
+
+Suite mặc định trên `e12a45c`: **1140 pass**, 11 deselected (D1–D11),
+12m30s, chạy khi `mp-live` đang hoạt động. Tăng 102 so với 1038 sau WP1.
+
+### 26.5 Còn mở
+
+1. **`docs/SOURCE_FEASIBILITY.md` có bản nháp** (`0d8dad1`). File chỉ tổng
+   hợp số đã đo ở §4, §4a và audit `mp-live`, và **chờ thầy duyệt**.
+2. **`bench all --repeat 3` đang chạy** từ 2026-10-04 khoảng 14:15 UTC, ước
+   tính 7 giờ. Log ở `data/ops/bench-all.log`, kết quả ở `data/ops/bench/`.
+   Trước đó đã chạy trial 1 lần cho từng kịch bản (lưu ở
+   `data/ops/bench-trial/`, không tính là kết quả). Trial tìm ra một bug:
+   trang stub luôn `PARTIAL`, mà kịch bản crawl chỉ chờ `SUCCEEDED` (test
+   `effea85`, fix `1f40de2`). Kịch bản batch trên dữ liệu phát lại luôn
+   `QUALITY_FAILED`, vì crawl run giả không có trong audit nên rule đối soát
+   fail. Thời gian chạy batch vẫn là số đo hợp lệ, nhưng báo cáo phải ghi rõ
+   điều này.
+3. **Demo đầy đủ (có Kibana và Superset)** mới chỉ chạy `--without-serve`, vì
+   RAM dùng chung với `mp-live`. Cần chạy khi có người theo dõi.
+4. **Integration run (plan §12.2) và tag `feature-freeze-w9`**: chờ user.
+5. Ngày 2026-11-03 mới đủ 30 ngày thu thập. Sau đó chạy lại `evaluate` và
+   `evidence`.
+
+### 26.6 Việc tiếp theo (cũ, nay resume ở §28.5)
+
+**Đang chạy, không phụ thuộc session Claude nào:**
+
+- `mp-live`: thu thập Tiki thật từ 2026-10-04 10:16 UTC. Kiểm bằng
+  `.\scripts\mp.ps1 -EnvFile env/live.env status`.
+- `bench all --repeat 3`: khởi động lại lúc 2026-10-04 khoảng 14:50 UTC, dưới
+  dạng tiến trình PowerShell tách rời (`Start-Process`, ẩn cửa sổ). Lý do:
+  tác vụ nền của session sẽ chết khi đóng Claude Code. Ước tính xong khoảng
+  22:00 UTC.
+  - Tiến độ: `Select-String '"bench_run"|bench_failed|exit=' data\opsench-all.log`.
+  - Xong khi log có dòng `exit=0 finished=...`.
+  - Kết quả ở `data/ops/bench/*.json`; bảng xem bằng
+    `.\scripts\mp.ps1 -EnvFile env/bench.env bench report`.
+  - Dừng giữa chừng: kill các process có `ops.bench` trong command line, rồi
+    `docker compose -f docker-compose.yml -p mp-bench --profile "*" down --volumes`
+    (đặt `$env:MP_CONTAINER_PREFIX="bench-"` trước).
+
+**Thứ tự việc tiếp theo:**
+
+1. **2026-10-05, sau 00:30 UTC:** nghiệm thu WP0.
+   - Batch `mp-20261005T0000Z` phải `SUCCEEDED`, con trỏ có giá trị, và
+     `mp -EnvFile env/live.env validate` pass.
+   - Nếu batch `QUALITY_FAILED`, đọc `audit.marketplace_quality_result`
+     trước, đừng sửa gì vội.
+   - Từ ngày này `evaluate storage` cũng chạy được (đủ 2 ngày snapshot).
+2. **Khi benchmark xong:**
+   - Kiểm `bench report`, và ghi các số chính cùng điều kiện đo vào một mục
+     PROGRESS mới. Mỗi file có `live_stack_running_containers = 10`, tức là đo
+     khi `mp-live` chạy cùng.
+   - Chạy `mp -EnvFile env/live.env evidence`. Mục còn MISSING khi đó chỉ nên
+     là những gì chưa tới hạn.
+3. **Chờ user hoặc thầy:**
+   - Duyệt `docs/SOURCE_FEASIBILITY.md` (bản nháp).
+   - Chạy demo đầy đủ có Kibana/Superset khi có người theo dõi RAM.
+   - Integration run (plan §12.2), rồi tag `feature-freeze-w9`.
+   - Merge `phase-9-evaluation-plan` vào `develop`, rồi mở PR `develop` →
+     `master`. Nội dung PR đã soạn sẵn ở `data/ops/pr-develop-to-master.md`
+     (gitignored, chỉ có trên máy này). Nó viết trước Phase 9, nên phải bổ
+     sung Phase 9 trước khi mở PR.
+4. **2026-11-03:** đủ 30 ngày thu thập. Chạy lại `evaluate` và `evidence`.
+
+## 27. 2026-10-05 (job tự động, sáng sớm) — `bench all --repeat 3` đã chạy xong
+
+Job chạy không người trông lúc 2026-10-04 22:43 UTC. Không sửa code, không
+đụng `mp-live`.
+
+### 27.1 Run kết thúc ra sao
+
+- Bắt đầu 2026-10-04 14:48 UTC. File kết quả cuối (`batch-n-200000`) ghi lúc
+  khoảng 21:12 UTC. Tổng khoảng **6 giờ 25 phút**.
+- Đủ **36/36 lượt** (4 kịch bản × 3 biến thể × 3 lần), 11 file trong
+  `data/ops/bench/`. Không có `bench_failed`.
+- **Log không có dòng `exit=`.** Lúc kiểm, không còn process `ops.bench`, và
+  không còn container `bench-*` nào, nên stack `mp-bench` đã tự xuống. Dòng
+  `exit=` do lệnh bọc ngoài ghi, sau khi `mp.ps1` trả về. `mp.ps1` kết thúc bằng
+  `exit $ExitCode`, nên nhiều khả năng lệnh bọc bị thoát cùng và không chạy tới
+  dòng đó. Python chỉ trả mã khác 0 khi có `bench_failed`, nên coi như exit 0.
+  Không có sleep/restart máy quanh lúc đó (System event log). Lần sau nên bọc
+  `mp.ps1` trong `powershell -File` riêng, rồi ghi `exit=` ở process cha.
+- Mọi file đều có `live_stack_running_containers = 10`, tức là **đo khi
+  `mp-live` chạy cùng**. `git_dirty = false`. Crawl đo ở `faace6c`, các kịch bản
+  khác ở `f8f32c2`. Giữa hai commit chỉ khác `docs/PROGRESS.md`. Image
+  `marketplace-python` có digest khác nhau giữa các kịch bản (build lại mỗi
+  project), code bên trong như nhau.
+- Máy: Windows 11, Docker Desktop 28.3.2 (WSL2), VM 8 CPU, 16 GB. Mọi số là
+  `dataset = replayed_fixture` (stub source), không phải số đo trên Tiki.
+
+### 27.2 Số chính (trung vị của 3 lần, kèm min–max)
+
+> **Latency trong mục này CHƯA hiệu chỉnh đồng hồ (review PR #13, §33).**
+> Bench đóng dấu `produced_at` trên Windows host, còn `LastModified` của MinIO
+> và thời điểm speed ghi xong lấy từ đồng hồ Docker VM. Đồng hồ VM chạy nhanh
+> hơn host khoảng 30 s và có lúc nhảy (đo 2026-10-05, trung vị 29,98 s trên 61
+> mẫu). Vì vậy các cột *Silver latency* (ingest), *latency batch* và *latency
+> max* (speed) dưới đây có thể **cao hơn thực tế khoảng 30 s**. Không đưa các
+> cột này vào báo cáo hay evidence trước khi chạy lại bằng bench đã sửa
+> (`2d0a68c`). Thời gian chạy, throughput, batch duration (Spark đo hai đầu
+> trên cùng đồng hồ VM) và các số crawl không bị ảnh hưởng. Batch duration
+> gần 30 s vẫn có thể là một lần đồng hồ nhảy; xem các cột stage trước khi
+> trích dẫn.
+
+Crawl, 120 request, 3.240 dòng parse, mỗi lần:
+
+| delay | thời gian (s) | request/s | parse/s | latency p50 (ms) | p95 (ms) | failed |
+|---|---:|---:|---:|---:|---:|---:|
+| 2 s | 365 (358–372) | 0,329 | 8,88 | 2.527 (2.480–2.589) | 3.025 | 0 |
+| 0 s | 128 (122–134) | 0,939 | 25,4 | 562 (487–619) | 1.036 | 0 |
+
+120/120 là `PARTIAL`, đúng thiết kế của trang stub (§26.5).
+
+Ingest (load generator → Kafka → Silver):
+
+| n | produce (rec/s) | Silver xả (rec/s) | tổng (s) | Silver latency p50 (s) | p95 (s) |
+|---|---:|---:|---:|---:|---:|
+| 10.000 | 483 | 80,0 (78,2–80,6) | 125 | 51 | 100 |
+| 50.000 | 493 | 94,2 (93,5–95,2) | 531 | 209 | 403 |
+| 200.000 | 537 | 116 (104–128) | 1.724 (1.567–1.917) | 659 | 1.290 |
+
+Silver xả chậm hơn produce khoảng 4–6 lần, và latency tăng gần tuyến tính theo
+n: record xếp hàng sau sink. Khớp với nhận xét §26.2 (sink ghi từng object lên
+MinIO là nút thắt). Mức 200.000 dao động nhiều nhất (±10 % quanh trung vị).
+
+Speed (300 s mỗi mức):
+
+| rate yêu cầu | rate thực phát | xử lý (row/s) | kịp? | batch p50 (s) | latency batch p50 (s) | latency max (s) |
+|---|---:|---:|---|---:|---:|---:|
+| 50/s | 50 | 50,2 | có, xả 26 s | 4,3 | 19,3 | 35,2 |
+| 200/s | 200 | 200,6 | có, xả 20 s | 13,5 | 28,6 | 48,1 |
+| 1000/s | **548** | 432 (387–445) | không | 43,5 | 66,6 | 164 |
+
+Ở mức 1000/s, generator chỉ phát được khoảng 548/s (cùng trần với produce của
+ingest), nên mức này thực chất là "khoảng 550/s". Ngưỡng chịu được của speed
+nằm giữa 200 và 550 row/s trên máy này. Báo cáo phải ghi rõ trần của generator.
+
+Batch (trên dữ liệu phát lại):
+
+| n Silver | thời gian (s) | Silver row/s | Gold rows |
+|---|---:|---:|---:|
+| 10.000 | 37,9 (37,8–38,4) | 264 | 8.011 |
+| 50.000 | 105,8 (105,6–105,9) | 473 | 8.011 |
+| 200.000 | 374,3 (373,0–374,8) | 534 | 8.011 |
+
+Cả 9 lượt là `QUALITY_FAILED`, đúng như dự kiến: crawl run giả không có trong
+audit nên rule đối soát fail. Thời gian chạy vẫn là số đo hợp lệ. Batch ổn định
+nhất trong 4 kịch bản (chênh dưới 2 %). Gold luôn 8.011 dòng vì universe của
+fixture cố định.
+
+### 27.3 Một phát hiện trên `mp-live` trong lúc kiểm
+
+Trang `{"page":3,"target":"1882"}` **không được crawl lại từ 2026-10-04
+15:18 UTC**. Từ 16:00 UTC mỗi giờ chỉ còn 14/15 trang.
+
+- Attempt duy nhất bị `FAILED`, `error_kind = UNKNOWN`, thông điệp
+  `raw artifact fetched_at must lie between started_at and completed_at`
+  (`crawler/contracts.py:397`). Tức là hai mốc thời gian đọc từ hai đồng hồ
+  lệch nhau.
+- Lúc đó benchmark vừa chuyển từ crawl sang ingest (15:17 UTC), máy đang tải
+  nặng. Có thể đồng hồ WSL bị chỉnh lùi. Chưa xác minh.
+- Frontier: `status = FAILED`, `attempts = 1`/`max_attempts = 5`, và không
+  có occurrence tiếp theo. Trang này đã rơi khỏi lịch hẳn.
+- 187 attempt khác đều `SUCCEEDED` (p50 2.901 ms, p95 3.713 ms).
+
+Chưa sửa gì (job tự động không được sửa code hay dữ liệu live). Cần user quyết:
+lỗi này nên được retry hay không, và có đưa trang về lịch không. Nếu để vậy,
+30 ngày thu thập sẽ thiếu 1/15 trang từ ngày đầu.
+
+### 27.4 Việc tiếp theo
+
+Vẫn theo §26.6, trừ mục "khi benchmark xong" đã làm phần `bench report` và
+mục này. Còn lại: chạy `mp -EnvFile env/live.env evidence`, nghiệm thu batch
+`mp-20261005T0000Z` (job 07:47 sáng nay), và xử lý §27.3.
+
+## 28. 2026-10-05 07:47 (job tự động) — nghiệm thu WP0: chưa đạt, scheduler bỏ qua cửa sổ
+
+Job chạy không người trông lúc 00:47 UTC. Không sửa code, không đụng dữ liệu
+`mp-live`. Báo cáo đầy đủ ở nhánh `daily-reports`, `reports/2026-10-05.md`.
+
+### 28.1 Batch `mp-20261005T0000Z` không chạy
+
+`audit.marketplace_batch_run` chỉ có `mp-20261004T0000Z`. Log
+`batch-scheduler` có ba tick, cả ba đều `as_of = 2026-10-04`, đều
+`QUALITY_FAILED` (`silver_parse_attempt_reconciliation` SKIPPED vì cửa sổ có 0
+dòng Silver, như §26.3):
+
+| tick in ra lúc (UTC) | ghi chú |
+|---|---|
+| 2026-10-04 10:22:02 | tick lúc khởi động |
+| 2026-10-05 00:29:30 | thức sớm khoảng 50 s so với mốc 00:30:00 |
+| 2026-10-05 00:30:20 | `started_at` 00:30:00,05, xong 00:30:19,59 |
+
+Nguyên nhân, suy từ `batch_layer/marketplace_scheduler.py`:
+
+1. `run_scheduler` ngủ bằng `stop.wait(timeout)`, tức là theo đồng hồ
+   monotonic. Sau 14 giờ ngủ, nó thức khi wall clock còn trước 00:30, nên
+   `window_as_of` vẫn ra cửa sổ 10-04, và nó resume run cũ.
+2. Lần chờ 30 s tiếp theo thức sớm vài ms. `as_of` vẫn là 10-04, trong khi
+   `started_at` ghi ngay sau đó đã là 00:30:00,05.
+3. Tick đó xong sau mốc. `next_wake(now)` trả về mốc của cửa sổ *sau* cửa sổ
+   hiện tại (2026-10-06 00:30), vì nó giả định cửa sổ hiện tại vừa chạy. Cửa sổ
+   10-05 bị bỏ qua.
+
+Scheduler vẫn sống và đang ngủ tới 2026-10-06 00:30. Test hiện có dùng clock
+giả luôn đúng mốc, nên không bắt được. Hướng sửa (chưa làm): sau khi thức, ngủ
+tiếp tới khi wall clock qua mốc, và tính mốc kế tiếp từ `as_of` vừa chạy, kèm
+test với clock thức sớm. Lỗi crawl §27.3 cũng dính tới đồng hồ, có thể chung gốc
+(đồng hồ VM WSL2), chưa xác minh.
+
+### 28.2 Nghiệm thu WP0: chưa đạt
+
+| điều kiện (§26.6 bước 1) | kết quả |
+|---|---|
+| batch `mp-20261005T0000Z` SUCCEEDED | không, batch không chạy |
+| con trỏ có giá trị | không, `null` |
+| `validate` pass | không, 7 PASS / 4 FAIL |
+
+Bốn check fail đều vì chưa có con trỏ (`pointer_gold_exists`,
+`pointer_matches_cache`, `quality_results_complete`,
+`silver_reconciles_with_audit`). Phần thu thập của WP0 thì đạt: 10/10 container
+healthy, 216 attempt, 215 `SUCCEEDED`, 8.600 dòng parse, latency p50 2.908 ms,
+p95 3.724 ms, khoảng cách crawl một trang p50 3.623,6 s (100 % trong 110 %
+cadence).
+
+### 28.3 Evaluate và evidence
+
+- `evaluate reliability|freshness|storage` đều chạy được (cửa sổ 0,588 ngày).
+  Storage nay có 2 snapshot: tăng khoảng 64,4 MB/ngày, 10.754 byte/observation,
+  dự báo ngày 30 khoảng 2,03 GB. Freshness theo offer còn rỗng vì chưa có Gold
+  publish. Crawl → Kafka p50 29,8 ms, p95 116,8 ms.
+- `evidence`: bundle `data/ops/evidence/20261005T004946Z` (commit `bd98dd8`,
+  cây sạch). Suite chạy kèm: **1141 pass**, 0 fail, 741 s, khi `mp-live` đang
+  chạy. 15 PRESENT, 1 MISSING, 3 MANUAL. So với bundle 2026-10-04 13:37 UTC,
+  thêm PRESENT các mục 1 (bản nháp SOURCE_FEASIBILITY), 11, 12 (benchmark) và
+  13 (storage).
+- Mục MISSING duy nhất: **15, ví dụ lịch sử/thay đổi/bất thường giá**. Mục này
+  cần Gold đã publish từ dữ liệu thật, nên đang bị chặn bởi §28.1, không phải
+  chỉ "chưa tới hạn". Ba mục MANUAL (ảnh Superset/Kibana, phần hạn chế, video
+  demo) là việc tay.
+
+### 28.4 Máy
+
+Ổ C: còn 177,7 GB. VM Docker 16,3 GB RAM, 10 container `mp-live` dùng khoảng
+5,8 GiB. Đồng hồ container và host lệch dưới 0,1 s lúc kiểm.
+
+User đã lên lịch `mp-shutdown` lúc 08:50 giờ máy hôm nay: dừng `mp-live`
+(giữ volume), tắt máy, và sẽ chuyển thu thập sang host khác.
+
+### 28.5 Việc tiếp theo (resume ở đây)
+
+1. **Sửa scheduler** (§28.1), có test, rồi triển khai lên stack thu thập.
+2. Quyết định có chạy bù cửa sổ 2026-10-05 không (chạy tay `mp -EnvFile
+   env/live.env batch` với as_of đó, hoặc restart `batch-scheduler`). Chỉ làm
+   được khi stack chạy lại.
+3. Trang `1882` p3 (§27.3).
+4. Trên host mới: kiểm NTP, rồi nghiệm thu WP0 lại: một batch `SUCCEEDED` trên
+   dữ liệu thật, con trỏ có giá trị, `validate` pass. Sau đó chạy lại
+   `evidence`, mục 15 phải thành PRESENT.
+5. Các mục chờ user hoặc thầy ở §26.6 bước 3 vẫn giữ nguyên. Mốc 30 ngày
+   (2026-11-03) tính từ ngày thu thập bắt đầu, nên sẽ dời nếu thu thập bị gián
+   đoạn khi chuyển host.
+
+## 33. 2026-10-13 — review PR #13 (Phase 9 → `develop`)
+
+Số mục là 33 vì §29–§32 đã có trên `phase-9-scheduler-wall-clock`, nhánh sẽ
+merge sau PR này.
+
+Review có 3 comment P1 của Codex và 8 comment inline của user. Mỗi mục bug có
+commit test riêng, rồi commit fix.
+
+| Comment | Xử lý | Commit |
+|---|---|---|
+| `bench_load` chạy được khi chưa nạp env nào; producer khi đó rơi về `localhost:9092`, tức Kafka của `mp-live` | Bắt buộc có `COMPOSE_PROJECT_NAME` (khác `mp-live`), `MP_CONTAINER_PREFIX` và `KAFKA_BOOTSTRAP_SERVERS` | `5530dcd`, `6591edb` |
+| Latency speed và Silver trộn đồng hồ host và VM (lệch ~30 s) | Mỗi lượt ingest/speed đọc `clock_timestamp()` của PostgreSQL (trong VM) kẹp giữa hai lần đọc đồng hồ host, ở đầu và cuối lượt; trừ độ lệch trung bình; ghi `clock_offset_*` và `clock_step_suspected` khi độ lệch đổi quá 1 s. §27.2 được đánh dấu chưa hiệu chỉnh | `0cc5873`, `2d0a68c` |
+| Batch benchmark chạy với `check=False`, nên một batch crash vẫn ra throughput | Chỉ nhận `SUCCEEDED`, hoặc `QUALITY_FAILED` mà check bắt buộc fail duy nhất là `silver_parse_attempt_reconciliation` (dữ liệu phát lại không có audit crawl). Kết quả ghi rõ `quality_gate` | `7b0cd5f`, `3e14a79` |
+| Một repeat lỗi làm mất cả variant và dừng `bench all` | Variant vẫn được ghi với các lượt đã xong và `failed: true`, variant sau vẫn chạy, lệnh trả exit 1 ở cuối | cùng hai commit trên |
+| `evaluate` chỉ đếm `SUCCEEDED`, còn benchmark đếm cả `PARTIAL` | `crawled = SUCCEEDED + PARTIAL`, dùng cho `crawl_rate` và khoảng cách giữa hai lần crawl một trang; `success_rate` vẫn là tỉ lệ `SUCCEEDED`; `partial` báo riêng | `8223dfd`, `4c4a486` |
+| Dự báo dung lượng nhân tuyến tính cả Kafka (có retention) | Chỉ Bronze, Silver, Gold, quarantine, audit, Elasticsearch (cận trên) nhân theo observation; Kafka dừng ở 7 ngày retention mặc định; cache giữ nguyên | `200c035`, `7812be6` |
+| Comment latency trong sink và SQL nói "lúc crawler gửi" | Ghi rõ giả định chung đồng hồ, và bench tự hiệu chỉnh | `d7953c9` |
+| Comment "copy 0 giữ ID cũ" của stub; ID 60 bit > 2^53 | Sửa comment. ID chỉ là số trong JSON của stub; adapter đổi sang chuỗi `platform_listing_id` trước khi tới Kafka, ES hay Kibana | `d7953c9` |
+| Parser env của `mp.ps1` không bỏ dấu nháy và comment cuối dòng | Theo quy tắc của Compose; test chạy chính hàm trong `mp.ps1` qua PowerShell | `4941382`, `089e460` |
+
+**Không sửa:** Codex P1 "kịch bản speed chờ micro-batch đầu tiên mãi không
+tới, vì volume Kafka vừa xoá". Run `bench all --repeat 3` (§27) có 9/9 lượt
+speed chạy trên commit đã có bộ lọc `addBatch` (`99bd092`), nên điều kiện chờ
+đó đã được thoả trong thực tế. Lý giải hợp lý nhất: khi chưa có offset nào
+được commit, Spark vẫn chạy batch 0 (có `addBatch`, 0 dòng), kể cả khi topic
+rỗng. Chưa đọc mã Spark để xác minh. Nếu kịch bản này timeout trên máy khác thì
+mở lại.
+
+**Còn phải làm:** chạy lại `bench ingest` và `bench speed` bằng bench đã sửa để
+có latency đã hiệu chỉnh, rồi thay các cột latency của §27.2. Stack phải chạy
+trên host có đủ RAM.

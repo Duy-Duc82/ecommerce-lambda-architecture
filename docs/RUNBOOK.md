@@ -47,6 +47,78 @@ the advisory lock; nothing was started.
 `*_HOST_PORT` variables in `.env`. Delete an old override file, or it keeps
 applying its own `!override` ports and images.
 
+## Four stacks on one machine (Phase 9 plan section 5)
+
+Live collection runs for 30 days and must never stop for a test. Every other
+use of the stack therefore runs in a Compose project of its own, beside it:
+
+| Stack | Env file | Project | Container names | What may run in it |
+|---|---|---|---|---|
+| live | `env/live.env` | `mp-live` | unprefixed (`kafka`, `speed`, ...) | live collection only: `up`, `status`, `validate`, `batch`, `backup` |
+| bench | `env/bench.env` | `mp-bench` | `bench-kafka`, ... | `smoke`, `drill`, benchmarks |
+| demo | `env/demo.env` | `mp-demo` | `demo-kafka`, ... | the offline demo |
+| *(none)* | `.env` only | the directory name | unprefixed | nothing while `mp-live` is up: its names are taken |
+
+```powershell
+.\scripts\mp.ps1 -EnvFile env/live.env status
+.\scripts\mp.ps1 -EnvFile env/live.env validate -Json data/ops/live/validate-2026-10-05.json
+.\scripts\mp.ps1 -EnvFile env/bench.env smoke
+.\scripts\mp.ps1 -EnvFile env/bench.env drill d3
+```
+
+`-EnvFile` sets the file's variables for that one call and puts the caller's
+environment back afterwards. Each isolated file sets its own project name,
+`MP_CONTAINER_PREFIX`, every published port, and the host-side client
+addresses that drills use. Without those addresses, a drill would reach the
+live stack's PostgreSQL on 5433.
+
+**`smoke`, `drill` and `down -Volumes` refuse the live stack, with exit
+code 2.** Two checks decide it: the project this call targets, and the
+`com.docker.compose.project` label of the `kafka` container the call would
+reach. So the checks still hold when `-EnvFile` is forgotten. `ops.drills`
+repeats the label check before the baseline, the drill and its restore.
+Never point an isolated stack at the live site: its stub categories `9001`–`9003`
+do not exist on Tiki.
+
+## Measuring and showing (Phase 9 plan sections 6-12)
+
+| Command | Stack | What it writes |
+|---|---|---|
+| `mp -EnvFile env/bench.env bench crawl\|ingest\|speed\|batch\|all [--repeat 3]` | bench, rebuilt per run | `data/ops/bench/<scenario>-<variant>-<stamp>.json` |
+| `mp -EnvFile env/bench.env bench report` | none, it reads files | Markdown tables to stdout |
+| `mp -EnvFile env/live.env evaluate reliability\|freshness\|storage` | live, read-only | `data/ops/evaluation/<kind>-<stamp>.{json,md}` |
+| `mp -EnvFile env/demo.env demo [--auto] [--snapshot] [--skip-faults] [--without-serve]` | demo | the demo, plus `data/ops/demo-backup/latest.json` with `--snapshot` |
+| `mp -EnvFile env/live.env evidence [--skip-tests]` | live, read-only | `data/ops/evidence/<stamp>/` with `INDEX.md` |
+| `python -m ops storage-snapshot` (in the `ops` container) | any | one row per store into `audit.storage_snapshot` |
+
+**Every benchmark number is a replayed fixture.** `ops.bench_load` reshapes
+the frozen Tiki fixture into many offers and sends them straight to Kafka.
+Each result file and every row of `bench report` carries
+`dataset: replayed_fixture`, and the report refuses to mix two labels in one
+table. Only `evaluate` measures live data.
+
+**What "latency" means in the speed audit.** `latency_p50_ms`,
+`latency_p95_ms` and `latency_max_ms` on `audit.marketplace_speed_batch` are
+the batch's completion, with every sink written, minus each applied
+observation's `produced_at`: the instant the crawler sent the observation to
+Kafka, which kafka-python also stamps as the record's CreateTime. The value
+includes the time the record waited for the next trigger. With the 30 s
+trigger, a p50 of 10–25 s is the trigger and not a slow pipeline.
+`audit.marketplace_stream_progress` holds Spark's own per-batch numbers; join
+it to the batch audit on `(query_name, query_id, batch_id)`.
+
+**The storage snapshot sizes Kafka from its files.** Kafka 4 no longer
+answers the `DescribeLogDirs` versions kafka-python speaks. The broker's
+volume is therefore mounted read-only into `ops` and `es-projector`, and
+partitions are sized by allocated blocks. The sparse, preallocated index
+files would otherwise count 20 MiB per partition that the disk does not hold.
+
+**The demo shares memory with the live stack.** A full demo adds Kibana,
+Superset and a second Elasticsearch, about 7–8 GB, to the live stack's ~5 GB.
+On a 16 GB Docker VM that is close to the limit, and an OOM kill can land on
+the *live* Elasticsearch. Check `docker stats` first. When memory is short,
+use `--without-serve`.
+
 ## `mp` — one command (plan section 9)
 
 ```powershell
