@@ -109,23 +109,56 @@ def crawl_metrics(attempts: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
-def silver_latency_metrics(samples: list[tuple[datetime, datetime]]) -> dict[str, Any]:
+def clock_offset_seconds(host_before: datetime, vm: datetime, host_after: datetime) -> float:
+    """Docker VM clock minus host clock, from one VM reading bracketed by two
+    host readings (the midpoint is the host instant of the VM reading)."""
+    midpoint = host_before + (host_after - host_before) / 2
+    return (vm - midpoint).total_seconds()
+
+
+def clock_fields(start_offset: float, end_offset: float, *, step_threshold: float = 1.0) -> dict[str, Any]:
+    """The offset applied to a run's cross-clock latencies, and how much it moved.
+
+    The mean of the two readings is applied. A move larger than
+    ``step_threshold`` seconds means the VM clock stepped during the run, so
+    latencies sampled on either side of the step are off by up to the step."""
+    return {"clock_offset_ms": round((start_offset + end_offset) / 2 * 1000, 1),
+            "clock_offset_start_ms": round(start_offset * 1000, 1), "clock_offset_end_ms": round(end_offset * 1000, 1),
+            "clock_step_suspected": abs(end_offset - start_offset) > step_threshold}
+
+
+def silver_latency_metrics(samples: list[tuple[datetime, datetime]], *, clock_offset_seconds: float = 0.0) -> dict[str, Any]:
     """``(LastModified, produced_at)`` pairs, in milliseconds. LastModified has
-    one-second resolution, so these are accurate to a second at best."""
-    values = [(written - produced).total_seconds() * 1000 for written, produced in samples]
+    one-second resolution, so these are accurate to a second at best.
+
+    LastModified is MinIO's, so the Docker VM's clock, while the bench stamps
+    ``produced_at`` on the host; ``clock_offset_seconds`` (VM minus host) is
+    subtracted to put both on the host's clock."""
+    values = [(written - produced).total_seconds() * 1000 - clock_offset_seconds * 1000 for written, produced in samples]
     return {"silver_latency_p50_ms": percentile(values, 0.50), "silver_latency_p95_ms": percentile(values, 0.95),
             "silver_latency_max_ms": max(values) if values else None, "silver_latency_samples": len(values),
             "silver_latency_resolution_ms": 1000}
 
 
 def speed_metrics(batches: list[dict[str, Any]], progress: list[dict[str, Any]], *, sent: int,
-                  send_seconds: float, drain_seconds: float | None) -> dict[str, Any]:
+                  send_seconds: float, drain_seconds: float | None, clock_offset_seconds: float = 0.0) -> dict[str, Any]:
     """From ``marketplace_speed_batch`` and ``marketplace_stream_progress`` rows
     of one rate step.
 
     Latency percentiles do not compose across batches, so the step reports
     the median of the batches' p50 and the worst batch's p95 and max, each
-    weighted by nothing and named for what it is."""
+    weighted by nothing and named for what it is.
+
+    The audit's latency is the speed service's completion time (Docker VM
+    clock) minus ``produced_at``, which the bench stamps on the host; the VM
+    minus host offset is subtracted from each. Batch durations need no
+    correction: Spark times both ends on the VM clock, though a clock step
+    inside a batch still lands in its duration."""
+    shift = clock_offset_seconds * 1000
+
+    def corrected(value):
+        return None if value is None else value - shift
+
     with_rows = [b for b in batches if (b.get("input_rows") or 0) > 0]
     input_rows = sum(b.get("input_rows") or 0 for b in batches)
     if with_rows:
@@ -140,9 +173,9 @@ def speed_metrics(batches: list[dict[str, Any]], progress: list[dict[str, Any]],
         "input_rows": input_rows, "batches_with_rows": len(with_rows),
         "processed_rows_per_second": input_rows / busy if busy else None,
         "batch_duration_p50_ms": percentile(durations, 0.50), "batch_duration_p95_ms": percentile(durations, 0.95),
-        "latency_batch_p50_median_ms": spread(b.get("latency_p50_ms") for b in with_rows)["median"],
-        "latency_batch_p95_max_ms": max((b["latency_p95_ms"] for b in with_rows if b.get("latency_p95_ms") is not None), default=None),
-        "latency_max_ms": max((b["latency_max_ms"] for b in with_rows if b.get("latency_max_ms") is not None), default=None),
+        "latency_batch_p50_median_ms": corrected(spread(b.get("latency_p50_ms") for b in with_rows)["median"]),
+        "latency_batch_p95_max_ms": corrected(max((b["latency_p95_ms"] for b in with_rows if b.get("latency_p95_ms") is not None), default=None)),
+        "latency_max_ms": corrected(max((b["latency_max_ms"] for b in with_rows if b.get("latency_max_ms") is not None), default=None)),
         "drain_seconds": drain_seconds, "kept_up": drain_seconds is not None,
     }
 
@@ -306,6 +339,14 @@ class Stack:
     def db_now(self) -> datetime:
         return self.query("SELECT now() AS now")[0]["now"]
 
+    def clock_offset(self) -> float:
+        """Docker VM clock minus host clock, in seconds. PostgreSQL runs in the
+        VM, and every container shares the VM's kernel clock."""
+        self.query("SELECT 1")  # connect first, so the bracket times only the query
+        before = datetime.now(timezone.utc)
+        vm = self.query("SELECT clock_timestamp() AS t")[0]["t"]
+        return clock_offset_seconds(before, vm, datetime.now(timezone.utc))
+
 
 def wait_until(check: Callable[[], bool], *, timeout: float, what: str, poll: float = 1.0) -> float:
     began = time.monotonic()
@@ -367,13 +408,16 @@ def _silver_latency_sample(limit: int = 300) -> list[tuple[datetime, datetime]]:
 
 def run_ingest(stack: Stack, *, count: int, seed: int) -> dict[str, Any]:
     stack.fresh("silver-sink")
+    offset_start = stack.clock_offset()
     began = time.monotonic()
     sent, send_seconds = _send_load(seed=seed, count=count, offers=1000, rate=0)
     wait_until(lambda: _silver_lag() == 0, timeout=3600, what="the Silver sink to drain", poll=1)
     total = time.monotonic() - began
+    clock = clock_fields(offset_start, stack.clock_offset())
     return {"sent": sent, "send_seconds": round(send_seconds, 3), "total_seconds": round(total, 3),
             "produce_per_second": sent / send_seconds, "silver_records_per_second": sent / total,
-            **silver_latency_metrics(_silver_latency_sample())}
+            **silver_latency_metrics(_silver_latency_sample(), clock_offset_seconds=clock["clock_offset_ms"] / 1000),
+            **clock}
 
 
 def run_batch(stack: Stack, *, count: int, seed: int) -> dict[str, Any]:
@@ -400,6 +444,7 @@ def run_speed(stack: Stack, *, rate: float, seconds: int, seed: int) -> dict[str
     wait_until(lambda: bool(stack.query("SELECT 1 FROM audit.marketplace_stream_progress LIMIT 1")),
                timeout=600, what="the speed query's first micro-batch", poll=5)
     since = stack.db_now()
+    offset_start = stack.clock_offset()
     sent, send_seconds = _send_load(seed=seed, count=int(rate * seconds), offers=max(1000, int(rate * 60)), rate=rate)
 
     def applied() -> int:
@@ -415,7 +460,9 @@ def run_speed(stack: Stack, *, rate: float, seconds: int, seed: int) -> dict[str
     batches = stack.query("SELECT * FROM audit.marketplace_speed_batch WHERE started_at >= %s AND status = 'SUCCEEDED'",
                           (since,))
     progress = stack.query("SELECT * FROM audit.marketplace_stream_progress WHERE progress_at >= %s", (since,))
-    return speed_metrics(batches, progress, sent=sent, send_seconds=send_seconds, drain_seconds=drain)
+    clock = clock_fields(offset_start, stack.clock_offset())
+    return {**speed_metrics(batches, progress, sent=sent, send_seconds=send_seconds, drain_seconds=drain,
+                            clock_offset_seconds=clock["clock_offset_ms"] / 1000), **clock}
 
 
 # Pages crawled in a run: a PARTIAL attempt fetched and parsed its page too.
