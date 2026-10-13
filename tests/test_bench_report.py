@@ -191,3 +191,77 @@ def test_speed_latency_is_put_on_the_host_clock_but_batch_duration_is_not():
 
     assert (m["latency_batch_p50_median_ms"], m["latency_batch_p95_max_ms"], m["latency_max_ms"]) == (4000, 8000, 10000)
     assert m["batch_duration_p50_ms"] == 2000
+
+
+def _batch_row(status):
+    return {"status": status, "quality_status": "PASS" if status == "SUCCEEDED" else "FAIL", "started_at": T0,
+            "completed_at": T0 + timedelta(seconds=40), "silver_rows": 10_000, "gold_rows": 8011}
+
+
+def test_a_succeeded_batch_reports_its_time():
+    m = bench.batch_outcome("bench-1", _batch_row("SUCCEEDED"), [])
+
+    assert m["seconds"] == 40 and m["silver_rows_per_second"] == 250 and m["quality_gate"] == "passed"
+
+
+def test_a_batch_failing_only_the_reconciliation_replay_cannot_pass_is_reported_and_labelled():
+    m = bench.batch_outcome("bench-1", _batch_row("QUALITY_FAILED"), ["silver_parse_attempt_reconciliation"])
+
+    assert m["quality_gate"] == "failed_as_expected_on_replayed_data"
+    assert m["quality_failing_checks"] == ["silver_parse_attempt_reconciliation"]
+
+
+@pytest.mark.parametrize("status,failing", [
+    ("QUALITY_FAILED", ["silver_parse_attempt_reconciliation", "gold_offer_current_unique"]),
+    ("QUALITY_FAILED", []),
+    ("FAILED", []),
+])
+def test_a_batch_that_failed_for_any_other_reason_fails_the_run(status, failing):
+    with pytest.raises(bench.BenchFailed, match=status):
+        bench.batch_outcome("bench-1", _batch_row(status), failing)
+
+
+def test_an_unfinished_batch_fails_the_run():
+    with pytest.raises(bench.BenchFailed, match="did not finish"):
+        bench.batch_outcome("bench-1", None, [])
+
+
+def test_a_failed_repeat_keeps_the_finished_runs_and_the_next_variant_still_runs(monkeypatch, tmp_path):
+    calls = []
+
+    def runner(stack, *, count, seed):
+        calls.append((count, seed))
+        if count == 10 and seed == 2:
+            raise bench.BenchFailed("speed layer never caught up")
+        return {"seconds": count}
+
+    class FakeStack:
+        def down(self):
+            pass
+
+    class FakeSampler:
+        samples = []
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+    monkeypatch.setattr(bench, "refuse_live", lambda: None)
+    monkeypatch.setattr(bench, "environment", lambda: {})
+    monkeypatch.setattr(bench, "RESULTS", tmp_path)
+    monkeypatch.setattr(bench, "Stack", FakeStack)
+    monkeypatch.setattr(bench, "ResourceSampler", FakeSampler)
+    monkeypatch.setitem(bench.RUNNERS, "ingest", runner)
+    args = bench.argparse.Namespace(sizes=[10, 20], repeat=3, seed=1, keep=False)
+
+    paths, failures = bench.run_scenario("ingest", args)
+
+    assert calls == [(10, 1), (10, 2), (20, 1), (20, 2), (20, 3)]
+    first, second = (json.loads(p.read_text(encoding="utf-8")) for p in paths)
+    assert first["failed"] is True and first["completed_runs"] == 1 and "never caught up" in first["failure"]
+    assert first["summary"]["seconds"]["runs"] == 1
+    assert second["failed"] is False and second["completed_runs"] == 3
+    assert len(failures) == 1
+    assert "(failed after 1 of 3 runs)" in bench.render_report([first, second])
