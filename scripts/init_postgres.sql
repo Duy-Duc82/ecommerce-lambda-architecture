@@ -155,7 +155,9 @@ ALTER TABLE audit.marketplace_speed_batch ADD CONSTRAINT marketplace_speed_batch
 -- Latency is the batch's completion -- every sink written -- minus each
 -- applied observation's produced_at, the instant the crawler sent it to
 -- Kafka (kafka-python stamps the record's CreateTime at that send). It
--- includes the time the record waited in Kafka for the next trigger.
+-- includes the time the record waited in Kafka for the next trigger. It
+-- assumes producer and speed service share a clock: true for the crawler,
+-- not for the bench's host-side load generator (ops.bench corrects that).
 -- Nullable: a batch with no applied observation has no latency, and rows
 -- from before Phase 9 have none either. No sign check: a clock step between
 -- containers must not fail a batch that wrote its sinks. Safe to run twice.
