@@ -156,3 +156,38 @@ def test_a_partial_page_counts_as_crawled():
 
     assert (m["completed"], m["partial"], m["failed"]) == (2, 2, 1)
     assert "PARTIAL" in bench.CRAWLED_SQL and "SUCCEEDED" in bench.CRAWLED_SQL
+
+
+def test_the_clock_offset_is_the_vm_reading_against_the_host_midpoint():
+    # VM reads 30 s ahead of the midpoint of two host readings 2 s apart.
+    offset = bench.clock_offset_seconds(T0, T0 + timedelta(seconds=31), T0 + timedelta(seconds=2))
+
+    assert offset == pytest.approx(30.0)
+
+
+def test_a_moving_offset_is_flagged_as_a_clock_step():
+    steady = bench.clock_fields(29.98, 30.01)
+    stepped = bench.clock_fields(30.0, 0.25)
+
+    assert steady["clock_offset_ms"] == pytest.approx(29995.0) and steady["clock_step_suspected"] is False
+    assert stepped["clock_step_suspected"] is True
+
+
+def test_silver_latency_is_put_on_the_host_clock():
+    # MinIO (VM clock, 30 s ahead) wrote 2 s after the host stamped produced_at.
+    pairs = [(T0 + timedelta(seconds=32), T0)]
+
+    m = bench.silver_latency_metrics(pairs, clock_offset_seconds=30)
+
+    assert m["silver_latency_p50_ms"] == pytest.approx(2000)
+
+
+def test_speed_latency_is_put_on_the_host_clock_but_batch_duration_is_not():
+    batches = [{"input_rows": 10, "started_at": T0, "completed_at": T0 + timedelta(seconds=2),
+                "latency_p50_ms": 34000, "latency_p95_ms": 38000, "latency_max_ms": 40000}]
+    progress = [{"num_input_rows": 10, "trigger_execution_ms": 2000}]
+
+    m = bench.speed_metrics(batches, progress, sent=10, send_seconds=1, drain_seconds=3, clock_offset_seconds=30)
+
+    assert (m["latency_batch_p50_median_ms"], m["latency_batch_p95_max_ms"], m["latency_max_ms"]) == (4000, 8000, 10000)
+    assert m["batch_duration_p50_ms"] == 2000
