@@ -247,6 +247,14 @@ def layers(rows: Iterable[Mapping[str, Any]]) -> dict[str, int]:
 
 
 STORED = ("bronze", "silver", "gold", "quarantine", "cache", "audit", "elasticsearch", "kafka")
+# Projected per observation: these keep every observation (or every change of
+# one) for as long as the project runs. Elasticsearch is an upper bound: its
+# change index grows like this, its current-offer index only with the offers.
+SCALED = ("bronze", "silver", "gold", "quarantine", "audit", "elasticsearch")
+# Kafka keeps a retention window, the broker default of 7 days (no topic or
+# broker setting overrides it), so it levels off at about a week of
+# observations. The serving cache holds one current copy, held constant.
+KAFKA_RETENTION_DAYS = 7
 
 
 def growth_report(snapshots: Iterable[Mapping[str, Any]], *, free_bytes: int | None = None) -> dict[str, Any]:
@@ -263,13 +271,27 @@ def growth_report(snapshots: Iterable[Mapping[str, Any]], *, free_bytes: int | N
     per_day = {k: (last[k] - first[k]) / days for k in (*STORED, "silver_observations")}
     total_per_day = sum(per_day[k] for k in STORED)
     per_observation = {k: (last[k] / observations if observations else None) for k in STORED}
-    bytes_per_observation = sum(v for v in per_observation.values() if v is not None) if observations else None
+    bytes_per_observation = sum(per_observation[k] for k in SCALED) if observations else None
+    # Bytes per observation Kafka still holds: all of them before the window
+    # fills, about a week's worth after.
+    retained = min(observations, per_day["silver_observations"] * KAFKA_RETENTION_DAYS) or observations
+    kafka_per_observation = last["kafka"] / retained if retained else None
 
-    def projected_bytes(at_day: int) -> int | None:
+    def kafka_steady(observations_per_day: float) -> int | None:
+        if kafka_per_observation is None:
+            return None
+        return round(kafka_per_observation * observations_per_day * KAFKA_RETENTION_DAYS)
+
+    def projected(obs: float, rate: float) -> int | None:
+        """``obs`` observations so far, arriving at ``rate`` a day."""
         if bytes_per_observation is None:
             return None
-        obs = observations + per_day["silver_observations"] * max(at_day - days, 0)
-        return round(obs * bytes_per_observation)
+        kafka = min(kafka_per_observation * obs, kafka_steady(rate) or 0) if kafka_per_observation else 0
+        return round(obs * bytes_per_observation + kafka + last["cache"])
+
+    def projected_live(at_day: int) -> int | None:
+        rate = per_day["silver_observations"]
+        return projected(observations + rate * max(at_day - days, 0), rate)
 
     return {
         "report": "storage_growth", "dataset": "live",
@@ -279,13 +301,19 @@ def growth_report(snapshots: Iterable[Mapping[str, Any]], *, free_bytes: int | N
         "growth_total_bytes_per_day": round(total_per_day),
         "bytes_per_observation": {k: (round(v, 1) if v is not None else None) for k, v in per_observation.items()},
         "bytes_per_observation_total": round(bytes_per_observation, 1) if bytes_per_observation else None,
+        "bytes_per_observation_total_covers": list(SCALED),
+        "bounded_stores": {"kafka": {"retention_days": KAFKA_RETENTION_DAYS,
+                                     "steady_bytes_at_measured_rate": kafka_steady(per_day["silver_observations"])},
+                           "cache": {"held_at_bytes": last["cache"]}},
         "ratios": {"bronze_to_silver": round(last["bronze"] / last["silver"], 3) if last["silver"] else None,
                    "silver_to_gold": round(last["silver"] / last["gold"], 3) if last["gold"] else None},
-        "projection_note": "a projection from measured bytes per observation, not a measurement",
-        "projection_total_bytes": {f"day_{n}": projected_bytes(n) for n in (30, 45, 60)},
+        "projection_note": ("a projection, not a measurement: Bronze, Silver, Gold, quarantine, audit and "
+                            "Elasticsearch scale with observations; Kafka levels off at its retention window; "
+                            "the cache is held constant"),
+        "projection_total_bytes": {f"day_{n}": projected_live(n) for n in (30, 45, 60)},
         "projection_brief_rows_60_days": [
             {"offers": offers, "cadence_seconds": cadence, "observations": offers * (86400 // cadence) * 60,
-             "bytes": round(offers * (86400 // cadence) * 60 * bytes_per_observation) if bytes_per_observation else None}
+             "bytes": projected(offers * (86400 // cadence) * 60, offers * (86400 // cadence))}
             for offers, cadence in BRIEF_ROWS],
         "disk": {"free_bytes": free_bytes,
                  "days_until_full": round(free_bytes / total_per_day, 1) if free_bytes and total_per_day > 0 else None,
