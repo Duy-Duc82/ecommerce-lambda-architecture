@@ -17,6 +17,7 @@ Lịch:
 
 ## Báo cáo (mới nhất trước)
 
+- [2026-10-15 17:58](reports/2026-10-15.md) — CẦN XEM: Docker vẫn tắt (từ 10-06), gần 9 ngày không thu thập; job 10-14 không ra báo cáo
 - [2026-10-13 18:12](reports/2026-10-13.md) — CẦN XEM: Docker vẫn tắt (từ 10-06), mp-live không chạy, gần 7 ngày không thu thập
 - [2026-10-12 21:08](reports/2026-10-12.md) — CẦN XEM: Docker vẫn tắt (từ 10-06), mp-live không chạy; báo cáo 10-11 trước đó chưa được push
 - [2026-10-11 14:42](reports/2026-10-11.md) — CẦN XEM: Docker vẫn tắt (từ 10-06), mp-live không chạy; mp-keep-awake dừng (0xC000013A)
