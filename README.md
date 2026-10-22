@@ -17,6 +17,7 @@ Lịch:
 
 ## Báo cáo (mới nhất trước)
 
+- [2026-10-22 17:07](reports/2026-10-22.md) — CẦN XEM: Docker vẫn tắt (từ 10-06), gần 16 ngày không thu thập; máy bật 16:58, lỡ giờ batch
 - [2026-10-21 09:32](reports/2026-10-21.md) — CẦN XEM: Docker vẫn tắt (từ 10-06), gần 15 ngày không thu thập; máy bật 09:23, lỡ giờ batch
 
 - [2026-10-20 18:39](reports/2026-10-20.md) — CẦN XEM: Docker vẫn tắt (từ 10-06), gần 14 ngày không thu thập; job 10-19 lỗi Claude CLI, không ra báo cáo
