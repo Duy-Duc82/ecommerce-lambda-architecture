@@ -17,6 +17,7 @@ Lịch:
 
 ## Báo cáo (mới nhất trước)
 
+- [2026-10-23 22:20](reports/2026-10-23.md) — CẦN XEM: Docker tắt lúc kiểm; tối 10-22 có mở Docker 20:55-00:43, 5 container chạy ~2h10m (không rõ project); không batch
 - [2026-10-22 17:07](reports/2026-10-22.md) — CẦN XEM: Docker vẫn tắt (từ 10-06), gần 16 ngày không thu thập; máy bật 16:58, lỡ giờ batch
 - [2026-10-21 09:32](reports/2026-10-21.md) — CẦN XEM: Docker vẫn tắt (từ 10-06), gần 15 ngày không thu thập; máy bật 09:23, lỡ giờ batch
 
