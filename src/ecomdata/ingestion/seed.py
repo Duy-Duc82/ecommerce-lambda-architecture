@@ -20,13 +20,14 @@ from typing import Any
 
 from ecomdata.domain.acquisition import encode_listing_page_task_target
 from ecomdata.domain.observations import ResourceType
+from ecomdata.domain.sources import SOURCES
 from ecomdata.ingestion.scheduling import CrawlTask, CrawlTaskStatus, CrawlTier, make_crawl_task_id
 
 # Due at once, and fixed, so the seeded task ID is a function of the target.
 SEED_SCHEDULED_FOR = datetime(1970, 1, 1, tzinfo=UTC)
 
 # Marketplace code -> ID, kept here so seeding needs no HTTP adapter.
-MARKETPLACE_IDS = {"tiki": "marketplace-tiki"}
+MARKETPLACE_IDS = {spec.code: spec.marketplace_id for spec in SOURCES}
 
 
 def seed(

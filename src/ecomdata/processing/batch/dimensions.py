@@ -10,11 +10,10 @@ Input is the flattened observation frame of
 
 from __future__ import annotations
 
-from collections.abc import Mapping
-
 from pyspark.sql import Column, DataFrame, SparkSession, Window
 from pyspark.sql import functions as F
 
+from ecomdata.domain.sources import SOURCES, SourceRegistry
 from ecomdata.processing.batch.dim_date import build_dim_date
 from ecomdata.processing.batch.keys import (
     OPEN_VALID_TO,
@@ -46,9 +45,14 @@ __all__ = [
 
 # Attributes the observations do not carry. A marketplace missing here still
 # gets a row, with these columns empty.
-KNOWN_MARKETPLACES: Mapping[str, dict[str, str]] = {
-    "tiki": {"marketplace_name": "Tiki", "platform_type": "marketplace", "country": "VN", "default_currency": "VND"},
-}
+def known_marketplaces(registry: SourceRegistry = SOURCES) -> dict[str, dict[str, str]]:
+    """Attributes the observations do not carry, from the source registry.
+
+    A marketplace missing from the registry still gets a row, with these
+    columns empty.
+    """
+    return {spec.code: {"marketplace_name": spec.name, "platform_type": spec.platform_type, "country": spec.country,
+                        "default_currency": spec.currency} for spec in registry}
 
 # Attributes that open a new dim_product_listing version (section 4.6).
 SCD2_ATTRIBUTES = ("product_title", "brand", "category_key", "seller_key")
@@ -126,7 +130,7 @@ def build_dim_marketplace(observations: DataFrame) -> DataFrame:
     attributes = spark.createDataFrame(
         [
             (code, a["marketplace_name"], a["platform_type"], a["country"], a["default_currency"])
-            for code, a in KNOWN_MARKETPLACES.items()
+            for code, a in known_marketplaces().items()
         ],
         "marketplace_code string, marketplace_name string, platform_type string, country string, default_currency string",
     )
