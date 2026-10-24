@@ -1,0 +1,47 @@
+# Log observability for the Lambda stack: Promtail -> Loki -> Grafana (2026-10-24).
+# Used with: docker compose -f docker-compose.yml -f stream.override.yml -f observability/docker-compose.logging.yml ...
+services:
+  loki:
+    image: grafana/loki:3.4.2
+    container_name: ${MP_CONTAINER_PREFIX:-}loki
+    restart: unless-stopped
+    command: ["-config.file=/etc/loki/local-config.yaml"]
+    ports: ["${LOKI_HOST_PORT:-3101}:3100"]
+    volumes: ["loki_data:/loki"]
+    networks: [bigdata]
+
+  promtail:
+    image: grafana/promtail:3.4.2
+    container_name: ${MP_CONTAINER_PREFIX:-}promtail
+    restart: unless-stopped
+    command: ["-config.file=/etc/promtail/promtail.yml", "-config.expand-env=true"]
+    environment:
+      COMPOSE_PROJECT_NAME: ${COMPOSE_PROJECT_NAME}
+    volumes:
+      - ./observability/promtail.yml:/etc/promtail/promtail.yml:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    depends_on: [loki]
+    networks: [bigdata]
+
+  grafana:
+    image: grafana/grafana:11.5.2
+    container_name: ${MP_CONTAINER_PREFIX:-}grafana
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+      GF_DATE_FORMATS_DEFAULT_TIMEZONE: Asia/Ho_Chi_Minh
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/lambda-logs.json
+    ports: ["${GRAFANA_HOST_PORT:-3001}:3000"]
+    volumes:
+      - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana_data:/var/lib/grafana
+    depends_on: [loki]
+    networks: [bigdata]
+
+volumes:
+  loki_data:
+  grafana_data:

@@ -1,0 +1,52 @@
+server:
+  http_listen_port: 9080
+  grpc_listen_port: 0
+positions:
+  filename: /tmp/positions.yaml
+clients:
+  - url: http://loki:3100/loki/api/v1/push
+scrape_configs:
+  - job_name: lambda-containers
+    docker_sd_configs:
+      - host: unix:///var/run/docker.sock
+        refresh_interval: 5s
+        filters:
+          - name: label
+            values: ["com.docker.compose.project=${COMPOSE_PROJECT_NAME}"]
+    relabel_configs:
+      - source_labels: [__meta_docker_container_name]
+        regex: "/(.*)"
+        target_label: container
+      - source_labels: [__meta_docker_container_label_com_docker_compose_service]
+        target_label: service
+      - source_labels: [__meta_docker_container_log_stream]
+        target_label: stream
+      - target_label: project
+        replacement: ${COMPOSE_PROJECT_NAME}
+      # one Lambda layer per service
+      - {source_labels: [service], regex: "crawl-worker|stub-source", target_label: layer, replacement: crawl}
+      - {source_labels: [service], regex: "silver-sink|kafka-init", target_label: layer, replacement: ingest}
+      - {source_labels: [service], regex: "speed", target_label: layer, replacement: speed}
+      - {source_labels: [service], regex: "batch-scheduler|batch-once", target_label: layer, replacement: batch}
+      - {source_labels: [service], regex: "es-projector|kibana|kibana-marketplace-setup|superset|superset-init", target_label: layer, replacement: serving}
+      - {source_labels: [service], regex: "kafka|minio|minio-init|postgres-dw|redis|elasticsearch", target_label: layer, replacement: storage}
+      - {source_labels: [service], regex: "ops", target_label: layer, replacement: ops}
+      - {source_labels: [service], regex: "loki|promtail|grafana", target_label: layer, replacement: observability}
+    pipeline_stages:
+      # explicit level markers only: level=error, [ERROR], an upper-case ERROR/FATAL word, a Python
+      # traceback, or a "SomethingError:" / "SomethingException:" class name; WARN markers likewise
+      - regex:
+          expression: '(?P<err>level=(?:error|fatal|critical)\b|\[(?:ERROR|FATAL|CRITICAL)\s*\]|\b(?:ERROR|FATAL|CRITICAL)\b|Traceback \(most recent call last\)|\b[A-Z][A-Za-z]+(?:Error|Exception):)|(?P<warn>level=warn(?:ing)?\b|\[WARN(?:ING)?\s*\]|\bWARN(?:ING)?\b)'
+      - template:
+          source: level
+          template: '{{ if .err }}error{{ else if .warn }}warn{{ else }}info{{ end }}'
+      # The batch probes each staging table before it creates it; Postgres logs the probe as
+      # ERROR "relation staging.mp_... does not exist". Kept in the log, labelled as expected.
+      - match:
+          selector: '{service="postgres-dw"} |~ "relation .staging[.]mp_[a-z_0-9]+. does not exist"'
+          stages:
+            - template:
+                source: level
+                template: 'expected'
+      - labels:
+          level:

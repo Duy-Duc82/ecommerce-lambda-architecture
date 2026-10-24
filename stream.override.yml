@@ -1,0 +1,12 @@
+# Local overrides for the 8-hour full-stack run (2026-10-24). Not committed.
+services:
+  speed:
+    environment:
+      MARKETPLACE_STREAM_TRIGGER: "5 seconds"
+  batch-scheduler:
+    environment:
+      MARKETPLACE_BATCH_INTERVAL_SECONDS: "3600"
+      MARKETPLACE_BATCH_AS_OF_LAG_SECONDS: "1200"
+      # the batch sets no spark.driver.memory, so local mode ran on the 1 GB default and hit
+      # "OutOfMemoryError: Java heap space" on the 7th hourly run (2026-10-23 23:26 UTC)
+      PYSPARK_SUBMIT_ARGS: "--driver-memory 3g pyspark-shell"

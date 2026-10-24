@@ -1,0 +1,527 @@
+{
+ "uid": "lambda-logs",
+ "title": "Lambda pipeline — log theo layer",
+ "timezone": "Asia/Ho_Chi_Minh",
+ "refresh": "10s",
+ "time": {
+  "from": "now-1h",
+  "to": "now"
+ },
+ "schemaVersion": 39,
+ "tags": [
+  "lambda",
+  "logs"
+ ],
+ "templating": {
+  "list": [
+   {
+    "name": "layer",
+    "type": "query",
+    "datasource": {
+     "type": "loki",
+     "uid": "loki"
+    },
+    "query": {
+     "label": "layer",
+     "type": 1,
+     "stream": "",
+     "refId": "LokiVariableQueryEditor-VariableQuery"
+    },
+    "definition": "label_values(layer)",
+    "multi": true,
+    "includeAll": true,
+    "current": {
+     "text": "All",
+     "value": "$__all"
+    },
+    "refresh": 2
+   },
+   {
+    "name": "service",
+    "type": "query",
+    "datasource": {
+     "type": "loki",
+     "uid": "loki"
+    },
+    "query": {
+     "label": "service",
+     "type": 1,
+     "stream": "{project=\"mp-tikihtml\", layer=~\"$layer\"}",
+     "refId": "LokiVariableQueryEditor-VariableQuery"
+    },
+    "definition": "label_values(service)",
+    "multi": true,
+    "includeAll": true,
+    "current": {
+     "text": "All",
+     "value": "$__all"
+    },
+    "refresh": 2
+   },
+   {
+    "name": "search",
+    "type": "textbox",
+    "label": "Tìm trong log (regex)",
+    "query": "",
+    "current": {
+     "text": "",
+     "value": ""
+    }
+   }
+  ]
+ },
+ "panels": [
+  {
+   "type": "timeseries",
+   "title": "Số dòng log / phút theo layer",
+   "targets": [
+    {
+     "refId": "A",
+     "expr": "sum by (layer) (count_over_time({project=\"mp-tikihtml\", layer=~\"$layer\"}[1m]))",
+     "legendFormat": "{{layer}}",
+     "datasource": {
+      "type": "loki",
+      "uid": "loki"
+     }
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "unit": "short",
+     "custom": {
+      "drawStyle": "bars",
+      "fillOpacity": 60,
+      "stacking": {
+       "mode": "normal"
+      }
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "legend": {
+     "displayMode": "table",
+     "placement": "right",
+     "calcs": [
+      "sum"
+     ]
+    }
+   },
+   "id": 1,
+   "gridPos": {
+    "h": 8,
+    "w": 12,
+    "x": 0,
+    "y": 0
+   },
+   "datasource": {
+    "type": "loki",
+    "uid": "loki"
+   }
+  },
+  {
+   "type": "timeseries",
+   "title": "Lỗi / 5 phút theo layer (level=error: ERROR, FATAL, Traceback, XxxError:)",
+   "targets": [
+    {
+     "refId": "A",
+     "expr": "sum by (layer) (count_over_time({project=\"mp-tikihtml\", layer=~\"$layer\", level=\"error\"} [5m]))",
+     "legendFormat": "{{layer}}",
+     "datasource": {
+      "type": "loki",
+      "uid": "loki"
+     }
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "unit": "short",
+     "custom": {
+      "drawStyle": "bars",
+      "fillOpacity": 60,
+      "stacking": {
+       "mode": "normal"
+      }
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "legend": {
+     "displayMode": "table",
+     "placement": "right",
+     "calcs": [
+      "sum"
+     ]
+    }
+   },
+   "id": 2,
+   "gridPos": {
+    "h": 8,
+    "w": 12,
+    "x": 12,
+    "y": 0
+   },
+   "datasource": {
+    "type": "loki",
+    "uid": "loki"
+   }
+  },
+  {
+   "type": "stat",
+   "title": "Lỗi trong khoảng thời gian đang chọn",
+   "targets": [
+    {
+     "refId": "A",
+     "expr": "sum by (layer) (count_over_time({project=\"mp-tikihtml\", layer=~\"$layer\", level=\"error\"} [$__range]))",
+     "legendFormat": "{{layer}}",
+     "instant": true,
+     "datasource": {
+      "type": "loki",
+      "uid": "loki"
+     }
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "green",
+        "value": null
+       },
+       {
+        "color": "red",
+        "value": 1
+       }
+      ]
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ]
+    },
+    "colorMode": "background",
+    "textMode": "value_and_name"
+   },
+   "id": 3,
+   "gridPos": {
+    "h": 5,
+    "w": 24,
+    "x": 0,
+    "y": 8
+   },
+   "datasource": {
+    "type": "loki",
+    "uid": "loki"
+   }
+  },
+  {
+   "type": "logs",
+   "title": "Chỉ dòng lỗi và cảnh báo (level error/warn), mới nhất trước",
+   "targets": [
+    {
+     "refId": "A",
+     "expr": "{project=\"mp-tikihtml\", layer=~\"$layer\", service=~\"$service\", level=~\"error|warn\"}",
+     "datasource": {
+      "type": "loki",
+      "uid": "loki"
+     }
+    }
+   ],
+   "options": {
+    "showTime": true,
+    "showLabels": true,
+    "wrapLogMessage": true,
+    "sortOrder": "Descending",
+    "enableLogDetails": true
+   },
+   "id": 4,
+   "gridPos": {
+    "h": 10,
+    "w": 24,
+    "x": 0,
+    "y": 13
+   },
+   "datasource": {
+    "type": "loki",
+    "uid": "loki"
+   }
+  },
+  {
+   "type": "row",
+   "title": "Crawl (crawl-worker): tải trang, ghi bronze, publish Kafka",
+   "id": 5,
+   "collapsed": false,
+   "gridPos": {
+    "h": 1,
+    "w": 24,
+    "x": 0,
+    "y": 23
+   },
+   "panels": []
+  },
+  {
+   "type": "logs",
+   "title": "Log crawl",
+   "targets": [
+    {
+     "refId": "A",
+     "expr": "{project=\"mp-tikihtml\", layer=\"crawl\", service=~\"$service\"} |~ \"$search\"",
+     "datasource": {
+      "type": "loki",
+      "uid": "loki"
+     }
+    }
+   ],
+   "options": {
+    "showTime": true,
+    "showLabels": true,
+    "wrapLogMessage": true,
+    "sortOrder": "Descending",
+    "enableLogDetails": true
+   },
+   "id": 6,
+   "gridPos": {
+    "h": 9,
+    "w": 24,
+    "x": 0,
+    "y": 24
+   },
+   "datasource": {
+    "type": "loki",
+    "uid": "loki"
+   }
+  },
+  {
+   "type": "row",
+   "title": "Ingest (silver-sink): Kafka → Silver",
+   "id": 7,
+   "collapsed": false,
+   "gridPos": {
+    "h": 1,
+    "w": 24,
+    "x": 0,
+    "y": 33
+   },
+   "panels": []
+  },
+  {
+   "type": "logs",
+   "title": "Log ingest",
+   "targets": [
+    {
+     "refId": "A",
+     "expr": "{project=\"mp-tikihtml\", layer=\"ingest\", service=~\"$service\"} |~ \"$search\"",
+     "datasource": {
+      "type": "loki",
+      "uid": "loki"
+     }
+    }
+   ],
+   "options": {
+    "showTime": true,
+    "showLabels": true,
+    "wrapLogMessage": true,
+    "sortOrder": "Descending",
+    "enableLogDetails": true
+   },
+   "id": 8,
+   "gridPos": {
+    "h": 9,
+    "w": 24,
+    "x": 0,
+    "y": 34
+   },
+   "datasource": {
+    "type": "loki",
+    "uid": "loki"
+   }
+  },
+  {
+   "type": "row",
+   "title": "Speed (Spark Structured Streaming): Kafka → ES / Redis",
+   "id": 9,
+   "collapsed": false,
+   "gridPos": {
+    "h": 1,
+    "w": 24,
+    "x": 0,
+    "y": 43
+   },
+   "panels": []
+  },
+  {
+   "type": "logs",
+   "title": "Log speed",
+   "targets": [
+    {
+     "refId": "A",
+     "expr": "{project=\"mp-tikihtml\", layer=\"speed\", service=~\"$service\"} |~ \"$search\"",
+     "datasource": {
+      "type": "loki",
+      "uid": "loki"
+     }
+    }
+   ],
+   "options": {
+    "showTime": true,
+    "showLabels": true,
+    "wrapLogMessage": true,
+    "sortOrder": "Descending",
+    "enableLogDetails": true
+   },
+   "id": 10,
+   "gridPos": {
+    "h": 9,
+    "w": 24,
+    "x": 0,
+    "y": 44
+   },
+   "datasource": {
+    "type": "loki",
+    "uid": "loki"
+   }
+  },
+  {
+   "type": "row",
+   "title": "Batch (scheduler + Spark batch): Silver → Gold → quality → Postgres",
+   "id": 11,
+   "collapsed": false,
+   "gridPos": {
+    "h": 1,
+    "w": 24,
+    "x": 0,
+    "y": 53
+   },
+   "panels": []
+  },
+  {
+   "type": "logs",
+   "title": "Log batch",
+   "targets": [
+    {
+     "refId": "A",
+     "expr": "{project=\"mp-tikihtml\", layer=\"batch\", service=~\"$service\"} |~ \"$search\"",
+     "datasource": {
+      "type": "loki",
+      "uid": "loki"
+     }
+    }
+   ],
+   "options": {
+    "showTime": true,
+    "showLabels": true,
+    "wrapLogMessage": true,
+    "sortOrder": "Descending",
+    "enableLogDetails": true
+   },
+   "id": 12,
+   "gridPos": {
+    "h": 9,
+    "w": 24,
+    "x": 0,
+    "y": 54
+   },
+   "datasource": {
+    "type": "loki",
+    "uid": "loki"
+   }
+  },
+  {
+   "type": "row",
+   "title": "Serving (es-projector, Kibana, Superset)",
+   "id": 13,
+   "collapsed": false,
+   "gridPos": {
+    "h": 1,
+    "w": 24,
+    "x": 0,
+    "y": 63
+   },
+   "panels": []
+  },
+  {
+   "type": "logs",
+   "title": "Log serving",
+   "targets": [
+    {
+     "refId": "A",
+     "expr": "{project=\"mp-tikihtml\", layer=\"serving\", service=~\"$service\"} |~ \"$search\"",
+     "datasource": {
+      "type": "loki",
+      "uid": "loki"
+     }
+    }
+   ],
+   "options": {
+    "showTime": true,
+    "showLabels": true,
+    "wrapLogMessage": true,
+    "sortOrder": "Descending",
+    "enableLogDetails": true
+   },
+   "id": 14,
+   "gridPos": {
+    "h": 9,
+    "w": 24,
+    "x": 0,
+    "y": 64
+   },
+   "datasource": {
+    "type": "loki",
+    "uid": "loki"
+   }
+  },
+  {
+   "type": "row",
+   "title": "Storage (Kafka, MinIO, Postgres, Redis, Elasticsearch)",
+   "id": 15,
+   "collapsed": false,
+   "gridPos": {
+    "h": 1,
+    "w": 24,
+    "x": 0,
+    "y": 73
+   },
+   "panels": []
+  },
+  {
+   "type": "logs",
+   "title": "Log storage",
+   "targets": [
+    {
+     "refId": "A",
+     "expr": "{project=\"mp-tikihtml\", layer=\"storage\", service=~\"$service\"} |~ \"$search\"",
+     "datasource": {
+      "type": "loki",
+      "uid": "loki"
+     }
+    }
+   ],
+   "options": {
+    "showTime": true,
+    "showLabels": true,
+    "wrapLogMessage": true,
+    "sortOrder": "Descending",
+    "enableLogDetails": true
+   },
+   "id": 16,
+   "gridPos": {
+    "h": 9,
+    "w": 24,
+    "x": 0,
+    "y": 74
+   },
+   "datasource": {
+    "type": "loki",
+    "uid": "loki"
+   }
+  }
+ ]
+}
