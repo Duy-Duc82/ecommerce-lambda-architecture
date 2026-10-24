@@ -1,21 +1,19 @@
-from tests.paths import FIXTURES, REPO_ROOT
 import hashlib
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
-from pathlib import Path
 
 import pytest
 
+from ecomdata.domain.acquisition import FetchResult, ListingPageParseError, ListingPageRequest
 from ecomdata.domain.identity import make_offer_id
 from ecomdata.domain.observations import ResourceType, create_raw_artifact
-from ecomdata.domain.acquisition import FetchResult, ListingPageParseError, ListingPageRequest
 from ecomdata.ingestion.cli import SITE_CRAWLERS
 from ecomdata.ingestion.sources.tiki.api import TikiCrawler
 from ecomdata.ingestion.sources.tiki.html import TikiCategoryHtmlCrawler
-
+from tests.paths import FIXTURES
 
 FIXTURE = FIXTURES / "tiki_category_page_sample.html"
-FETCHED = datetime(2026, 10, 12, 4, 30, tzinfo=timezone.utc)
+FETCHED = datetime(2026, 10, 12, 4, 30, tzinfo=UTC)
 TARGET = "nha-sach-tiki/c8322"
 
 

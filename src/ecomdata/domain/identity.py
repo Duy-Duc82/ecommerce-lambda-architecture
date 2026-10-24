@@ -4,11 +4,10 @@ from __future__ import annotations
 
 import hashlib
 import re
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from enum import Enum
 from typing import Any
-
 
 _SHA256_PATTERN = re.compile(r"[0-9a-fA-F]{64}\Z")
 _PREFIX_PATTERN = re.compile(r"[a-z0-9_]+\Z")
@@ -24,7 +23,7 @@ def _normalize_identity_part(value: Any) -> str:
     if isinstance(value, datetime):
         if value.tzinfo is None or value.utcoffset() is None:
             raise ValueError("identity datetime must be timezone-aware")
-        return value.astimezone(timezone.utc).isoformat(timespec="microseconds")
+        return value.astimezone(UTC).isoformat(timespec="microseconds")
 
     if isinstance(value, Decimal):
         if value == 0:

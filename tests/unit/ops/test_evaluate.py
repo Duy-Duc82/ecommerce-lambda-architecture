@@ -1,22 +1,32 @@
 """Crawl reliability, freshness and coverage — Phase 9 plan section 9 (tests 8-10)."""
+
 from __future__ import annotations
 
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 
 import pytest
 
 from ecomdata.ops import evaluate
 from ecomdata.ops.evaluate import EvaluationRefused, Window
 
-T0 = datetime(2026, 10, 4, 10, 0, tzinfo=timezone.utc)
+T0 = datetime(2026, 10, 4, 10, 0, tzinfo=UTC)
 HOUR = 3600
 
 
 def _attempt(minutes, *, task="t1", status="SUCCEEDED", latency=3000, error=None, http=200, parsed=40):
     started = T0 + timedelta(minutes=minutes)
-    return {"task_id": task, "status": status, "started_at": started, "completed_at": started + timedelta(seconds=4),
-            "http_status": http, "latency_ms": latency, "raw_bytes": 150_000, "parsed_count": parsed,
-            "rejected_count": 0, "error_kind": error}
+    return {
+        "task_id": task,
+        "status": status,
+        "started_at": started,
+        "completed_at": started + timedelta(seconds=4),
+        "http_status": http,
+        "latency_ms": latency,
+        "raw_bytes": 150_000,
+        "parsed_count": parsed,
+        "rejected_count": 0,
+        "error_kind": error,
+    }
 
 
 def test_the_universe_check_refuses_a_category_outside_it():
@@ -32,15 +42,20 @@ def test_the_universe_check_refuses_an_empty_universe():
 
 def test_a_gap_is_any_stretch_over_twice_the_cadence_including_one_across_midnight():
     window = Window(T0, T0 + timedelta(hours=20))
-    starts = [T0, T0 + timedelta(hours=1), T0 + timedelta(hours=2),         # hourly
-              T0 + timedelta(hours=16),                                     # 14 h later, past midnight
-              T0 + timedelta(hours=17)]
+    starts = [
+        T0,
+        T0 + timedelta(hours=1),
+        T0 + timedelta(hours=2),  # hourly
+        T0 + timedelta(hours=16),  # 14 h later, past midnight
+        T0 + timedelta(hours=17),
+    ]
 
     gaps = evaluate.collection_gaps(starts, cadence_seconds=HOUR, window=window)
 
     assert [(g["start"], g["end"], g["hours"]) for g in gaps] == [
         ((T0 + timedelta(hours=2)).isoformat(), (T0 + timedelta(hours=16)).isoformat(), 14.0),
-        ((T0 + timedelta(hours=17)).isoformat(), (T0 + timedelta(hours=20)).isoformat(), 3.0)]
+        ((T0 + timedelta(hours=17)).isoformat(), (T0 + timedelta(hours=20)).isoformat(), 3.0),
+    ]
     assert {g["cause"] for g in gaps} == {"unknown"}
 
 
@@ -51,13 +66,19 @@ def test_an_hourly_collection_has_no_gap():
 
 
 def test_reliability_counts_success_errors_retries_and_lateness():
-    attempts = [_attempt(0, task="a"), _attempt(1, task="b", status="FAILED", error="SERVER_ERROR", http=500, parsed=0),
-                _attempt(3, task="b"), _attempt(60, task="c", latency=5000),
-                _attempt(61, task="d", status="FAILED", error="RATE_LIMITED", http=429, parsed=0),
-                _attempt(62, task="d", status="FAILED", error="RATE_LIMITED", http=429, parsed=0),
-                _attempt(64, task="d")]
-    tasks = [{"task_id": t, "scheduled_for": T0 + timedelta(minutes=m)}
-             for t, m in (("a", 0), ("b", 0), ("c", 59), ("d", 60))]
+    attempts = [
+        _attempt(0, task="a"),
+        _attempt(1, task="b", status="FAILED", error="SERVER_ERROR", http=500, parsed=0),
+        _attempt(3, task="b"),
+        _attempt(60, task="c", latency=5000),
+        _attempt(61, task="d", status="FAILED", error="RATE_LIMITED", http=429, parsed=0),
+        _attempt(62, task="d", status="FAILED", error="RATE_LIMITED", http=429, parsed=0),
+        _attempt(64, task="d"),
+    ]
+    tasks = [
+        {"task_id": t, "scheduled_for": T0 + timedelta(minutes=m)}
+        for t, m in (("a", 0), ("b", 0), ("c", 59), ("d", 60))
+    ]
 
     report = evaluate.reliability_report(attempts, tasks, [], [], cadence_seconds=HOUR)
 
@@ -75,11 +96,18 @@ def test_reliability_counts_success_errors_retries_and_lateness():
 def test_seeded_occurrences_are_left_out_of_lateness_and_pages_are_timed_between_crawls():
     from ecomdata.ingestion.seed import SEED_SCHEDULED_FOR
 
-    attempts = [dict(_attempt(0, task="s1"), target="p1"), dict(_attempt(61, task="n1"), target="p1"),
-                dict(_attempt(130, task="n2"), target="p1"), dict(_attempt(0, task="s2"), target="p2")]
-    tasks = [{"task_id": "s1", "scheduled_for": SEED_SCHEDULED_FOR}, {"task_id": "s2", "scheduled_for": SEED_SCHEDULED_FOR},
-             {"task_id": "n1", "scheduled_for": T0 + timedelta(minutes=60)},
-             {"task_id": "n2", "scheduled_for": T0 + timedelta(minutes=121)}]
+    attempts = [
+        dict(_attempt(0, task="s1"), target="p1"),
+        dict(_attempt(61, task="n1"), target="p1"),
+        dict(_attempt(130, task="n2"), target="p1"),
+        dict(_attempt(0, task="s2"), target="p2"),
+    ]
+    tasks = [
+        {"task_id": "s1", "scheduled_for": SEED_SCHEDULED_FOR},
+        {"task_id": "s2", "scheduled_for": SEED_SCHEDULED_FOR},
+        {"task_id": "n1", "scheduled_for": T0 + timedelta(minutes=60)},
+        {"task_id": "n2", "scheduled_for": T0 + timedelta(minutes=121)},
+    ]
 
     report = evaluate.reliability_report(attempts, tasks, [], [], cadence_seconds=HOUR)
 
@@ -93,9 +121,12 @@ def test_seeded_occurrences_are_left_out_of_lateness_and_pages_are_timed_between
 def test_a_partial_page_is_crawled_reported_apart_and_keeps_its_page_interval():
     # One rejected row makes an attempt PARTIAL: the page was still fetched,
     # stored and published, so it is no gap in that page's crawl intervals.
-    attempts = [dict(_attempt(0, task="a"), target="p1"), dict(_attempt(60, task="b", status="PARTIAL"), target="p1"),
-                dict(_attempt(120, task="c"), target="p1"),
-                dict(_attempt(121, task="d", status="FAILED", error="SERVER_ERROR", http=500, parsed=0), target="p2")]
+    attempts = [
+        dict(_attempt(0, task="a"), target="p1"),
+        dict(_attempt(60, task="b", status="PARTIAL"), target="p1"),
+        dict(_attempt(120, task="c"), target="p1"),
+        dict(_attempt(121, task="d", status="FAILED", error="SERVER_ERROR", http=500, parsed=0), target="p2"),
+    ]
 
     report = evaluate.reliability_report(attempts, [], [], [], cadence_seconds=HOUR)
 
@@ -113,14 +144,22 @@ def test_a_window_of_thirty_days_meets_the_threshold():
 
 
 def test_drill_recovery_is_read_from_the_step_timestamps():
-    record = {"drill": "d3", "passed": True, "steps": [
-        {"step": "baseline", "at": "2026-10-03T14:35:53+00:00"}, {"step": "inject", "at": "2026-10-03T14:36:16+00:00"},
-        {"step": "observe", "at": "2026-10-03T14:37:18+00:00"}, {"step": "recover", "at": "2026-10-03T14:37:25+00:00"},
-        {"step": "verify", "at": "2026-10-03T14:37:27+00:00"}]}
+    record = {
+        "drill": "d3",
+        "passed": True,
+        "steps": [
+            {"step": "baseline", "at": "2026-10-03T14:35:53+00:00"},
+            {"step": "inject", "at": "2026-10-03T14:36:16+00:00"},
+            {"step": "observe", "at": "2026-10-03T14:37:18+00:00"},
+            {"step": "recover", "at": "2026-10-03T14:37:25+00:00"},
+            {"step": "verify", "at": "2026-10-03T14:37:27+00:00"},
+        ],
+    }
 
     assert evaluate.drill_recovery([record, {"drill": "d10", "passed": True, "steps": []}]) == [
         {"drill": "d3", "passed": True, "fault_seconds": 69.0, "recovery_seconds": 2.0},
-        {"drill": "d10", "passed": True, "fault_seconds": None, "recovery_seconds": None}]
+        {"drill": "d10", "passed": True, "fault_seconds": None, "recovery_seconds": None},
+    ]
 
 
 def test_no_attempt_is_refused_rather_than_reported_as_zero():
@@ -129,7 +168,7 @@ def test_no_attempt_is_refused_rather_than_reported_as_zero():
 
 
 def test_expected_observations_follow_the_window_on_partial_days():
-    window = Window(datetime(2026, 10, 4, 10, 16, tzinfo=timezone.utc), datetime(2026, 10, 6, 12, 0, tzinfo=timezone.utc))
+    window = Window(datetime(2026, 10, 4, 10, 16, tzinfo=UTC), datetime(2026, 10, 6, 12, 0, tzinfo=UTC))
 
     assert evaluate.expected_per_day(date(2026, 10, 4), window, HOUR) == pytest.approx(13 + 44 / 60)
     assert evaluate.expected_per_day(date(2026, 10, 5), window, HOUR) == 24
@@ -138,15 +177,18 @@ def test_expected_observations_follow_the_window_on_partial_days():
 
 
 def test_freshness_shares_ratios_and_crawl_to_kafka_delay():
-    window = Window(datetime(2026, 10, 4, 0, 0, tzinfo=timezone.utc), datetime(2026, 10, 6, 0, 0, tzinfo=timezone.utc))
-    as_of = datetime(2026, 10, 6, tzinfo=timezone.utc)
-    freshness = [{"as_of": as_of, "freshness_status": s, "age_seconds": a}
-                 for s, a in (("FRESH", 100), ("FRESH", 200), ("FRESH", 300), ("STALE", 30000))]
+    window = Window(datetime(2026, 10, 4, 0, 0, tzinfo=UTC), datetime(2026, 10, 6, 0, 0, tzinfo=UTC))
+    as_of = datetime(2026, 10, 6, tzinfo=UTC)
+    freshness = [
+        {"as_of": as_of, "freshness_status": s, "age_seconds": a}
+        for s, a in (("FRESH", 100), ("FRESH", 200), ("FRESH", 300), ("STALE", 30000))
+    ]
     coverage = [{"observed_date": date(2026, 10, 4), "observed_offer_count": 600, "coverage_rate": 1}]
     offer_days = [{"observed_date": date(2026, 10, 5), "observation_count": n} for n in (24, 24, 22, 12)]
 
-    report = evaluate.freshness_report(freshness, coverage, offer_days, [120.0, 80.0, 400.0],
-                                       window=window, cadence_seconds=HOUR)
+    report = evaluate.freshness_report(
+        freshness, coverage, offer_days, [120.0, 80.0, 400.0], window=window, cadence_seconds=HOUR
+    )
 
     assert report["latest_freshness"]["shares"] == {"FRESH": 0.75, "STALE": 0.25}
     assert report["latest_freshness"]["age_seconds"]["p50"] == 200

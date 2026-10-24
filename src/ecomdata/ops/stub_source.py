@@ -22,6 +22,7 @@ enough for ``LARGE_PRICE_DROP``, the fourth a return to the fixture price.
 Nothing is random, and the bytes differ between serves, so each serve yields
 new observations.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -89,8 +90,9 @@ class StubState:
             return {"mode": self.mode, "served": dict(sorted(self.served.items()))}
 
 
-def load_state(path: Path = FIXTURE, *, last_page: int = 2, timeout_seconds: float = 0.0,
-               rows_per_page: int | None = None) -> StubState:
+def load_state(
+    path: Path = FIXTURE, *, last_page: int = 2, timeout_seconds: float = 0.0, rows_per_page: int | None = None
+) -> StubState:
     rows = json.loads(path.read_text(encoding="utf-8"))["data"]
     if not rows:
         raise ValueError(f"{path} holds no listing rows")
@@ -111,7 +113,11 @@ def listing_page(state: StubState, category: str, page: int) -> tuple[int, dict[
     with state.lock:
         mode = state.mode
     if mode == "429":
-        return 429, {"Retry-After": str(RETRY_AFTER_SECONDS), "Content-Type": "application/json"}, b'{"error":"rate limited"}'
+        return (
+            429,
+            {"Retry-After": str(RETRY_AFTER_SECONDS), "Content-Type": "application/json"},
+            b'{"error":"rate limited"}',
+        )
     if mode == "500":
         return 500, {"Content-Type": "application/json"}, b'{"error":"internal"}'
     if mode == "timeout":
@@ -139,7 +145,11 @@ def listing_page(state: StubState, category: str, page: int) -> tuple[int, dict[
             served["price"] = _scaled(row.get("price"), percent)
             rows.append(served)
     body = {"data": rows, "paging": {"current_page": page, "last_page": state.last_page, "per_page": width}}
-    return 200, {"Content-Type": "application/json"}, json.dumps(body, ensure_ascii=False, sort_keys=True).encode("utf-8")
+    return (
+        200,
+        {"Content-Type": "application/json"},
+        json.dumps(body, ensure_ascii=False, sort_keys=True).encode("utf-8"),
+    )
 
 
 def make_handler(state: StubState) -> type[BaseHTTPRequestHandler]:
@@ -196,11 +206,16 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Offline Tiki listing stub for the smoke and the drills")
     parser.add_argument("--port", type=int, default=8000)
     parser.add_argument("--last-page", type=int, default=2)
-    parser.add_argument("--rows-per-page", type=int, default=None,
-                        help="repeat the fixture to this many rows per page (default: the fixture once)")
+    parser.add_argument(
+        "--rows-per-page",
+        type=int,
+        default=None,
+        help="repeat the fixture to this many rows per page (default: the fixture once)",
+    )
     args = parser.parse_args()
-    state = load_state(last_page=args.last_page, timeout_seconds=CRAWL_HTTP_TIMEOUT_SECONDS + 2,
-                       rows_per_page=args.rows_per_page)
+    state = load_state(
+        last_page=args.last_page, timeout_seconds=CRAWL_HTTP_TIMEOUT_SECONDS + 2, rows_per_page=args.rows_per_page
+    )
     server = serve(state, port=args.port)
     print(json.dumps({"event": "stub_listening", "port": args.port}), flush=True)
     server.serve_forever()

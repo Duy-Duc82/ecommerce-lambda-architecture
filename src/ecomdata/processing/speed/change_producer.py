@@ -1,11 +1,13 @@
 """Acknowledged producer for deterministic marketplace change events."""
+
 from __future__ import annotations
+
 import json
 from typing import Any
 
+from ecomdata.domain.topics import MARKETPLACE_CHANGES
 from ecomdata.domain.wire import canonical_json, marketplace_change_from_wire
 from ecomdata.settings import KAFKA_BOOTSTRAP_SERVERS, KAFKA_CHANGE_ACK_TIMEOUT_SECONDS
-from ecomdata.domain.topics import MARKETPLACE_CHANGES
 
 
 def create_change_producer(bootstrap_servers: str = KAFKA_BOOTSTRAP_SERVERS) -> Any:
@@ -20,12 +22,15 @@ def create_change_producer(bootstrap_servers: str = KAFKA_BOOTSTRAP_SERVERS) -> 
         # At-least-once, not idempotent: kafka-python-ng has no idempotent
         # producer. Deterministic event IDs absorb a duplicate; one request in
         # flight keeps a retry from reordering an offer's changes.
-        acks="all", retries=5, max_in_flight_requests_per_connection=1,
+        acks="all",
+        retries=5,
+        max_in_flight_requests_per_connection=1,
     )
 
 
 def publish_change(producer: Any, event: Any, *, ack_timeout_seconds: int = KAFKA_CHANGE_ACK_TIMEOUT_SECONDS) -> Any:
-    if ack_timeout_seconds <= 0: raise ValueError("ack_timeout_seconds must be positive")
+    if ack_timeout_seconds <= 0:
+        raise ValueError("ack_timeout_seconds must be positive")
     wire = json.loads(canonical_json(event))
     checked = marketplace_change_from_wire(wire)
     future = producer.send(MARKETPLACE_CHANGES.name, key=checked.offer_id, value=wire)

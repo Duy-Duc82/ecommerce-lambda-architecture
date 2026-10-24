@@ -8,13 +8,11 @@ from decimal import Decimal
 
 import pytest
 
-from ecomdata.domain.wire import canonical_json
-from ecomdata.settings import MARKETPLACE_STREAM_CHECKPOINT_VERSION
 from ecomdata.domain.change_rules import (
-    ChangeRuleConfig,
     detect_observation_changes,
     detect_stale_change,
 )
+from ecomdata.domain.wire import canonical_json
 from ecomdata.processing.speed.sinks import SpeedOutput
 from ecomdata.processing.speed.stream import (
     SPEED_OUTPUT_SCHEMA,
@@ -24,6 +22,7 @@ from ecomdata.processing.speed.stream import (
     decode_observation_stream,
     speed_output_schema,
 )
+from ecomdata.settings import MARKETPLACE_STREAM_CHECKPOINT_VERSION
 from tests.spark_support import requires_spark
 from tests.unit.domain.test_marketplace_change_rules import CONFIG, _event, _later
 from tests.unit.domain.test_marketplace_schema import OBSERVED_AT

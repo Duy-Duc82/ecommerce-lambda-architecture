@@ -14,7 +14,6 @@ import textwrap
 
 import pytest
 
-
 _PROBE = textwrap.dedent(
     """
     from pyspark.sql import SparkSession

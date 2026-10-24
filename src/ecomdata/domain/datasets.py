@@ -13,6 +13,7 @@ against ``scripts/init_postgres.sql``, ``docs/model/star-schema.sql`` and
 
 The grain sentences are the ones in ``docs/DATA_MODEL.md`` section 4.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -72,7 +73,9 @@ def _cols(text: str) -> tuple[str, ...]:
 
 MARTS: tuple[MarketplaceDataset, ...] = (
     MarketplaceDataset(
-        "offer_current", MART, "one row per offer: its latest observed state",
+        "offer_current",
+        MART,
+        "one row per offer: its latest observed state",
         ("offer_id",),
         _cols("""offer_id marketplace marketplace_id platform_listing_id seller_id product_title brand category_path
                  source_url currency active_status first_seen_at last_seen_at current_observation_id observed_at
@@ -80,12 +83,16 @@ MARTS: tuple[MarketplaceDataset, ...] = (
                  sold_count availability ranking_position raw_uri raw_sha256 adapter_version crawl_run_id"""),
     ),
     MarketplaceDataset(
-        "seller_current", MART, "one row per seller and marketplace",
+        "seller_current",
+        MART,
+        "one row per seller and marketplace",
         ("seller_id", "marketplace"),
         _cols("seller_id marketplace marketplace_id first_seen_at last_seen_at observed_offer_count"),
     ),
     MarketplaceDataset(
-        "offer_price_history_daily", MART, "one offer, one UTC day, one currency",
+        "offer_price_history_daily",
+        MART,
+        "one offer, one UTC day, one currency",
         ("marketplace", "offer_id", "observed_date", "currency"),
         _cols("""marketplace offer_id observed_date currency first_observed_at last_observed_at first_price last_price
                  min_price max_price avg_price first_list_price last_list_price observation_count distinct_price_count
@@ -93,7 +100,9 @@ MARTS: tuple[MarketplaceDataset, ...] = (
         DAILY_BY_OBSERVED,
     ),
     MarketplaceDataset(
-        "offer_change_daily", MART, "one offer, one UTC day, one currency",
+        "offer_change_daily",
+        MART,
+        "one offer, one UTC day, one currency",
         ("marketplace", "offer_id", "observed_date", "currency"),
         _cols("""marketplace offer_id observed_date currency transition_count price_change_count price_drop_count
                  price_increase_count absolute_price_change_sum signed_price_change_sum max_price_drop max_price_increase
@@ -101,20 +110,26 @@ MARTS: tuple[MarketplaceDataset, ...] = (
         DAILY_BY_OBSERVED,
     ),
     MarketplaceDataset(
-        "offer_freshness", MART, "one row per offer, judged at the run's as_of",
+        "offer_freshness",
+        MART,
+        "one row per offer, judged at the run's as_of",
         ("offer_id",),
         _cols("""as_of marketplace offer_id last_observation_id last_observed_at age_seconds freshness_status
                  stale_after_seconds freshness_rule_version"""),
     ),
     MarketplaceDataset(
-        "category_price_daily", MART, "one category path, one UTC day, one currency",
+        "category_price_daily",
+        MART,
+        "one category path, one UTC day, one currency",
         ("marketplace", "category_path", "observed_date", "currency"),
         _cols("""marketplace category_path observed_date currency observed_offer_count observation_count min_price
                  p25_price median_price p75_price max_price avg_price"""),
         DAILY_BY_OBSERVED,
     ),
     MarketplaceDataset(
-        "source_coverage_daily", MART, "one marketplace, one UTC day",
+        "source_coverage_daily",
+        MART,
+        "one marketplace, one UTC day",
         ("marketplace", "observed_date"),
         _cols("""marketplace observed_date eligible_offer_count observed_offer_count missing_offer_count
                  fresh_offer_count stale_offer_count observation_count parsed_count rejected_count coverage_rate
@@ -122,7 +137,9 @@ MARTS: tuple[MarketplaceDataset, ...] = (
         DAILY_BY_OBSERVED,
     ),
     MarketplaceDataset(
-        "crawl_reliability_daily", MART, "one marketplace, one UTC request day",
+        "crawl_reliability_daily",
+        MART,
+        "one marketplace, one UTC request day",
         ("marketplace", "request_date"),
         _cols("""marketplace request_date request_count succeeded_count failed_count success_rate avg_latency_ms
                  p95_latency_ms raw_bytes parsed_count rejected_count rate_limited_count transport_error_count
@@ -130,7 +147,9 @@ MARTS: tuple[MarketplaceDataset, ...] = (
         DAILY_BY_REQUEST,
     ),
     MarketplaceDataset(
-        "counter_delta_daily", MART, "one offer, one UTC day, one public counter",
+        "counter_delta_daily",
+        MART,
+        "one offer, one UTC day, one public counter",
         ("marketplace", "offer_id", "observed_date", "counter_name"),
         _cols("""marketplace offer_id observed_date counter_name first_value last_value raw_delta_sum valid_delta_sum
                  valid_transition_count invalid_transition_count elapsed_seconds_valid velocity_proxy_per_hour
@@ -138,7 +157,9 @@ MARTS: tuple[MarketplaceDataset, ...] = (
         DAILY_BY_OBSERVED,
     ),
     MarketplaceDataset(
-        "price_anomaly_daily", MART, "one offer, one UTC day, one currency",
+        "price_anomaly_daily",
+        MART,
+        "one offer, one UTC day, one currency",
         ("marketplace", "offer_id", "observed_date", "currency"),
         _cols("""marketplace offer_id observed_date currency evaluated_price baseline_sample_size baseline_median
                  baseline_mad baseline_p25 baseline_p75 baseline_iqr deviation_amount deviation_percent robust_score
@@ -150,39 +171,64 @@ MARTS: tuple[MarketplaceDataset, ...] = (
 
 STAR: tuple[MarketplaceDataset, ...] = (
     MarketplaceDataset(
-        "dim_date", DIM, "one calendar day", ("date_key",),
+        "dim_date",
+        DIM,
+        "one calendar day",
+        ("date_key",),
         _cols("""date_key full_date day_of_week day_name week_of_year month month_name quarter year is_weekend
                  is_double_day_sale is_vn_holiday"""),
     ),
     MarketplaceDataset(
-        "dim_marketplace", DIM, "one marketplace", ("marketplace_key",),
-        _cols("marketplace_key marketplace_code marketplace_id marketplace_name platform_type country default_currency first_crawled_at"),
+        "dim_marketplace",
+        DIM,
+        "one marketplace",
+        ("marketplace_key",),
+        _cols(
+            "marketplace_key marketplace_code marketplace_id marketplace_name platform_type country default_currency first_crawled_at"
+        ),
     ),
     MarketplaceDataset(
-        "dim_seller", DIM, "one seller", ("seller_key",),
+        "dim_seller",
+        DIM,
+        "one seller",
+        ("seller_key",),
         _cols("seller_key seller_id marketplace_key first_seen_at last_seen_at observed_listing_count"),
     ),
     MarketplaceDataset(
-        "dim_category", DIM, "one node of a marketplace's category tree", ("category_key",),
-        _cols("category_key marketplace_key category_id category_name category_slug parent_key level full_path is_leaf"),
+        "dim_category",
+        DIM,
+        "one node of a marketplace's category tree",
+        ("category_key",),
+        _cols(
+            "category_key marketplace_key category_id category_name category_slug parent_key level full_path is_leaf"
+        ),
     ),
     MarketplaceDataset(
-        "bridge_category_ancestry", BRIDGE, "one category node and one of its ancestors, itself included",
+        "bridge_category_ancestry",
+        BRIDGE,
+        "one category node and one of its ancestors, itself included",
         ("ancestor_key", "descendant_key"),
         _cols("ancestor_key descendant_key depth"),
     ),
     MarketplaceDataset(
-        "dim_product_listing", DIM, "one version of one offer's descriptive attributes", ("listing_key",),
+        "dim_product_listing",
+        DIM,
+        "one version of one offer's descriptive attributes",
+        ("listing_key",),
         _cols("""listing_key offer_key offer_id marketplace_key platform_listing_id product_title brand category_key
                  seller_key source_url valid_from valid_to is_current version"""),
     ),
     MarketplaceDataset(
-        "dim_offer_status", DIM, "one combination of availability, active status, discount and rating flags",
+        "dim_offer_status",
+        DIM,
+        "one combination of availability, active status, discount and rating flags",
         ("offer_status_key",),
         _cols("offer_status_key availability active_status has_discount has_rating"),
     ),
     MarketplaceDataset(
-        "fact_offer_observation", FACT, "one sighting of one offer by the crawler at one instant",
+        "fact_offer_observation",
+        FACT,
+        "one sighting of one offer by the crawler at one instant",
         ("observation_id",),
         _cols("""observation_id date_key marketplace_key listing_key offer_key seller_key category_key offer_status_key
                  observed_at fetched_at currency current_price list_price shipping_price discount_amount discount_percent
@@ -190,7 +236,8 @@ STAR: tuple[MarketplaceDataset, ...] = (
                  raw_sha256 adapter_version"""),
     ),
     MarketplaceDataset(
-        "fact_price_snapshot_daily", FACT,
+        "fact_price_snapshot_daily",
+        FACT,
         "one offer, one UTC day, one currency, on which the offer was sighted at least once",
         ("date_key", "offer_key", "currency"),
         _cols("""date_key offer_key currency listing_key marketplace_key seller_key category_key offer_status_key
@@ -198,21 +245,28 @@ STAR: tuple[MarketplaceDataset, ...] = (
                  avg_price first_list_price last_list_price observation_count distinct_price_count in_stock_ratio"""),
     ),
     MarketplaceDataset(
-        "fact_price_change", FACT, "one sighting whose price differs from the same offer's previous sighting",
+        "fact_price_change",
+        FACT,
+        "one sighting whose price differs from the same offer's previous sighting",
         ("observation_id",),
         _cols("""observation_id previous_observation_id date_key marketplace_key listing_key offer_key seller_key
                  category_key changed_at previous_observed_at currency previous_currency old_price new_price price_delta
                  pct_change minutes_since_previous direction is_large_drop change_rule_version"""),
     ),
     MarketplaceDataset(
-        "fact_counter_daily", FACT, "one offer, one UTC day, one public counter",
+        "fact_counter_daily",
+        FACT,
+        "one offer, one UTC day, one public counter",
         ("date_key", "offer_key", "counter_name"),
         _cols("""date_key offer_key counter_name listing_key marketplace_key first_value last_value raw_delta_sum
                  valid_delta_sum valid_transition_count invalid_transition_count elapsed_seconds_valid
                  velocity_proxy_per_hour counter_reset_or_invalid invalid_reasons_json counter_rule_version"""),
     ),
     MarketplaceDataset(
-        "fact_crawl_attempt", FACT, "one HTTP attempt to fetch one page", ("attempt_id",),
+        "fact_crawl_attempt",
+        FACT,
+        "one HTTP attempt to fetch one page",
+        ("attempt_id",),
         _cols("""attempt_id date_key marketplace_key category_key crawl_run_id task_id resource_type attempt_number
                  started_at completed_at status http_status error_kind latency_ms raw_bytes parsed_count rejected_count
                  raw_uri"""),

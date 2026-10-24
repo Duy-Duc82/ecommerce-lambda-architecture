@@ -2,19 +2,12 @@
 
 Every time here is a fixed UTC instant and no test sleeps.
 """
-from tests.paths import FIXTURES, REPO_ROOT
 import re
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta, timezone
 from decimal import Decimal
 
 import pytest
 
-from ecomdata.domain.observations import ResourceType
-from ecomdata.settings import (
-    CRAWL_ACTIVE_CADENCE_MINUTES,
-    CRAWL_COLD_CADENCE_MINUTES,
-    CRAWL_NORMAL_CADENCE_MINUTES,
-)
 from ecomdata.domain.acquisition import (
     CanonicalRecordError,
     FetchTransportError,
@@ -23,6 +16,7 @@ from ecomdata.domain.acquisition import (
     RawPersistenceError,
     RobotsDeniedError,
 )
+from ecomdata.domain.observations import ResourceType
 from ecomdata.ingestion.scheduling import (
     CrawlTask,
     CrawlTaskStatus,
@@ -37,9 +31,15 @@ from ecomdata.ingestion.scheduling import (
     next_scheduled_for,
     parse_retry_after,
 )
+from ecomdata.settings import (
+    CRAWL_ACTIVE_CADENCE_MINUTES,
+    CRAWL_COLD_CADENCE_MINUTES,
+    CRAWL_NORMAL_CADENCE_MINUTES,
+)
+from tests.paths import REPO_ROOT
 
-NOW = datetime(2026, 9, 29, 8, 0, tzinfo=timezone.utc)
-BUCKET = datetime(2026, 9, 29, 8, 0, tzinfo=timezone.utc)
+NOW = datetime(2026, 9, 29, 8, 0, tzinfo=UTC)
+BUCKET = datetime(2026, 9, 29, 8, 0, tzinfo=UTC)
 POLICY = RetryPolicy(5, 30, 1800, Decimal("0.20"))
 NO_JITTER = Decimal("0.5")
 
@@ -329,7 +329,7 @@ def test_task_timestamps_normalize_to_utc():
     task = _crawl_task(scheduled_for=BUCKET.astimezone(tehran))
 
     assert task.scheduled_for == BUCKET
-    assert task.scheduled_for.tzinfo == timezone.utc
+    assert task.scheduled_for.tzinfo == UTC
 
 
 @pytest.mark.parametrize(
@@ -412,7 +412,6 @@ def test_a_publish_failure_stops_retrying_once_attempts_run_out():
 def test_every_failure_kind_is_allowed_by_both_audit_constraints_and_their_migration():
     # The enum and two CHECK constraints are three copies of one list. A kind
     # the database rejects would make the worker fail while auditing a failure.
-    from pathlib import Path
 
     sql = (REPO_ROOT / "scripts" / "init_postgres.sql").read_text(encoding="utf-8")
     for constraint in ("crawl_frontier_last_error_kind_check", "crawl_request_attempt_error_kind_check"):

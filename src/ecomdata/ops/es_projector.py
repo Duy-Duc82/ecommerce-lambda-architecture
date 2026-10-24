@@ -33,13 +33,15 @@ Keying the document without it would let a replay's batch 0 silently overwrite
 the previous run's batch 0, which is the bug WP2 fixed, reintroduced one layer
 up. The ``_id`` here matches the primary key.
 """
+
 from __future__ import annotations
 
 import argparse
 import json
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
-from typing import Any, Callable, Iterable, Protocol, Sequence
+from datetime import UTC, datetime, timedelta
+from typing import Any, Protocol
 
 # ---------------------------------------------------------------------------
 # Sources
@@ -53,14 +55,36 @@ class ProjectorSources(Protocol):
     def commit_dlq(self) -> None: ...
 
 
-SOURCE_HEALTH_COLUMNS = ("marketplace_code", "consecutive_failures", "opened_until",
-                         "last_failure_at", "last_success_at", "updated_at")
+SOURCE_HEALTH_COLUMNS = (
+    "marketplace_code",
+    "consecutive_failures",
+    "opened_until",
+    "last_failure_at",
+    "last_success_at",
+    "updated_at",
+)
 SOURCE_HEALTH_SQL = f"SELECT {', '.join(SOURCE_HEALTH_COLUMNS)} FROM audit.crawl_source_state ORDER BY marketplace_code"
 
-CRAWL_ATTEMPT_COLUMNS = ("attempt_id", "crawl_run_id", "task_id", "marketplace_code", "resource_type",
-                         "attempt_number", "started_at", "completed_at", "status", "http_status",
-                         "latency_ms", "raw_artifact_id", "raw_uri", "raw_bytes", "parsed_count",
-                         "rejected_count", "error_kind", "error_message")
+CRAWL_ATTEMPT_COLUMNS = (
+    "attempt_id",
+    "crawl_run_id",
+    "task_id",
+    "marketplace_code",
+    "resource_type",
+    "attempt_number",
+    "started_at",
+    "completed_at",
+    "status",
+    "http_status",
+    "latency_ms",
+    "raw_artifact_id",
+    "raw_uri",
+    "raw_bytes",
+    "parsed_count",
+    "rejected_count",
+    "error_kind",
+    "error_message",
+)
 # The frontier carries marketplace_code; the attempt does not. (audit.crawl_run
 # has no such column either — the Phase 7 bug that two marts were built on.)
 _CRAWL_ATTEMPT_SELECT = (
@@ -73,14 +97,31 @@ _CRAWL_ATTEMPT_SELECT = (
 CRAWL_ATTEMPT_SQL_ALL = _CRAWL_ATTEMPT_SELECT + " ORDER BY a.completed_at, a.attempt_id"
 CRAWL_ATTEMPT_SQL_SINCE = _CRAWL_ATTEMPT_SELECT + " WHERE a.completed_at >= %s ORDER BY a.completed_at, a.attempt_id"
 
-SPEED_BATCH_COLUMNS = ("query_name", "query_id", "batch_id", "status", "started_at", "completed_at",
-                       "input_rows", "invalid_rows", "applied_rows", "duplicate_rows", "late_rows",
-                       "change_rows", "kafka_rows", "es_rows", "redis_rows", "error_message")
+SPEED_BATCH_COLUMNS = (
+    "query_name",
+    "query_id",
+    "batch_id",
+    "status",
+    "started_at",
+    "completed_at",
+    "input_rows",
+    "invalid_rows",
+    "applied_rows",
+    "duplicate_rows",
+    "late_rows",
+    "change_rows",
+    "kafka_rows",
+    "es_rows",
+    "redis_rows",
+    "error_message",
+)
 _SPEED_BATCH_SELECT = f"SELECT {', '.join(SPEED_BATCH_COLUMNS)} FROM audit.marketplace_speed_batch"
 SPEED_BATCH_SQL_ALL = _SPEED_BATCH_SELECT + " ORDER BY started_at, batch_id"
 # A RUNNING batch has no completed_at. It is projected anyway, so a stranded
 # one is visible; the next pass overwrites that document with its final state.
-SPEED_BATCH_SQL_SINCE = _SPEED_BATCH_SELECT + " WHERE completed_at IS NULL OR completed_at >= %s ORDER BY started_at, batch_id"
+SPEED_BATCH_SQL_SINCE = (
+    _SPEED_BATCH_SELECT + " WHERE completed_at IS NULL OR completed_at >= %s ORDER BY started_at, batch_id"
+)
 
 
 # ---------------------------------------------------------------------------
@@ -101,17 +142,17 @@ def _instant(value: Any) -> datetime | None:
     if value is None:
         return None
     if isinstance(value, datetime):
-        return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+        return value if value.tzinfo else value.replace(tzinfo=UTC)
     return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
 
 
 def _iso(value: Any) -> str | None:
     moment = _instant(value)
-    return None if moment is None else moment.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+    return None if moment is None else moment.astimezone(UTC).isoformat().replace("+00:00", "Z")
 
 
 def _row(columns: Sequence[str], row: Sequence[Any]) -> dict:
-    return dict(zip(columns, row))
+    return dict(zip(columns, row, strict=False))
 
 
 def source_health_document(row: Sequence[Any], *, last_observation: str | None, now: datetime) -> Projection:
@@ -181,9 +222,20 @@ def speed_batch_document(row: Sequence[Any]) -> Projection:
         # Micro-batch duration. NOT observation-to-change latency: the change
         # contract carries no processed time, and Phase 8 does not add one.
         "duration_ms": None if completed is None else int((completed - started).total_seconds() * 1000),
-        **{name: int(values[name]) for name in (
-            "input_rows", "invalid_rows", "applied_rows", "duplicate_rows", "late_rows",
-            "change_rows", "kafka_rows", "es_rows", "redis_rows")},
+        **{
+            name: int(values[name])
+            for name in (
+                "input_rows",
+                "invalid_rows",
+                "applied_rows",
+                "duplicate_rows",
+                "late_rows",
+                "change_rows",
+                "kafka_rows",
+                "es_rows",
+                "redis_rows",
+            )
+        },
         "error_message": values["error_message"],
     }
     doc_id = f"{values['query_name']}:{values['query_id']}:{values['batch_id']}"
@@ -194,9 +246,22 @@ def speed_batch_document(row: Sequence[Any]) -> Projection:
 # the raw response body; the body belongs in Bronze and in the DLQ topic, not
 # in an operational index (Brief section 20, and the same rule the audit
 # tables follow). The document carries the coordinates to find it.
-DLQ_DOCUMENT_FIELDS = ("dlq_id", "schema_version", "failed_at", "stage", "source_topic",
-                       "source_partition", "source_offset", "source_key", "marketplace",
-                       "crawl_run_id", "raw_artifact_id", "raw_uri", "error_type", "error_message")
+DLQ_DOCUMENT_FIELDS = (
+    "dlq_id",
+    "schema_version",
+    "failed_at",
+    "stage",
+    "source_topic",
+    "source_partition",
+    "source_offset",
+    "source_key",
+    "marketplace",
+    "crawl_run_id",
+    "raw_artifact_id",
+    "raw_uri",
+    "error_type",
+    "error_message",
+)
 
 
 def dlq_document(record: dict) -> Projection:
@@ -233,7 +298,7 @@ class Projector:
     sources: ProjectorSources
     bulk: Callable[[list[dict]], None]
     overlap_seconds: int
-    clock: Callable[[], datetime] = lambda: datetime.now(timezone.utc)
+    clock: Callable[[], datetime] = lambda: datetime.now(UTC)
     # Set on construction so the first pass re-reads the overlap window, as a
     # restart must: the watermark is in-process state and nothing persists it.
     watermark: datetime | None = None
@@ -259,11 +324,17 @@ class Projector:
             )
             for row in self.sources.query(SOURCE_HEALTH_SQL)
         ]
-        attempts_rows = (self.sources.query(CRAWL_ATTEMPT_SQL_ALL) if since is None
-                         else self.sources.query(CRAWL_ATTEMPT_SQL_SINCE, (since,)))
+        attempts_rows = (
+            self.sources.query(CRAWL_ATTEMPT_SQL_ALL)
+            if since is None
+            else self.sources.query(CRAWL_ATTEMPT_SQL_SINCE, (since,))
+        )
         attempts = [crawl_attempt_document(row) for row in attempts_rows]
-        batch_rows = (self.sources.query(SPEED_BATCH_SQL_ALL) if since is None
-                      else self.sources.query(SPEED_BATCH_SQL_SINCE, (since,)))
+        batch_rows = (
+            self.sources.query(SPEED_BATCH_SQL_ALL)
+            if since is None
+            else self.sources.query(SPEED_BATCH_SQL_SINCE, (since,))
+        )
         batches = [speed_batch_document(row) for row in batch_rows]
         dlq = [dlq_document(record) for record in self.sources.drain_dlq(from_beginning=rebuild)]
 
@@ -279,12 +350,19 @@ class Projector:
         # next pass re-reads from there minus the overlap. A pass that saw
         # nothing leaves the watermark where it was rather than skipping
         # forward over rows that had not landed yet.
-        seen = [_instant(doc.document["completed_at"]) for doc in (*attempts, *batches)
-                if doc.document["completed_at"] is not None]
+        seen = [
+            _instant(doc.document["completed_at"])
+            for doc in (*attempts, *batches)
+            if doc.document["completed_at"] is not None
+        ]
         if seen:
             self.watermark = max([self.watermark, *seen])
-        return {"source_health": len(health), "crawl_attempts": len(attempts),
-                "speed_batches": len(batches), "dlq": len(dlq)}
+        return {
+            "source_health": len(health),
+            "crawl_attempts": len(attempts),
+            "speed_batches": len(batches),
+            "dlq": len(dlq),
+        }
 
 
 # ---------------------------------------------------------------------------
@@ -324,8 +402,8 @@ class LiveProjectorSources:
         if self._consumer is None:
             from kafka import KafkaConsumer
 
-            from ecomdata.settings import KAFKA_BOOTSTRAP_SERVERS, KAFKA_DLQ_PROJECTOR_GROUP
             from ecomdata.domain.topics import MARKETPLACE_OBSERVATIONS_DLQ
+            from ecomdata.settings import KAFKA_BOOTSTRAP_SERVERS, KAFKA_DLQ_PROJECTOR_GROUP
 
             self._consumer = KafkaConsumer(
                 MARKETPLACE_OBSERVATIONS_DLQ.name,
@@ -366,8 +444,12 @@ def elasticsearch_bulk(es: Any) -> Callable[[list[dict]], None]:
 
     def write(operations: list[dict]) -> None:
         result = es.bulk(operations=operations)
-        failed = [detail for item in result.get("items", []) for detail in item.values()
-                  if detail.get("error") or detail.get("status", 200) >= 300]
+        failed = [
+            detail
+            for item in result.get("items", [])
+            for detail in item.values()
+            if detail.get("error") or detail.get("status", 200) >= 300
+        ]
         if result.get("errors") or failed:
             error = (failed[0].get("error") if failed else None) or {}
             reason = f"{error.get('type', '')}: {error.get('reason', '')}" if isinstance(error, dict) else str(error)
@@ -380,19 +462,25 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Project marketplace audit and DLQ into Elasticsearch")
     parser.add_argument("--once", action="store_true", help="one pass, then exit")
     parser.add_argument("--rebuild", action="store_true", help="re-index everything on the first pass")
-    parser.add_argument("--interval", type=float, default=None,
-                        help="seconds between passes (default MARKETPLACE_OPS_PROJECT_INTERVAL_SECONDS)")
+    parser.add_argument(
+        "--interval",
+        type=float,
+        default=None,
+        help="seconds between passes (default MARKETPLACE_OPS_PROJECT_INTERVAL_SECONDS)",
+    )
     args = parser.parse_args(argv)
 
     from elasticsearch import Elasticsearch
 
     from ecomdata.infra.heartbeat import heartbeat
     from ecomdata.infra.lifecycle import StopSignal, install_signal_handlers
+    from ecomdata.serving.kibana.marketplace_index_templates import ensure_projector_indices, install_index_templates
     from ecomdata.settings import (
-        ES_HOST, MARKETPLACE_OPS_PROJECT_INTERVAL_SECONDS, MARKETPLACE_OPS_PROJECT_OVERLAP_SECONDS,
+        ES_HOST,
+        MARKETPLACE_OPS_PROJECT_INTERVAL_SECONDS,
+        MARKETPLACE_OPS_PROJECT_OVERLAP_SECONDS,
         SERVICE_HEARTBEAT_FILE,
     )
-    from ecomdata.serving.kibana.marketplace_index_templates import ensure_projector_indices, install_index_templates
 
     interval = MARKETPLACE_OPS_PROJECT_INTERVAL_SECONDS if args.interval is None else args.interval
     stop = StopSignal()
@@ -404,12 +492,14 @@ def main(argv: list[str] | None = None) -> int:
     # and the indices before a dashboard panel asks Elasticsearch about them.
     install_index_templates(es)
     ensure_projector_indices(es)
-    projector = Projector(sources=sources, bulk=elasticsearch_bulk(es),
-                          overlap_seconds=MARKETPLACE_OPS_PROJECT_OVERLAP_SECONDS)
+    projector = Projector(
+        sources=sources, bulk=elasticsearch_bulk(es), overlap_seconds=MARKETPLACE_OPS_PROJECT_OVERLAP_SECONDS
+    )
     rebuild = args.rebuild
     # Phase 9 plan section 6.3: the projector already wakes every interval on
     # every stack, live included, so it takes the day's storage snapshot.
     from ecomdata.ops.storage import DailySnapshot, run_snapshot
+
     daily = DailySnapshot(run_snapshot)
     try:
         while True:
@@ -422,14 +512,24 @@ def main(argv: list[str] | None = None) -> int:
                     raise
                 # The overlap means the next pass re-reads whatever this one
                 # missed, so an outage costs freshness, never a document.
-                print(json.dumps({"event": "projection_failed",
-                                  "error": f"{type(error).__name__}: {error}"[:500]}, sort_keys=True), flush=True)
+                print(
+                    json.dumps(
+                        {"event": "projection_failed", "error": f"{type(error).__name__}: {error}"[:500]},
+                        sort_keys=True,
+                    ),
+                    flush=True,
+                )
             try:
                 if not args.once:
-                    daily.maybe(datetime.now(timezone.utc))
+                    daily.maybe(datetime.now(UTC))
             except Exception as error:
-                print(json.dumps({"event": "storage_snapshot_failed",
-                                  "error": f"{type(error).__name__}: {error}"[:500]}, sort_keys=True), flush=True)
+                print(
+                    json.dumps(
+                        {"event": "storage_snapshot_failed", "error": f"{type(error).__name__}: {error}"[:500]},
+                        sort_keys=True,
+                    ),
+                    flush=True,
+                )
             beat()
             if args.once or stop.wait(interval):
                 break

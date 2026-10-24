@@ -5,6 +5,7 @@ import json
 import threading
 import urllib.error
 import urllib.request
+from datetime import UTC
 
 import pytest
 
@@ -95,7 +96,7 @@ def test_error_modes_answer_with_their_status_and_count_no_serve(mode, status):
 
 
 def _parse(body):
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     from ecomdata.domain.acquisition import ListingPageRequest
     from tests.unit.ingestion.test_tiki_contract import _adapter, _artifact, _fetch
@@ -104,7 +105,7 @@ def _parse(body):
     fetch = _fetch(adapter, body)
     return adapter.parse_listing_page(
         request=ListingPageRequest("tiki", "marketplace-tiki", "1846", 1), fetch_result=fetch,
-        raw_artifact=_artifact(fetch), crawl_run_id="run-1", produced_at=datetime(2026, 10, 2, tzinfo=timezone.utc),
+        raw_artifact=_artifact(fetch), crawl_run_id="run-1", produced_at=datetime(2026, 10, 2, tzinfo=UTC),
     )
 
 

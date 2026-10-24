@@ -3,31 +3,33 @@
 Every client here is a fake: no Kafka, Elasticsearch, Redis or PostgreSQL
 connection is opened.
 """
-from tests.paths import FIXTURES, REPO_ROOT
+
 import json
 from contextlib import contextmanager
+from datetime import UTC
 from decimal import Decimal
 
 import pytest
 
-from ecomdata.domain.wire import canonical_json
-from ecomdata.settings import (
-    ES_INDEX_MARKETPLACE_CHANGES,
-    ES_INDEX_MARKETPLACE_OFFERS,
-    MARKETPLACE_SPEED_QUERY_NAME,
-    REDIS_MARKETPLACE_OFFER_TTL_SECONDS,
-)
-from ecomdata.domain.topics import MARKETPLACE_CHANGES
 from ecomdata.domain.change_rules import (
     detect_observation_changes,
     offer_state_to_json,
 )
+from ecomdata.domain.topics import MARKETPLACE_CHANGES
+from ecomdata.domain.wire import canonical_json
 from ecomdata.processing.speed.sinks import (
     BatchCounts,
     MarketplaceSpeedAudit,
     MarketplaceSpeedSinks,
     SpeedOutput,
 )
+from ecomdata.settings import (
+    ES_INDEX_MARKETPLACE_CHANGES,
+    ES_INDEX_MARKETPLACE_OFFERS,
+    MARKETPLACE_SPEED_QUERY_NAME,
+    REDIS_MARKETPLACE_OFFER_TTL_SECONDS,
+)
+from tests.paths import REPO_ROOT
 from tests.unit.domain.test_marketplace_change_rules import CONFIG, _event, _later
 from tests.unit.ingestion.test_marketplace_producer import FakeProducer
 
@@ -171,9 +173,7 @@ def _connection_factory(row=None):
 def _batch():
     """One NEW_OFFER plus one price change, as the transform would emit them."""
     first = detect_observation_changes(None, _event(), CONFIG)
-    second = detect_observation_changes(
-        first.next_state, _later(current_price=Decimal("150.00")), CONFIG
-    )
+    second = detect_observation_changes(first.next_state, _later(current_price=Decimal("150.00")), CONFIG)
     outputs = [
         SpeedOutput(
             output_kind="CHANGE",
@@ -255,12 +255,7 @@ def test_redis_uses_hashes_and_sorted_sets_with_deterministic_members():
     verbs = {command[0] for command in commands}
     assert verbs <= {"zadd", "setex", "hset", "expire", "set", "zremrangebyrank"}
     assert not verbs & {"lpush", "rpush", "sadd"}
-    members = [
-        member
-        for command in commands
-        if command[0] == "zadd"
-        for member, _ in command[2]
-    ]
+    members = [member for command in commands if command[0] == "zadd" for member, _ in command[2]]
     assert members == [change.event_id for change in changes]
     hset_keys = [command[1] for command in commands if command[0] == "hset"]
     assert hset_keys == [f"rt:offer:{state.offer_id}"]
@@ -378,7 +373,8 @@ def test_audit_errors_are_truncated_and_carry_no_event_body():
     audit = MarketplaceSpeedAudit(factory)
 
     audit.mark_failed(
-        query_name=MARKETPLACE_SPEED_QUERY_NAME, query_id=QUERY_ID,
+        query_name=MARKETPLACE_SPEED_QUERY_NAME,
+        query_id=QUERY_ID,
         batch_id=7,
         completed_at=None,
         error=RuntimeError(body + "x" * 5000),
@@ -396,7 +392,8 @@ def test_audit_success_writes_the_batch_counts():
     counts = BatchCounts(input_rows=4, change_rows=2, es_rows=3, redis_rows=3)
 
     audit.mark_succeeded(
-        query_name=MARKETPLACE_SPEED_QUERY_NAME, query_id=QUERY_ID,
+        query_name=MARKETPLACE_SPEED_QUERY_NAME,
+        query_id=QUERY_ID,
         batch_id=7,
         completed_at=None,
         counts=counts,
@@ -434,10 +431,14 @@ def test_change_documents_reach_elasticsearch_as_canonical_wire():
     sinks.write_batch(outputs, batch_id=1, query_id=QUERY_ID)
 
     documents = _change_documents(parts)
-    for change, doc in zip(changes, documents):
+    for change, doc in zip(changes, documents, strict=False):
         wire = json.loads(canonical_json(change))
-        expected = {key: canonical_json(value) if key in ("previous_value", "current_value") and isinstance(value, (dict, list)) else value
-                    for key, value in wire.items()}
+        expected = {
+            key: canonical_json(value)
+            if key in ("previous_value", "current_value") and isinstance(value, (dict, list))
+            else value
+            for key, value in wire.items()
+        }
         assert doc == expected
     # A scalar change is the wire, byte for byte.
     assert documents[1] == json.loads(canonical_json(changes[1]))
@@ -454,7 +455,7 @@ def test_change_documents_reach_elasticsearch_as_canonical_wire():
 # ----------------------------------------------------------------------------
 def _change_documents(parts):
     (operations,) = parts["es"].calls
-    pairs = list(zip(operations[::2], operations[1::2]))
+    pairs = list(zip(operations[::2], operations[1::2], strict=False))
     return [doc for header, doc in pairs if header["index"]["_index"] == ES_INDEX_MARKETPLACE_CHANGES]
 
 
@@ -486,15 +487,26 @@ def test_an_elasticsearch_item_failure_names_its_reason():
     class RefusingElasticsearch(FakeElasticsearch):
         def bulk(self, operations=None):
             self.calls.append(operations)
-            return {"errors": True, "items": [{"index": {"status": 400, "error": {
-                "type": "document_parsing_exception", "reason": "object mapping for [current_value]"}}}]}
+            return {
+                "errors": True,
+                "items": [
+                    {
+                        "index": {
+                            "status": 400,
+                            "error": {
+                                "type": "document_parsing_exception",
+                                "reason": "object mapping for [current_value]",
+                            },
+                        }
+                    }
+                ],
+            }
 
     outputs, _, _ = _batch()
     sinks, parts = _sinks(es=RefusingElasticsearch())
 
     with pytest.raises(RuntimeError, match="Elasticsearch item failure.*document_parsing_exception.*current_value"):
         sinks.write_batch(outputs, batch_id=1, query_id=QUERY_ID)
-
 
 
 # ----------------------------------------------------------------------------
@@ -522,7 +534,9 @@ def test_closing_a_batch_updates_only_that_query_s_row():
     factory = _connection_factory(row=None)
     audit = MarketplaceSpeedAudit(factory)
 
-    audit.mark_succeeded(query_name=MARKETPLACE_SPEED_QUERY_NAME, query_id=QUERY_ID, batch_id=0, completed_at=None, counts=BatchCounts())
+    audit.mark_succeeded(
+        query_name=MARKETPLACE_SPEED_QUERY_NAME, query_id=QUERY_ID, batch_id=0, completed_at=None, counts=BatchCounts()
+    )
 
     sql, params = factory.connection.cur.executed[0]
     assert "WHERE query_name=%s AND query_id=%s AND batch_id=%s" in sql
@@ -549,7 +563,6 @@ def test_a_batch_without_a_query_id_is_refused_before_any_write(query_id):
 
 
 def test_the_migration_puts_query_id_in_the_primary_key():
-    from pathlib import Path
 
     sql = (REPO_ROOT / "scripts" / "init_postgres.sql").read_text(encoding="utf-8")
     assert "ALTER TABLE audit.marketplace_speed_batch ADD COLUMN IF NOT EXISTS query_id" in sql
@@ -559,12 +572,13 @@ def test_the_migration_puts_query_id_in_the_primary_key():
 
 # -- Phase 9 plan section 6.1: processing latency per micro-batch --
 
+
 def test_batch_latency_is_exact_nearest_rank_over_produced_at():
-    from datetime import datetime, timedelta, timezone
+    from datetime import datetime, timedelta
 
     from ecomdata.processing.speed.sinks import BatchLatency, batch_latency
 
-    done = datetime(2026, 10, 4, 12, tzinfo=timezone.utc)
+    done = datetime(2026, 10, 4, 12, tzinfo=UTC)
     produced = [done - timedelta(milliseconds=ms) for ms in (40, 10, 30, 20, 100, 50, 60, 70, 80, 90)]
 
     assert batch_latency(produced, done) == BatchLatency(p50_ms=50, p95_ms=100, max_ms=100)
@@ -572,11 +586,11 @@ def test_batch_latency_is_exact_nearest_rank_over_produced_at():
 
 
 def test_a_batch_with_nothing_applied_has_no_latency():
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     from ecomdata.processing.speed.sinks import batch_latency
 
-    assert batch_latency([], datetime(2026, 10, 4, tzinfo=timezone.utc)) is None
+    assert batch_latency([], datetime(2026, 10, 4, tzinfo=UTC)) is None
 
 
 def test_a_succeeded_batch_reports_latency_from_its_applied_states():
@@ -610,10 +624,21 @@ def test_the_audit_writes_the_latency_columns_and_nulls_them_on_failure():
     factory = _connection_factory()
     audit = MarketplaceSpeedAudit(factory)
 
-    audit.mark_succeeded(query_name=MARKETPLACE_SPEED_QUERY_NAME, query_id=QUERY_ID, batch_id=7, completed_at=None,
-                         counts=BatchCounts(), latency=BatchLatency(11, 22, 33))
-    audit.mark_failed(query_name=MARKETPLACE_SPEED_QUERY_NAME, query_id=QUERY_ID, batch_id=8, completed_at=None,
-                      error=RuntimeError("x"))
+    audit.mark_succeeded(
+        query_name=MARKETPLACE_SPEED_QUERY_NAME,
+        query_id=QUERY_ID,
+        batch_id=7,
+        completed_at=None,
+        counts=BatchCounts(),
+        latency=BatchLatency(11, 22, 33),
+    )
+    audit.mark_failed(
+        query_name=MARKETPLACE_SPEED_QUERY_NAME,
+        query_id=QUERY_ID,
+        batch_id=8,
+        completed_at=None,
+        error=RuntimeError("x"),
+    )
 
     (ok_sql, ok_params), (_, failed_params) = factory.connection.cur.executed
     assert "latency_p50_ms=%s,latency_p95_ms=%s,latency_max_ms=%s" in ok_sql
@@ -622,7 +647,6 @@ def test_the_audit_writes_the_latency_columns_and_nulls_them_on_failure():
 
 
 def test_the_migration_adds_nullable_latency_columns_and_the_progress_table():
-    from pathlib import Path
 
     sql = (REPO_ROOT / "scripts" / "init_postgres.sql").read_text(encoding="utf-8")
     for column in ("latency_p50_ms", "latency_p95_ms", "latency_max_ms"):

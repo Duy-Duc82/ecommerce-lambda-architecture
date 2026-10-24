@@ -1,22 +1,27 @@
 """Phase 8 plan section 9.2: `ops validate` (test 23)."""
+
 from __future__ import annotations
 
 import json
 import subprocess
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
 from ecomdata.ops import validate as v
 
-AS_OF = datetime(2026, 10, 2, 7, tzinfo=timezone.utc)
+AS_OF = datetime(2026, 10, 2, 7, tzinfo=UTC)
 LIMITS = v.Limits(reconciliation_lookback_seconds=172800, reconciliation_settle_seconds=900, offer_ttl_seconds=86400)
 SILVER = "file:///lake/silver/marketplace/offer_observations"
 
 
 def _silver_event(run_id, observed_at, observation_id):
-    return json.dumps({"crawl_run_id": run_id, "payload": {"observation": {
-        "observation_id": observation_id, "observed_at": observed_at.isoformat()}}}).encode()
+    return json.dumps(
+        {
+            "crawl_run_id": run_id,
+            "payload": {"observation": {"observation_id": observation_id, "observed_at": observed_at.isoformat()}},
+        }
+    ).encode()
 
 
 class FakeSources:
@@ -30,8 +35,12 @@ class FakeSources:
         self.run_completed = {"run-1": AS_OF - timedelta(hours=1)}
         day = (AS_OF - timedelta(hours=2)).date().isoformat()
         self.silver = {
-            f"{SILVER}/marketplace=tiki/observed_date={day}/observation_id=o1.json": _silver_event("run-1", AS_OF - timedelta(hours=2), "o1"),
-            f"{SILVER}/marketplace=tiki/observed_date={day}/observation_id=o2.json": _silver_event("run-1", AS_OF - timedelta(hours=2), "o2"),
+            f"{SILVER}/marketplace=tiki/observed_date={day}/observation_id=o1.json": _silver_event(
+                "run-1", AS_OF - timedelta(hours=2), "o1"
+            ),
+            f"{SILVER}/marketplace=tiki/observed_date={day}/observation_id=o2.json": _silver_event(
+                "run-1", AS_OF - timedelta(hours=2), "o2"
+            ),
         }
         self.lag = 0
         self.stages = ["DECODE", "CONTRACT_VALIDATION"]
@@ -42,8 +51,13 @@ class FakeSources:
         }
         self.redis = {"rt:offer:offer-1"}
         self.batch = [("mp-20261002T0700Z", "SUCCEEDED", len(QUALITY_RULES))]
-        self.pointer = {"run_id": "mp-20261002T0700Z", "as_of": AS_OF.isoformat(),
-                        "datasets": [{"dataset_name": "offer_current", "uri": "s3a://ecommerce-gold/x/offer_current", "row_count": 2}]}
+        self.pointer = {
+            "run_id": "mp-20261002T0700Z",
+            "as_of": AS_OF.isoformat(),
+            "datasets": [
+                {"dataset_name": "offer_current", "uri": "s3a://ecommerce-gold/x/offer_current", "row_count": 2}
+            ],
+        }
         self.cache = [("mp-20261002T0700Z",)]
         self.gold_rows = {"s3a://ecommerce-gold/x/offer_current": 2}
         self.quality = [(rule.check_name,) for rule in QUALITY_RULES]
@@ -65,15 +79,32 @@ class FakeSources:
             return self.quality
         raise AssertionError(sql)
 
-    def object_exists(self, uri): return self.raw.get(uri, False)
-    def list_objects(self, prefix): return sorted(uri for uri in self.silver if uri.startswith(prefix))
-    def read_object(self, uri): return self.silver.get(uri)
-    def parquet_rows(self, uri): return self.gold_rows.get(uri)
-    def consumer_lag(self, group, topic): return self.lag
-    def dlq_stages(self): return list(self.stages)
-    def es_documents(self, index): return list(self.es.get(index, []))
-    def redis_exists(self, key): return key in self.redis
-    def current_pointer(self): return self.pointer
+    def object_exists(self, uri):
+        return self.raw.get(uri, False)
+
+    def list_objects(self, prefix):
+        return sorted(uri for uri in self.silver if uri.startswith(prefix))
+
+    def read_object(self, uri):
+        return self.silver.get(uri)
+
+    def parquet_rows(self, uri):
+        return self.gold_rows.get(uri)
+
+    def consumer_lag(self, group, topic):
+        return self.lag
+
+    def dlq_stages(self):
+        return list(self.stages)
+
+    def es_documents(self, index):
+        return list(self.es.get(index, []))
+
+    def redis_exists(self, key):
+        return key in self.redis
+
+    def current_pointer(self):
+        return self.pointer
 
 
 @pytest.fixture(autouse=True)
@@ -143,7 +174,8 @@ def test_silver_rows_without_audit_are_a_mismatch():
     sources = FakeSources()
     day = (AS_OF - timedelta(hours=3)).date().isoformat()
     sources.silver[f"{SILVER}/marketplace=tiki/observed_date={day}/observation_id=o9.json"] = _silver_event(
-        "run-unknown", AS_OF - timedelta(hours=3), "o9")
+        "run-unknown", AS_OF - timedelta(hours=3), "o9"
+    )
 
     result = by_name(v.validate(sources, LIMITS))["silver_reconciles_with_audit"]
 
@@ -154,7 +186,8 @@ def test_silver_rows_without_audit_are_a_mismatch():
 def test_an_expired_offer_is_not_expected_in_redis():
     sources = FakeSources()
     sources.es["marketplace-offers-current-v1"].append(
-        {"offer_id": "offer-old", "observed_at": (AS_OF - timedelta(days=3)).isoformat()})
+        {"offer_id": "offer-old", "observed_at": (AS_OF - timedelta(days=3)).isoformat()}
+    )
 
     assert by_name(v.validate(sources, LIMITS))["redis_offer_state_present"].status == v.PASS
 
@@ -207,12 +240,24 @@ def test_the_smoke_targets_are_the_ones_seed_creates():
     from ecomdata.ingestion.seed import seed
 
     class Recording:
-        def __init__(self): self.targets = []
-        def enqueue(self, task): self.targets.append(task.target); return True
+        def __init__(self):
+            self.targets = []
+
+        def enqueue(self, task):
+            self.targets.append(task.target)
+            return True
 
     frontier = Recording()
-    seed(frontier, marketplace_code="tiki", marketplace_id="marketplace-tiki", categories=smoke.SMOKE_CATEGORIES,
-         pages=smoke.SMOKE_PAGES, tier=CrawlTier.ACTIVE, priority=0, max_attempts=5)
+    seed(
+        frontier,
+        marketplace_code="tiki",
+        marketplace_id="marketplace-tiki",
+        categories=smoke.SMOKE_CATEGORIES,
+        pages=smoke.SMOKE_PAGES,
+        tier=CrawlTier.ACTIVE,
+        priority=0,
+        max_attempts=5,
+    )
 
     assert frontier.targets == smoke.smoke_targets()
     assert len(set(frontier.targets)) == len(smoke.SMOKE_CATEGORIES) * smoke.SMOKE_PAGES
@@ -221,24 +266,37 @@ def test_the_smoke_targets_are_the_ones_seed_creates():
 def test_the_smoke_waits_until_every_condition_holds():
     lines = []
 
-    assert smoke.wait(SmokeSources(), targets=["t1", "t2"], timeout_seconds=60, since=SINCE,
-                      log=lines.append, sleep=lambda s: None)
-    assert json.loads(lines[-1])["conditions"]["silver_holds_parsed_observations"]["observed"] == {"expected": 2, "found": 2}
+    assert smoke.wait(
+        SmokeSources(), targets=["t1", "t2"], timeout_seconds=60, since=SINCE, log=lines.append, sleep=lambda s: None
+    )
+    assert json.loads(lines[-1])["conditions"]["silver_holds_parsed_observations"]["observed"] == {
+        "expected": 2,
+        "found": 2,
+    }
 
 
 @pytest.mark.parametrize("overrides", [{"successes": 1}, {"changes": 0}])
 def test_the_smoke_times_out_while_a_condition_is_unmet(overrides):
     clock = iter(range(0, 1000, 30))
 
-    assert not smoke.wait(SmokeSources(**overrides), targets=["t1"], timeout_seconds=60, since=SINCE,
-                          log=lambda line: None, sleep=lambda s: None, monotonic=lambda: next(clock))
+    assert not smoke.wait(
+        SmokeSources(**overrides),
+        targets=["t1"],
+        timeout_seconds=60,
+        since=SINCE,
+        log=lambda line: None,
+        sleep=lambda s: None,
+        monotonic=lambda: next(clock),
+    )
 
 
 def test_the_ops_cli_answers_help():
     import subprocess
     import sys
 
-    result = subprocess.run([sys.executable, "-m", "ecomdata.ops", "--help"], capture_output=True, text=True, timeout=300)
+    result = subprocess.run(
+        [sys.executable, "-m", "ecomdata.ops", "--help"], capture_output=True, text=True, timeout=300
+    )
 
     assert result.returncode == 0, result.stderr
     for command in ("migrate", "seed-smoke", "smoke-wait", "batch-plan", "validate", "status"):
@@ -268,22 +326,29 @@ def test_the_quiet_wait_gives_up_after_its_timeout():
     sources.consumer_lag = lambda group, topic: 5
     clock = iter(range(0, 1000, 30))
 
-    assert not smoke.wait_for_quiet(sources, timeout_seconds=60, log=lambda line: None,
-                                    sleep=lambda s: None, monotonic=lambda: next(clock))
+    assert not smoke.wait_for_quiet(
+        sources, timeout_seconds=60, log=lambda line: None, sleep=lambda s: None, monotonic=lambda: next(clock)
+    )
 
 
 def test_the_smoke_batch_window_covers_every_settled_crawl_run(monkeypatch, capsys):
     import ecomdata.ops.__main__ as cli
     import ecomdata.ops.validate as validate_module
 
-    last = datetime(2026, 10, 2, 9, 37, 50, tzinfo=timezone.utc)
+    last = datetime(2026, 10, 2, 9, 37, 50, tzinfo=UTC)
 
     class Last:
-        def query(self, sql, params=()): return [(last,)]
+        def query(self, sql, params=()):
+            return [(last,)]
 
     monkeypatch.setattr(validate_module, "LiveSources", Last)
-    ticks = iter([datetime(2026, 10, 2, 9, 38, 10, tzinfo=timezone.utc), datetime(2026, 10, 2, 9, 39, 5, tzinfo=timezone.utc),
-                  datetime(2026, 10, 2, 9, 39, 5, tzinfo=timezone.utc)])
+    ticks = iter(
+        [
+            datetime(2026, 10, 2, 9, 38, 10, tzinfo=UTC),
+            datetime(2026, 10, 2, 9, 39, 5, tzinfo=UTC),
+            datetime(2026, 10, 2, 9, 39, 5, tzinfo=UTC),
+        ]
+    )
     slept = []
 
     cli.batch_plan(60, after_last_crawl=True, sleep=slept.append, now=lambda: next(ticks))
@@ -297,13 +362,24 @@ def test_the_smoke_batch_window_covers_every_settled_crawl_run(monkeypatch, caps
 # The smoke's made-up categories must never outlive the smoke: a later `mp up`
 # with the real TIKI_LISTING_URL would crawl the live marketplace for them.
 class RecordingConnection:
-    def __init__(self, log): self.log = log
-    def __enter__(self): return self
-    def __exit__(self, *exc): return False
-    def cursor(self): return self
-    def execute(self, sql, params=()): self.log.append((" ".join(sql.split()), params))
+    def __init__(self, log):
+        self.log = log
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def cursor(self):
+        return self
+
+    def execute(self, sql, params=()):
+        self.log.append((" ".join(sql.split()), params))
+
     @property
-    def rowcount(self): return 6
+    def rowcount(self):
+        return 6
 
 
 def test_parking_disables_every_pending_smoke_task_and_only_those():
@@ -311,7 +387,7 @@ def test_parking_disables_every_pending_smoke_task_and_only_those():
 
     parked = smoke.park(lambda: RecordingConnection(log))
 
-    (sql, params), = log
+    ((sql, params),) = log
     assert sql.startswith("UPDATE audit.crawl_frontier SET status = 'DISABLED'")
     assert "status IN ('READY', 'RETRY_WAIT', 'LEASED')" in sql
     assert "marketplace_code = 'tiki'" in sql
@@ -324,7 +400,7 @@ def test_activating_reenables_parked_and_failed_smoke_tasks_now():
 
     smoke.activate(lambda: RecordingConnection(log))
 
-    (sql, params), = log
+    ((sql, params),) = log
     assert sql.startswith("UPDATE audit.crawl_frontier SET status = 'READY'")
     assert "scheduled_for = now()" in sql
     assert "attempts = 0" in sql
@@ -336,10 +412,17 @@ def test_a_topic_without_partitions_is_an_error_not_zero_lag(monkeypatch):
     import kafka
 
     class NoTopic:
-        def __init__(self, **kwargs): pass
-        def partitions_for_topic(self, topic): return None
-        def list_consumer_group_offsets(self, group): return {}
-        def close(self): pass
+        def __init__(self, **kwargs):
+            pass
+
+        def partitions_for_topic(self, topic):
+            return None
+
+        def list_consumer_group_offsets(self, group):
+            return {}
+
+        def close(self):
+            pass
 
     monkeypatch.setattr(kafka, "KafkaConsumer", NoTopic)
     monkeypatch.setattr(kafka, "KafkaAdminClient", NoTopic)
@@ -381,8 +464,6 @@ def test_a_drill_record_keeps_every_step_with_its_time(tmp_path, monkeypatch):
     assert all("at" in step for step in written["steps"])
 
 
-
-
 def test_a_stack_only_removes_volumes_of_its_own_compose_project(monkeypatch):
     """A drill shares the machine with other projects' stacks."""
     from ecomdata.ops import drills
@@ -419,14 +500,18 @@ def test_a_worker_killed_for_a_lease_drill_is_not_restarted_by_docker(monkeypatc
 
     calls = []
     stack = drills.Stack.__new__(drills.Stack)
-    monkeypatch.setattr(stack, "run", lambda args, **kw: calls.append(args) or subprocess.CompletedProcess(args, 0, "", ""))
+    monkeypatch.setattr(
+        stack, "run", lambda args, **kw: calls.append(args) or subprocess.CompletedProcess(args, 0, "", "")
+    )
 
     stack.kill("crawl-worker", stays_dead=True)
     stack.kill("speed")
 
-    assert calls == [["docker", "update", "--restart", "no", "crawl-worker"],
-                     ["docker", "kill", "crawl-worker"],
-                     ["docker", "kill", "speed"]]
+    assert calls == [
+        ["docker", "update", "--restart", "no", "crawl-worker"],
+        ["docker", "kill", "crawl-worker"],
+        ["docker", "kill", "speed"],
+    ]
 
 
 def test_the_kill_waits_for_a_batch_to_open_and_reports_which(monkeypatch):
@@ -436,18 +521,30 @@ def test_the_kill_waits_for_a_batch_to_open_and_reports_which(monkeypatch):
     class FakeCursor:
         rows = [None, None, ("q1", 7)]
 
-        def __enter__(self): return self
-        def __exit__(self, *exc): return False
-        def execute(self, sql, params=()): self.sql, self.params = sql, params
-        def fetchone(self): return self.rows.pop(0)
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def execute(self, sql, params=()):
+            self.sql, self.params = sql, params
+
+        def fetchone(self):
+            return self.rows.pop(0)
 
     class FakeConnection:
         autocommit = False
         cursor_ = FakeCursor()
 
-        def __enter__(self): return self
-        def __exit__(self, *exc): self.closed = True
-        def cursor(self): return self.cursor_
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            self.closed = True
+
+        def cursor(self):
+            return self.cursor_
 
     connection = FakeConnection()
     monkeypatch.setattr("ecomdata.infra.postgres.postgres_connection_factory", lambda: lambda: connection)
@@ -455,7 +552,7 @@ def test_the_kill_waits_for_a_batch_to_open_and_reports_which(monkeypatch):
     killed = []
     stack = drills.Stack.__new__(drills.Stack)
     monkeypatch.setattr(stack, "kill", lambda container, **kw: killed.append(container))
-    since = datetime(2026, 10, 3, 9, tzinfo=timezone.utc)
+    since = datetime(2026, 10, 3, 9, tzinfo=UTC)
 
     assert stack.kill_when_batch_opens(since) == ("q1", 7)
 
@@ -469,17 +566,29 @@ def test_nothing_is_killed_when_no_batch_ever_opens(monkeypatch):
     from ecomdata.ops import drills
 
     class FakeCursor:
-        def __enter__(self): return self
-        def __exit__(self, *exc): return False
-        def execute(self, sql, params=()): pass
-        def fetchone(self): return None
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def execute(self, sql, params=()):
+            pass
+
+        def fetchone(self):
+            return None
 
     class FakeConnection:
         autocommit = False
 
-        def __enter__(self): return self
-        def __exit__(self, *exc): return False
-        def cursor(self): return FakeCursor()
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def cursor(self):
+            return FakeCursor()
 
     monkeypatch.setattr("ecomdata.infra.postgres.postgres_connection_factory", lambda: FakeConnection)
     monkeypatch.setattr(drills.time, "sleep", lambda seconds: None)
@@ -501,7 +610,7 @@ def test_the_speed_backlog_counts_only_settled_smoke_observations():
 
     assert stack.observations_published_since(AS_OF) == 150
 
-    (sql, params), = captured
+    ((sql, params),) = captured
     assert "sum(a.parsed_count)" in sql
     assert "a.status IN ('SUCCEEDED', 'PARTIAL')" in sql
     assert params[1] == AS_OF
@@ -516,7 +625,7 @@ def test_a_stranded_batch_is_one_still_running_long_after_it_opened():
 
     stack.stranded_speed_batches(AS_OF, stale_seconds=15)
 
-    (sql, params), = captured
+    ((sql, params),) = captured
     assert "status = 'RUNNING'" in sql
     assert "started_at < now() - %s * interval '1 second'" in sql
     assert params == (AS_OF, 15)
@@ -566,7 +675,7 @@ def test_draining_waits_on_the_speed_query_not_the_silver_group(monkeypatch):
     from ecomdata.ops import drills
 
     monkeypatch.setattr(drills.time, "sleep", lambda seconds: None)
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     busy = [("q1", 1, "SUCCEEDED", 12, 19, now - timedelta(seconds=10))]
     idle = [("q1", 1, "SUCCEEDED", 12, 19, now - timedelta(seconds=120))]
     views = iter([busy, busy, idle])
@@ -583,7 +692,7 @@ def test_a_query_that_never_goes_quiet_fails_with_how_long_it_waited(monkeypatch
     clock = iter(range(0, 100000, 100))
     monkeypatch.setattr(drills.time, "monotonic", lambda: next(clock))
     stack = drills.Stack.__new__(drills.Stack)
-    stack.speed_batches_since = lambda since: [("q1", 1, "SUCCEEDED", 12, 19, datetime.now(timezone.utc))]
+    stack.speed_batches_since = lambda since: [("q1", 1, "SUCCEEDED", 12, 19, datetime.now(UTC))]
 
     with pytest.raises(drills.DrillFailed, match="batches_with_rows"):
         stack.wait_speed_drained(AS_OF, quiet_seconds=75, timeout=300)
@@ -610,8 +719,10 @@ def test_d11_runs_last_because_it_is_the_one_that_takes_the_stack_down():
 def test_a_raw_uri_yields_the_five_components_reparse_needs():
     from ecomdata.ops import drills
 
-    uri = ("s3a://ecommerce-bronze/marketplace/raw/marketplace=tiki/observed_date=2026-10-03/hour=14/"
-           "crawl_run_id=run-7/raw_artifact_id=art-9/body.bin")
+    uri = (
+        "s3a://ecommerce-bronze/marketplace/raw/marketplace=tiki/observed_date=2026-10-03/hour=14/"
+        "crawl_run_id=run-7/raw_artifact_id=art-9/body.bin"
+    )
 
     from ecomdata.ingestion.reparse import RawArtifactRef
 
@@ -714,8 +825,8 @@ def test_a_resume_passes_resume_through_to_the_batch():
     assert stack.batch_command("mp-1", "2026-10-03T15:00:00+00:00", "--resume")[-1] == "--resume"
 
 
-
 # --- D11, offline ------------------------------------------------------------
+
 
 class _FakeD11Stack:
     """Enough of Stack for D11, with every outcome dialled from the test."""
@@ -723,23 +834,45 @@ class _FakeD11Stack:
     BACKUP_ID = "bk-20261004T000000Z"
     RUN_ID = "mp-20261004T0000Z"
 
-    def __init__(self, tmp_path, *, checks=None, quality=None, verdict=None, pointer=None,
-                 volumes_after=None, manifest_cache_run_id=None):
+    def __init__(
+        self,
+        tmp_path,
+        *,
+        checks=None,
+        quality=None,
+        verdict=None,
+        pointer=None,
+        volumes_after=None,
+        manifest_cache_run_id=None,
+    ):
         from ecomdata.ops import drills
 
         self.drills = drills
         self.root = tmp_path
-        self.checks = checks if checks is not None else {
-            "restored_pointer_matches_cache": "PASS",
-            "restored_datasets_match_manifest": "PASS",
-            "restored_raw_reparses_identical": "PASS",
-        }
-        self.quality = quality if quality is not None else {
-            "quality_status": "PASS", "mandatory_failure_count": 0,
-            "manifest_promoted": False, "silver_rows": 878}
-        self.verdict = verdict if verdict is not None else {
-            "event": "validate_restored", "passed": True,
-            "tolerated": ["es_changes_unique"], "unexpected": []}
+        self.checks = (
+            checks
+            if checks is not None
+            else {
+                "restored_pointer_matches_cache": "PASS",
+                "restored_datasets_match_manifest": "PASS",
+                "restored_raw_reparses_identical": "PASS",
+            }
+        )
+        self.quality = (
+            quality
+            if quality is not None
+            else {
+                "quality_status": "PASS",
+                "mandatory_failure_count": 0,
+                "manifest_promoted": False,
+                "silver_rows": 878,
+            }
+        )
+        self.verdict = (
+            verdict
+            if verdict is not None
+            else {"event": "validate_restored", "passed": True, "tolerated": ["es_changes_unique"], "unexpected": []}
+        )
         self.pointer = pointer if pointer is not None else self.RUN_ID
         self.volumes = ["mp_pg_data", "mp_minio_data"]
         self.volumes_after = volumes_after
@@ -747,10 +880,17 @@ class _FakeD11Stack:
         self.torn_down = False
         backup = tmp_path / "data" / "ops" / "backups" / self.BACKUP_ID
         backup.mkdir(parents=True)
-        (backup / "backup-manifest.json").write_text(json.dumps({
-            "backup_id": self.BACKUP_ID, "pointer_run_id": self.RUN_ID,
-            "cache_run_id": manifest_cache_run_id or self.RUN_ID,
-            "pointer_as_of": "2026-10-04T00:00:00Z"}), encoding="utf-8")
+        (backup / "backup-manifest.json").write_text(
+            json.dumps(
+                {
+                    "backup_id": self.BACKUP_ID,
+                    "pointer_run_id": self.RUN_ID,
+                    "cache_run_id": manifest_cache_run_id or self.RUN_ID,
+                    "pointer_as_of": "2026-10-04T00:00:00Z",
+                }
+            ),
+            encoding="utf-8",
+        )
 
     # -- the bits D11 uses --
     # The real reader: parsing what the tool containers print is part of
@@ -784,29 +924,33 @@ class _FakeD11Stack:
             return _Completed(0, "")
         if "batch-once" in args:
             self.calls.append(("quality-only", project))
-            return _Completed(0 if self.quality.get("quality_status") == "PASS" else 1,
-                              json.dumps(self.quality))
+            return _Completed(0 if self.quality.get("quality_status") == "PASS" else 1, json.dumps(self.quality))
         self.calls.append(("compose", project, args[0]))
         return _Completed(0, "")
 
     def ops_in(self, project, *args):
         self.calls.append(("ops", project, args[0]))
         if args[0] == "backup":
-            return 0, [{"event": "backup_written", "backup_id": self.BACKUP_ID,
-                        "counts": {"silver": 879}, "files": 1832}]
+            return 0, [
+                {"event": "backup_written", "backup_id": self.BACKUP_ID, "counts": {"silver": 879}, "files": 1832}
+            ]
         if args[0] == "migrate":
             return 0, [{"event": "migrated"}]
         if args[0] == "restore":
             failed = any(status != "PASS" for status in self.checks.values())
             return (1 if failed else 0), [
                 {"checks": [{"check": name, "status": status} for name, status in self.checks.items()]},
-                {"event": "quality_only_batch_next", "as_of": "2026-10-04T00:00:00Z",
-                 "pointer_run_id": self.RUN_ID}]
+                {"event": "quality_only_batch_next", "as_of": "2026-10-04T00:00:00Z", "pointer_run_id": self.RUN_ID},
+            ]
         if args[0] == "validate":
             return (0 if self.verdict.get("passed") else 1), [
-                {"checks": [{"check": "pointer_matches_cache",
-                             "observed": {"pointer": self.pointer, "cache": self.pointer}}]},
-                self.verdict]
+                {
+                    "checks": [
+                        {"check": "pointer_matches_cache", "observed": {"pointer": self.pointer, "cache": self.pointer}}
+                    ]
+                },
+                self.verdict,
+            ]
         raise AssertionError(args)
 
 
@@ -847,8 +991,11 @@ def test_d11_takes_the_running_stack_down_before_bringing_the_other_up(tmp_path,
 def test_d11_fails_when_a_restore_check_does_not_pass(tmp_path, monkeypatch):
     from ecomdata.ops import drills
 
-    checks = {"restored_pointer_matches_cache": "PASS", "restored_datasets_match_manifest": "FAIL",
-              "restored_raw_reparses_identical": "PASS"}
+    checks = {
+        "restored_pointer_matches_cache": "PASS",
+        "restored_datasets_match_manifest": "FAIL",
+        "restored_raw_reparses_identical": "PASS",
+    }
     with pytest.raises(drills.DrillFailed, match="restore checks did not all pass"):
         _run_d11(tmp_path, monkeypatch, checks=checks)
 
@@ -881,8 +1028,7 @@ def test_d11_fails_when_the_restored_pointer_serves_another_version(tmp_path, mo
 def test_d11_fails_on_a_validate_failure_that_is_not_an_empty_derived_store(tmp_path, monkeypatch):
     from ecomdata.ops import drills
 
-    verdict = {"event": "validate_restored", "passed": False, "tolerated": [],
-               "unexpected": ["bronze_present"]}
+    verdict = {"event": "validate_restored", "passed": False, "tolerated": [], "unexpected": ["bronze_present"]}
     with pytest.raises(drills.DrillFailed, match="not an empty derived store"):
         _run_d11(tmp_path, monkeypatch, verdict=verdict)
 

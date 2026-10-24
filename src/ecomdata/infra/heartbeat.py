@@ -13,7 +13,7 @@ import argparse
 import os
 import sys
 import time
-from typing import Callable
+from collections.abc import Callable
 
 
 def heartbeat(path: str) -> Callable[[], None]:

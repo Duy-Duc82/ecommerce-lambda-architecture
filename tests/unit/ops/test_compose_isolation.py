@@ -5,23 +5,34 @@ benchmark or a demo must run in a project of its own *while* it runs, and
 must never act on it. These tests read the committed files only; nothing
 here starts Docker.
 """
+
 from __future__ import annotations
-from tests.paths import FIXTURES, REPO_ROOT
 
 import re
 import subprocess
-from pathlib import Path
 
 import pytest
+
+from tests.paths import REPO_ROOT
 
 ROOT = REPO_ROOT
 COMPOSE = (ROOT / "docker-compose.yml").read_text(encoding="utf-8")
 ISOLATED = ("bench", "demo")
 # The host ports a stack publishes, and the host-side client setting that
 # must point at each one.
-PORTS = ("KAFKA_HOST_PORT", "POSTGRES_HOST_PORT", "MINIO_API_HOST_PORT", "MINIO_CONSOLE_HOST_PORT",
-         "REDIS_HOST_PORT", "ES_HOST_PORT", "KIBANA_HOST_PORT", "SUPERSET_HOST_PORT",
-         "SPARK_UI_HOST_PORT", "SPARK_RPC_HOST_PORT", "SPARK_WORKER_UI_HOST_PORT")
+PORTS = (
+    "KAFKA_HOST_PORT",
+    "POSTGRES_HOST_PORT",
+    "MINIO_API_HOST_PORT",
+    "MINIO_CONSOLE_HOST_PORT",
+    "REDIS_HOST_PORT",
+    "ES_HOST_PORT",
+    "KIBANA_HOST_PORT",
+    "SUPERSET_HOST_PORT",
+    "SPARK_UI_HOST_PORT",
+    "SPARK_RPC_HOST_PORT",
+    "SPARK_WORKER_UI_HOST_PORT",
+)
 CLIENTS = {
     "KAFKA_BOOTSTRAP_SERVERS": ("KAFKA_HOST_PORT", "localhost:{}"),
     "POSTGRES_PORT": ("POSTGRES_HOST_PORT", "{}"),
@@ -123,13 +134,16 @@ def test_mp_refuses_the_commands_that_would_act_on_the_live_stack():
 
 # -- the drill harness --
 
+
 def test_a_drill_addresses_containers_through_the_prefix(monkeypatch):
     from ecomdata.ops import drills
 
     monkeypatch.setenv("MP_CONTAINER_PREFIX", "bench-")
     calls = []
     stack = drills.Stack.__new__(drills.Stack)
-    monkeypatch.setattr(stack, "run", lambda args, **kw: calls.append(args) or subprocess.CompletedProcess(args, 0, "", ""))
+    monkeypatch.setattr(
+        stack, "run", lambda args, **kw: calls.append(args) or subprocess.CompletedProcess(args, 0, "", "")
+    )
 
     stack.kill("crawl-worker", stays_dead=True)
     stack.status("speed")
@@ -217,20 +231,28 @@ def _mp_env_value(raw: str) -> str:
     command = f"{function}\n[Console]::Out.Write((ConvertFrom-EnvValue '{literal}'))"
     # Encoded, so no quote in the value is lost on the way (PowerShell 5.1 drops inner '"').
     encoded = base64.b64encode(command.encode("utf-16-le")).decode("ascii")
-    result = subprocess.run([shell, "-NoProfile", "-NonInteractive", "-EncodedCommand", encoded],
-                            capture_output=True, text=True, timeout=60, check=True)
+    result = subprocess.run(
+        [shell, "-NoProfile", "-NonInteractive", "-EncodedCommand", encoded],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=True,
+    )
     return result.stdout
 
 
-@pytest.mark.parametrize("raw,value", [
-    ("localhost:9192", "localhost:9192"),
-    ("  mp-bench  ", "mp-bench"),
-    ('"bench-"', "bench-"),
-    ("'a value # kept'", "a value # kept"),
-    ('"quoted"  # note', "quoted"),
-    ("2.0  # seconds", "2.0"),
-    ("http://stub-source:8000/api#frag", "http://stub-source:8000/api#frag"),
-    ("", ""),
-])
+@pytest.mark.parametrize(
+    "raw,value",
+    [
+        ("localhost:9192", "localhost:9192"),
+        ("  mp-bench  ", "mp-bench"),
+        ('"bench-"', "bench-"),
+        ("'a value # kept'", "a value # kept"),
+        ('"quoted"  # note', "quoted"),
+        ("2.0  # seconds", "2.0"),
+        ("http://stub-source:8000/api#frag", "http://stub-source:8000/api#frag"),
+        ("", ""),
+    ],
+)
 def test_mp_reads_an_env_value_as_compose_does(raw, value):
     assert _mp_env_value(raw) == value

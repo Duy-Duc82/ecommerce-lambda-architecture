@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from enum import Enum
-import re
-from typing import Any, TypeVar
+from typing import Any
 from urllib.parse import urlparse
 
 from ecomdata.domain.identity import (
@@ -15,7 +15,6 @@ from ecomdata.domain.identity import (
     make_offer_id,
     make_raw_artifact_id,
 )
-
 
 OBSERVATION_SCHEMA_VERSION = "marketplace-observation.v1"
 CHANGE_SCHEMA_VERSION = "marketplace-change.v1"
@@ -66,7 +65,6 @@ _CURRENCY_PATTERN = re.compile(r"[A-Za-z]{3}\Z")
 _SHA256_PATTERN = re.compile(r"[0-9a-fA-F]{64}\Z")
 _RAW_URI_SCHEMES = {"s3a", "s3", "file"}
 
-EnumType = TypeVar("EnumType", bound=Enum)
 
 
 def _require_text(value: str, field_name: str) -> str:
@@ -92,7 +90,7 @@ def _require_aware_datetime(value: datetime, field_name: str) -> datetime:
         raise ValueError(f"{field_name} must be a datetime")
     if value.tzinfo is None or value.utcoffset() is None:
         raise ValueError(f"{field_name} must be timezone-aware")
-    return value.astimezone(timezone.utc)
+    return value.astimezone(UTC)
 
 
 def _require_non_negative_decimal(value: Decimal | None, field_name: str) -> None:
@@ -139,7 +137,7 @@ def _require_currency(value: str) -> str:
     return value.upper()
 
 
-def _require_enum(value: Any, enum_type: type[EnumType], field_name: str) -> EnumType:
+def _require_enum[E: Enum](value: Any, enum_type: type[E], field_name: str) -> E:
     if not isinstance(value, enum_type):
         raise ValueError(f"{field_name} must be a {enum_type.__name__}")
     return value

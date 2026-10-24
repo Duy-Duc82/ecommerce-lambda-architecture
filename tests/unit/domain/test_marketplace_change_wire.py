@@ -1,20 +1,20 @@
 """Strict change-wire tests, items 18-19 of the Phase 5 plan section 13."""
 import json
-from datetime import timedelta, timezone
+from datetime import UTC, timedelta, timezone
 from decimal import Decimal
 
 import pytest
 
+from ecomdata.domain.change_rules import (
+    ChangeRuleConfig,
+    detect_observation_changes,
+    detect_stale_change,
+)
 from ecomdata.domain.observations import MarketplaceChangeType
 from ecomdata.domain.wire import (
     WireContractError,
     canonical_json,
     marketplace_change_from_wire,
-)
-from ecomdata.domain.change_rules import (
-    ChangeRuleConfig,
-    detect_observation_changes,
-    detect_stale_change,
 )
 from tests.unit.domain.test_marketplace_change_rules import CONFIG, _event, _later
 
@@ -154,7 +154,7 @@ def test_strict_change_decoder_normalizes_utc():
 
     decoded = marketplace_change_from_wire(wire)
 
-    assert decoded.detected_at.tzinfo == timezone.utc
+    assert decoded.detected_at.tzinfo == UTC
     assert decoded.detected_at == change.detected_at
 
 

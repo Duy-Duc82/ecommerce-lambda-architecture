@@ -10,27 +10,25 @@ from __future__ import annotations
 import argparse
 import json
 import logging
-import sys
 import uuid
-from datetime import datetime, timezone
+from collections.abc import Callable
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Callable, TextIO
+from typing import TextIO
 
-
-from ecomdata.infra.object_store import put_bytes
-from ecomdata.domain.serialization import serialize_for_wire
-from ecomdata.settings import CRAWL_MAX_PAGES, TIKI_CATEGORIES
-from ecomdata.ingestion.pipeline import acquire_listing_page
-from ecomdata.ingestion.site_crawler import SiteCrawler
 from ecomdata.domain.acquisition import (
     AcquisitionStatus,
     ListingPageRequest,
     Phase2AcquisitionReport,
     decode_listing_page_task_target,
 )
+from ecomdata.domain.serialization import serialize_for_wire
+from ecomdata.infra.object_store import put_bytes
+from ecomdata.ingestion.pipeline import acquire_listing_page
+from ecomdata.ingestion.site_crawler import SiteCrawler
 from ecomdata.ingestion.sources.tiki.api import TikiCrawler
 from ecomdata.ingestion.sources.tiki.html import TikiCategoryHtmlCrawler
-
+from ecomdata.settings import CRAWL_MAX_PAGES, TIKI_CATEGORIES
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
@@ -48,7 +46,7 @@ SITE_CATEGORIES = {
 
 
 def _utc_now() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def _adapter_for(

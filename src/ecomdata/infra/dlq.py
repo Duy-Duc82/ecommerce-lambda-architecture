@@ -8,7 +8,7 @@ observable on ``<topic>.dlq`` instead of silently vanishing.
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -28,7 +28,7 @@ def publish_to_dlq(producer: Any, topic: str, raw_payload: Any, error: Exception
         "source": source,
         "error": str(error),
         "error_type": type(error).__name__,
-        "failed_at": datetime.now(timezone.utc).isoformat(),
+        "failed_at": datetime.now(UTC).isoformat(),
         "raw_payload": raw_payload,
     }
     try:
@@ -40,7 +40,6 @@ def publish_to_dlq(producer: Any, topic: str, raw_payload: Any, error: Exception
         )
 def publish_marketplace_dlq(producer, record, *, ack_timeout_seconds: int):
     """Publish a marketplace DLQ record and wait for broker acknowledgement."""
-    import json
     from ecomdata.domain.serialization import serialize_for_wire
     from ecomdata.domain.topics import MARKETPLACE_OBSERVATIONS_DLQ
     if ack_timeout_seconds <= 0:

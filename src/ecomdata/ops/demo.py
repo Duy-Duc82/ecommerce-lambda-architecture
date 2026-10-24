@@ -13,6 +13,7 @@ would overwrite the drill evidence the evaluation reads.
 
 ``docs/DEMO_SCRIPT.md`` holds the spoken script and the timing for each step.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -20,8 +21,8 @@ import json
 import os
 import sys
 from collections import Counter
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable
 
 from ecomdata.ops import drills
 from ecomdata.ops.drills import Record, Stack
@@ -59,15 +60,19 @@ def superset_url() -> str:
 def step_running(stack: Stack) -> list[str]:
     failing = drills._failing(stack.validate())
     serving = stack.serving_version()
-    return [f"validate: {'all checks pass' if not failing else f'FAILING {failing}'}",
-            f"serving version: pointer {serving['pointer_run_id']}, cache {serving['cache_run_id']}, "
-            f"{serving['cache_offer_rows']} offers in the cache"]
+    return [
+        f"validate: {'all checks pass' if not failing else f'FAILING {failing}'}",
+        f"serving version: pointer {serving['pointer_run_id']}, cache {serving['cache_run_id']}, "
+        f"{serving['cache_offer_rows']} offers in the cache",
+    ]
 
 
 def step_raw_first(stack: Stack) -> list[str]:
     """One attempt's raw artifact, and the Silver observation that names it."""
-    rows = stack.query("SELECT crawl_run_id, raw_uri, raw_bytes, parsed_count FROM audit.crawl_request_attempt "
-                       "WHERE raw_uri IS NOT NULL AND parsed_count > 0 ORDER BY started_at LIMIT 1")
+    rows = stack.query(
+        "SELECT crawl_run_id, raw_uri, raw_bytes, parsed_count FROM audit.crawl_request_attempt "
+        "WHERE raw_uri IS NOT NULL AND parsed_count > 0 ORDER BY started_at LIMIT 1"
+    )
     if not rows:
         return ["no attempt with a raw artifact yet"]
     crawl_run_id, raw_uri, raw_bytes, parsed = rows[0]
@@ -80,15 +85,19 @@ def step_raw_first(stack: Stack) -> list[str]:
         if event.get("raw_uri") == raw_uri:
             match = (uri, event)
             break
-    lines = [f"1. the crawler stored the response first: {raw_uri}",
-             f"   {raw_bytes} bytes, crawl run {crawl_run_id}, {parsed} observations parsed from it",
-             f"   present in Bronze: {stack.src.object_exists(raw_uri)}"]
+    lines = [
+        f"1. the crawler stored the response first: {raw_uri}",
+        f"   {raw_bytes} bytes, crawl run {crawl_run_id}, {parsed} observations parsed from it",
+        f"   present in Bronze: {stack.src.object_exists(raw_uri)}",
+    ]
     if match:
         uri, event = match
         obs = event["payload"]["observation"]
-        lines += [f"2. a Silver observation names it: {uri}",
-                  f"   observation_id {obs['observation_id']}",
-                  f"   raw_sha256 {obs['raw_sha256']} (the checksum of those bytes)"]
+        lines += [
+            f"2. a Silver observation names it: {uri}",
+            f"   observation_id {obs['observation_id']}",
+            f"   raw_sha256 {obs['raw_sha256']} (the checksum of those bytes)",
+        ]
     return lines
 
 
@@ -104,20 +113,30 @@ def step_realtime(stack: Stack) -> list[str]:
     finally:
         es.close()
     kinds = Counter(hit["_source"].get("change_type") for hit in hits)
-    return [f"change events in Elasticsearch: {dict(sorted(kinds.items()))}",
-            "the stub cuts each page's price by 5 %, then 40 %, then restores it, on successive serves:",
-            "PRICE_CHANGED, then LARGE_PRICE_DROP, as a real price would move",
-            f"Kibana realtime dashboard: {kibana_url()}  (Dashboards -> Marketplace realtime changes)"]
+    return [
+        f"change events in Elasticsearch: {dict(sorted(kinds.items()))}",
+        "the stub cuts each page's price by 5 %, then 40 %, then restores it, on successive serves:",
+        "PRICE_CHANGED, then LARGE_PRICE_DROP, as a real price would move",
+        f"Kibana realtime dashboard: {kibana_url()}  (Dashboards -> Marketplace realtime changes)",
+    ]
 
 
 def step_batch(stack: Stack) -> list[str]:
     serving = stack.serving_version()
-    results = stack.query("SELECT check_name, status FROM audit.marketplace_quality_result WHERE run_id = %s "
-                          "ORDER BY check_name", (serving["pointer_run_id"],)) if serving["pointer_run_id"] else []
+    results = (
+        stack.query(
+            "SELECT check_name, status FROM audit.marketplace_quality_result WHERE run_id = %s ORDER BY check_name",
+            (serving["pointer_run_id"],),
+        )
+        if serving["pointer_run_id"]
+        else []
+    )
     passed = sum(1 for _, status in results if status == "PASS")
-    return [f"batch run {serving['pointer_run_id']} is the serving version: the pointer and the cache agree",
-            f"quality gate: {passed}/{len(results)} rules PASS for that run",
-            f"Superset price history: {superset_url()}"]
+    return [
+        f"batch run {serving['pointer_run_id']} is the serving version: the pointer and the cache agree",
+        f"quality gate: {passed}/{len(results)} rules PASS for that run",
+        f"Superset price history: {superset_url()}",
+    ]
 
 
 def narrated(stack: Stack, name: str, run: Callable[[Stack, Record], None]) -> list[str]:
@@ -131,16 +150,20 @@ def narrated(stack: Stack, name: str, run: Callable[[Stack, Record], None]) -> l
         error = f"{type(exc).__name__}: {exc}"
     finally:
         failing = drills.restore(stack, rec)
-    lines = [f"{s['step']:>9}: " + json.dumps({k: v for k, v in s.items() if k not in ("step", "at")},
-                                               default=str)[:160] for s in rec.steps]
+    lines = [
+        f"{s['step']:>9}: " + json.dumps({k: v for k, v in s.items() if k not in ("step", "at")}, default=str)[:160]
+        for s in rec.steps
+    ]
     lines.append("PASSED" if error is None and not failing else f"FAILED: {error or failing}")
     return lines
 
 
 def step_evaluation() -> list[str]:
     lines = []
-    for label, folder in (("benchmarks (replayed fixtures)", ROOT / "data" / "ops" / "bench"),
-                          ("live evaluation", ROOT / "data" / "ops" / "evaluation")):
+    for label, folder in (
+        ("benchmarks (replayed fixtures)", ROOT / "data" / "ops" / "bench"),
+        ("live evaluation", ROOT / "data" / "ops" / "evaluation"),
+    ):
         files = sorted(folder.glob("*.json")) if folder.is_dir() else []
         lines.append(f"{label}: {len(files)} file(s)" + (f", latest {files[-1].name}" if files else ""))
     lines.append("python -m ecomdata.ops.bench report renders the benchmark tables; each row carries its dataset label")
@@ -155,13 +178,17 @@ def snapshot(stack: Stack) -> list[str]:
         return [f"backup FAILED (exit {code})"]
     DEMO_BACKUP.mkdir(parents=True, exist_ok=True)
     (DEMO_BACKUP / "latest.json").write_text(json.dumps(written, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    return [f"backup {written['backup_id']} recorded in {DEMO_BACKUP / 'latest.json'}",
-            "replay it offline: .\\scripts\\mp.ps1 -EnvFile env/demo.env restore "
-            f"-BackupId {written['backup_id']} -Project mp-demo-replay"]
+    return [
+        f"backup {written['backup_id']} recorded in {DEMO_BACKUP / 'latest.json'}",
+        "replay it offline: .\\scripts\\mp.ps1 -EnvFile env/demo.env restore "
+        f"-BackupId {written['backup_id']} -Project mp-demo-replay",
+    ]
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(prog="python -m ecomdata.ops.demo", description="The scripted thesis demo (offline)")
+    parser = argparse.ArgumentParser(
+        prog="python -m ecomdata.ops.demo", description="The scripted thesis demo (offline)"
+    )
     parser.add_argument("--auto", action="store_true", help="no pauses between steps")
     parser.add_argument("--snapshot", action="store_true", help="take a restorable backup at the end")
     parser.add_argument("--skip-faults", action="store_true", help="leave out the D3 and D8 steps")
@@ -178,10 +205,16 @@ def main(argv: list[str] | None = None) -> int:
         ("4. Batch truth: quality-gated, versioned serving", lambda: step_batch(stack)),
     ]
     if not args.skip_faults:
-        steps += [("5. Failure: MinIO goes down under the Silver sink (drill D3)",
-                   lambda: narrated(stack, "d3", drills.d3_minio_down_during_sink)),
-                  ("6. Quality gate: a bad run never reaches the cache (drill D8)",
-                   lambda: narrated(stack, "d8", drills.d8_quality_failure))]
+        steps += [
+            (
+                "5. Failure: MinIO goes down under the Silver sink (drill D3)",
+                lambda: narrated(stack, "d3", drills.d3_minio_down_during_sink),
+            ),
+            (
+                "6. Quality gate: a bad run never reaches the cache (drill D8)",
+                lambda: narrated(stack, "d8", drills.d8_quality_failure),
+            ),
+        ]
     steps.append(("7. Evaluation", step_evaluation))
     failed = False
     for title, run in steps:

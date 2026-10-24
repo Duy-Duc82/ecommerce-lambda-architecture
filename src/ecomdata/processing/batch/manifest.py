@@ -17,9 +17,10 @@ checked by comparing files. Wall-clock timestamps belong in
 from __future__ import annotations
 
 import json
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
-from datetime import datetime, timezone
-from typing import TYPE_CHECKING, Any, Callable, Mapping, Sequence
+from datetime import UTC, datetime
+from typing import TYPE_CHECKING, Any
 from urllib.parse import quote
 
 from ecomdata.domain.datasets import MARTS
@@ -85,9 +86,9 @@ class PromotionResult:
 
 
 def build_gold_manifest(
-    writes: Mapping[str, "GoldWriteResult"],
-    decision: "QualityDecision",
-    context: "MarketplaceBatchContext",
+    writes: Mapping[str, GoldWriteResult],
+    decision: QualityDecision,
+    context: MarketplaceBatchContext,
     *,
     previous_run_id: str | None,
 ) -> GoldManifest:
@@ -130,13 +131,13 @@ def build_gold_manifest(
     )
 
 
-def _run_root(context: "MarketplaceBatchContext") -> str:
+def _run_root(context: MarketplaceBatchContext) -> str:
     root = context.gold_root_uri.rstrip("/")
     return f"{root}/runs/run_id={quote(context.run_id, safe='')}"
 
 
 def _instant(value: datetime) -> str:
-    return value.astimezone(timezone.utc).isoformat()
+    return value.astimezone(UTC).isoformat()
 
 
 def serialize_manifest(manifest: GoldManifest) -> bytes:

@@ -2,11 +2,13 @@
 
 Connections are fakes; no PostgreSQL socket is opened.
 """
+
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
+from ecomdata.processing.batch.quality import QualityDecision, QualityGateFailure, QualityResult
 from ecomdata.processing.batch.repositories import (
     DATASET_COLUMNS,
     DATASETS,
@@ -15,17 +17,22 @@ from ecomdata.processing.batch.repositories import (
     MarketplaceQualityRepository,
     StagedDataset,
 )
-from ecomdata.processing.batch.quality import QualityDecision, QualityGateFailure, QualityResult
 from ecomdata.processing.batch.warehouse import MarketplaceBatchContext
 
-AS_OF = datetime(2026, 9, 29, tzinfo=timezone.utc)
+AS_OF = datetime(2026, 9, 29, tzinfo=UTC)
 MANIFEST_URI = "s3a://gold/marketplace/manifests/run_id=run-1/manifest.json"
 
 
 def passing(run_id="run-1"):
     return QualityDecision(
-        run_id=run_id, passed=True, rule_version="quality-rules.v1", evaluated_at=AS_OF,
-        mandatory_total=13, mandatory_failures=0, advisory_failures=0, skipped=0,
+        run_id=run_id,
+        passed=True,
+        rule_version="quality-rules.v1",
+        evaluated_at=AS_OF,
+        mandatory_total=13,
+        mandatory_failures=0,
+        advisory_failures=0,
+        skipped=0,
     )
 
 
@@ -116,10 +123,7 @@ def _marts(rows=1, log=None, **overrides):
 
 
 def _staged(publisher, run_id="run-1", rows=1):
-    return tuple(
-        StagedDataset(name, publisher.staging_table(name, run_id), rows)
-        for name in DATASETS
-    )
+    return tuple(StagedDataset(name, publisher.staging_table(name, run_id), rows) for name in DATASETS)
 
 
 def _counts(staged, **overrides):
@@ -148,9 +152,7 @@ def test_staging_requires_every_dataset():
 
 def test_staging_rejects_a_mart_missing_declared_columns():
     publisher = MarketplaceCachePublisher(_factory(FakeCursor()))
-    marts = _marts(
-        seller_current=FakeFrame("seller_current", columns=["seller_id"])
-    )
+    marts = _marts(seller_current=FakeFrame("seller_current", columns=["seller_id"]))
 
     with pytest.raises(ValueError, match="seller_current missing columns"):
         publisher.stage(marts, run_id="run-1")
@@ -179,9 +181,7 @@ def test_stage_table_rejects_a_dataset_outside_the_allowlist():
 
 def test_staging_writes_every_dataset_with_its_declared_columns():
     log = []
-    publisher = MarketplaceCachePublisher(
-        _factory(FakeCursor()), jdbc_url="jdbc:postgresql://db/test"
-    )
+    publisher = MarketplaceCachePublisher(_factory(FakeCursor()), jdbc_url="jdbc:postgresql://db/test")
 
     staged = publisher.stage(_marts(rows=3, log=log), run_id="run-1")
 
@@ -236,17 +236,13 @@ def test_publish_requires_all_ten_staged_datasets():
 def test_duplicate_cache_primary_key_blocks_publish():
     publisher = MarketplaceCachePublisher(_factory(FakeCursor()))
     staged = _staged(publisher)
-    cursor = FakeCursor(
-        counts=_counts(staged), fail_on="INSERT INTO cache.marketplace_seller_current"
-    )
+    cursor = FakeCursor(counts=_counts(staged), fail_on="INSERT INTO cache.marketplace_seller_current")
     publisher = MarketplaceCachePublisher(_factory(cursor))
 
     with pytest.raises(RuntimeError, match="duplicate key"):
         publisher.publish(staged, run_id="run-1", published_at=AS_OF, quality=passing(), manifest_uri=MANIFEST_URI)
 
-    assert not any(
-        "marketplace_cache_version" in sql for sql, _ in cursor.executed
-    )
+    assert not any("marketplace_cache_version" in sql for sql, _ in cursor.executed)
 
 
 # 40, 42
@@ -264,17 +260,11 @@ def test_publish_uses_one_transaction_with_explicit_columns():
     assert factory.connection.entered == 1
     assert statements[0].startswith("SELECT pg_advisory_xact_lock")
     truncate_at = next(i for i, sql in enumerate(statements) if sql.startswith("TRUNCATE"))
-    version_at = next(
-        i for i, sql in enumerate(statements) if "marketplace_cache_version" in sql
-    )
-    succeeded_at = next(
-        i for i, sql in enumerate(statements) if "status='SUCCEEDED'" in sql
-    )
+    version_at = next(i for i, sql in enumerate(statements) if "marketplace_cache_version" in sql)
+    succeeded_at = next(i for i, sql in enumerate(statements) if "status='SUCCEEDED'" in sql)
     assert truncate_at < version_at < succeeded_at
     for name in DATASETS:
-        insert = next(
-            sql for sql in statements if f"INSERT INTO cache.marketplace_{name} (" in sql
-        )
+        insert = next(sql for sql in statements if f"INSERT INTO cache.marketplace_{name} (" in sql)
         assert ",".join(DATASET_COLUMNS[name]) in insert
         assert "SELECT *" not in insert
 
@@ -339,7 +329,7 @@ def test_an_existing_run_requires_explicit_resume():
 @pytest.mark.parametrize(
     "stored_as_of, stored_silver",
     [
-        (datetime(2026, 9, 28, tzinfo=timezone.utc), "s3a://silver"),
+        (datetime(2026, 9, 28, tzinfo=UTC), "s3a://silver"),
         (AS_OF, "s3a://other-silver"),
     ],
 )
@@ -406,19 +396,39 @@ def test_gold_written_records_dataset_counts_deterministically():
 # ----------------------------------------------------------------------------
 # Quality result persistence, Phase 7 plan section 9.
 # ----------------------------------------------------------------------------
-def quality_result(check_name="observation_id_unique", *, run_id="run-1", severity="MANDATORY",
-                   status="PASS", observed=0.0, sample=None):
+def quality_result(
+    check_name="observation_id_unique",
+    *,
+    run_id="run-1",
+    severity="MANDATORY",
+    status="PASS",
+    observed=0.0,
+    sample=None,
+):
     return QualityResult(
-        run_id=run_id, check_name=check_name, severity=severity, dataset_name="silver",
-        status=status, observed_value=observed, expectation="an expectation",
-        rule_version="quality-rules.v1", failure_sample_json=sample, checked_at=AS_OF,
+        run_id=run_id,
+        check_name=check_name,
+        severity=severity,
+        dataset_name="silver",
+        status=status,
+        observed_value=observed,
+        expectation="an expectation",
+        rule_version="quality-rules.v1",
+        failure_sample_json=sample,
+        checked_at=AS_OF,
     )
 
 
 def quality_decision(*, run_id="run-1", passed=False, failures=2):
     return QualityDecision(
-        run_id=run_id, passed=passed, rule_version="quality-rules.v1", evaluated_at=AS_OF,
-        mandatory_total=13, mandatory_failures=failures, advisory_failures=0, skipped=1,
+        run_id=run_id,
+        passed=passed,
+        rule_version="quality-rules.v1",
+        evaluated_at=AS_OF,
+        mandatory_total=13,
+        mandatory_failures=failures,
+        advisory_failures=0,
+        skipped=1,
     )
 
 
@@ -497,8 +507,10 @@ def test_a_refused_run_is_recorded_as_quality_failed_not_failed():
     audit = MarketplaceBatchAudit(_factory(cursor))
 
     audit.mark_quality_failed(
-        run_id="run-1", completed_at=AS_OF,
-        decision=quality_decision(), manifest_uri="s3a://gold/marketplace/manifests/run_id=run-1/manifest.json",
+        run_id="run-1",
+        completed_at=AS_OF,
+        decision=quality_decision(),
+        manifest_uri="s3a://gold/marketplace/manifests/run_id=run-1/manifest.json",
     )
 
     sql, params = cursor.executed[0]
@@ -515,7 +527,9 @@ def test_a_held_run_is_recorded_as_gold_written_with_nothing_published(reason):
     audit = MarketplaceBatchAudit(_factory(cursor))
 
     audit.mark_held(
-        run_id="run-1", completed_at=AS_OF, reason=reason,
+        run_id="run-1",
+        completed_at=AS_OF,
+        reason=reason,
         manifest_uri="s3a://gold/marketplace/manifests/run_id=run-1/manifest.json",
     )
 
@@ -545,8 +559,10 @@ def test_a_passing_decision_cannot_be_filed_as_a_quality_failure():
 
     with pytest.raises(ValueError, match="passing decision"):
         audit.mark_quality_failed(
-            run_id="run-1", completed_at=AS_OF,
-            decision=quality_decision(passed=True, failures=0), manifest_uri=None,
+            run_id="run-1",
+            completed_at=AS_OF,
+            decision=quality_decision(passed=True, failures=0),
+            manifest_uri=None,
         )
 
 
@@ -555,8 +571,10 @@ def test_a_decision_belonging_to_another_run_cannot_be_filed():
 
     with pytest.raises(ValueError, match="another run"):
         audit.mark_quality_failed(
-            run_id="run-1", completed_at=AS_OF,
-            decision=quality_decision(run_id="run-2"), manifest_uri=None,
+            run_id="run-1",
+            completed_at=AS_OF,
+            decision=quality_decision(run_id="run-2"),
+            manifest_uri=None,
         )
 
 
@@ -570,7 +588,9 @@ def test_a_failed_decision_blocks_publication_before_any_lock_or_truncate():
     staged = _staged(publisher)
 
     with pytest.raises(QualityGateFailure):
-        publisher.publish(staged, run_id="run-1", published_at=AS_OF, quality=quality_decision(), manifest_uri=MANIFEST_URI)
+        publisher.publish(
+            staged, run_id="run-1", published_at=AS_OF, quality=quality_decision(), manifest_uri=MANIFEST_URI
+        )
 
     # Nothing reached the database at all: no advisory lock, no TRUNCATE.
     assert cursor.executed == []
@@ -583,7 +603,9 @@ def test_a_decision_from_another_run_blocks_publication():
     staged = _staged(publisher)
 
     with pytest.raises(QualityGateFailure, match="belongs to run run-2"):
-        publisher.publish(staged, run_id="run-1", published_at=AS_OF, quality=passing("run-2"), manifest_uri=MANIFEST_URI)
+        publisher.publish(
+            staged, run_id="run-1", published_at=AS_OF, quality=passing("run-2"), manifest_uri=MANIFEST_URI
+        )
 
     assert cursor.executed == []
 
@@ -609,9 +631,7 @@ def test_publication_records_the_manifest_and_rule_version_it_published_under():
     version_sql, version_params = next(
         (sql, params) for sql, params in cursor.executed if "marketplace_cache_version" in sql
     )
-    run_sql, run_params = next(
-        (sql, params) for sql, params in cursor.executed if "marketplace_batch_run" in sql
-    )
+    run_sql, run_params = next((sql, params) for sql, params in cursor.executed if "marketplace_batch_run" in sql)
 
     assert version_params[3] == "quality-rules.v1"
     assert version_params[4] == MANIFEST_URI

@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta, timezone
 from decimal import Decimal
 
 import pytest
@@ -12,11 +12,10 @@ from ecomdata.domain.identity import (
     make_seller_id,
 )
 
-
 MARKETPLACE = "tiki"
 LISTING = "p1"
 SELLER = "seller-1"
-FETCHED_AT = datetime(2026, 9, 4, 8, 30, tzinfo=timezone.utc)
+FETCHED_AT = datetime(2026, 9, 4, 8, 30, tzinfo=UTC)
 RAW_SHA256 = "a" * 64
 
 
@@ -31,7 +30,7 @@ def test_any_changed_input_produces_a_different_id():
 
 
 def test_equivalent_timestamps_with_different_utc_offsets_match():
-    utc = datetime(2026, 9, 4, 8, 30, tzinfo=timezone.utc)
+    utc = datetime(2026, 9, 4, 8, 30, tzinfo=UTC)
     offset = datetime(2026, 9, 4, 10, 30, tzinfo=timezone(timedelta(hours=2)))
     assert deterministic_id("time", utc) == deterministic_id("time", offset)
 

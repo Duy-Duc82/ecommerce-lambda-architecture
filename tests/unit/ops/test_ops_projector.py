@@ -7,13 +7,13 @@ fakes here.
 from __future__ import annotations
 
 import json
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
 from ecomdata.ops import es_projector as p
 
-NOW = datetime(2026, 10, 4, 12, 0, tzinfo=timezone.utc)
+NOW = datetime(2026, 10, 4, 12, 0, tzinfo=UTC)
 OVERLAP = 900
 
 
@@ -399,7 +399,8 @@ def test_an_overlap_that_is_not_positive_is_refused():
 
 def test_the_configured_overlap_exceeds_the_configured_interval():
     from ecomdata.settings import (
-        MARKETPLACE_OPS_PROJECT_INTERVAL_SECONDS, MARKETPLACE_OPS_PROJECT_OVERLAP_SECONDS,
+        MARKETPLACE_OPS_PROJECT_INTERVAL_SECONDS,
+        MARKETPLACE_OPS_PROJECT_OVERLAP_SECONDS,
     )
 
     # Otherwise a pass that failed leaves a window nothing ever re-reads.

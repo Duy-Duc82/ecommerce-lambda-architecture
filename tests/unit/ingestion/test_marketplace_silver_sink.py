@@ -2,24 +2,25 @@
 
 Everything runs against an in-memory writer and a fake DLQ producer.
 """
+
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
-from ecomdata.domain.serialization import serialize_for_wire
 from ecomdata.domain.dlq import (
     MARKETPLACE_DLQ_SCHEMA_VERSION,
     DlqStage,
     create_observation_dlq,
 )
-from ecomdata.domain.wire import canonical_json
+from ecomdata.domain.serialization import serialize_for_wire
 from ecomdata.domain.topics import MARKETPLACE_OBSERVATIONS, MARKETPLACE_OBSERVATIONS_DLQ
+from ecomdata.domain.wire import canonical_json
 from ecomdata.ingestion.silver_sink import SourceRecord, process_record
-from tests.unit.ingestion.test_marketplace_producer import FakeProducer
 from tests.unit.domain.test_marketplace_schema import make_event
+from tests.unit.ingestion.test_marketplace_producer import FakeProducer
 
-FAILED_AT = datetime(2026, 9, 29, 6, 0, tzinfo=timezone.utc)
+FAILED_AT = datetime(2026, 9, 29, 6, 0, tzinfo=UTC)
 
 
 class MemoryWriter:
@@ -42,9 +43,7 @@ def _record(event=None, *, key=None, value=None, offset=3):
 
 def _process(record):
     writer, producer = MemoryWriter(), FakeProducer()
-    result = process_record(
-        record, writer=writer, dlq_producer=producer, clock=lambda: FAILED_AT
-    )
+    result = process_record(record, writer=writer, dlq_producer=producer, clock=lambda: FAILED_AT)
     return result, writer, producer
 
 
@@ -260,7 +259,9 @@ def test_bad_records_are_still_quarantined_while_silver_is_down():
     # The outage must not change what counts as a bad record.
     writer, producer = SilverOutageWriter(), FakeProducer()
 
-    result = process_record(_record(value=b"\xff\xfe not utf-8"), writer=writer, dlq_producer=producer, clock=lambda: FAILED_AT)
+    result = process_record(
+        _record(value=b"\xff\xfe not utf-8"), writer=writer, dlq_producer=producer, clock=lambda: FAILED_AT
+    )
 
     assert result.status == "QUARANTINE"
     assert len(producer.sent) == 1

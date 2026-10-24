@@ -1,18 +1,21 @@
-from tests.paths import FIXTURES, REPO_ROOT
 import io
 import json
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
-from pathlib import Path
 
 import pytest
 
 import ecomdata.ingestion.cli as phase2_runner
-from ecomdata.infra.dlq import publish_to_dlq
+from ecomdata.domain.acquisition import (
+    FetchResult,
+    ParsedListingPage,
+    encode_listing_page_task_target,
+)
 from ecomdata.domain.observations import create_marketplace_offer, create_observation_event, create_offer_observation
+from ecomdata.infra.dlq import publish_to_dlq
 from ecomdata.ingestion.site_crawler import SiteCrawler
-from ecomdata.domain.acquisition import FetchResult, ListingPageRequest, ParsedListingPage, encode_listing_page_task_target
 from ecomdata.ingestion.sources.tiki.api import TikiCrawler
+from tests.paths import FIXTURES
 
 FIXTURES = FIXTURES
 
@@ -387,7 +390,7 @@ def test_publish_to_dlq_never_raises_on_producer_failure():
     publish_to_dlq(producer, "topic", {"bad": "row"}, ValueError("boom"), source="crawler.tiki")  # must not raise
 
 
-UTC = timezone.utc
+UTC = UTC
 PHASE2_START = datetime(2026, 9, 4, 8, 30, tzinfo=UTC)
 
 

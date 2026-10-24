@@ -4,6 +4,7 @@ A scripted worker and recording fakes stand in for PostgreSQL and Kafka. No
 test opens a socket, and none sleeps: the service waits on a stop signal, and
 every wait here returns at once.
 """
+
 import signal
 import subprocess
 import sys
@@ -11,10 +12,10 @@ from datetime import timedelta
 
 import pytest
 
+from ecomdata.domain.acquisition import AcquisitionStatus, ObservationPublishError, decode_listing_page_task_target
 from ecomdata.domain.observations import ResourceType
 from ecomdata.ingestion import seed as seed_frontier
 from ecomdata.ingestion import service
-from ecomdata.domain.acquisition import AcquisitionStatus, ObservationPublishError, decode_listing_page_task_target
 from ecomdata.ingestion.scheduling import CrawlTaskStatus, CrawlTier, make_crawl_task_id
 from ecomdata.ingestion.worker import CycleResult
 from tests.unit.ingestion.test_crawl_worker import NOW, FakeReport, _task
@@ -248,9 +249,13 @@ class RecordingFrontier:
 
 def _seed(frontier, **overrides):
     options = {
-        "marketplace_code": "tiki", "marketplace_id": "marketplace-tiki",
-        "categories": ["1846", "8322"], "pages": 2,
-        "tier": CrawlTier.NORMAL, "priority": 0, "max_attempts": 5,
+        "marketplace_code": "tiki",
+        "marketplace_id": "marketplace-tiki",
+        "categories": ["1846", "8322"],
+        "pages": 2,
+        "tier": CrawlTier.NORMAL,
+        "priority": 0,
+        "max_attempts": 5,
     }
     options.update(overrides)
     return seed_frontier.seed(frontier, **options)
@@ -290,7 +295,9 @@ def test_a_seeded_task_id_depends_only_on_its_target():
     _seed(frontier, categories=["1846"], pages=1)
 
     (task,) = frontier.rows.values()
-    assert task.task_id == make_crawl_task_id("tiki", ResourceType.LISTING_PAGE, task.target, seed_frontier.SEED_SCHEDULED_FOR)
+    assert task.task_id == make_crawl_task_id(
+        "tiki", ResourceType.LISTING_PAGE, task.target, seed_frontier.SEED_SCHEDULED_FOR
+    )
 
 
 def test_seeding_refuses_an_empty_or_malformed_universe():
@@ -399,6 +406,7 @@ def test_a_heartbeat_file_is_fresh_only_after_a_beat(tmp_path):
     assert is_fresh(path, max_age_seconds=60)
     assert main(["--check", path, "--max-age", "60"]) == 0
     import os
+
     modified = os.path.getmtime(path)
     assert not is_fresh(path, max_age_seconds=60, now=modified + 61)
 
@@ -428,7 +436,9 @@ def test_a_backward_clock_step_mid_task_no_longer_kills_the_worker():
     readings = iter([NOW, NOW, NOW - timedelta(seconds=30)] + [NOW + timedelta(seconds=1)] * 10)
     frontier, audit = FakeFrontier(tasks=[_task()]), FakeAudit()
     worker = _worker(
-        frontier, audit, lambda *, task, crawl_run_id: FakeReport(),
+        frontier,
+        audit,
+        lambda *, task, crawl_run_id: FakeReport(),
         clock=service.non_decreasing_clock(lambda: next(readings)),
     )
 

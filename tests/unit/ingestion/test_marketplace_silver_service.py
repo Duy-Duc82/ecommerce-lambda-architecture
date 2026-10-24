@@ -3,6 +3,7 @@
 A scripted consumer stands in for Kafka. No socket is opened and nothing
 sleeps: waits go to a recording stop signal.
 """
+
 import subprocess
 import sys
 from collections import namedtuple
@@ -102,15 +103,23 @@ def test_the_processor_receives_the_record_coordinates_and_bytes():
     _run(consumer, seen.append, max_records=1)
 
     (record,) = seen
-    assert (record.topic, record.partition, record.offset, record.key, record.value) == (TOPIC, 2, 41, b"tiki:p1", b"{}")
+    assert (record.topic, record.partition, record.offset, record.key, record.value) == (
+        TOPIC,
+        2,
+        41,
+        b"tiki:p1",
+        b"{}",
+    )
 
 
 # 10, 11
 def test_a_failed_record_is_retried_at_the_same_offset_and_never_skipped():
-    consumer = ScriptedConsumer([
-        {_tp(0): [_msg(0, 5), _msg(0, 6)]},
-        {_tp(0): [_msg(0, 6)]},
-    ])
+    consumer = ScriptedConsumer(
+        [
+            {_tp(0): [_msg(0, 5), _msg(0, 6)]},
+            {_tp(0): [_msg(0, 6)]},
+        ]
+    )
     failures = {6: 1}
 
     def process(record):
@@ -231,8 +240,12 @@ def test_importing_the_service_opens_no_client():
 
 
 def test_the_entrypoint_answers_help():
-    result = subprocess.run([sys.executable, "-m", "ecomdata.ingestion.silver_service", "--help"],
-                            capture_output=True, text=True, timeout=300)
+    result = subprocess.run(
+        [sys.executable, "-m", "ecomdata.ingestion.silver_service", "--help"],
+        capture_output=True,
+        text=True,
+        timeout=300,
+    )
 
     assert result.returncode == 0, result.stderr
     assert "usage" in result.stdout.lower()

@@ -14,15 +14,16 @@ operator action: pass ``--scheduled-for``.
 from __future__ import annotations
 
 import argparse
-from datetime import datetime, timezone
-from typing import Any, Iterable
+from collections.abc import Iterable
+from datetime import UTC, datetime
+from typing import Any
 
-from ecomdata.domain.observations import ResourceType
 from ecomdata.domain.acquisition import encode_listing_page_task_target
+from ecomdata.domain.observations import ResourceType
 from ecomdata.ingestion.scheduling import CrawlTask, CrawlTaskStatus, CrawlTier, make_crawl_task_id
 
 # Due at once, and fixed, so the seeded task ID is a function of the target.
-SEED_SCHEDULED_FOR = datetime(1970, 1, 1, tzinfo=timezone.utc)
+SEED_SCHEDULED_FOR = datetime(1970, 1, 1, tzinfo=UTC)
 
 # Marketplace code -> ID, kept here so seeding needs no HTTP adapter.
 MARKETPLACE_IDS = {"tiki": "marketplace-tiki"}

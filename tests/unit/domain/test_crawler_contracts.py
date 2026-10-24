@@ -1,16 +1,8 @@
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta, timezone
 from decimal import Decimal
 
 import pytest
 
-from ecomdata.domain.observations import (
-    Availability,
-    create_marketplace_offer,
-    create_observation_event,
-    create_offer_observation,
-    create_raw_artifact,
-    ResourceType,
-)
 from ecomdata.domain.acquisition import (
     AcquisitionFailure,
     AcquisitionStage,
@@ -25,9 +17,16 @@ from ecomdata.domain.acquisition import (
     decode_listing_page_task_target,
     encode_listing_page_task_target,
 )
+from ecomdata.domain.observations import (
+    Availability,
+    ResourceType,
+    create_marketplace_offer,
+    create_observation_event,
+    create_offer_observation,
+    create_raw_artifact,
+)
 
-
-UTC = timezone.utc
+UTC = UTC
 STARTED = datetime(2026, 9, 4, 8, 30, tzinfo=UTC)
 FETCHED = STARTED + timedelta(seconds=1)
 RAW_SHA = "a" * 64
@@ -90,7 +89,16 @@ def _event():
     )
 
 
-def _report(status, *, observations=(), rejections=(), failure=None, artifact=None, metadata="file:///tmp/raw/metadata.json", source_count=None):
+def _report(
+    status,
+    *,
+    observations=(),
+    rejections=(),
+    failure=None,
+    artifact=None,
+    metadata="file:///tmp/raw/metadata.json",
+    source_count=None,
+):
     if source_count is None:
         source_count = len(observations) + len(rejections)
     return Phase2AcquisitionReport(
@@ -149,7 +157,9 @@ def test_task_target_encoding_is_canonical_and_round_trips_unicode():
     assert decode_listing_page_task_target(encoded) == ("Điện thoại/1846", 2)
 
 
-@pytest.mark.parametrize("value", ["", "not-json", '{"target":"x"}', '{"page":true,"target":"x"}', '{"page":1,"target":"x","extra":1}'])
+@pytest.mark.parametrize(
+    "value", ["", "not-json", '{"target":"x"}', '{"page":true,"target":"x"}', '{"page":1,"target":"x","extra":1}']
+)
 def test_task_target_decoder_rejects_invalid_shape(value):
     with pytest.raises(ValueError):
         decode_listing_page_task_target(value)
@@ -206,7 +216,6 @@ def test_failed_report_can_retain_body_when_metadata_write_failed():
 def test_report_rejects_lineage_mismatch():
     artifact = _artifact()
     event = _event()
-    bad = event.payload.observation
     # The event points to the fixture artifact, so changing the report run is
     # detected by the report invariant before any downstream publish.
     with pytest.raises(ValueError, match="crawl_run_id"):

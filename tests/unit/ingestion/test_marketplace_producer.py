@@ -1,14 +1,15 @@
 """Acknowledged producer tests: exact topic, key and ack timeout."""
+
 import json
 from decimal import Decimal
 
 import pytest
 
-from ecomdata.domain.wire import canonical_json
-from ecomdata.domain.topics import MARKETPLACE_CHANGES, MARKETPLACE_OBSERVATIONS
-from ecomdata.processing.speed.change_producer import publish_change
-from ecomdata.ingestion.publisher import publish_observation
 from ecomdata.domain.change_rules import detect_observation_changes
+from ecomdata.domain.topics import MARKETPLACE_CHANGES, MARKETPLACE_OBSERVATIONS
+from ecomdata.domain.wire import WireContractError, canonical_json
+from ecomdata.ingestion.publisher import publish_observation
+from ecomdata.processing.speed.change_producer import publish_change
 from tests.unit.domain.test_marketplace_change_rules import CONFIG, _event
 from tests.unit.domain.test_marketplace_schema import make_event
 
@@ -133,11 +134,9 @@ def test_change_publish_rejects_a_price_change_with_a_drifted_rule_version():
         ),
         CONFIG,
     ).changes[0]
-    forged = type(price_change)(
-        **{**price_change.__dict__, "rule_version": "speed-rules.v2"}
-    )
+    forged = type(price_change)(**{**price_change.__dict__, "rule_version": "speed-rules.v2"})
 
-    with pytest.raises(Exception):
+    with pytest.raises(WireContractError):
         publish_change(producer, forged)
 
 
@@ -148,8 +147,8 @@ def test_change_publish_rejects_a_price_change_with_a_drifted_rule_version():
 # (Phase 8 WP1, 2026-10-01). Checked against the client's own config table,
 # so no broker is needed.
 # ----------------------------------------------------------------------------
-from ecomdata.processing.speed import change_producer as marketplace_change_producer
 from ecomdata.ingestion import publisher as marketplace_producer
+from ecomdata.processing.speed import change_producer as marketplace_change_producer
 
 
 def _captured_config(monkeypatch, factory):
@@ -171,7 +170,9 @@ def _known_options():
     return set(KafkaProducer.DEFAULT_CONFIG)
 
 
-@pytest.mark.parametrize("factory", [marketplace_producer.create_marketplace_producer, marketplace_change_producer.create_change_producer])
+@pytest.mark.parametrize(
+    "factory", [marketplace_producer.create_marketplace_producer, marketplace_change_producer.create_change_producer]
+)
 def test_the_producer_factory_passes_only_options_the_client_knows(monkeypatch, factory):
     captured = _captured_config(monkeypatch, factory)
 
@@ -180,7 +181,9 @@ def test_the_producer_factory_passes_only_options_the_client_knows(monkeypatch, 
     assert unknown == set(), f"KafkaProducer would refuse {sorted(unknown)}"
 
 
-@pytest.mark.parametrize("factory", [marketplace_producer.create_marketplace_producer, marketplace_change_producer.create_change_producer])
+@pytest.mark.parametrize(
+    "factory", [marketplace_producer.create_marketplace_producer, marketplace_change_producer.create_change_producer]
+)
 def test_the_producer_keeps_per_key_order_under_retries(monkeypatch, factory):
     # Without idempotence, a retried batch can overtake the next one when more
     # than one request is in flight. One in flight is what keeps an offer's

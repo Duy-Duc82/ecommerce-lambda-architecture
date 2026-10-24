@@ -1,6 +1,6 @@
 """Strict observation-wire tests for the Phase 4 contract the speed layer reads."""
 import json
-from datetime import timedelta, timezone
+from datetime import UTC, timedelta, timezone
 
 import pytest
 
@@ -160,7 +160,7 @@ def test_observation_wire_normalizes_utc():
 
     decoded = marketplace_observation_from_wire(wire)
 
-    assert decoded.payload.observation.observed_at.tzinfo == timezone.utc
+    assert decoded.payload.observation.observed_at.tzinfo == UTC
     assert decoded.payload.observation.observed_at == observed_at
     assert decoded == event
 

@@ -13,13 +13,15 @@ The checks reach the stack only through :class:`Sources`. The default suite
 drives them with a fake; :class:`LiveSources` is the real one, built in the
 ``ops`` container.
 """
+
 from __future__ import annotations
 
 import json
 from collections import Counter
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import asdict, dataclass
-from datetime import datetime, timedelta, timezone
-from typing import Any, Callable, Iterable, Protocol, Sequence
+from datetime import UTC, datetime, timedelta
+from typing import Any, Protocol
 from urllib.parse import unquote, urlparse
 
 PASS, FAIL = "PASS", "FAIL"
@@ -61,13 +63,14 @@ def _result(name: str, ok: bool, observed: Any, expected: Any) -> CheckResult:
 
 def _instant(value: Any) -> datetime:
     if isinstance(value, datetime):
-        return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+        return value if value.tzinfo else value.replace(tzinfo=UTC)
     return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
 
 
 # ---------------------------------------------------------------------------
 # Checks
 # ---------------------------------------------------------------------------
+
 
 def bronze_present(src: Sources, limits: Limits) -> CheckResult:
     rows = src.query(
@@ -80,8 +83,8 @@ def bronze_present(src: Sources, limits: Limits) -> CheckResult:
 
 
 def kafka_to_silver_lag(src: Sources, limits: Limits) -> CheckResult:
-    from ecomdata.settings import KAFKA_SILVER_CONSUMER_GROUP
     from ecomdata.domain.topics import MARKETPLACE_OBSERVATIONS
+    from ecomdata.settings import KAFKA_SILVER_CONSUMER_GROUP
 
     lag = src.consumer_lag(KAFKA_SILVER_CONSUMER_GROUP, MARKETPLACE_OBSERVATIONS.name)
     return _result("kafka_to_silver_lag", lag <= limits.max_silver_lag, lag, f"<= {limits.max_silver_lag}")
@@ -117,25 +120,35 @@ def silver_reconciles_with_audit(src: Sources, limits: Limits) -> CheckResult:
     as_of = _instant(pointer["as_of"])
     newest = as_of - timedelta(seconds=limits.reconciliation_settle_seconds)
     oldest = as_of - timedelta(seconds=limits.reconciliation_lookback_seconds)
-    parsed = dict(src.query(
-        "SELECT crawl_run_id, sum(parsed_count) FROM audit.crawl_request_attempt WHERE started_at <= %s GROUP BY 1",
-        (as_of,),
-    ))
-    completed = dict(src.query(
-        "SELECT crawl_run_id, completed_at FROM audit.crawl_run WHERE started_at <= %s", (as_of,),
-    ))
+    parsed = dict(
+        src.query(
+            "SELECT crawl_run_id, sum(parsed_count) FROM audit.crawl_request_attempt WHERE started_at <= %s GROUP BY 1",
+            (as_of,),
+        )
+    )
+    completed = dict(
+        src.query(
+            "SELECT crawl_run_id, completed_at FROM audit.crawl_run WHERE started_at <= %s",
+            (as_of,),
+        )
+    )
     mismatched = []
     silver = _silver_rows_by_run(src, as_of=as_of, oldest=oldest)
     for run_id, observed in sorted(silver.items()):
         # As in check 8: an audited run settles at its completion, a run with
         # no audit at its last observation; an unfinished one waits.
-        settled = _instant(completed[run_id]) if completed.get(run_id) is not None else (
-            None if run_id in completed else max(observed))
+        settled = (
+            _instant(completed[run_id])
+            if completed.get(run_id) is not None
+            else (None if run_id in completed else max(observed))
+        )
         if settled is None or not (oldest <= settled <= newest):
             continue
         if int(parsed.get(run_id) or -1) != len(observed):
             mismatched.append({"crawl_run_id": run_id, "silver_rows": len(observed), "parsed": parsed.get(run_id)})
-    return _result(name, not mismatched, {"as_of": as_of.isoformat(), "mismatched": mismatched[:10]}, {"mismatched": []})
+    return _result(
+        name, not mismatched, {"as_of": as_of.isoformat(), "mismatched": mismatched[:10]}, {"mismatched": []}
+    )
 
 
 def dlq_only_bad_records(src: Sources, limits: Limits) -> CheckResult:
@@ -148,12 +161,13 @@ def dlq_only_bad_records(src: Sources, limits: Limits) -> CheckResult:
 
 
 def speed_last_batch_succeeded(src: Sources, limits: Limits) -> CheckResult:
-    rows = src.query(
-        "SELECT batch_id, status FROM audit.marketplace_speed_batch ORDER BY started_at DESC LIMIT 1")
+    rows = src.query("SELECT batch_id, status FROM audit.marketplace_speed_batch ORDER BY started_at DESC LIMIT 1")
     if not rows:
         return _result("speed_last_batch_succeeded", False, "no speed batch", "SUCCEEDED")
     batch_id, status = rows[0]
-    return _result("speed_last_batch_succeeded", status == "SUCCEEDED", {"batch_id": batch_id, "status": status}, "SUCCEEDED")
+    return _result(
+        "speed_last_batch_succeeded", status == "SUCCEEDED", {"batch_id": batch_id, "status": status}, "SUCCEEDED"
+    )
 
 
 def es_changes_unique(src: Sources, limits: Limits) -> CheckResult:
@@ -161,8 +175,12 @@ def es_changes_unique(src: Sources, limits: Limits) -> CheckResult:
 
     ids = [doc.get("event_id") for doc in src.es_documents(ES_INDEX_MARKETPLACE_CHANGES)]
     distinct = len(set(ids))
-    return _result("es_changes_unique", len(ids) == distinct and len(ids) > 0,
-                   {"documents": len(ids), "distinct_event_ids": distinct}, "documents == distinct_event_ids > 0")
+    return _result(
+        "es_changes_unique",
+        len(ids) == distinct and len(ids) > 0,
+        {"documents": len(ids), "distinct_event_ids": distinct},
+        "documents == distinct_event_ids > 0",
+    )
 
 
 def redis_offer_state_present(src: Sources, limits: Limits) -> CheckResult:
@@ -173,10 +191,15 @@ def redis_offer_state_present(src: Sources, limits: Limits) -> CheckResult:
     if not docs:
         return _result("redis_offer_state_present", False, "no offers in Elasticsearch", "at least one offer")
     newest = max(_instant(doc["observed_at"]) for doc in docs)
-    live = sorted(doc["offer_id"] for doc in docs
-                  if _instant(doc["observed_at"]) > newest - timedelta(seconds=limits.offer_ttl_seconds))
+    live = sorted(
+        doc["offer_id"]
+        for doc in docs
+        if _instant(doc["observed_at"]) > newest - timedelta(seconds=limits.offer_ttl_seconds)
+    )
     missing = [offer for offer in live if not src.redis_exists(f"rt:offer:{offer}")]
-    return _result("redis_offer_state_present", not missing, {"offers": len(live), "missing": missing[:10]}, {"missing": []})
+    return _result(
+        "redis_offer_state_present", not missing, {"offers": len(live), "missing": missing[:10]}, {"missing": []}
+    )
 
 
 def batch_latest_terminal(src: Sources, limits: Limits) -> CheckResult:
@@ -189,16 +212,24 @@ def batch_latest_terminal(src: Sources, limits: Limits) -> CheckResult:
         return _result("batch_latest_terminal", False, "no scheduled run", "SUCCEEDED, or QUALITY_FAILED with results")
     run_id, status, results = rows[0]
     ok = status == "SUCCEEDED" or (status == "QUALITY_FAILED" and results > 0)
-    return _result("batch_latest_terminal", ok, {"run_id": run_id, "status": status, "quality_results": results},
-                   "SUCCEEDED, or QUALITY_FAILED with results")
+    return _result(
+        "batch_latest_terminal",
+        ok,
+        {"run_id": run_id, "status": status, "quality_results": results},
+        "SUCCEEDED, or QUALITY_FAILED with results",
+    )
 
 
 def pointer_matches_cache(src: Sources, limits: Limits) -> CheckResult:
     pointer = src.current_pointer()
     cache = src.query("SELECT run_id FROM audit.marketplace_cache_version")
     observed = {"pointer": pointer and pointer["run_id"], "cache": cache[0][0] if cache else None}
-    return _result("pointer_matches_cache", observed["pointer"] is not None and observed["pointer"] == observed["cache"],
-                   observed, "pointer == cache")
+    return _result(
+        "pointer_matches_cache",
+        observed["pointer"] is not None and observed["pointer"] == observed["cache"],
+        observed,
+        "pointer == cache",
+    )
 
 
 def pointer_gold_exists(src: Sources, limits: Limits) -> CheckResult:
@@ -210,7 +241,9 @@ def pointer_gold_exists(src: Sources, limits: Limits) -> CheckResult:
         rows = src.parquet_rows(dataset["uri"])
         if rows != dataset["row_count"]:
             wrong.append({"dataset": dataset["dataset_name"], "rows": rows, "recorded": dataset["row_count"]})
-    return _result("pointer_gold_exists", not wrong, {"datasets": len(pointer["datasets"]), "wrong": wrong}, {"wrong": []})
+    return _result(
+        "pointer_gold_exists", not wrong, {"datasets": len(pointer["datasets"]), "wrong": wrong}, {"wrong": []}
+    )
 
 
 def quality_results_complete(src: Sources, limits: Limits) -> CheckResult:
@@ -219,24 +252,41 @@ def quality_results_complete(src: Sources, limits: Limits) -> CheckResult:
     pointer = src.current_pointer()
     if pointer is None:
         return _result("quality_results_complete", False, "no serving pointer", "one result per rule")
-    stored = {name for (name,) in src.query(
-        "SELECT check_name FROM audit.marketplace_quality_result WHERE run_id = %s", (pointer["run_id"],))}
+    stored = {
+        name
+        for (name,) in src.query(
+            "SELECT check_name FROM audit.marketplace_quality_result WHERE run_id = %s", (pointer["run_id"],)
+        )
+    }
     expected = {rule.check_name for rule in QUALITY_RULES}
-    return _result("quality_results_complete", stored == expected,
-                   {"run_id": pointer["run_id"], "missing": sorted(expected - stored), "unexpected": sorted(stored - expected)},
-                   {"missing": [], "unexpected": []})
+    return _result(
+        "quality_results_complete",
+        stored == expected,
+        {"run_id": pointer["run_id"], "missing": sorted(expected - stored), "unexpected": sorted(stored - expected)},
+        {"missing": [], "unexpected": []},
+    )
 
 
 CHECKS: tuple[Callable[[Sources, Limits], CheckResult], ...] = (
-    bronze_present, kafka_to_silver_lag, silver_reconciles_with_audit, dlq_only_bad_records,
-    speed_last_batch_succeeded, es_changes_unique, redis_offer_state_present, batch_latest_terminal,
-    pointer_matches_cache, pointer_gold_exists, quality_results_complete,
+    bronze_present,
+    kafka_to_silver_lag,
+    silver_reconciles_with_audit,
+    dlq_only_bad_records,
+    speed_last_batch_succeeded,
+    es_changes_unique,
+    redis_offer_state_present,
+    batch_latest_terminal,
+    pointer_matches_cache,
+    pointer_gold_exists,
+    quality_results_complete,
 )
 # source_health_projected (plan 9.2) arrives with the ops projector in WP8:
 # until then the index it reads does not exist.
 
 
-def validate(src: Sources, limits: Limits, checks: Iterable[Callable[[Sources, Limits], CheckResult]] = CHECKS) -> list[CheckResult]:
+def validate(
+    src: Sources, limits: Limits, checks: Iterable[Callable[[Sources, Limits], CheckResult]] = CHECKS
+) -> list[CheckResult]:
     results = []
     for check in checks:
         try:
@@ -247,22 +297,32 @@ def validate(src: Sources, limits: Limits, checks: Iterable[Callable[[Sources, L
 
 
 def report(results: Sequence[CheckResult]) -> str:
-    return json.dumps({"passed": all(r.status == PASS for r in results), "checks": [asdict(r) for r in results]},
-                      sort_keys=True, default=str, indent=2)
+    return json.dumps(
+        {"passed": all(r.status == PASS for r in results), "checks": [asdict(r) for r in results]},
+        sort_keys=True,
+        default=str,
+        indent=2,
+    )
 
 
 def default_limits() -> Limits:
     from ecomdata.settings import (
-        MARKETPLACE_QUALITY_RECONCILIATION_LOOKBACK_SECONDS, MARKETPLACE_QUALITY_RECONCILIATION_SETTLE_SECONDS,
+        MARKETPLACE_QUALITY_RECONCILIATION_LOOKBACK_SECONDS,
+        MARKETPLACE_QUALITY_RECONCILIATION_SETTLE_SECONDS,
         REDIS_MARKETPLACE_OFFER_TTL_SECONDS,
     )
-    return Limits(MARKETPLACE_QUALITY_RECONCILIATION_LOOKBACK_SECONDS, MARKETPLACE_QUALITY_RECONCILIATION_SETTLE_SECONDS,
-                  REDIS_MARKETPLACE_OFFER_TTL_SECONDS)
+
+    return Limits(
+        MARKETPLACE_QUALITY_RECONCILIATION_LOOKBACK_SECONDS,
+        MARKETPLACE_QUALITY_RECONCILIATION_SETTLE_SECONDS,
+        REDIS_MARKETPLACE_OFFER_TTL_SECONDS,
+    )
 
 
 # ---------------------------------------------------------------------------
 # The real sources
 # ---------------------------------------------------------------------------
+
 
 class LiveSources:
     """PostgreSQL, the lake, Kafka, Elasticsearch and Redis, read-only."""
@@ -281,7 +341,11 @@ class LiveSources:
     @staticmethod
     def _split(uri: str) -> tuple[str, str, str]:
         parsed = urlparse(uri)
-        return parsed.scheme, parsed.netloc, unquote(parsed.path.lstrip("/") if parsed.scheme != "file" else parsed.path)
+        return (
+            parsed.scheme,
+            parsed.netloc,
+            unquote(parsed.path.lstrip("/") if parsed.scheme != "file" else parsed.path),
+        )
 
     @staticmethod
     def _client():
@@ -294,8 +358,10 @@ class LiveSources:
         scheme, bucket, key = self._split(uri)
         if scheme == "file":
             from pathlib import Path
+
             return Path(key.lstrip("/") if key[2:3] == ":" else key).exists()
         from minio.error import S3Error
+
         try:
             self._client().stat_object(bucket, key)
             return True
@@ -308,18 +374,24 @@ class LiveSources:
         scheme, bucket, key = self._split(uri_prefix)
         if scheme == "file":
             from pathlib import Path
+
             root = Path(key.lstrip("/") if key[2:3] == ":" else key)
             return sorted(path.as_uri() for path in root.rglob("*") if path.is_file())
         prefix = key.rstrip("/") + "/"
-        return sorted(f"s3a://{bucket}/{obj.object_name}" for obj in self._client().list_objects(bucket, prefix=prefix, recursive=True))
+        return sorted(
+            f"s3a://{bucket}/{obj.object_name}"
+            for obj in self._client().list_objects(bucket, prefix=prefix, recursive=True)
+        )
 
     def read_object(self, uri: str) -> bytes | None:
         scheme, bucket, key = self._split(uri)
         if scheme == "file":
             from pathlib import Path
+
             path = Path(key.lstrip("/") if key[2:3] == ":" else key)
             return path.read_bytes() if path.exists() else None
         from minio.error import S3Error
+
         response = None
         try:
             response = self._client().get_object(bucket, key)
@@ -342,12 +414,15 @@ class LiveSources:
         objects = self.list_objects(uri_prefix)
         if not any(uri.endswith("/_SUCCESS") for uri in objects):
             return None
-        return sum(pq.ParquetFile(io.BytesIO(self.read_object(uri))).metadata.num_rows
-                   for uri in objects if uri.endswith(".parquet"))
+        return sum(
+            pq.ParquetFile(io.BytesIO(self.read_object(uri))).metadata.num_rows
+            for uri in objects
+            if uri.endswith(".parquet")
+        )
 
     def current_pointer(self) -> dict | None:
-        from ecomdata.processing.batch.manifest import CURRENT_POINTER_PATH, GOLD_ZONE
         from ecomdata.infra.object_store import get_bytes
+        from ecomdata.processing.batch.manifest import CURRENT_POINTER_PATH, GOLD_ZONE
 
         payload = get_bytes(GOLD_ZONE, CURRENT_POINTER_PATH)
         return None if payload is None else json.loads(payload)
@@ -361,8 +436,11 @@ class LiveSources:
         admin = KafkaAdminClient(bootstrap_servers=KAFKA_BOOTSTRAP_SERVERS)
         consumer = KafkaConsumer(bootstrap_servers=KAFKA_BOOTSTRAP_SERVERS)
         try:
-            committed = {tp: meta.offset for tp, meta in admin.list_consumer_group_offsets(group).items() if tp.topic == topic}
+            committed = {
+                tp: meta.offset for tp, meta in admin.list_consumer_group_offsets(group).items() if tp.topic == topic
+            }
             from kafka import TopicPartition
+
             known = consumer.partitions_for_topic(topic)
             if not known:
                 # Not "no lag": a missing topic, or metadata not loaded yet,
@@ -378,8 +456,8 @@ class LiveSources:
     def dlq_stages(self) -> list[str]:
         from kafka import KafkaConsumer, TopicPartition
 
-        from ecomdata.settings import KAFKA_BOOTSTRAP_SERVERS
         from ecomdata.domain.topics import MARKETPLACE_OBSERVATIONS_DLQ
+        from ecomdata.settings import KAFKA_BOOTSTRAP_SERVERS
 
         consumer = KafkaConsumer(bootstrap_servers=KAFKA_BOOTSTRAP_SERVERS, enable_auto_commit=False)
         try:
@@ -427,5 +505,4 @@ class LiveSources:
     def redis_zset_members(self, key: str) -> list[str]:
         """Members of a sorted set, in rank order — a list, so drill D4 can see
         a duplicate if Redis ever returned one."""
-        return [m.decode("utf-8") if isinstance(m, bytes) else str(m)
-                for m in self._redis_client().zrange(key, 0, -1)]
+        return [m.decode("utf-8") if isinstance(m, bytes) else str(m) for m in self._redis_client().zrange(key, 0, -1)]

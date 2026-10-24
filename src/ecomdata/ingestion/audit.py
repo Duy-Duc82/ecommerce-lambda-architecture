@@ -7,9 +7,10 @@ and a truncated error message, and the body itself already lives in Bronze.
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
-from typing import Any, Callable
+from datetime import UTC, datetime, timedelta
+from typing import Any
 
 from ecomdata.domain.observations import CrawlRun
 from ecomdata.ingestion.scheduling import FailureKind
@@ -23,7 +24,7 @@ def _utc(value: datetime, field_name: str) -> datetime:
         raise TypeError(f"{field_name} must be a datetime")
     if value.tzinfo is None or value.utcoffset() is None:
         raise ValueError(f"{field_name} must be timezone-aware")
-    return value.astimezone(timezone.utc)
+    return value.astimezone(UTC)
 
 
 def _count(value: Any, field_name: str) -> int:

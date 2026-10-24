@@ -32,11 +32,13 @@ import hashlib
 import json
 import os
 import subprocess
+from collections.abc import Callable, Iterator, Sequence
+from contextlib import AbstractContextManager as ContextManager
 from contextlib import contextmanager
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Callable, ContextManager, Iterator, Protocol, Sequence
+from typing import Any, Protocol
 from urllib.parse import unquote, urlparse
 
 BACKUP_SCHEMA_VERSION = "marketplace-backup.v1"
@@ -129,7 +131,7 @@ def zone_key(uri: str, zone: str) -> str:
 
 
 def backup_id_for(moment: datetime) -> str:
-    return "bk-" + moment.astimezone(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    return "bk-" + moment.astimezone(UTC).strftime("%Y%m%dT%H%M%SZ")
 
 
 def sample_uris(uris: Sequence[str], count: int) -> list[str]:
@@ -195,7 +197,7 @@ def backup(
     store: BackupStore,
     *,
     backup_id: str | None = None,
-    clock: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
+    clock: Callable[[], datetime] = lambda: datetime.now(UTC),
     tools: dict[str, str] | None = None,
     log: Callable[[str], None] = lambda line: None,
 ) -> dict:
@@ -263,10 +265,10 @@ def backup(
         manifest = {
             "schema_version": BACKUP_SCHEMA_VERSION,
             "backup_id": identifier,
-            "created_at": started.astimezone(timezone.utc).isoformat().replace("+00:00", "Z"),
+            "created_at": started.astimezone(UTC).isoformat().replace("+00:00", "Z"),
             "pointer_run_id": pointer.run_id,
             "cache_run_id": cache_run_id,
-            "pointer_as_of": pointer.as_of.astimezone(timezone.utc).isoformat().replace("+00:00", "Z"),
+            "pointer_as_of": pointer.as_of.astimezone(UTC).isoformat().replace("+00:00", "Z"),
             "pointer_key": key_of_pointer,
             "datasets": [{"dataset_name": dataset.dataset_name, "uri": dataset.uri,
                           "row_count": dataset.row_count} for dataset in pointer.datasets],
@@ -453,8 +455,8 @@ class LiveLake:
     """The medallion zones, through MinIO or the local filesystem."""
 
     def list_keys(self, zone: str, prefix: str = "") -> list[str]:
-        from ecomdata.settings import DATA_LAKE_LOCAL_ROOT, MINIO_BUCKETS
         from ecomdata.infra.storage import active_profile
+        from ecomdata.settings import DATA_LAKE_LOCAL_ROOT, MINIO_BUCKETS
 
         profile = active_profile()
         if profile.is_local:
@@ -516,8 +518,8 @@ class LivePostgres:
 
     @contextmanager
     def batch_lock(self) -> Iterator[None]:
-        from ecomdata.processing.batch.lock import exclusive_batch
         from ecomdata.infra.postgres import postgres_connection_factory
+        from ecomdata.processing.batch.lock import exclusive_batch
 
         with exclusive_batch(postgres_connection_factory()):
             yield
@@ -556,9 +558,9 @@ def parquet_rows_at(uri: str) -> int | None:
 def reparse_sample(uris: Sequence[str]) -> dict:
     """Reparse the sampled artifacts against restored Silver, and summarise."""
     import ecomdata.infra.object_store as object_store
-    from ecomdata.settings import MARKETPLACE_SILVER_DATASET
     from ecomdata.ingestion.reparse import RawArtifactRef, reparse_batch, summarise
     from ecomdata.ingestion.sources.tiki.api import TikiCrawler
+    from ecomdata.settings import MARKETPLACE_SILVER_DATASET
 
     adapters = {"tiki": TikiCrawler}
     refs = [RawArtifactRef.from_uri(uri) for uri in uris]
@@ -568,11 +570,11 @@ def reparse_sample(uris: Sequence[str]) -> dict:
         # reaches the marketplace.
         adapter_for=lambda code: adapters[code](categories=[], fetch_robots=False),
         reader=object_store.get_bytes,
-        clock=lambda: datetime.now(timezone.utc),
+        clock=lambda: datetime.now(UTC),
         silver_reader=object_store.get_bytes,
         silver_dataset=MARKETPLACE_SILVER_DATASET,
     )
-    return summarise(outcomes, reported_at=datetime.now(timezone.utc))
+    return summarise(outcomes, reported_at=datetime.now(UTC))
 
 
 def restore_checks(lake: Lake, db: Database, manifest: dict, *, sample_size: int,

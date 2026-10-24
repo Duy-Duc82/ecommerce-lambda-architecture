@@ -8,12 +8,12 @@ from __future__ import annotations
 import json
 import math
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from types import SimpleNamespace
 
 from ecomdata.processing.speed import service
 
-NOW = datetime(2026, 10, 4, 12, 18, tzinfo=timezone.utc)
+NOW = datetime(2026, 10, 4, 12, 18, tzinfo=UTC)
 QUERY_ID = "6f1c1a52-0d6a-4b0e-9a54-2b1f7f0c9d11"
 
 
@@ -56,7 +56,7 @@ def test_a_progress_row_carries_spark_s_numbers_unchanged():
     row = service.progress_row(_progress(7), query_name="marketplace_speed", recorded_at=NOW)
 
     assert row["query_id"] == QUERY_ID and row["batch_id"] == 7
-    assert row["progress_at"] == datetime(2026, 10, 4, 12, 17, 30, 1000, tzinfo=timezone.utc)
+    assert row["progress_at"] == datetime(2026, 10, 4, 12, 17, 30, 1000, tzinfo=UTC)
     assert row["recorded_at"] == NOW
     assert (row["num_input_rows"], row["input_rows_per_second"], row["processed_rows_per_second"]) == (15, 0.5, 18.4)
     assert (row["batch_duration_ms"], row["trigger_execution_ms"], row["add_batch_ms"]) == (812, 812, 640)

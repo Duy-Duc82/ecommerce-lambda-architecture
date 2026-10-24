@@ -11,8 +11,9 @@ share of such rows can be counted.
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
-from typing import Any, Mapping
+from collections.abc import Mapping
+from datetime import UTC, datetime
+from typing import Any
 
 from pyspark.sql import Column, DataFrame
 from pyspark.sql import functions as F
@@ -24,8 +25,8 @@ UNKNOWN_KEY = -1
 UNKNOWN_NATURAL_KEY = "__UNKNOWN__"
 UNKNOWN_LABEL = "Unknown"
 # valid_to of an open SCD2 version; exclusive like every valid_to.
-OPEN_VALID_TO = datetime(9999, 12, 31, tzinfo=timezone.utc)
-UNKNOWN_VALID_FROM = datetime(1970, 1, 1, tzinfo=timezone.utc)
+OPEN_VALID_TO = datetime(9999, 12, 31, tzinfo=UTC)
+UNKNOWN_VALID_FROM = datetime(1970, 1, 1, tzinfo=UTC)
 
 
 def _column(value: str | Column) -> Column:

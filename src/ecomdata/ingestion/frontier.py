@@ -6,8 +6,9 @@ an error message are remote text and are never interpolated into a statement.
 """
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
-from typing import Any, Callable
+from collections.abc import Callable
+from datetime import UTC, datetime, timedelta
+from typing import Any
 
 from ecomdata.domain.observations import ResourceType
 from ecomdata.ingestion.scheduling import (
@@ -41,7 +42,7 @@ def _utc(value: datetime, field_name: str) -> datetime:
         raise TypeError(f"{field_name} must be a datetime")
     if value.tzinfo is None or value.utcoffset() is None:
         raise ValueError(f"{field_name} must be timezone-aware")
-    return value.astimezone(timezone.utc)
+    return value.astimezone(UTC)
 
 
 def _worker(worker_id: str) -> str:

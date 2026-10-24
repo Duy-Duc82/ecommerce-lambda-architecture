@@ -3,13 +3,12 @@
 Fake repositories and a fake executor throughout: no network, Kafka, MinIO
 or PostgreSQL, and no sleep.
 """
-from datetime import datetime, timedelta, timezone
+
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import pytest
 
-from ecomdata.domain.observations import CrawlRun, CrawlRunStatus, ResourceType
-from ecomdata.ingestion.audit import CrawlAttemptAudit
 from ecomdata.domain.acquisition import (
     AcquisitionStatus,
     CanonicalRecordError,
@@ -18,6 +17,8 @@ from ecomdata.domain.acquisition import (
     ListingPageParseError,
     RawPersistenceError,
 )
+from ecomdata.domain.observations import CrawlRunStatus, ResourceType
+from ecomdata.ingestion.audit import CrawlAttemptAudit
 from ecomdata.ingestion.scheduling import (
     CrawlTask,
     CrawlTaskStatus,
@@ -29,7 +30,7 @@ from ecomdata.ingestion.scheduling import (
 )
 from ecomdata.ingestion.worker import CrawlWorker
 
-NOW = datetime(2026, 9, 29, 8, 0, tzinfo=timezone.utc)
+NOW = datetime(2026, 9, 29, 8, 0, tzinfo=UTC)
 POLICY = RetryPolicy(5, 30, 1800, Decimal("0"))
 
 
@@ -56,8 +57,15 @@ def _task(attempts=1, **overrides):
 class FakeReport:
     """Stands in for Phase2AcquisitionReport with only what the worker reads."""
 
-    def __init__(self, status=AcquisitionStatus.SUCCEEDED, http_status=200,
-                 observations=(), rejections=(), retry_after=None, failure=None):
+    def __init__(
+        self,
+        status=AcquisitionStatus.SUCCEEDED,
+        http_status=200,
+        observations=(),
+        rejections=(),
+        retry_after=None,
+        failure=None,
+    ):
         self.status = status
         self.http_status = http_status
         self.observations = observations
@@ -87,8 +95,7 @@ class FakeFrontier:
     def mark_retry(self, *, task_id, worker_id, decision, http_status, error_message):
         self.calls.append(("retry", task_id, decision.failure_kind, error_message))
 
-    def mark_failed(self, *, task_id, worker_id, completed_at, failure_kind,
-                    http_status, error_message):
+    def mark_failed(self, *, task_id, worker_id, completed_at, failure_kind, http_status, error_message):
         self.calls.append(("failed", task_id, failure_kind, error_message))
 
     def kinds(self):
@@ -143,9 +150,7 @@ def _worker(frontier, audit, executor, clock=None):
 
 
 def _run(frontier, audit, executor):
-    return _worker(frontier, audit, executor).run_once(
-        crawl_run_id_for=lambda task: f"run-{task.task_id[:8]}"
-    )
+    return _worker(frontier, audit, executor).run_once(crawl_run_id_for=lambda task: f"run-{task.task_id[:8]}")
 
 
 # 22
@@ -424,9 +429,7 @@ def test_no_default_test_opens_network_kafka_minio_or_postgresql():
         "assert 'requests' not in sys.modules;"
         "print('CLEAN')"
     )
-    result = subprocess.run(
-        [sys.executable, "-c", probe], capture_output=True, text=True, timeout=300
-    )
+    result = subprocess.run([sys.executable, "-c", probe], capture_output=True, text=True, timeout=300)
 
     assert "CLEAN" in result.stdout, result.stderr
 
@@ -492,7 +495,9 @@ from ecomdata.domain.acquisition import ObservationPublishError
 
 def _publish_failure(report, acknowledged):
     def executor(*, task, crawl_run_id):
-        raise ObservationPublishError(report=report, acknowledged=acknowledged, cause=RuntimeError("broker unavailable"))
+        raise ObservationPublishError(
+            report=report, acknowledged=acknowledged, cause=RuntimeError("broker unavailable")
+        )
 
     return executor
 
@@ -555,8 +560,12 @@ def test_a_publish_failure_is_retried_and_never_opens_the_source_circuit():
 )
 def test_a_returned_failure_is_classified_by_its_own_exception(stage, error, kind, retried):
     from ecomdata.domain.acquisition import (
-        AcquisitionFailure, AcquisitionStage, FetchTransportError, ListingPageParseError,
-        RawPersistenceError, RobotsDeniedError,
+        AcquisitionFailure,
+        AcquisitionStage,
+        FetchTransportError,
+        ListingPageParseError,
+        RawPersistenceError,
+        RobotsDeniedError,
     )
 
     exception = {
@@ -567,8 +576,11 @@ def test_a_returned_failure_is_classified_by_its_own_exception(stage, error, kin
     }[error]
     frontier = FakeFrontier(tasks=[_task()])
     audit = FakeAudit()
-    report = FakeReport(status=AcquisitionStatus.FAILED, http_status=None,
-                        failure=AcquisitionFailure(AcquisitionStage(stage), exception))
+    report = FakeReport(
+        status=AcquisitionStatus.FAILED,
+        http_status=None,
+        failure=AcquisitionFailure(AcquisitionStage(stage), exception),
+    )
 
     result = _run(frontier, audit, lambda *, task, crawl_run_id: report)
 

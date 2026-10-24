@@ -1,15 +1,14 @@
 import hashlib
 import json
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta, timezone
 
 import pytest
 
-from ecomdata.domain.identity import make_raw_artifact_id
 from ecomdata.domain.acquisition import FetchResult, ListingPageRequest, RawPersistenceError
+from ecomdata.domain.identity import make_raw_artifact_id
 from ecomdata.ingestion.raw_store import RAW_METADATA_SCHEMA_VERSION, persist_fetch_result
 
-
-UTC = timezone.utc
+UTC = UTC
 FETCHED = datetime(2026, 9, 4, 8, 30, tzinfo=UTC)
 BODY = b"{\n  \"data\": [\xff]\n}"
 

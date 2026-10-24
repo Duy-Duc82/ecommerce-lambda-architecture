@@ -17,12 +17,14 @@ listing key, ``offer_current``, the two Gold reconciliations, freshness and the
 four advisory checks — thirteen in all. A failing check adds one bounded
 ``limit().collect()`` to name its first offending keys.
 """
+
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import TYPE_CHECKING, Any, Mapping, Sequence
+from typing import TYPE_CHECKING, Any
 
 from pyspark.sql import Column, DataFrame
 from pyspark.sql import functions as F
@@ -84,9 +86,7 @@ class QualityGateFailure(RuntimeError):
         self.decision = decision
         self.results = tuple(results)
         self.failing = tuple(
-            result.check_name
-            for result in self.results
-            if result.severity == MANDATORY and result.status != PASS
+            result.check_name for result in self.results if result.severity == MANDATORY and result.status != PASS
         )
         super().__init__(
             reason
@@ -103,7 +103,7 @@ def _canonical(payload: Mapping[str, Any]) -> str:
 
 def _result(
     check_name: str,
-    context: "MarketplaceBatchContext",
+    context: MarketplaceBatchContext,
     *,
     status: str,
     observed_value: float | None,
@@ -147,7 +147,7 @@ def _sample_keys(frame: DataFrame, key: Column) -> tuple[str, ...]:
 
 def _counted(
     check_name: str,
-    context: "MarketplaceBatchContext",
+    context: MarketplaceBatchContext,
     *,
     violations: int,
     frame: DataFrame | None = None,
@@ -159,21 +159,23 @@ def _counted(
     return _result(check_name, context, status=FAIL, observed_value=float(violations), keys=keys)
 
 
-def _silver_row_checks(observations: DataFrame, context: "MarketplaceBatchContext") -> dict[str, Column]:
+def _silver_row_checks(observations: DataFrame, context: MarketplaceBatchContext) -> dict[str, Column]:
     """The seven row-level Silver predicates, each True when the row offends."""
     tolerance = F.expr(f"INTERVAL {int(context.future_tolerance_seconds)} SECONDS")
     blank = lambda name: F.col(name).isNull() | (F.trim(F.col(name)) == "")  # noqa: E731
     return {
-        "raw_artifact_checksum_and_uri_present":
-            blank("raw_uri") | F.col("raw_sha256").isNull() | ~F.col("raw_sha256").rlike(_SHA256_HEX),
-        "silver_observation_raw_lineage_complete":
-            blank("crawl_run_id") | blank("adapter_version") | F.col("fetched_at").isNull(),
-        "offer_key_and_price_complete":
-            F.col("offer_id").isNull() | F.col("marketplace").isNull()
-            | F.col("observed_at").isNull() | F.col("current_price").isNull(),
-        "price_non_negative":
-            (F.col("current_price") < F.lit(0))
-            | (F.col("list_price").isNotNull() & (F.col("list_price") < F.lit(0))),
+        "raw_artifact_checksum_and_uri_present": blank("raw_uri")
+        | F.col("raw_sha256").isNull()
+        | ~F.col("raw_sha256").rlike(_SHA256_HEX),
+        "silver_observation_raw_lineage_complete": blank("crawl_run_id")
+        | blank("adapter_version")
+        | F.col("fetched_at").isNull(),
+        "offer_key_and_price_complete": F.col("offer_id").isNull()
+        | F.col("marketplace").isNull()
+        | F.col("observed_at").isNull()
+        | F.col("current_price").isNull(),
+        "price_non_negative": (F.col("current_price") < F.lit(0))
+        | (F.col("list_price").isNotNull() & (F.col("list_price") < F.lit(0))),
         # Judged against the row's own fetch and production, not the run's
         # as_of: the orchestrator cut everything after as_of before this
         # point, so that comparison could never fire. An observation claiming
@@ -181,22 +183,28 @@ def _silver_row_checks(observations: DataFrame, context: "MarketplaceBatchContex
         # carried it, is a clock or parsing defect. least() skips a missing
         # timestamp; a missing fetched_at is check 2's to report. The boundary
         # is inclusive.
-        "observed_at_within_future_tolerance":
-            F.col("observed_at") > F.least(F.col("fetched_at"), F.col("produced_at")) + tolerance,
-        "currency_valid":
-            F.col("currency").isNull() | ~F.col("currency").rlike(_ISO_CURRENCY)
-            | ~F.col("currency").isin(list(context.allowed_currencies)),
+        "observed_at_within_future_tolerance": F.col("observed_at")
+        > F.least(F.col("fetched_at"), F.col("produced_at")) + tolerance,
+        "currency_valid": F.col("currency").isNull()
+        | ~F.col("currency").rlike(_ISO_CURRENCY)
+        | ~F.col("currency").isin(list(context.allowed_currencies)),
     }
 
 
-def _evaluate_silver(observations: DataFrame, context: "MarketplaceBatchContext") -> tuple[list[QualityResult], int]:
+def _evaluate_silver(observations: DataFrame, context: MarketplaceBatchContext) -> tuple[list[QualityResult], int]:
     predicates = _silver_row_checks(observations, context)
     aggregates = [F.count(F.lit(1)).alias("_total"), F.countDistinct("observation_id").alias("_distinct")]
     aggregates += [_violations(predicate).alias(name) for name, predicate in predicates.items()]
     totals = observations.agg(*aggregates).collect()[0]
 
     results = [
-        _counted(name, context, violations=int(totals[name]), frame=observations.filter(predicate), key=F.col("observation_id"))
+        _counted(
+            name,
+            context,
+            violations=int(totals[name]),
+            frame=observations.filter(predicate),
+            key=F.col("observation_id"),
+        )
         for name, predicate in predicates.items()
     ]
 
@@ -213,7 +221,8 @@ def _evaluate_silver(observations: DataFrame, context: "MarketplaceBatchContext"
     )
     results.append(
         _counted(
-            "offer_listing_key_unique", context,
+            "offer_listing_key_unique",
+            context,
             violations=listing.count(),
             frame=listing,
             key=F.concat_ws("/", F.col("marketplace_id"), F.col("platform_listing_id")),
@@ -223,13 +232,16 @@ def _evaluate_silver(observations: DataFrame, context: "MarketplaceBatchContext"
 
 
 def _evaluate_audit_reconciliation(
-    observations: DataFrame, attempts: DataFrame, runs: DataFrame, context: "MarketplaceBatchContext"
+    observations: DataFrame, attempts: DataFrame, runs: DataFrame, context: MarketplaceBatchContext
 ) -> QualityResult:
     name = "silver_parse_attempt_reconciliation"
     missing = {"crawl_run_id", "parsed_count"} - set(attempts.columns)
     if missing:
         return _result(
-            name, context, status=SKIPPED, observed_value=None,
+            name,
+            context,
+            status=SKIPPED,
+            observed_value=None,
             reason=f"crawl attempt audit lacks {','.join(sorted(missing))}",
         )
     if "completed_at" not in runs.columns:
@@ -240,7 +252,8 @@ def _evaluate_audit_reconciliation(
         return _result(name, context, status=SKIPPED, observed_value=None, reason="crawl attempt audit is empty")
 
     silver_runs = observations.groupBy("crawl_run_id").agg(
-        F.count(F.lit(1)).alias("_silver_rows"), F.max("observed_at").alias("_last_observed_at"),
+        F.count(F.lit(1)).alias("_silver_rows"),
+        F.max("observed_at").alias("_last_observed_at"),
     )
     audit_runs = attempts.groupBy("crawl_run_id").agg(F.sum("parsed_count").alias("_parsed"))
     run_ends = runs.select("crawl_run_id", F.col("completed_at").alias("_completed_at"), F.lit(True).alias("_audited"))
@@ -268,7 +281,7 @@ def _evaluate_audit_reconciliation(
 def _evaluate_gold(
     observations: DataFrame,
     marts: Mapping[str, DataFrame],
-    context: "MarketplaceBatchContext",
+    context: MarketplaceBatchContext,
     silver_rows: int,
 ) -> list[QualityResult]:
     results: list[QualityResult] = []
@@ -276,8 +289,11 @@ def _evaluate_gold(
     duplicated_offers = marts["offer_current"].groupBy("offer_id").count().filter(F.col("count") > 1)
     results.append(
         _counted(
-            "offer_current_single_row_per_offer", context,
-            violations=duplicated_offers.count(), frame=duplicated_offers, key=F.col("offer_id"),
+            "offer_current_single_row_per_offer",
+            context,
+            violations=duplicated_offers.count(),
+            frame=duplicated_offers,
+            key=F.col("offer_id"),
         )
     )
 
@@ -286,8 +302,10 @@ def _evaluate_gold(
     difference = abs(int(counted) - silver_rows)
     results.append(
         _result(
-            "gold_daily_row_count_reconciles", context,
-            status=PASS if difference == 0 else FAIL, observed_value=float(difference),
+            "gold_daily_row_count_reconciles",
+            context,
+            status=PASS if difference == 0 else FAIL,
+            observed_value=float(difference),
             keys=() if difference == 0 else (f"gold={int(counted)}", f"silver={silver_rows}"),
         )
     )
@@ -307,8 +325,10 @@ def _evaluate_gold(
     )
     results.append(
         _counted(
-            "gold_daily_price_aggregates_reconcile", context,
-            violations=divergent.count(), frame=divergent,
+            "gold_daily_price_aggregates_reconcile",
+            context,
+            violations=divergent.count(),
+            frame=divergent,
             key=F.concat_ws("/", F.col("offer_id"), F.col("observed_date")),
         )
     )
@@ -322,15 +342,18 @@ def _evaluate_gold(
     mislabelled = freshness.filter(stale_rule)
     results.append(
         _counted(
-            "freshness_rule_version_and_as_of_applied", context,
-            violations=mislabelled.count(), frame=mislabelled, key=F.col("offer_id"),
+            "freshness_rule_version_and_as_of_applied",
+            context,
+            violations=mislabelled.count(),
+            frame=mislabelled,
+            key=F.col("offer_id"),
         )
     )
     return results
 
 
 def _evaluate_advisory(
-    marts: Mapping[str, DataFrame], context: "MarketplaceBatchContext", silver_rows: int
+    marts: Mapping[str, DataFrame], context: MarketplaceBatchContext, silver_rows: int
 ) -> list[QualityResult]:
     results: list[QualityResult] = []
 
@@ -339,25 +362,37 @@ def _evaluate_advisory(
     # every "invalid" reason on it is MISSING_VALUE, so including those rows
     # would report a permanent hundred-percent invalid rate for any marketplace
     # that simply does not expose that counter.
-    counters = marts["counter_delta_daily"].filter(F.col("last_value").isNotNull()).agg(
-        F.coalesce(F.sum("invalid_transition_count"), F.lit(0)).alias("_invalid"),
-        F.coalesce(F.sum("valid_transition_count"), F.lit(0)).alias("_valid"),
-    ).collect()[0]
+    counters = (
+        marts["counter_delta_daily"]
+        .filter(F.col("last_value").isNotNull())
+        .agg(
+            F.coalesce(F.sum("invalid_transition_count"), F.lit(0)).alias("_invalid"),
+            F.coalesce(F.sum("valid_transition_count"), F.lit(0)).alias("_valid"),
+        )
+        .collect()[0]
+    )
     transitions = int(counters["_invalid"]) + int(counters["_valid"])
     invalid_rate = (int(counters["_invalid"]) / transitions) if transitions else 0.0
     results.append(
         _result(
-            "counter_invalid_transition_rate", context,
+            "counter_invalid_transition_rate",
+            context,
             status=PASS if invalid_rate <= _ADVISORY_MAJORITY else FAIL,
             observed_value=invalid_rate,
-            keys=() if invalid_rate <= _ADVISORY_MAJORITY else (f"invalid={int(counters['_invalid'])}", f"transitions={transitions}"),
+            keys=()
+            if invalid_rate <= _ADVISORY_MAJORITY
+            else (f"invalid={int(counters['_invalid'])}", f"transitions={transitions}"),
         )
     )
 
-    anomaly = marts["price_anomaly_daily"].agg(
-        F.count(F.lit(1)).alias("_rows"),
-        _violations(~F.col("anomaly_status").startswith("INSUFFICIENT")).alias("_evaluated"),
-    ).collect()[0]
+    anomaly = (
+        marts["price_anomaly_daily"]
+        .agg(
+            F.count(F.lit(1)).alias("_rows"),
+            _violations(~F.col("anomaly_status").startswith("INSUFFICIENT")).alias("_evaluated"),
+        )
+        .collect()[0]
+    )
     rows = int(anomaly["_rows"])
     coverage = (int(anomaly["_evaluated"]) / rows) if rows else 0.0
     # Zero coverage over a non-empty mart means the window or the minimum
@@ -365,7 +400,8 @@ def _evaluate_advisory(
     # even though it blocks nothing.
     results.append(
         _result(
-            "price_anomaly_evaluation_coverage", context,
+            "price_anomaly_evaluation_coverage",
+            context,
             status=FAIL if rows and coverage == 0.0 else PASS,
             observed_value=coverage,
             keys=() if not (rows and coverage == 0.0) else (f"offer_days={rows}",),
@@ -376,8 +412,10 @@ def _evaluate_advisory(
     missing_rate = coverage_mart.filter((F.col("eligible_offer_count") > 0) & F.col("coverage_rate").isNull())
     results.append(
         _counted(
-            "source_coverage_rate_denominator_present", context,
-            violations=missing_rate.count(), frame=missing_rate,
+            "source_coverage_rate_denominator_present",
+            context,
+            violations=missing_rate.count(),
+            frame=missing_rate,
             key=F.concat_ws("/", F.col("marketplace"), F.col("observed_date")),
         )
     )
@@ -386,8 +424,10 @@ def _evaluate_advisory(
     absent = silver_rows > 0 and reliability_rows == 0
     results.append(
         _result(
-            "crawl_reliability_evidence_present", context,
-            status=FAIL if absent else PASS, observed_value=float(reliability_rows),
+            "crawl_reliability_evidence_present",
+            context,
+            status=FAIL if absent else PASS,
+            observed_value=float(reliability_rows),
             keys=() if not absent else (f"silver_rows={silver_rows}",),
         )
     )
@@ -399,7 +439,7 @@ def evaluate_quality_gates(
     marts: Mapping[str, DataFrame],
     attempts: DataFrame,
     runs: DataFrame,
-    context: "MarketplaceBatchContext",
+    context: MarketplaceBatchContext,
 ) -> tuple[QualityResult, ...]:
     """Run every registered rule and return exactly one result for each.
 
@@ -425,7 +465,7 @@ def evaluate_quality_gates(
     return tuple(sorted(results, key=lambda result: order[result.check_name]))
 
 
-def decide(results: Sequence[QualityResult], context: "MarketplaceBatchContext") -> QualityDecision:
+def decide(results: Sequence[QualityResult], context: MarketplaceBatchContext) -> QualityDecision:
     """Turn results into the one decision that gates the manifest and the cache.
 
     A mandatory check that is missing or SKIPPED counts as a failure. Treating
@@ -439,9 +479,7 @@ def decide(results: Sequence[QualityResult], context: "MarketplaceBatchContext")
         result = by_name.get(name)
         if result is None or result.status != PASS:
             failures += 1
-    advisory_failures = sum(
-        1 for result in results if result.severity == ADVISORY and result.status == FAIL
-    )
+    advisory_failures = sum(1 for result in results if result.severity == ADVISORY and result.status == FAIL)
     return QualityDecision(
         run_id=context.run_id,
         passed=failures == 0,

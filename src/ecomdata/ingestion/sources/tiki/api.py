@@ -18,25 +18,13 @@ from __future__ import annotations
 import json
 import logging
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
 from typing import Any
 from urllib.parse import urlencode, urlparse
 
 import requests
 
-from ecomdata.domain.identity import make_seller_id
-from ecomdata.domain.observations import (
-    Availability,
-    MarketplaceOffer,
-    RawArtifact,
-    ResourceType,
-    create_marketplace_offer,
-    create_observation_event,
-    create_offer_observation,
-)
-from ecomdata.settings import CRAWL_HTTP_TIMEOUT_SECONDS, TIKI_LISTING_URL
-from ecomdata.ingestion.site_crawler import SiteCrawler
 from ecomdata.domain.acquisition import (
     AcquisitionStage,
     CanonicalRecordError,
@@ -46,6 +34,17 @@ from ecomdata.domain.acquisition import (
     ParsedListingPage,
     RecordRejection,
 )
+from ecomdata.domain.identity import make_seller_id
+from ecomdata.domain.observations import (
+    Availability,
+    RawArtifact,
+    ResourceType,
+    create_marketplace_offer,
+    create_observation_event,
+    create_offer_observation,
+)
+from ecomdata.ingestion.site_crawler import SiteCrawler
+from ecomdata.settings import CRAWL_HTTP_TIMEOUT_SECONDS, TIKI_LISTING_URL
 
 logger = logging.getLogger(__name__)
 
@@ -99,7 +98,7 @@ class TikiCrawler(SiteCrawler):
 
     def _now(self) -> datetime:
         """The observation instant. Callers inject a clock to make runs replayable."""
-        clock = getattr(self, "_clock", None) or (lambda: datetime.now(timezone.utc))
+        clock = getattr(self, "_clock", None) or (lambda: datetime.now(UTC))
         return clock()
 
     def fetch_listing_page(self, request: ListingPageRequest) -> FetchResult:

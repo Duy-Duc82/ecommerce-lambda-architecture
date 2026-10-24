@@ -4,20 +4,20 @@ The stored artifact is written by the production ``persist_fetch_result`` into
 a dict standing in for Bronze, so the sidecar under test has exactly the shape
 the crawler writes. A hand-written fixture would drift away from it silently.
 """
-from tests.paths import FIXTURES, REPO_ROOT
+
 import json
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import pytest
 
+from ecomdata.domain.acquisition import FetchResult, ListingPageRequest
 from ecomdata.domain.observations import (
     ResourceType,
     create_marketplace_offer,
     create_observation_event,
     create_offer_observation,
 )
-from ecomdata.domain.acquisition import FetchResult, ListingPageRequest
 from ecomdata.ingestion.raw_store import persist_fetch_result
 from ecomdata.ingestion.reparse import (
     ADAPTER_VERSION_CHANGED,
@@ -37,14 +37,17 @@ from ecomdata.ingestion.reparse import (
     reparse_raw_artifact,
     summarise,
 )
+from tests.paths import FIXTURES
 
-FETCHED_AT = datetime(2026, 9, 20, 8, 30, tzinfo=timezone.utc)
+FETCHED_AT = datetime(2026, 9, 20, 8, 30, tzinfo=UTC)
 CRAWL_RUN = "run-2026-09-20"
 BODY = json.dumps(
-    {"rows": [
-        {"listing_id": "L1", "title": "First product", "price": "100.00"},
-        {"listing_id": "L2", "title": "Second product", "price": "250.50"},
-    ]},
+    {
+        "rows": [
+            {"listing_id": "L1", "title": "First product", "price": "100.00"},
+            {"listing_id": "L2", "title": "Second product", "price": "250.50"},
+        ]
+    },
     sort_keys=True,
 ).encode("utf-8")
 
@@ -124,8 +127,11 @@ class FakeAdapter:
         from ecomdata.domain.acquisition import ParsedListingPage
 
         return ParsedListingPage(
-            observations=tuple(observations), rejections=(), source_record_count=len(rows),
-            duplicate_count=0, last_page=None,
+            observations=tuple(observations),
+            rejections=(),
+            source_record_count=len(rows),
+            duplicate_count=0,
+            last_page=None,
         )
 
 
@@ -133,17 +139,26 @@ def stored(*, body=BODY, adapter_version="fake-v1"):
     """Write one artifact the way the crawler does and return its reference."""
     store = FakeStore()
     request = ListingPageRequest(
-        marketplace_code="tiki", marketplace_id="marketplace-tiki", target="1846", page=1,
+        marketplace_code="tiki",
+        marketplace_id="marketplace-tiki",
+        target="1846",
+        page=1,
         resource_type=ResourceType.LISTING_PAGE,
     )
     fetch_result = FetchResult(
         request_url="https://tiki.vn/api/listing?category=1846&page=1",
-        fetched_at=FETCHED_AT, http_status=200, content_type="application/json", body=body,
+        fetched_at=FETCHED_AT,
+        http_status=200,
+        content_type="application/json",
+        body=body,
         elapsed_ms=120,
     )
     persisted = persist_fetch_result(
-        request=request, fetch_result=fetch_result, crawl_run_id=CRAWL_RUN,
-        adapter_version=adapter_version, writer=store.write,
+        request=request,
+        fetch_result=fetch_result,
+        crawl_run_id=CRAWL_RUN,
+        adapter_version=adapter_version,
+        writer=store.write,
     )
     ref = RawArtifactRef(
         marketplace_code="tiki",
@@ -156,7 +171,7 @@ def stored(*, body=BODY, adapter_version="fake-v1"):
 
 
 def clock(offset_seconds=0):
-    return lambda: datetime(2026, 9, 30, tzinfo=timezone.utc) + timedelta(seconds=offset_seconds)
+    return lambda: datetime(2026, 9, 30, tzinfo=UTC) + timedelta(seconds=offset_seconds)
 
 
 def test_the_reference_points_at_what_the_crawler_actually_wrote():
@@ -284,7 +299,10 @@ def test_a_batch_grades_every_artifact_against_silver():
     baseline = reparse_raw_artifact(ref, adapter=FakeAdapter(), reader=store.read, clock=clock())
 
     outcomes = reparse_batch(
-        [ref], adapter_for=lambda code: FakeAdapter(), reader=store.read, clock=clock(),
+        [ref],
+        adapter_for=lambda code: FakeAdapter(),
+        reader=store.read,
+        clock=clock(),
         existing=baseline.content_hashes,
     )
 
@@ -297,7 +315,7 @@ def test_the_report_counts_statuses_and_names_only_identifiers():
         ReparseOutcome("artifact-2", DIVERGED, diverged_observation_ids=("obs-1",), error_type="ContentDiverged"),
     )
 
-    report = summarise(outcomes, reported_at=datetime(2026, 9, 30, tzinfo=timezone.utc))
+    report = summarise(outcomes, reported_at=datetime(2026, 9, 30, tzinfo=UTC))
 
     assert report["counts"] == {DIVERGED: 1, IDENTICAL: 1}
     assert report["problems"][0]["raw_artifact_id"] == "artifact-2"
@@ -310,10 +328,20 @@ def test_the_cli_exits_non_zero_when_an_artifact_is_not_identical(monkeypatch, c
 
     monkeypatch.setattr(reparse, "reparse_batch", lambda *a, **k: (ReparseOutcome("artifact-1", DIVERGED),))
 
-    code = main([
-        "--marketplace", "tiki", "--observed-date", "2026-09-20", "--hour", "08",
-        "--crawl-run-id", CRAWL_RUN, "--raw-artifact-id", "artifact-1",
-    ])
+    code = main(
+        [
+            "--marketplace",
+            "tiki",
+            "--observed-date",
+            "2026-09-20",
+            "--hour",
+            "08",
+            "--crawl-run-id",
+            CRAWL_RUN,
+            "--raw-artifact-id",
+            "artifact-1",
+        ]
+    )
 
     assert code == 1
     assert json.loads(capsys.readouterr().out)["counts"] == {DIVERGED: 1}
@@ -325,10 +353,20 @@ def test_the_cli_exits_zero_when_every_artifact_is_identical(monkeypatch, capsys
 
     monkeypatch.setattr(reparse, "reparse_batch", lambda *a, **k: (ReparseOutcome("artifact-1", IDENTICAL),))
 
-    code = main([
-        "--marketplace", "tiki", "--observed-date", "2026-09-20", "--hour", "08",
-        "--crawl-run-id", CRAWL_RUN, "--raw-artifact-id", "artifact-1",
-    ])
+    code = main(
+        [
+            "--marketplace",
+            "tiki",
+            "--observed-date",
+            "2026-09-20",
+            "--hour",
+            "08",
+            "--crawl-run-id",
+            CRAWL_RUN,
+            "--raw-artifact-id",
+            "artifact-1",
+        ]
+    )
 
     assert code == 0
     assert json.loads(capsys.readouterr().out)["counts"] == {IDENTICAL: 1}
@@ -349,12 +387,10 @@ def test_the_content_hash_ignores_only_the_envelope_produced_at():
 # the adapter is the production TikiCrawler and Silver is laid out by the
 # production sink path, so neither half can drift into agreeing with a fake.
 # ----------------------------------------------------------------------------
-from pathlib import Path
 
 from ecomdata.domain.serialization import serialize_for_wire
-from ecomdata.ingestion.site_crawler import SiteCrawler
-from ecomdata.ingestion.sources.tiki.api import TikiCrawler
 from ecomdata.ingestion.silver_sink import silver_observation_path
+from ecomdata.ingestion.sources.tiki.api import TikiCrawler
 
 TIKI_BODY = (FIXTURES / "tiki_listing_sample.json").read_bytes()
 
@@ -372,15 +408,21 @@ def stored_tiki_with_silver(monkeypatch, *, tamper=None):
     """A Tiki artifact in Bronze plus the Silver records its ingest produced."""
     forbid_network(monkeypatch)
     store, ref = stored(body=TIKI_BODY, adapter_version=TikiCrawler.adapter_version)
-    original = reparse_raw_artifact(ref, adapter=TikiCrawler(categories=[], fetch_robots=False), reader=store.read, clock=clock())
+    original = reparse_raw_artifact(
+        ref, adapter=TikiCrawler(categories=[], fetch_robots=False), reader=store.read, clock=clock()
+    )
     assert original.status == IDENTICAL and original.observation_ids
-    from ecomdata.ingestion.reparse import _rebuild, load_raw_artifact as load
+    from ecomdata.ingestion.reparse import _rebuild
+    from ecomdata.ingestion.reparse import load_raw_artifact as load
 
     metadata, body = load(ref, reader=store.read)
     request, fetch_result, artifact = _rebuild(ref, metadata, body)
     parsed = TikiCrawler(categories=[], fetch_robots=False).parse_listing_page(
-        request=request, fetch_result=fetch_result, raw_artifact=artifact,
-        crawl_run_id=artifact.crawl_run_id, produced_at=FETCHED_AT,
+        request=request,
+        fetch_result=fetch_result,
+        raw_artifact=artifact,
+        crawl_run_id=artifact.crawl_run_id,
+        produced_at=FETCHED_AT,
     )
     for index, event in enumerate(parsed.observations):
         document = serialize_for_wire(event)
@@ -397,8 +439,17 @@ def stored_tiki_with_silver(monkeypatch, *, tamper=None):
 
 def cli_args(ref, *extra):
     return [
-        "--marketplace", ref.marketplace_code, "--observed-date", ref.observed_date, "--hour", ref.hour,
-        "--crawl-run-id", ref.crawl_run_id, "--raw-artifact-id", ref.raw_artifact_id, *extra,
+        "--marketplace",
+        ref.marketplace_code,
+        "--observed-date",
+        ref.observed_date,
+        "--hour",
+        ref.hour,
+        "--crawl-run-id",
+        ref.crawl_run_id,
+        "--raw-artifact-id",
+        ref.raw_artifact_id,
+        *extra,
     ]
 
 
@@ -473,10 +524,17 @@ def test_the_sink_lands_silver_where_the_reparse_looks_for_it():
 
     metadata, body = load_raw_artifact(ref, reader=store.read)
     request, fetch_result, artifact = reparse._rebuild(ref, metadata, body)
-    event = FakeAdapter().parse_listing_page(
-        request=request, fetch_result=fetch_result, raw_artifact=artifact,
-        crawl_run_id=CRAWL_RUN, produced_at=FETCHED_AT,
-    ).observations[0]
+    event = (
+        FakeAdapter()
+        .parse_listing_page(
+            request=request,
+            fetch_result=fetch_result,
+            raw_artifact=artifact,
+            crawl_run_id=CRAWL_RUN,
+            produced_at=FETCHED_AT,
+        )
+        .observations[0]
+    )
 
     path = silver_observation_path(event)
 
@@ -487,6 +545,7 @@ def test_the_sink_lands_silver_where_the_reparse_looks_for_it():
 
 
 # --- a raw_uri out of the audit, back into the five components it addresses --
+
 
 def test_a_raw_uri_round_trips_through_the_reference_that_built_it():
     from ecomdata.ingestion.reparse import RawArtifactRef
@@ -511,5 +570,6 @@ def test_a_raw_uri_missing_a_component_is_an_error_not_a_guess():
     # Reparsing the wrong artifact would report a divergence that is really a
     # lookup bug, so a path that does not address one is refused.
     with pytest.raises(ValueError, match="missing hour, crawl_run_id, raw_artifact_id"):
-        RawArtifactRef.from_uri("s3a://ecommerce-bronze/marketplace/raw/marketplace=tiki/"
-                                "observed_date=2026-10-04/body.bin")
+        RawArtifactRef.from_uri(
+            "s3a://ecommerce-bronze/marketplace/raw/marketplace=tiki/observed_date=2026-10-04/body.bin"
+        )

@@ -5,7 +5,7 @@ the DDL, the Superset provisioning, the publisher and the quality registry from
 drifting away from it: a column added to one and not the other fails here,
 before a publish fails at night.
 """
-from tests.paths import FIXTURES, REPO_ROOT
+
 import re
 from pathlib import Path
 
@@ -26,6 +26,7 @@ from ecomdata.domain.datasets import (
     dataset,
     datasets_of_kind,
 )
+from tests.paths import REPO_ROOT
 
 ROOT = REPO_ROOT
 INIT_SQL = ROOT / "scripts" / "init_postgres.sql"
@@ -81,8 +82,11 @@ def test_registry_holds_ten_marts_and_the_twelve_star_tables():
     assert len(STAR) == 12
     assert {d.kind for d in STAR} == {DIM, BRIDGE, FACT}
     assert [d.name for d in datasets_of_kind(FACT)] == [
-        "fact_offer_observation", "fact_price_snapshot_daily", "fact_price_change",
-        "fact_counter_daily", "fact_crawl_attempt",
+        "fact_offer_observation",
+        "fact_price_snapshot_daily",
+        "fact_price_change",
+        "fact_counter_daily",
+        "fact_crawl_attempt",
     ]
     assert len(datasets_of_kind(DIM)) == 6
 
@@ -129,7 +133,9 @@ def test_superset_datasources_register_every_mart_in_cache():
     entries = set(re.findall(r"- table_name: (\w+)\s*\n\s*schema: (\w+)", text))
     for mart in MARTS:
         assert (mart.postgres_table, CACHE_SCHEMA) in entries, mart.postgres_table
-    marketplace_cache = {table for table, schema in entries if schema == CACHE_SCHEMA and table.startswith("marketplace_")}
+    marketplace_cache = {
+        table for table, schema in entries if schema == CACHE_SCHEMA and table.startswith("marketplace_")
+    }
     assert marketplace_cache == {d.postgres_table for d in MARTS}
 
 
@@ -154,9 +160,9 @@ def test_superset_dashboards_name_registered_marts_only():
 
 
 def test_quality_registry_and_publisher_read_the_registry():
+    from ecomdata.domain.quality_rules import GOLD_DATASETS
     from ecomdata.processing.batch.manifest import _DAILY_PARTITIONS
     from ecomdata.processing.batch.repositories import DATASET_COLUMNS, DATASETS
-    from ecomdata.domain.quality_rules import GOLD_DATASETS
 
     assert tuple(GOLD_DATASETS) == MART_NAMES
     assert tuple(DATASETS) == MART_NAMES

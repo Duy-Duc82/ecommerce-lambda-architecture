@@ -1,24 +1,22 @@
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import pytest
 
-from ecomdata.domain.observations import ResourceType, create_marketplace_offer, create_observation_event, create_offer_observation
-from ecomdata.ingestion.pipeline import acquire_listing_page
 from ecomdata.domain.acquisition import (
     AcquisitionStage,
     AcquisitionStatus,
     FetchResult,
-    ListingPageRequest,
     ListingPageParseError,
+    ListingPageRequest,
     ParsedListingPage,
-    RecordRejection,
     RawPersistenceError,
+    RecordRejection,
 )
-from ecomdata.ingestion.raw_store import persist_fetch_result
+from ecomdata.domain.observations import create_marketplace_offer, create_observation_event, create_offer_observation
+from ecomdata.ingestion.pipeline import acquire_listing_page
 
-
-UTC = timezone.utc
+UTC = UTC
 START = datetime(2026, 9, 4, 8, 30, tzinfo=UTC)
 FETCHED = START + timedelta(seconds=1)
 PRODUCED = START + timedelta(seconds=2)

@@ -10,6 +10,7 @@ This module holds names and expectations only. It imports nothing from
 ``batch_layer`` so that the contract can be read, and its spelling checked,
 without starting Spark.
 """
+
 from __future__ import annotations
 
 import re
@@ -49,71 +50,105 @@ class QualityRule:
 
 QUALITY_RULES: tuple[QualityRule, ...] = (
     QualityRule(
-        "raw_artifact_checksum_and_uri_present", MANDATORY, "silver",
+        "raw_artifact_checksum_and_uri_present",
+        MANDATORY,
+        "silver",
         "every observation carries a non-empty raw_uri and a 64-character hexadecimal raw_sha256",
     ),
     QualityRule(
-        "silver_observation_raw_lineage_complete", MANDATORY, "silver",
+        "silver_observation_raw_lineage_complete",
+        MANDATORY,
+        "silver",
         "every observation carries crawl_run_id, adapter_version and fetched_at",
     ),
     QualityRule(
-        "observation_id_unique", MANDATORY, "silver",
+        "observation_id_unique",
+        MANDATORY,
+        "silver",
         "the count of distinct observation_id equals the row count",
     ),
     QualityRule(
-        "offer_key_and_price_complete", MANDATORY, "silver",
+        "offer_key_and_price_complete",
+        MANDATORY,
+        "silver",
         "offer_id, marketplace, observed_at and current_price are all non-null",
     ),
     QualityRule(
-        "price_non_negative", MANDATORY, "silver",
+        "price_non_negative",
+        MANDATORY,
+        "silver",
         "current_price is at least zero and list_price is null or at least zero",
     ),
     QualityRule(
-        "observed_at_within_future_tolerance", MANDATORY, "silver",
+        "observed_at_within_future_tolerance",
+        MANDATORY,
+        "silver",
         "observed_at is no later than the row's own fetched_at and produced_at plus the configured future tolerance",
     ),
     QualityRule(
-        "currency_valid", MANDATORY, "silver",
+        "currency_valid",
+        MANDATORY,
+        "silver",
         "currency is a three-letter uppercase code inside the configured allowlist",
     ),
     QualityRule(
-        "silver_parse_attempt_reconciliation", MANDATORY, "audit",
+        "silver_parse_attempt_reconciliation",
+        MANDATORY,
+        "audit",
         "per crawl run present in this input that settled inside the reconciliation lookback, the Silver observation count equals the audit parsed_count",
     ),
     QualityRule(
-        "offer_listing_key_unique", MANDATORY, "silver",
+        "offer_listing_key_unique",
+        MANDATORY,
+        "silver",
         "no marketplace_id and platform_listing_id pair maps to more than one offer_id",
     ),
     QualityRule(
-        "offer_current_single_row_per_offer", MANDATORY, "offer_current",
+        "offer_current_single_row_per_offer",
+        MANDATORY,
+        "offer_current",
         "offer_current holds exactly one row per offer_id",
     ),
     QualityRule(
-        "gold_daily_row_count_reconciles", MANDATORY, "offer_price_history_daily",
+        "gold_daily_row_count_reconciles",
+        MANDATORY,
+        "offer_price_history_daily",
         "the sum of observation_count equals the deduplicated Silver row count",
     ),
     QualityRule(
-        "gold_daily_price_aggregates_reconcile", MANDATORY, "offer_price_history_daily",
+        "gold_daily_price_aggregates_reconcile",
+        MANDATORY,
+        "offer_price_history_daily",
         "per offer and observed date, min_price and max_price equal a direct recomputation from Silver",
     ),
     QualityRule(
-        "freshness_rule_version_and_as_of_applied", MANDATORY, "offer_freshness",
+        "freshness_rule_version_and_as_of_applied",
+        MANDATORY,
+        "offer_freshness",
         "every row carries the run as_of and freshness rule version and a non-null freshness status",
     ),
     QualityRule(
-        "counter_invalid_transition_rate", ADVISORY, "counter_delta_daily",
+        "counter_invalid_transition_rate",
+        ADVISORY,
+        "counter_delta_daily",
         "the share of public-counter transitions marked invalid is reported for review",
     ),
     QualityRule(
-        "price_anomaly_evaluation_coverage", ADVISORY, "price_anomaly_daily",
+        "price_anomaly_evaluation_coverage",
+        ADVISORY,
+        "price_anomaly_daily",
         "the share of offer-days with enough baseline history to be evaluated is reported for review",
     ),
     QualityRule(
-        "source_coverage_rate_denominator_present", ADVISORY, "source_coverage_daily",
+        "source_coverage_rate_denominator_present",
+        ADVISORY,
+        "source_coverage_daily",
         "coverage_rate is non-null wherever eligible_offer_count is positive",
     ),
     QualityRule(
-        "crawl_reliability_evidence_present", ADVISORY, "crawl_reliability_daily",
+        "crawl_reliability_evidence_present",
+        ADVISORY,
+        "crawl_reliability_daily",
         "crawl_reliability_daily is non-empty whenever Silver holds observations",
     ),
 )

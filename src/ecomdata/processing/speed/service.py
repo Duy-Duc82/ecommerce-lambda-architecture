@@ -12,42 +12,55 @@ Run inside the Spark 4 image, where the Kafka connector is on the classpath:
 
     python -m ecomdata.processing.speed.service
 """
+
 from __future__ import annotations
 
 import argparse
 import json
 import math
-from datetime import datetime, timezone
-from typing import Any, Callable, Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping
+from datetime import UTC, datetime
+from typing import Any
 
 from pyspark.sql import DataFrame, SparkSession
 from pyspark.sql import functions as F
 
+from ecomdata.domain.change_rules import ChangeRuleConfig
+from ecomdata.processing.speed import stream as layer
+from ecomdata.processing.speed.stream import SPEED_OUTPUT_SCHEMA
 from ecomdata.settings import (
-    MARKETPLACE_CHANGE_RULE_VERSION, MARKETPLACE_LARGE_DROP_ABSOLUTE, MARKETPLACE_LARGE_DROP_RELATIVE,
-    MARKETPLACE_SPEED_QUERY_NAME, MARKETPLACE_SPEED_SHUFFLE_PARTITIONS, MARKETPLACE_STALE_AFTER_SECONDS,
+    MARKETPLACE_CHANGE_RULE_VERSION,
+    MARKETPLACE_LARGE_DROP_ABSOLUTE,
+    MARKETPLACE_LARGE_DROP_RELATIVE,
+    MARKETPLACE_SPEED_QUERY_NAME,
+    MARKETPLACE_SPEED_SHUFFLE_PARTITIONS,
+    MARKETPLACE_STALE_AFTER_SECONDS,
     MARKETPLACE_STREAM_TRIGGER,
     SPARK_KAFKA_PACKAGE,
 )
-from ecomdata.processing.speed import stream as layer
-from ecomdata.domain.change_rules import ChangeRuleConfig
-from ecomdata.processing.speed.stream import SPEED_OUTPUT_SCHEMA
 
 
 def default_config() -> ChangeRuleConfig:
-    return ChangeRuleConfig(MARKETPLACE_CHANGE_RULE_VERSION, MARKETPLACE_LARGE_DROP_ABSOLUTE,
-                            MARKETPLACE_LARGE_DROP_RELATIVE, MARKETPLACE_STALE_AFTER_SECONDS)
+    return ChangeRuleConfig(
+        MARKETPLACE_CHANGE_RULE_VERSION,
+        MARKETPLACE_LARGE_DROP_ABSOLUTE,
+        MARKETPLACE_LARGE_DROP_RELATIVE,
+        MARKETPLACE_STALE_AFTER_SECONDS,
+    )
 
 
 def speed_outputs(raw: DataFrame, config: ChangeRuleConfig) -> DataFrame:
     """State, change and duplicate/late rows, plus every invalid record."""
     valid, invalid = layer.decode_observation_stream(raw)
     changes = layer.build_change_stream(valid, config)
-    shaped = invalid.select(*[
-        F.col(field.name).cast(field.dataType) if field.name in invalid.columns
-        else F.lit(None).cast(field.dataType).alias(field.name)
-        for field in SPEED_OUTPUT_SCHEMA.fields
-    ])
+    shaped = invalid.select(
+        *[
+            F.col(field.name).cast(field.dataType)
+            if field.name in invalid.columns
+            else F.lit(None).cast(field.dataType).alias(field.name)
+            for field in SPEED_OUTPUT_SCHEMA.fields
+        ]
+    )
     return changes.select(*SPEED_OUTPUT_SCHEMA.names).unionByName(shaped)
 
 
@@ -60,25 +73,42 @@ def start_query(
     query_name: str = MARKETPLACE_SPEED_QUERY_NAME,
 ) -> Any:
     outputs = speed_outputs(read(spark), config or default_config())
-    return (outputs.writeStream
-            .queryName(query_name)
-            .option("checkpointLocation", layer.checkpoint_path())
-            .trigger(processingTime=trigger)
-            .outputMode("append")
-            .foreachBatch(layer.write_marketplace_batch)
-            .start())
+    return (
+        outputs.writeStream.queryName(query_name)
+        .option("checkpointLocation", layer.checkpoint_path())
+        .trigger(processingTime=trigger)
+        .outputMode("append")
+        .foreachBatch(layer.write_marketplace_batch)
+        .start()
+    )
 
 
 # -- Phase 9 plan section 6.1: Spark's own progress, one row per micro-batch --
 
 _DURATIONS = {
-    "trigger_execution_ms": "triggerExecution", "add_batch_ms": "addBatch", "get_batch_ms": "getBatch",
-    "latest_offset_ms": "latestOffset", "query_planning_ms": "queryPlanning", "wal_commit_ms": "walCommit",
+    "trigger_execution_ms": "triggerExecution",
+    "add_batch_ms": "addBatch",
+    "get_batch_ms": "getBatch",
+    "latest_offset_ms": "latestOffset",
+    "query_planning_ms": "queryPlanning",
+    "wal_commit_ms": "walCommit",
     "commit_offsets_ms": "commitOffsets",
 }
-PROGRESS_COLUMNS = ("query_name", "query_id", "batch_id", "run_id", "progress_at", "recorded_at", "num_input_rows",
-                    "input_rows_per_second", "processed_rows_per_second", "batch_duration_ms",
-                    *_DURATIONS, "state_rows_total", "state_memory_bytes")
+PROGRESS_COLUMNS = (
+    "query_name",
+    "query_id",
+    "batch_id",
+    "run_id",
+    "progress_at",
+    "recorded_at",
+    "num_input_rows",
+    "input_rows_per_second",
+    "processed_rows_per_second",
+    "batch_duration_ms",
+    *_DURATIONS,
+    "state_rows_total",
+    "state_memory_bytes",
+)
 
 
 def _as_mapping(progress: Any) -> Mapping[str, Any]:
@@ -136,8 +166,13 @@ class ProgressRecorder:
     checkpoint, which is what ``audit.marketplace_speed_batch`` is keyed by.
     """
 
-    def __init__(self, connection_factory: Callable[[], Any], *, query_name: str = MARKETPLACE_SPEED_QUERY_NAME,
-                 clock: Callable[[], datetime] = lambda: datetime.now(timezone.utc)) -> None:
+    def __init__(
+        self,
+        connection_factory: Callable[[], Any],
+        *,
+        query_name: str = MARKETPLACE_SPEED_QUERY_NAME,
+        clock: Callable[[], datetime] = lambda: datetime.now(UTC),
+    ) -> None:
         self.connection_factory, self.query_name, self.clock = connection_factory, query_name, clock
         self.seen: set[tuple[str, int]] = set()
 
@@ -156,9 +191,11 @@ class ProgressRecorder:
         placeholders = ",".join(["%s"] * len(PROGRESS_COLUMNS))
         with self.connection_factory() as conn, conn.cursor() as cur:
             for row in rows:
-                cur.execute(f"INSERT INTO audit.marketplace_stream_progress ({','.join(PROGRESS_COLUMNS)}) "
-                            f"VALUES ({placeholders}) ON CONFLICT (query_name, query_id, batch_id) DO NOTHING",
-                            tuple(row[c] for c in PROGRESS_COLUMNS))
+                cur.execute(
+                    f"INSERT INTO audit.marketplace_stream_progress ({','.join(PROGRESS_COLUMNS)}) "
+                    f"VALUES ({placeholders}) ON CONFLICT (query_name, query_id, batch_id) DO NOTHING",
+                    tuple(row[c] for c in PROGRESS_COLUMNS),
+                )
         self.seen.update((row["query_id"], row["batch_id"]) for row in rows)
         return len(rows)
 
@@ -169,12 +206,13 @@ def record_progress_safely(recorder: ProgressRecorder, query: Any) -> None:
     try:
         recorder.record(query.recentProgress)
     except Exception as error:  # noqa: BLE001
-        print(json.dumps({"event": "progress_record_failed", "error": f"{type(error).__name__}: {error}"[:500]}),
-              flush=True)
+        print(
+            json.dumps({"event": "progress_record_failed", "error": f"{type(error).__name__}: {error}"[:500]}),
+            flush=True,
+        )
 
 
-def await_query(query: Any, *, stop: Any, poll_seconds: float = 5,
-                on_poll: Callable[[], None] | None = None) -> None:
+def await_query(query: Any, *, stop: Any, poll_seconds: float = 5, on_poll: Callable[[], None] | None = None) -> None:
     """Block until the query ends by itself, or stop it once asked to.
 
     ``query.stop()`` cancels a micro-batch in progress rather than waiting
@@ -191,10 +229,12 @@ def await_query(query: Any, *, stop: Any, poll_seconds: float = 5,
 
 
 def build_spark() -> SparkSession:
-    builder = (SparkSession.builder.appName(MARKETPLACE_SPEED_QUERY_NAME)
-               .config("spark.sql.session.timeZone", "UTC")
-               # Fixed in the checkpoint on first run; see the setting.
-               .config("spark.sql.shuffle.partitions", str(MARKETPLACE_SPEED_SHUFFLE_PARTITIONS)))
+    builder = (
+        SparkSession.builder.appName(MARKETPLACE_SPEED_QUERY_NAME)
+        .config("spark.sql.session.timeZone", "UTC")
+        # Fixed in the checkpoint on first run; see the setting.
+        .config("spark.sql.shuffle.partitions", str(MARKETPLACE_SPEED_SHUFFLE_PARTITIONS))
+    )
     # Empty inside the Spark 4 image, whose jars are baked in; set on a host
     # that must resolve the connector at start.
     if SPARK_KAFKA_PACKAGE:
@@ -203,7 +243,9 @@ def build_spark() -> SparkSession:
 
 
 def main() -> None:
-    argparse.ArgumentParser(description="Long-running marketplace speed query (Kafka -> changes, ES, Redis)").parse_args()
+    argparse.ArgumentParser(
+        description="Long-running marketplace speed query (Kafka -> changes, ES, Redis)"
+    ).parse_args()
     from ecomdata.infra.lifecycle import StopSignal, install_signal_handlers
 
     stop = StopSignal()

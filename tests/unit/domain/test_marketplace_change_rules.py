@@ -1,16 +1,10 @@
 """Pure change-rule tests, items 1-17 of the Phase 5 plan section 13."""
 from dataclasses import replace
-from datetime import timedelta, timezone
+from datetime import UTC, timedelta, timezone
 from decimal import Decimal
 
 import pytest
 
-from ecomdata.domain.identity import make_change_id
-from ecomdata.domain.observations import (
-    Availability,
-    MarketplaceChangeType,
-    create_observation_event,
-)
 from ecomdata.domain.change_rules import (
     ChangeRuleConfig,
     ObservationDisposition,
@@ -20,12 +14,17 @@ from ecomdata.domain.change_rules import (
     offer_state_to_json,
     state_from_observation,
 )
+from ecomdata.domain.identity import make_change_id
+from ecomdata.domain.observations import (
+    Availability,
+    MarketplaceChangeType,
+    create_observation_event,
+)
 from tests.unit.domain.test_marketplace_schema import (
     OBSERVED_AT,
     make_observation,
     make_offer,
 )
-
 
 CONFIG = ChangeRuleConfig("speed-rules.v1", Decimal("20"), Decimal("0.2"), 10)
 
@@ -76,7 +75,7 @@ def test_state_json_round_trip_preserves_decimal_null_and_utc():
     assert restored.list_price is None
     assert restored.rating_value is None
     assert restored.seller_id is None
-    assert restored.observed_at.tzinfo == timezone.utc
+    assert restored.observed_at.tzinfo == UTC
     assert restored.observed_at == OBSERVED_AT
 
 

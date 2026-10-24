@@ -12,6 +12,7 @@ reads ``MISSING`` (the command exits 1), or ``MANUAL`` for what a person
 supplies: screenshots, the demo recording, the limitations prose. Each item
 carries its dataset label, so a replayed number is never read as a live one.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -19,11 +20,12 @@ import json
 import shutil
 import subprocess
 import sys
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 from decimal import Decimal
 from pathlib import Path
-from typing import Any, Callable, Mapping
+from typing import Any
 
 ROOT = Path(__file__).resolve().parents[3]
 OPS = ROOT / "data" / "ops"
@@ -33,17 +35,24 @@ EVIDENCE = OPS / "evidence"
 @dataclass(frozen=True)
 class Item:
     """One line of Brief section 25, and where its evidence lives in the bundle."""
+
     title: str
-    paths: tuple[str, ...]           # relative to the bundle; any one present satisfies the item
-    dataset: str                     # live, replayed_fixture, stub stack, repository, manual
+    paths: tuple[str, ...]  # relative to the bundle; any one present satisfies the item
+    dataset: str  # live, replayed_fixture, stub stack, repository, manual
     manual: bool = False
     note: str = ""
 
 
 ITEMS: tuple[Item, ...] = (
-    Item("Source feasibility matrix", ("docs/SOURCE_FEASIBILITY.md",), "repository",
-         note="Brief §3/P0-01; the evidence so far is spread over PROGRESS.md §4a"),
-    Item("Monitored-universe definition and volume projection", ("universe/live.env", "evaluation/storage.json"), "live"),
+    Item(
+        "Source feasibility matrix",
+        ("docs/SOURCE_FEASIBILITY.md",),
+        "repository",
+        note="Brief §3/P0-01; the evidence so far is spread over PROGRESS.md §4a",
+    ),
+    Item(
+        "Monitored-universe definition and volume projection", ("universe/live.env", "evaluation/storage.json"), "live"
+    ),
     Item("Crawl-run audit samples", ("samples/crawl_runs.json",), "live"),
     Item("Raw artifact and raw-to-Silver lineage example", ("samples/lineage.json",), "live"),
     Item("Adapter version / schema-drift example", ("integration/drills/d7.json",), "stub stack, fault injected"),
@@ -55,12 +64,21 @@ ITEMS: tuple[Item, ...] = (
     Item("Spark streaming p50/p95 latency", ("bench/speed",), "replayed_fixture"),
     Item("Batch runtime and rows/second", ("bench/batch",), "replayed_fixture"),
     Item("Raw/Parquet storage growth", ("evaluation/storage.json",), "live"),
-    Item("Replay/idempotency/restart test results", ("tests/junit.xml", "integration/drills/d5.json"), "repository, stub stack"),
+    Item(
+        "Replay/idempotency/restart test results",
+        ("tests/junit.xml", "integration/drills/d5.json"),
+        "repository, stub stack",
+    ),
     Item("Price history/change/anomaly examples", ("samples/price_examples.json",), "live"),
     Item("Superset/Kibana screenshots", (), "manual", manual=True),
     Item("Hardware/software/test configuration", ("environment.json",), "this machine"),
-    Item("Limitations and failed experiments", (), "manual", manual=True,
-         note="report prose; PROGRESS.md records each failed run and production bug"),
+    Item(
+        "Limitations and failed experiments",
+        (),
+        "manual",
+        manual=True,
+        note="report prose; PROGRESS.md records each failed run and production bug",
+    ),
     Item("Recorded fallback demo", (), "manual", manual=True, note="docs/DEMO_SCRIPT.md; the video stays outside git"),
 )
 
@@ -72,8 +90,14 @@ def item_status(item: Item, bundle: Path) -> str:
 
 
 def render_index(bundle: Path, items: tuple[Item, ...] = ITEMS, *, header: Mapping[str, Any]) -> tuple[str, list[str]]:
-    lines = ["# Evidence bundle", "", *(f"- **{k}:** {v}" for k, v in header.items()), "",
-             "| # | Brief §25 item | status | dataset | evidence | note |", "|---:|---|---|---|---|---|"]
+    lines = [
+        "# Evidence bundle",
+        "",
+        *(f"- **{k}:** {v}" for k, v in header.items()),
+        "",
+        "| # | Brief §25 item | status | dataset | evidence | note |",
+        "|---:|---|---|---|---|---|",
+    ]
     missing = []
     for n, item in enumerate(items, 1):
         status = item_status(item, bundle)
@@ -98,6 +122,7 @@ def _latest(folder: Path, pattern: str) -> Path | None:
 
 
 # -- collectors: each writes into the bundle and may fail on its own -----------
+
 
 def copy_repository_docs(bundle: Path) -> None:
     for rel in ("docs/SOURCE_FEASIBILITY.md",):
@@ -140,10 +165,14 @@ def copy_runs(bundle: Path) -> None:
 SAMPLES: dict[str, str] = {
     "crawl_runs.json": "SELECT * FROM audit.crawl_run ORDER BY started_at DESC LIMIT 20",
     "quality_results.json": "SELECT * FROM audit.marketplace_quality_result ORDER BY checked_at DESC LIMIT 50",
-    "price_examples.json": ("SELECT * FROM cache.marketplace_offer_change_daily WHERE price_change_count > 0 "
-                            "ORDER BY observed_date DESC, max_price_drop DESC NULLS LAST LIMIT 30"),
-    "anomaly_examples.json": ("SELECT * FROM cache.marketplace_price_anomaly_daily "
-                              "ORDER BY observed_date DESC, robust_score DESC NULLS LAST LIMIT 30"),
+    "price_examples.json": (
+        "SELECT * FROM cache.marketplace_offer_change_daily WHERE price_change_count > 0 "
+        "ORDER BY observed_date DESC, max_price_drop DESC NULLS LAST LIMIT 30"
+    ),
+    "anomaly_examples.json": (
+        "SELECT * FROM cache.marketplace_price_anomaly_daily "
+        "ORDER BY observed_date DESC, robust_score DESC NULLS LAST LIMIT 30"
+    ),
 }
 
 
@@ -153,21 +182,51 @@ def collect_samples(bundle: Path, query: Callable[[str], list[dict[str, Any]]]) 
     for name, sql in SAMPLES.items():
         rows = query(sql)
         if rows:
-            (out / name).write_text(json.dumps([{k: _jsonable(v) for k, v in r.items()} for r in rows],
-                                               indent=2, sort_keys=True, default=str) + "\n", encoding="utf-8")
-    lineage = query("SELECT a.crawl_run_id, a.task_id, a.raw_uri, a.raw_bytes, a.parsed_count, a.started_at "
-                    "FROM audit.crawl_request_attempt a WHERE a.parsed_count > 0 ORDER BY a.started_at DESC LIMIT 1")
+            (out / name).write_text(
+                json.dumps(
+                    [{k: _jsonable(v) for k, v in r.items()} for r in rows], indent=2, sort_keys=True, default=str
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+    lineage = query(
+        "SELECT a.crawl_run_id, a.task_id, a.raw_uri, a.raw_bytes, a.parsed_count, a.started_at "
+        "FROM audit.crawl_request_attempt a WHERE a.parsed_count > 0 ORDER BY a.started_at DESC LIMIT 1"
+    )
     if lineage:
-        (out / "lineage.json").write_text(json.dumps({"attempt": {k: _jsonable(v) for k, v in lineage[0].items()},
-                                                      "how_to_follow": "the Silver observations carrying this raw_uri; "
-                                                                       "ecomdata.ingestion.reparse re-derives them from Bronze"},
-                                                     indent=2, sort_keys=True, default=str) + "\n", encoding="utf-8")
+        (out / "lineage.json").write_text(
+            json.dumps(
+                {
+                    "attempt": {k: _jsonable(v) for k, v in lineage[0].items()},
+                    "how_to_follow": "the Silver observations carrying this raw_uri; "
+                    "ecomdata.ingestion.reparse re-derives them from Bronze",
+                },
+                indent=2,
+                sort_keys=True,
+                default=str,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
 
 
 def run_tests(bundle: Path) -> int:
     (bundle / "tests").mkdir(exist_ok=True)
-    result = subprocess.run([sys.executable, "-m", "pytest", "tests", "-q", "-p", "no:cacheprovider",
-                             f"--junitxml={bundle / 'tests' / 'junit.xml'}"], cwd=ROOT, capture_output=True, text=True)
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "pytest",
+            "tests",
+            "-q",
+            "-p",
+            "no:cacheprovider",
+            f"--junitxml={bundle / 'tests' / 'junit.xml'}",
+        ],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+    )
     (bundle / "tests" / "pytest.txt").write_text(result.stdout[-20000:], encoding="utf-8")
     return result.returncode
 
@@ -178,15 +237,19 @@ def live_query(sql: str) -> list[dict[str, Any]]:
     with postgres_connection_factory()() as conn, conn.cursor() as cur:
         cur.execute(sql)
         names = [d[0] for d in cur.description]
-        return [dict(zip(names, row)) for row in cur.fetchall()]
+        return [dict(zip(names, row, strict=False)) for row in cur.fetchall()]
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(prog="python -m ecomdata.ops.evidence", description="Assemble the report evidence bundle")
-    parser.add_argument("--skip-tests", action="store_true", help="leave the test run out (its item then reads MISSING)")
+    parser = argparse.ArgumentParser(
+        prog="python -m ecomdata.ops.evidence", description="Assemble the report evidence bundle"
+    )
+    parser.add_argument(
+        "--skip-tests", action="store_true", help="leave the test run out (its item then reads MISSING)"
+    )
     parser.add_argument("--out", default=str(EVIDENCE))
     args = parser.parse_args(argv)
-    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
     bundle = Path(args.out) / stamp
     bundle.mkdir(parents=True, exist_ok=False)
 
@@ -194,8 +257,12 @@ def main(argv: list[str] | None = None) -> int:
 
     problems: dict[str, str] = {}
     steps: list[tuple[str, Callable[[], Any]]] = [
-        ("environment", lambda: (bundle / "environment.json").write_text(
-            json.dumps(environment(), indent=2, sort_keys=True) + "\n", encoding="utf-8")),
+        (
+            "environment",
+            lambda: (bundle / "environment.json").write_text(
+                json.dumps(environment(), indent=2, sort_keys=True) + "\n", encoding="utf-8"
+            ),
+        ),
         ("repository", lambda: copy_repository_docs(bundle)),
         ("runs", lambda: copy_runs(bundle)),
         ("samples", lambda: collect_samples(bundle, live_query)),
@@ -208,13 +275,23 @@ def main(argv: list[str] | None = None) -> int:
         except Exception as error:  # noqa: BLE001 - one missing source must not cost the rest
             problems[name] = f"{type(error).__name__}: {error}"[:300]
 
-    env = json.loads((bundle / "environment.json").read_text(encoding="utf-8")) if (bundle / "environment.json").exists() else {}
-    header = {"assembled": stamp, "commit": env.get("git_head"), "dirty tree": env.get("git_dirty"),
-              "collection problems": problems or "none"}
+    env = (
+        json.loads((bundle / "environment.json").read_text(encoding="utf-8"))
+        if (bundle / "environment.json").exists()
+        else {}
+    )
+    header = {
+        "assembled": stamp,
+        "commit": env.get("git_head"),
+        "dirty tree": env.get("git_dirty"),
+        "collection problems": problems or "none",
+    }
     index, missing = render_index(bundle, header=header)
     (bundle / "INDEX.md").write_text(index, encoding="utf-8")
-    print(json.dumps({"event": "evidence_written", "bundle": str(bundle), "missing": missing, "problems": problems}),
-          flush=True)
+    print(
+        json.dumps({"event": "evidence_written", "bundle": str(bundle), "missing": missing, "problems": problems}),
+        flush=True,
+    )
     return 1 if missing or problems else 0
 
 

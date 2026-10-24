@@ -1,27 +1,25 @@
-from tests.paths import FIXTURES, REPO_ROOT
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
-from pathlib import Path
 from types import SimpleNamespace
 from urllib.parse import parse_qs, urlparse
 
 import pytest
 
-from ecomdata.domain.identity import make_observation_id, make_offer_id, make_seller_id
-from ecomdata.domain.serialization import serialize_for_wire
-from ecomdata.domain.observations import ResourceType, create_raw_artifact
 from ecomdata.domain.acquisition import (
     AcquisitionStage,
     FetchResult,
-    ListingPageRequest,
     ListingPageParseError,
+    ListingPageRequest,
 )
+from ecomdata.domain.identity import make_observation_id, make_offer_id, make_seller_id
+from ecomdata.domain.observations import ResourceType, create_raw_artifact
+from ecomdata.domain.serialization import serialize_for_wire
 from ecomdata.ingestion.sources.tiki.api import LISTING_URL, PAGE_SIZE, TikiCrawler
-
+from tests.paths import FIXTURES
 
 FIXTURE = FIXTURES / "tiki_listing_sample.json"
-FETCHED = datetime(2026, 9, 4, 8, 30, tzinfo=timezone.utc)
+FETCHED = datetime(2026, 9, 4, 8, 30, tzinfo=UTC)
 
 
 def _adapter():

@@ -4,6 +4,7 @@ The registry tests need no Spark. The evaluation tests are marked individually
 so the registry contract still gets checked on a runtime that cannot serve
 DataFrames.
 """
+
 import json
 import subprocess
 import sys
@@ -13,16 +14,6 @@ from decimal import Decimal
 import pytest
 from pyspark.sql import functions as F
 
-from ecomdata.processing.batch.marts import build_marketplace_marts
-from ecomdata.processing.batch.quality import (
-    FAIL,
-    PASS,
-    SKIPPED,
-    QualityGateFailure,
-    decide,
-    evaluate_quality_gates,
-)
-from ecomdata.processing.batch.warehouse import MarketplaceBatchContext
 from ecomdata.domain.quality_rules import (
     ADVISORY,
     GOLD_DATASETS,
@@ -33,16 +24,27 @@ from ecomdata.domain.quality_rules import (
     quality_rule,
     rules_with_severity,
 )
+from ecomdata.processing.batch.marts import build_marketplace_marts
+from ecomdata.processing.batch.quality import (
+    FAIL,
+    PASS,
+    SKIPPED,
+    QualityGateFailure,
+    decide,
+    evaluate_quality_gates,
+)
+from ecomdata.processing.batch.warehouse import MarketplaceBatchContext
+
 # The observation builder is forty fields wide. Re-declaring it here would make
 # two fixtures that drift apart; importing it keeps one definition of what a
 # canonical Silver row looks like.
 from tests.spark.test_marketplace_marts import DAY, observation, observations
 from tests.spark_support import requires_spark
 
-
 # ----------------------------------------------------------------------------
 # Registry. No Spark needed.
 # ----------------------------------------------------------------------------
+
 
 # 17
 def test_the_registry_rejects_malformed_rules():
@@ -140,10 +142,7 @@ def attempts(spark, parsed_count, *, run_ids=("run-1",)):
 # The fixture crawl run finished an hour before as_of: settled, and well inside
 # any lookback, so the clean fixture is reconciled under the default windows.
 SETTLED_AT = AS_OF - timedelta(hours=1)
-RUN_SCHEMA = (
-    "crawl_run_id string, marketplace string, started_at timestamp, "
-    "completed_at timestamp, status string"
-)
+RUN_SCHEMA = "crawl_run_id string, marketplace string, started_at timestamp, completed_at timestamp, status string"
 
 
 def runs(spark, *, run_ids=("run-1",), completed_at=SETTLED_AT):
@@ -155,10 +154,7 @@ def runs(spark, *, run_ids=("run-1",), completed_at=SETTLED_AT):
 
 
 def clean_rows():
-    return [
-        observation(minute=DAILY * day, price=price)
-        for day, price in enumerate(("100.00", "101.00", "102.00"))
-    ]
+    return [observation(minute=DAILY * day, price=price) for day, price in enumerate(("100.00", "101.00", "102.00"))]
 
 
 def gates(spark, rows=None, *, parsed_count=None, ctx=None, attempt_frame=None, run_frame=None, tamper=None):
@@ -255,7 +251,12 @@ def test_the_future_tolerance_boundary_is_inclusive(spark):
     edge = fetched + timedelta(seconds=ctx.future_tolerance_seconds)
     at_edge = clean_rows() + [observation(minute=DAILY * 4, observed_at=edge, fetched_at=fetched, produced_at=edge)]
     past_edge = clean_rows() + [
-        observation(minute=DAILY * 5, observed_at=edge + timedelta(seconds=1), fetched_at=fetched, produced_at=edge + timedelta(seconds=1))
+        observation(
+            minute=DAILY * 5,
+            observed_at=edge + timedelta(seconds=1),
+            fetched_at=fetched,
+            produced_at=edge + timedelta(seconds=1),
+        )
     ]
 
     assert status_of(gates(spark, at_edge, ctx=ctx)[0], "observed_at_within_future_tolerance") == PASS
@@ -269,7 +270,9 @@ def test_an_observation_produced_before_it_claims_to_be_observed_fails(spark):
     observed = DAY + timedelta(days=2, hours=6)
     skewed = clean_rows() + [
         observation(
-            minute=DAILY * 4, observed_at=observed, fetched_at=observed,
+            minute=DAILY * 4,
+            observed_at=observed,
+            fetched_at=observed,
             produced_at=observed - timedelta(seconds=ctx.future_tolerance_seconds + 1),
         )
     ]
@@ -460,7 +463,9 @@ def test_silver_rows_with_no_audit_run_are_placed_by_their_last_observation(spar
     recent = clean_rows() + [observation(minute=DAILY * 2 + 60, crawl_run_id="ghost")]
     stale = clean_rows() + [
         observation(
-            minute=0, observation_id="obs-ghost-old", crawl_run_id="ghost",
+            minute=0,
+            observation_id="obs-ghost-old",
+            crawl_run_id="ghost",
             observed_at=ctx.as_of - timedelta(seconds=ctx.reconciliation_lookback_seconds + 60),
         )
     ]
@@ -469,7 +474,9 @@ def test_silver_rows_with_no_audit_run_are_placed_by_their_last_observation(spar
     # No provenance for rows inside the window is a discrepancy...
     recent_results, _ = gates(spark, recent, ctx=ctx, attempt_frame=audited)
     assert status_of(recent_results, "silver_parse_attempt_reconciliation") == FAIL
-    assert json.loads(result_of(recent_results, "silver_parse_attempt_reconciliation").failure_sample_json) == {"keys": ["ghost"]}
+    assert json.loads(result_of(recent_results, "silver_parse_attempt_reconciliation").failure_sample_json) == {
+        "keys": ["ghost"]
+    }
     # ...but one that has aged out of the lookback is no longer re-judged.
     stale_results, _ = gates(spark, stale, ctx=ctx, attempt_frame=audited)
     assert status_of(stale_results, "silver_parse_attempt_reconciliation") == PASS
@@ -524,6 +531,7 @@ def test_the_rule_version_moved_when_checks_6_and_8_changed_meaning():
     # Verdicts stored under v1 judged a different question. Keeping the old
     # version would make them indistinguishable from verdicts under the new one.
     import os
+
     from ecomdata.settings import MARKETPLACE_QUALITY_RULE_VERSION
 
     if "MARKETPLACE_QUALITY_RULE_VERSION" in os.environ:

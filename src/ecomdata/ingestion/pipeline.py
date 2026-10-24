@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from datetime import datetime
-from typing import Callable
 
-from ecomdata.infra.object_store import put_bytes
 from ecomdata.domain.acquisition import (
     AcquisitionFailure,
     AcquisitionStage,
@@ -16,11 +15,12 @@ from ecomdata.domain.acquisition import (
     ListingPageAdapter,
     ListingPageParseError,
     ListingPageRequest,
-    Phase2AcquisitionReport,
     ParsedListingPage,
+    Phase2AcquisitionReport,
     RawPersistenceError,
     RobotsDeniedError,
 )
+from ecomdata.infra.object_store import put_bytes
 from ecomdata.ingestion.raw_store import persist_fetch_result
 
 

@@ -28,9 +28,7 @@ SPARK_MASTER_URL: str = os.getenv("SPARK_MASTER_URL", "spark://spark:7077")
 # Spark 4 is built on Scala 2.13 (pyspark is pinned to 4.x, PROGRESS §6), and
 # the connector must match the runtime's version. Set it empty inside an
 # image whose connector jars are already on the classpath.
-SPARK_KAFKA_PACKAGE: str = os.getenv(
-    "SPARK_KAFKA_PACKAGE", "org.apache.spark:spark-sql-kafka-0-10_2.13:4.0.1"
-)
+SPARK_KAFKA_PACKAGE: str = os.getenv("SPARK_KAFKA_PACKAGE", "org.apache.spark:spark-sql-kafka-0-10_2.13:4.0.1")
 
 # ============================================================
 # MINIO — S3-compatible data lake (authoritative warehouse)
@@ -53,9 +51,7 @@ MINIO_BUCKETS: dict[str, str] = {
 # object store an "s3a" lake actually points at is now chosen by
 # DATA_LAKE_PROFILE — see config/storage.py.
 DATA_LAKE_MODE: str = os.getenv("DATA_LAKE_MODE", "local").lower()
-DATA_LAKE_LOCAL_ROOT: Path = Path(
-    os.getenv("DATA_LAKE_LOCAL_ROOT", str(_BASE_DIR / "data" / "lakehouse"))
-)
+DATA_LAKE_LOCAL_ROOT: Path = Path(os.getenv("DATA_LAKE_LOCAL_ROOT", str(_BASE_DIR / "data" / "lakehouse")))
 
 
 def data_lake_uri(zone: str, dataset: str = "") -> str:
@@ -83,10 +79,7 @@ POSTGRES_USER: str = os.getenv("POSTGRES_USER", "admin")
 POSTGRES_PASSWORD: str = os.getenv("POSTGRES_PASSWORD", "admin123")
 POSTGRES_DB: str = os.getenv("POSTGRES_DB", "data_warehouse")
 
-POSTGRES_URL: str = (
-    f"postgresql://{POSTGRES_USER}:{POSTGRES_PASSWORD}"
-    f"@{POSTGRES_HOST}:{POSTGRES_PORT}/{POSTGRES_DB}"
-)
+POSTGRES_URL: str = f"postgresql://{POSTGRES_USER}:{POSTGRES_PASSWORD}@{POSTGRES_HOST}:{POSTGRES_PORT}/{POSTGRES_DB}"
 
 # ============================================================
 # REDIS — realtime KPI serving (speed layer)
@@ -107,15 +100,11 @@ ES_INDEX_METRICS: str = os.getenv("ES_INDEX_METRICS", "ecommerce-metrics")
 # a crawler can only observe public catalog/price state, not real user
 # view/cart/purchase behavior — see legacy.kaggle.schema price-snapshot contract)
 # ============================================================
-KAFKA_TOPIC_PRICE_SNAPSHOTS: str = os.getenv(
-    "KAFKA_TOPIC_PRICE_SNAPSHOTS", "ecommerce_price_snapshots"
-)
+KAFKA_TOPIC_PRICE_SNAPSHOTS: str = os.getenv("KAFKA_TOPIC_PRICE_SNAPSHOTS", "ecommerce_price_snapshots")
 CRAWL_REQUEST_DELAY_SECONDS: float = float(os.getenv("CRAWL_REQUEST_DELAY_SECONDS", "2.0"))
 CRAWL_JITTER_SECONDS: float = float(os.getenv("CRAWL_JITTER_SECONDS", "1.0"))
 CRAWL_HTTP_TIMEOUT_SECONDS: float = float(os.getenv("CRAWL_HTTP_TIMEOUT_SECONDS", "10"))
-CRAWL_USER_AGENT: str = os.getenv(
-    "CRAWL_USER_AGENT", "EcommercePriceResearchBot/0.1 (+thesis project; rate-limited)"
-)
+CRAWL_USER_AGENT: str = os.getenv("CRAWL_USER_AGENT", "EcommercePriceResearchBot/0.1 (+thesis project; rate-limited)")
 # Pages requested per category before moving on. The adapter stops earlier when
 # the site reports its last page, so this is a safety ceiling, not a target.
 CRAWL_MAX_PAGES: int = int(os.getenv("CRAWL_MAX_PAGES", "50"))
@@ -128,9 +117,7 @@ TIKI_LISTING_URL: str = os.getenv("TIKI_LISTING_URL", "https://tiki.vn/api/perso
 # (50 pages), 1789 has 116 products and 17166 has 307.
 TIKI_CATEGORIES: list[str] = [
     c.strip()
-    for c in os.getenv(
-        "TIKI_CATEGORIES", "1846,8322,1882,1520,931,915,4384,1789,17166"
-    ).split(",")
+    for c in os.getenv("TIKI_CATEGORIES", "1846,8322,1882,1520,931,915,4384,1789,17166").split(",")
     if c.strip()
 ]
 
@@ -139,6 +126,7 @@ TIKI_CATEGORIES: list[str] = [
 # ============================================================
 BASE_DIR: Path = _BASE_DIR
 CHECKPOINTS_DIR: Path = _BASE_DIR / "data" / "checkpoints"
+
 
 # ============================================================
 # MARKETPLACE SPEED / TEMPORAL WAREHOUSE
@@ -257,8 +245,12 @@ MARKETPLACE_QUALITY_FUTURE_TOLERANCE_SECONDS = int(os.getenv("MARKETPLACE_QUALIT
 # the settle delay, or a run could settle and age out between two batches
 # without ever being reconciled. It also bounds how long one discrepancy can
 # hold publication back.
-MARKETPLACE_QUALITY_RECONCILIATION_SETTLE_SECONDS = int(os.getenv("MARKETPLACE_QUALITY_RECONCILIATION_SETTLE_SECONDS", "900"))
-MARKETPLACE_QUALITY_RECONCILIATION_LOOKBACK_SECONDS = int(os.getenv("MARKETPLACE_QUALITY_RECONCILIATION_LOOKBACK_SECONDS", "172800"))
+MARKETPLACE_QUALITY_RECONCILIATION_SETTLE_SECONDS = int(
+    os.getenv("MARKETPLACE_QUALITY_RECONCILIATION_SETTLE_SECONDS", "900")
+)
+MARKETPLACE_QUALITY_RECONCILIATION_LOOKBACK_SECONDS = int(
+    os.getenv("MARKETPLACE_QUALITY_RECONCILIATION_LOOKBACK_SECONDS", "172800")
+)
 # A failure sample exists to point a human at the first few offending rows, so
 # it stays small and carries identifiers only.
 MARKETPLACE_QUALITY_SAMPLE_LIMIT = int(os.getenv("MARKETPLACE_QUALITY_SAMPLE_LIMIT", "10"))
@@ -269,7 +261,9 @@ MARKETPLACE_ALLOWED_CURRENCIES = tuple(
 
 # Phase 4 topic settings are kept separate from the legacy behavioral topic.
 KAFKA_TOPIC_MARKETPLACE_OBSERVATIONS = os.getenv("KAFKA_TOPIC_MARKETPLACE_OBSERVATIONS", "marketplace.observations.v1")
-KAFKA_TOPIC_MARKETPLACE_OBSERVATIONS_DLQ = os.getenv("KAFKA_TOPIC_MARKETPLACE_OBSERVATIONS_DLQ", "marketplace.observations.v1.dlq")
+KAFKA_TOPIC_MARKETPLACE_OBSERVATIONS_DLQ = os.getenv(
+    "KAFKA_TOPIC_MARKETPLACE_OBSERVATIONS_DLQ", "marketplace.observations.v1.dlq"
+)
 KAFKA_TOPIC_MARKETPLACE_CHANGES = os.getenv("KAFKA_TOPIC_MARKETPLACE_CHANGES", "marketplace.changes.v1")
 KAFKA_MARKETPLACE_PARTITIONS = int(os.getenv("KAFKA_MARKETPLACE_PARTITIONS", "3"))
 KAFKA_PRODUCER_ACK_TIMEOUT_SECONDS = int(os.getenv("KAFKA_PRODUCER_ACK_TIMEOUT_SECONDS", "30"))
@@ -323,11 +317,18 @@ def validate_marketplace_settings() -> None:
         raise ValueError("MARKETPLACE_ANOMALY_MIN_SAMPLES cannot exceed MARKETPLACE_ANOMALY_WINDOW_DAYS")
     if MARKETPLACE_QUALITY_RECONCILIATION_LOOKBACK_SECONDS <= MARKETPLACE_QUALITY_RECONCILIATION_SETTLE_SECONDS:
         # An empty window would reconcile nothing and pass every run.
-        raise ValueError("MARKETPLACE_QUALITY_RECONCILIATION_LOOKBACK_SECONDS must exceed MARKETPLACE_QUALITY_RECONCILIATION_SETTLE_SECONDS")
-    if MARKETPLACE_QUALITY_RECONCILIATION_LOOKBACK_SECONDS <= MARKETPLACE_BATCH_INTERVAL_SECONDS + MARKETPLACE_QUALITY_RECONCILIATION_SETTLE_SECONDS:
+        raise ValueError(
+            "MARKETPLACE_QUALITY_RECONCILIATION_LOOKBACK_SECONDS must exceed MARKETPLACE_QUALITY_RECONCILIATION_SETTLE_SECONDS"
+        )
+    if (
+        MARKETPLACE_QUALITY_RECONCILIATION_LOOKBACK_SECONDS
+        <= MARKETPLACE_BATCH_INTERVAL_SECONDS + MARKETPLACE_QUALITY_RECONCILIATION_SETTLE_SECONDS
+    ):
         # A crawl run could otherwise settle and age out between two scheduled
         # batches without ever being reconciled.
-        raise ValueError("MARKETPLACE_QUALITY_RECONCILIATION_LOOKBACK_SECONDS must exceed MARKETPLACE_BATCH_INTERVAL_SECONDS plus MARKETPLACE_QUALITY_RECONCILIATION_SETTLE_SECONDS")
+        raise ValueError(
+            "MARKETPLACE_QUALITY_RECONCILIATION_LOOKBACK_SECONDS must exceed MARKETPLACE_BATCH_INTERVAL_SECONDS plus MARKETPLACE_QUALITY_RECONCILIATION_SETTLE_SECONDS"
+        )
     if MARKETPLACE_OPS_PROJECT_OVERLAP_SECONDS <= MARKETPLACE_OPS_PROJECT_INTERVAL_SECONDS:
         # The pass after an outage must re-read everything the outage hid.
         raise ValueError("MARKETPLACE_OPS_PROJECT_OVERLAP_SECONDS must exceed MARKETPLACE_OPS_PROJECT_INTERVAL_SECONDS")
@@ -336,14 +337,22 @@ def validate_marketplace_settings() -> None:
     if MARKETPLACE_ANOMALY_IQR_MULTIPLIER <= 0:
         raise ValueError("MARKETPLACE_ANOMALY_IQR_MULTIPLIER must be positive")
     for name in (
-        "MARKETPLACE_CHANGE_RULE_VERSION", "MARKETPLACE_STREAM_CHECKPOINT_VERSION",
-        "MARKETPLACE_SPEED_QUERY_NAME", "MARKETPLACE_FRESHNESS_RULE_VERSION",
-        "MARKETPLACE_COUNTER_RULE_VERSION", "MARKETPLACE_SILVER_DATASET",
-        "MARKETPLACE_GOLD_DATASET", "MARKETPLACE_BATCH_APP_NAME",
-        "MARKETPLACE_ANOMALY_RULE_VERSION", "MARKETPLACE_QUALITY_RULE_VERSION",
-        "MARKETPLACE_MANIFEST_SCHEMA_VERSION", "KAFKA_DLQ_PROJECTOR_GROUP",
-        "ES_INDEX_MARKETPLACE_SOURCE_HEALTH", "ES_INDEX_MARKETPLACE_CRAWL_ATTEMPTS",
-        "ES_INDEX_MARKETPLACE_SPEED_BATCHES", "ES_INDEX_MARKETPLACE_DLQ",
+        "MARKETPLACE_CHANGE_RULE_VERSION",
+        "MARKETPLACE_STREAM_CHECKPOINT_VERSION",
+        "MARKETPLACE_SPEED_QUERY_NAME",
+        "MARKETPLACE_FRESHNESS_RULE_VERSION",
+        "MARKETPLACE_COUNTER_RULE_VERSION",
+        "MARKETPLACE_SILVER_DATASET",
+        "MARKETPLACE_GOLD_DATASET",
+        "MARKETPLACE_BATCH_APP_NAME",
+        "MARKETPLACE_ANOMALY_RULE_VERSION",
+        "MARKETPLACE_QUALITY_RULE_VERSION",
+        "MARKETPLACE_MANIFEST_SCHEMA_VERSION",
+        "KAFKA_DLQ_PROJECTOR_GROUP",
+        "ES_INDEX_MARKETPLACE_SOURCE_HEALTH",
+        "ES_INDEX_MARKETPLACE_CRAWL_ATTEMPTS",
+        "ES_INDEX_MARKETPLACE_SPEED_BATCHES",
+        "ES_INDEX_MARKETPLACE_DLQ",
     ):
         if not globals()[name].strip():
             raise ValueError(f"{name} must be non-empty")

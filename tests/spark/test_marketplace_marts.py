@@ -3,7 +3,8 @@
 These need real DataFrames, so they run on a local Spark session over small
 frozen fixtures. No MinIO, PostgreSQL or network is touched.
 """
-from datetime import date, datetime, timedelta, timezone
+
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 
 import pytest
@@ -26,32 +27,53 @@ from tests.spark_support import requires_spark
 
 pytestmark = requires_spark
 
-DAY = datetime(2026, 9, 4, tzinfo=timezone.utc)
+DAY = datetime(2026, 9, 4, tzinfo=UTC)
 AS_OF = DAY + timedelta(hours=12)
 
 MONEY = "decimal(38,6)"
 # Declared as pairs, not one string: a "decimal(38,6)" type carries its own
 # comma, so a schema string cannot be split back into field names.
 _COLUMNS = [
-    ("event_id", "string"), ("schema_version", "string"), ("event_type", "string"),
-    ("occurred_at", "timestamp"), ("produced_at", "timestamp"),
-    ("marketplace", "string"), ("partition_key", "string"),
-    ("crawl_run_id", "string"), ("raw_uri", "string"),
-    ("offer_id", "string"), ("marketplace_id", "string"),
-    ("platform_listing_id", "string"), ("seller_id", "string"),
-    ("product_title", "string"), ("brand", "string"), ("category_path", "string"),
-    ("source_url", "string"), ("currency", "string"),
-    ("first_seen_at", "timestamp"), ("last_seen_at", "timestamp"),
+    ("event_id", "string"),
+    ("schema_version", "string"),
+    ("event_type", "string"),
+    ("occurred_at", "timestamp"),
+    ("produced_at", "timestamp"),
+    ("marketplace", "string"),
+    ("partition_key", "string"),
+    ("crawl_run_id", "string"),
+    ("raw_uri", "string"),
+    ("offer_id", "string"),
+    ("marketplace_id", "string"),
+    ("platform_listing_id", "string"),
+    ("seller_id", "string"),
+    ("product_title", "string"),
+    ("brand", "string"),
+    ("category_path", "string"),
+    ("source_url", "string"),
+    ("currency", "string"),
+    ("first_seen_at", "timestamp"),
+    ("last_seen_at", "timestamp"),
     ("active_status", "string"),
-    ("observation_id", "string"), ("observed_at", "timestamp"),
+    ("observation_id", "string"),
+    ("observed_at", "timestamp"),
     ("fetched_at", "timestamp"),
-    ("current_price", MONEY), ("list_price", MONEY), ("shipping_price", MONEY),
-    ("discount_amount", MONEY), ("discount_percent", MONEY),
-    ("rating_value", MONEY), ("rating_scale", MONEY),
-    ("rating_count", "bigint"), ("review_count", "bigint"), ("sold_count", "bigint"),
-    ("availability", "string"), ("promotion_json", "string"),
-    ("ranking_position", "bigint"), ("raw_sha256", "string"),
-    ("adapter_version", "string"), ("observed_date", "date"),
+    ("current_price", MONEY),
+    ("list_price", MONEY),
+    ("shipping_price", MONEY),
+    ("discount_amount", MONEY),
+    ("discount_percent", MONEY),
+    ("rating_value", MONEY),
+    ("rating_scale", MONEY),
+    ("rating_count", "bigint"),
+    ("review_count", "bigint"),
+    ("sold_count", "bigint"),
+    ("availability", "string"),
+    ("promotion_json", "string"),
+    ("ranking_position", "bigint"),
+    ("raw_sha256", "string"),
+    ("adapter_version", "string"),
+    ("observed_date", "date"),
 ]
 OBSERVATION_SCHEMA = ", ".join(f"{name} {dtype}" for name, dtype in _COLUMNS)
 _FIELDS = [name for name, _ in _COLUMNS]
@@ -198,8 +220,12 @@ def test_seller_projection_excludes_null_ids_and_invents_nothing(spark):
     record = one(sellers)
 
     assert set(sellers.columns) == {
-        "seller_id", "marketplace", "marketplace_id",
-        "first_seen_at", "last_seen_at", "observed_offer_count",
+        "seller_id",
+        "marketplace",
+        "marketplace_id",
+        "first_seen_at",
+        "last_seen_at",
+        "observed_offer_count",
     }
     assert record["seller_id"] == "seller-1"
     assert record["observed_offer_count"] == 2
@@ -235,11 +261,7 @@ def test_unordered_input_yields_the_same_price_mart(spark):
     ]
 
     ordered = one(build_offer_price_history_daily(observations(spark, rows)))
-    shuffled = one(
-        build_offer_price_history_daily(
-            observations(spark, [rows[2], rows[0], rows[1]])
-        )
-    )
+    shuffled = one(build_offer_price_history_daily(observations(spark, [rows[2], rows[0], rows[1]])))
 
     assert ordered == shuffled
 
@@ -332,11 +354,7 @@ def test_freshness_boundary_is_inclusive_for_fresh(spark, age_seconds, expected)
     observed = as_of - timedelta(seconds=age_seconds)
     frame = observations(spark, [observation(observed_at=observed)])
 
-    record = one(
-        build_offer_freshness(
-            frame, as_of=as_of, stale_after_seconds=3600, rule_version="fresh.v1"
-        )
-    )
+    record = one(build_offer_freshness(frame, as_of=as_of, stale_after_seconds=3600, rule_version="fresh.v1"))
 
     assert record["age_seconds"] == age_seconds
     assert record["freshness_status"] == expected
@@ -348,11 +366,7 @@ def test_a_future_observation_is_future_and_not_clamped(spark):
     as_of = DAY
     frame = observations(spark, [observation(minute=10)])
 
-    record = one(
-        build_offer_freshness(
-            frame, as_of=as_of, stale_after_seconds=3600, rule_version="fresh.v1"
-        )
-    )
+    record = one(build_offer_freshness(frame, as_of=as_of, stale_after_seconds=3600, rule_version="fresh.v1"))
 
     assert record["freshness_status"] == "FUTURE"
     assert record["age_seconds"] == -600
@@ -521,11 +535,7 @@ def test_valid_delta_and_hourly_velocity_are_exact(spark):
     ]
 
     daily = build_counter_delta_daily(_transitions(spark, rows))
-    record = next(
-        row.asDict()
-        for row in daily.collect()
-        if row.counter_name == "sold_count"
-    )
+    record = next(row.asDict() for row in daily.collect() if row.counter_name == "sold_count")
 
     assert record["first_value"] == 10
     assert record["last_value"] == 40
@@ -546,9 +556,7 @@ def test_daily_invalid_reason_json_is_sorted_and_deterministic(spark):
     ]
 
     daily = build_counter_delta_daily(_transitions(spark, rows, max_gap_seconds=600))
-    record = next(
-        row.asDict() for row in daily.collect() if row.counter_name == "sold_count"
-    )
+    record = next(row.asDict() for row in daily.collect() if row.counter_name == "sold_count")
 
     import json
 
@@ -588,8 +596,7 @@ RUN_SCHEMA = (
     "failed bigint, adapter_version string"
 )
 FRONTIER_SCHEMA = (
-    "task_id string, marketplace_code string, marketplace_id string, "
-    "target string, resource_type string, status string"
+    "task_id string, marketplace_code string, marketplace_id string, target string, resource_type string, status string"
 )
 
 
@@ -603,16 +610,36 @@ def _audit_frames(spark, attempt_rows):
     attempts, runs, frontier = [], {}, {}
     for index, row in enumerate(attempt_rows):
         run_id, marketplace_code, request_date, status, latency, raw_bytes, parsed, rejected, error_kind = row
-        started = datetime(request_date.year, request_date.month, request_date.day, 8, tzinfo=timezone.utc)
+        started = datetime(request_date.year, request_date.month, request_date.day, 8, tzinfo=UTC)
         completed = started + timedelta(minutes=3)
         task_id = f"task-{run_id}"
-        attempts.append((
-            run_id, task_id, index + 1, started, completed, status,
-            200 if status != "FAILED" else 500, latency, f"raw-{run_id}-{index}",
-            f"file:///bronze/{run_id}-{index}.json", raw_bytes, parsed, rejected, error_kind,
-        ))
+        attempts.append(
+            (
+                run_id,
+                task_id,
+                index + 1,
+                started,
+                completed,
+                status,
+                200 if status != "FAILED" else 500,
+                latency,
+                f"raw-{run_id}-{index}",
+                f"file:///bronze/{run_id}-{index}.json",
+                raw_bytes,
+                parsed,
+                rejected,
+                error_kind,
+            )
+        )
         runs[run_id] = (run_id, f"marketplace-{marketplace_code}", started, completed, "COMPLETED", 1, 1, 0, "test-v1")
-        frontier[task_id] = (task_id, marketplace_code, f"marketplace-{marketplace_code}", "1846", "LISTING_PAGE", "SUCCEEDED")
+        frontier[task_id] = (
+            task_id,
+            marketplace_code,
+            f"marketplace-{marketplace_code}",
+            "1846",
+            "LISTING_PAGE",
+            "SUCCEEDED",
+        )
     return (
         spark.createDataFrame(attempts, schema=ATTEMPT_SCHEMA),
         spark.createDataFrame(list(runs.values()), schema=RUN_SCHEMA),
@@ -666,9 +693,7 @@ def test_source_coverage_counts_reconcile(spark):
             observation(offer="offer-2", minute=0),
         ],
     )
-    attempts, runs = _audit(
-        spark, [("run-1", "tiki", date(2026, 9, 4), "SUCCEEDED", 100, 10, 2, 1, None)]
-    )
+    attempts, runs = _audit(spark, [("run-1", "tiki", date(2026, 9, 4), "SUCCEEDED", 100, 10, 2, 1, None)])
 
     record = one(
         build_source_coverage_daily(
@@ -698,9 +723,7 @@ def test_a_day_without_an_observation_counts_as_missing(spark):
             observation(offer="offer-1", observed_at=next_day, observation_id="o1-d2"),
         ],
     )
-    attempts, runs = _audit(
-        spark, [("run-1", "tiki", date(2026, 9, 4), "SUCCEEDED", 100, 10, 2, 0, None)]
-    )
+    attempts, runs = _audit(spark, [("run-1", "tiki", date(2026, 9, 4), "SUCCEEDED", 100, 10, 2, 0, None)])
 
     records = {
         record["observed_date"]: record
@@ -755,9 +778,7 @@ def test_parsed_and_rejected_counts_come_from_the_audit(spark):
 
 def test_a_zero_denominator_rate_is_null(spark):
     frame = observations(spark, [observation(offer="offer-1", minute=0)])
-    attempts, runs = _audit(
-        spark, [("run-1", "tiki", date(2026, 9, 4), "SUCCEEDED", 100, 10, 0, 0, None)]
-    )
+    attempts, runs = _audit(spark, [("run-1", "tiki", date(2026, 9, 4), "SUCCEEDED", 100, 10, 0, 0, None)])
 
     record = one(
         build_source_coverage_daily(

@@ -16,8 +16,9 @@ from __future__ import annotations
 
 import argparse
 import json
-from datetime import datetime, timezone
-from typing import Any, Callable
+from collections.abc import Callable
+from datetime import UTC, datetime
+from typing import Any
 
 from ecomdata.ingestion.silver_sink import SourceRecord
 
@@ -102,8 +103,8 @@ def run_sink(
 
 
 def create_consumer(bootstrap_servers: str | None = None) -> Any:
-    from ecomdata.settings import KAFKA_BOOTSTRAP_SERVERS, KAFKA_SILVER_CONSUMER_GROUP
     from ecomdata.domain.topics import MARKETPLACE_OBSERVATIONS
+    from ecomdata.settings import KAFKA_BOOTSTRAP_SERVERS, KAFKA_SILVER_CONSUMER_GROUP
 
     try:
         from kafka import KafkaConsumer
@@ -128,18 +129,20 @@ def main() -> None:
     from ecomdata.infra.heartbeat import heartbeat
     from ecomdata.infra.lifecycle import StopSignal, install_signal_handlers
     from ecomdata.infra.object_store import put_bytes
-    from ecomdata.settings import (
-        MARKETPLACE_SILVER_POLL_TIMEOUT_MS, MARKETPLACE_SILVER_RETRY_BASE_SECONDS, MARKETPLACE_SILVER_RETRY_MAX_SECONDS,
-        SERVICE_HEARTBEAT_FILE,
-    )
     from ecomdata.ingestion.publisher import create_marketplace_producer
     from ecomdata.ingestion.silver_sink import process_record
+    from ecomdata.settings import (
+        MARKETPLACE_SILVER_POLL_TIMEOUT_MS,
+        MARKETPLACE_SILVER_RETRY_BASE_SECONDS,
+        MARKETPLACE_SILVER_RETRY_MAX_SECONDS,
+        SERVICE_HEARTBEAT_FILE,
+    )
 
     stop = StopSignal()
     install_signal_handlers(stop)
     consumer = create_consumer()
     dlq_producer = create_marketplace_producer()
-    clock = lambda: datetime.now(timezone.utc)  # noqa: E731 - the DLQ failed_at clock
+    clock = lambda: datetime.now(UTC)  # noqa: E731 - the DLQ failed_at clock
     try:
         run_sink(
             consumer,

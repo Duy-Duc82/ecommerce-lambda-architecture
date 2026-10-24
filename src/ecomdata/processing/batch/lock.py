@@ -8,8 +8,9 @@ by itself if the process dies and the connection drops.
 """
 from __future__ import annotations
 
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
-from typing import Any, Callable, Iterator
+from typing import Any
 
 from ecomdata.settings import MARKETPLACE_BATCH_LOCK_KEY
 

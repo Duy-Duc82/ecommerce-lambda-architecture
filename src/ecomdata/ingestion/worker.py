@@ -10,14 +10,15 @@ them.
 """
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
-from typing import Any, Callable, Protocol
+from typing import Protocol
 
+from ecomdata.domain.acquisition import AcquisitionStatus, ObservationPublishError, Phase2AcquisitionReport
 from ecomdata.domain.observations import CrawlRun, CrawlRunStatus
 from ecomdata.ingestion.audit import CrawlAttemptAudit, CrawlAuditRepository
-from ecomdata.domain.acquisition import AcquisitionStatus, ObservationPublishError, Phase2AcquisitionReport
 from ecomdata.ingestion.frontier import LeaseLostError, PostgresCrawlFrontier
 from ecomdata.ingestion.scheduling import (
     CrawlTask,
@@ -59,7 +60,7 @@ class CycleResult:
 def _utc(value: datetime, field_name: str) -> datetime:
     if value.tzinfo is None or value.utcoffset() is None:
         raise ValueError(f"{field_name} must be timezone-aware")
-    return value.astimezone(timezone.utc)
+    return value.astimezone(UTC)
 
 
 def _retry_after(report: Phase2AcquisitionReport | None, error: Exception) -> str | None:
@@ -189,7 +190,7 @@ class CrawlWorker:
             FailureKind.RATE_LIMITED,
             self.circuit_open_seconds,
             now.fromtimestamp(
-                now.timestamp() + self.circuit_open_seconds, tz=timezone.utc
+                now.timestamp() + self.circuit_open_seconds, tz=UTC
             ),
         )
 

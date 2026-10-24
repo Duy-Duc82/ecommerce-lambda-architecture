@@ -4,11 +4,12 @@ The connection is a fake that records SQL and parameters; no PostgreSQL
 socket is opened.
 """
 from contextlib import contextmanager
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import pytest
 
+from ecomdata.domain.acquisition import HttpResponseError
 from ecomdata.domain.observations import ResourceType
 from ecomdata.ingestion.frontier import LeaseLostError, PostgresCrawlFrontier
 from ecomdata.ingestion.scheduling import (
@@ -20,9 +21,8 @@ from ecomdata.ingestion.scheduling import (
     decide_retry,
     make_crawl_task_id,
 )
-from ecomdata.domain.acquisition import HttpResponseError
 
-NOW = datetime(2026, 9, 29, 8, 0, tzinfo=timezone.utc)
+NOW = datetime(2026, 9, 29, 8, 0, tzinfo=UTC)
 POLICY = RetryPolicy(5, 30, 1800, Decimal("0"))
 
 

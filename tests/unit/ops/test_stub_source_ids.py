@@ -6,6 +6,7 @@ categories with the same ``crc32 % 100`` -- 9004 and 9012 -- or a page past
 99 made different offers share one ID, so a load run would have measured
 the dedup path instead of new offers.
 """
+
 from __future__ import annotations
 
 import json
@@ -34,8 +35,12 @@ def test_a_page_past_99_does_not_reuse_another_page_s_ids():
 
 def test_ids_are_unique_across_200_pages_and_50_categories():
     state = stub.load_state(last_page=200)
-    ids = [listing for category in range(9001, 9051) for page in range(1, 201)
-           for listing in _ids(state, str(category), page)]
+    ids = [
+        listing
+        for category in range(9001, 9051)
+        for page in range(1, 201)
+        for listing in _ids(state, str(category), page)
+    ]
 
     assert len(ids) == len(set(ids))
 
@@ -48,7 +53,8 @@ def test_the_default_page_is_the_fixture_once_with_unchanged_ids():
 
     assert len(rows) == len(state.rows)
     assert [row.get("id") for row in rows] == [
-        stub.listing_id(r["id"], "9001", 1) if isinstance(r.get("id"), int) else r.get("id") for r in state.rows]
+        stub.listing_id(r["id"], "9001", 1) if isinstance(r.get("id"), int) else r.get("id") for r in state.rows
+    ]
 
 
 def test_a_wide_page_repeats_the_fixture_with_new_ids_and_keeps_its_invalid_rows():
@@ -61,7 +67,9 @@ def test_a_wide_page_repeats_the_fixture_with_new_ids_and_keeps_its_invalid_rows
 
     assert len(rows) == 40 and payload["paging"]["per_page"] == 40
     assert len(valid) == len(set(valid))
-    assert len(rows) - len(valid) == sum(1 for i in range(40) if not isinstance(state.rows[i % len(state.rows)].get("id"), int))
+    assert len(rows) - len(valid) == sum(
+        1 for i in range(40) if not isinstance(state.rows[i % len(state.rows)].get("id"), int)
+    )
     assert invalid_in_fixture >= 1
 
 

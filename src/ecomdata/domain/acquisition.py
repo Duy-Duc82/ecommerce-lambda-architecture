@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import Enum
 from typing import Any, Protocol
 from urllib.parse import urlparse
@@ -90,7 +90,11 @@ class ObservationPublishError(Exception):
 
     def __init__(self, *, report: Any, acknowledged: int, cause: BaseException):
         observations = len(getattr(report, "observations", ()) or ())
-        if isinstance(acknowledged, bool) or not isinstance(acknowledged, int) or not 0 <= acknowledged < max(observations, 1):
+        if (
+            isinstance(acknowledged, bool)
+            or not isinstance(acknowledged, int)
+            or not 0 <= acknowledged < max(observations, 1)
+        ):
             raise ValueError(f"acknowledged must be between 0 and {max(observations - 1, 0)}, got {acknowledged!r}")
         self.report = report
         self.acknowledged = acknowledged
@@ -121,7 +125,7 @@ def _aware_utc(value: Any, field_name: str) -> datetime:
         raise ValueError(f"{field_name} must be a datetime")
     if value.tzinfo is None or value.utcoffset() is None:
         raise ValueError(f"{field_name} must be timezone-aware")
-    return value.astimezone(timezone.utc)
+    return value.astimezone(UTC)
 
 
 def _non_bool_int(value: Any, field_name: str, *, minimum: int = 0) -> int:
@@ -395,9 +399,7 @@ class Phase2AcquisitionReport:
             # every downstream partition keyed on fetched_at would then be
             # stamped by whichever clock the machine happened to have.
             if not started_at <= self.raw_artifact.fetched_at <= completed_at:
-                raise ValueError(
-                    "raw artifact fetched_at must lie between started_at and completed_at"
-                )
+                raise ValueError("raw artifact fetched_at must lie between started_at and completed_at")
             if self.raw_metadata_uri is None and not (
                 self.failure is not None
                 and self.failure.stage is AcquisitionStage.STORAGE
@@ -433,9 +435,7 @@ class Phase2AcquisitionReport:
 
     @property
     def page_exhausted(self) -> bool:
-        return self.source_record_count == 0 or (
-            self.last_page is not None and self.page >= self.last_page
-        )
+        return self.source_record_count == 0 or (self.last_page is not None and self.page >= self.last_page)
 
     @property
     def is_task_success(self) -> bool:

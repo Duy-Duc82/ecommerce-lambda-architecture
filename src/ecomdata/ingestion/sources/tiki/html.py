@@ -86,7 +86,8 @@ class TikiCategoryHtmlCrawler(TikiCrawler):
     ) -> ParsedListingPage:
         """Parse only already-saved bytes into canonical observations."""
         rows = [
-            row for row in self._catalog_rows(fetch_result.body)
+            row
+            for row in self._catalog_rows(fetch_result.body)
             if not (isinstance(row, dict) and row.get("advertisement"))
         ]
         if not rows:
@@ -99,7 +100,9 @@ class TikiCategoryHtmlCrawler(TikiCrawler):
         for index, row in enumerate(rows):
             if not isinstance(row, dict):
                 rejections.append(
-                    RecordRejection(index, AcquisitionStage.PARSE, ListingPageParseError("listing row must be an object"))
+                    RecordRejection(
+                        index, AcquisitionStage.PARSE, ListingPageParseError("listing row must be an object")
+                    )
                 )
                 continue
             try:

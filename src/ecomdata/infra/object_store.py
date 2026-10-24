@@ -13,8 +13,8 @@ from __future__ import annotations
 import io
 from functools import lru_cache
 
-from ecomdata.settings import DATA_LAKE_LOCAL_ROOT, MINIO_BUCKETS
 from ecomdata.infra.storage import StorageProfile, active_profile
+from ecomdata.settings import DATA_LAKE_LOCAL_ROOT, MINIO_BUCKETS
 
 
 @lru_cache(maxsize=4)

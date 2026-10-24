@@ -9,10 +9,10 @@ from types import SimpleNamespace
 import pytest
 
 from ecomdata.domain.wire import canonical_json
-from ecomdata.settings import MARKETPLACE_SPEED_QUERY_NAME, MARKETPLACE_STREAM_TRIGGER
-from ecomdata.processing.speed import stream as layer
 from ecomdata.processing.speed import service
+from ecomdata.processing.speed import stream as layer
 from ecomdata.processing.speed.stream import SPEED_OUTPUT_SCHEMA
+from ecomdata.settings import MARKETPLACE_SPEED_QUERY_NAME, MARKETPLACE_STREAM_TRIGGER
 from tests.spark_support import requires_spark
 from tests.unit.domain.test_marketplace_change_rules import CONFIG, _event
 
@@ -193,8 +193,8 @@ class _ClosingClient:
 # outlive it, whether the batch succeeds, is skipped or never reaches the sink.
 @pytest.mark.parametrize("outcome", ["succeeded", "collect_failed"])
 def test_each_micro_batch_closes_its_sink_clients(monkeypatch, outcome):
-    from ecomdata.infra import postgres
     import ecomdata.processing.speed.sinks as sinks
+    from ecomdata.infra import postgres
 
     clients = (_ClosingClient(), _ClosingClient(), _ClosingClient())
     monkeypatch.setattr(postgres, "postgres_connection_factory", lambda: (lambda: None))

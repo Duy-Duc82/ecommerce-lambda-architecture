@@ -9,19 +9,21 @@ Gold or PostgreSQL, which is what makes it safe to point at production data.
 A divergence is reported, never repaired: repairing one would be a recovery
 decision, and recovery is Phase 8.
 """
+
 from __future__ import annotations
 
 import argparse
 import hashlib
 import json
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from typing import Any, Callable, Mapping, Sequence
+from datetime import UTC, datetime
+from typing import Any
 from urllib.parse import quote, unquote
 
-from ecomdata.domain.serialization import serialize_for_wire
-from ecomdata.domain.observations import ResourceType, create_raw_artifact
 from ecomdata.domain.acquisition import FetchResult, ListingPageRequest
+from ecomdata.domain.observations import ResourceType, create_raw_artifact
+from ecomdata.domain.serialization import serialize_for_wire
 from ecomdata.ingestion.raw_store import RAW_METADATA_SCHEMA_VERSION
 
 IDENTICAL = "IDENTICAL"
@@ -73,7 +75,7 @@ class RawArtifactRef:
         return f"{self._base}/metadata.json"
 
     @classmethod
-    def from_uri(cls, uri: str) -> "RawArtifactRef":
+    def from_uri(cls, uri: str) -> RawArtifactRef:
         """The inverse of :attr:`body_path`, for a ``raw_uri`` out of the audit.
 
         ``audit.crawl_request_attempt`` stores where the body landed, not the
@@ -92,8 +94,9 @@ class RawArtifactRef:
         missing = [name for name in wanted if name not in parts]
         if missing:
             raise ValueError(f"raw_uri is missing {', '.join(missing)}: {uri}")
-        return cls(parts["marketplace"], parts["observed_date"], parts["hour"],
-                   parts["crawl_run_id"], parts["raw_artifact_id"])
+        return cls(
+            parts["marketplace"], parts["observed_date"], parts["hour"], parts["crawl_run_id"], parts["raw_artifact_id"]
+        )
 
 
 @dataclass(frozen=True)
@@ -195,7 +198,11 @@ def _rebuild(ref: RawArtifactRef, metadata: Mapping[str, Any], body: bytes):
 
 
 def reparse_raw_artifact(
-    ref: RawArtifactRef, *, adapter, reader: Reader, clock: Callable[[], datetime],
+    ref: RawArtifactRef,
+    *,
+    adapter,
+    reader: Reader,
+    clock: Callable[[], datetime],
     silver_dataset: str | None = None,
 ) -> ReparseOutcome:
     """Re-run the adapter over a stored body in the mandatory order."""
@@ -210,7 +217,8 @@ def reparse_raw_artifact(
         # Reparsing under a different adapter is a Silver version change, not a
         # verification. Superseding stored observations needs a schema bump.
         return ReparseOutcome(
-            ref.raw_artifact_id, ADAPTER_VERSION_CHANGED,
+            ref.raw_artifact_id,
+            ADAPTER_VERSION_CHANGED,
             error_type="AdapterVersionChanged",
             error_message=f"artifact was parsed by {stored_version}, adapter is {getattr(adapter, 'adapter_version', None)}",
         )
@@ -227,7 +235,9 @@ def reparse_raw_artifact(
             produced_at=clock(),
         )
     except Exception as error:
-        return ReparseOutcome(ref.raw_artifact_id, PARSE_FAILED, error_type=type(error).__name__, error_message=str(error))
+        return ReparseOutcome(
+            ref.raw_artifact_id, PARSE_FAILED, error_type=type(error).__name__, error_message=str(error)
+        )
 
     from ecomdata.ingestion.silver_sink import silver_observation_path
 
@@ -237,7 +247,8 @@ def reparse_raw_artifact(
         for observation in parsed.observations
     }
     return ReparseOutcome(
-        ref.raw_artifact_id, IDENTICAL,
+        ref.raw_artifact_id,
+        IDENTICAL,
         observation_ids=tuple(sorted(hashes)),
         content_hashes=hashes,
         silver_paths=paths,
@@ -281,7 +292,10 @@ def classify(outcome: ReparseOutcome, existing: Mapping[str, str]) -> ReparseOut
     diverged, unseen = diff_reparsed_observations(outcome.content_hashes, existing)
     if diverged:
         return ReparseOutcome(
-            outcome.raw_artifact_id, DIVERGED, outcome.observation_ids, outcome.content_hashes,
+            outcome.raw_artifact_id,
+            DIVERGED,
+            outcome.observation_ids,
+            outcome.content_hashes,
             diverged_observation_ids=diverged,
             error_type="ContentDiverged",
             error_message=f"{len(diverged)} observation(s) parsed to different content",
@@ -290,7 +304,10 @@ def classify(outcome: ReparseOutcome, existing: Mapping[str, str]) -> ReparseOut
         # The original ingest lost rows. Writing them back is a Phase 8
         # recovery decision, not something a verification tool should do.
         return ReparseOutcome(
-            outcome.raw_artifact_id, NEW_OBSERVATIONS, outcome.observation_ids, outcome.content_hashes,
+            outcome.raw_artifact_id,
+            NEW_OBSERVATIONS,
+            outcome.observation_ids,
+            outcome.content_hashes,
             diverged_observation_ids=unseen,
             error_type="ObservationsMissingFromSilver",
             error_message=f"{len(unseen)} observation(s) absent from Silver",
@@ -317,7 +334,11 @@ def reparse_batch(
     outcomes = []
     for ref in refs:
         outcome = reparse_raw_artifact(
-            ref, adapter=adapter_for(ref.marketplace_code), reader=reader, clock=clock, silver_dataset=silver_dataset,
+            ref,
+            adapter=adapter_for(ref.marketplace_code),
+            reader=reader,
+            clock=clock,
+            silver_dataset=silver_dataset,
         )
         if existing is not None:
             outcome = classify(outcome, existing)
@@ -342,7 +363,7 @@ def summarise(outcomes: Sequence[ReparseOutcome], *, reported_at: datetime) -> d
         if not outcome.ok
     ]
     return {
-        "reported_at": reported_at.astimezone(timezone.utc).isoformat(),
+        "reported_at": reported_at.astimezone(UTC).isoformat(),
         "artifacts": len(outcomes),
         "counts": dict(sorted(counts.items())),
         "problems": problems,
@@ -356,7 +377,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--hour", required=True)
     parser.add_argument("--crawl-run-id", required=True)
     parser.add_argument("--raw-artifact-id", required=True, action="append")
-    parser.add_argument("--silver-dataset", default=None, help="Silver dataset prefix the ingest landed observations under")
+    parser.add_argument(
+        "--silver-dataset", default=None, help="Silver dataset prefix the ingest landed observations under"
+    )
     parser.add_argument("--report-path", default=None, help="also write the report to this local file")
     args = parser.parse_args(argv)
 
@@ -374,11 +397,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         # verification run never reaches the marketplace.
         adapter_for=lambda code: adapters[code](categories=[], fetch_robots=False),
         reader=object_store.get_bytes,
-        clock=lambda: datetime.now(timezone.utc),
+        clock=lambda: datetime.now(UTC),
         silver_reader=object_store.get_bytes,
         silver_dataset=args.silver_dataset,
     )
-    report = json.dumps(summarise(outcomes, reported_at=datetime.now(timezone.utc)), ensure_ascii=False, sort_keys=True)
+    report = json.dumps(summarise(outcomes, reported_at=datetime.now(UTC)), ensure_ascii=False, sort_keys=True)
     print(report)
     if args.report_path:
         from pathlib import Path

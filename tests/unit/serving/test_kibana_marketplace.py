@@ -3,6 +3,7 @@
 Offline: the templates and the dashboards are data, and everything asserted
 here is asserted against that data, not against a running Kibana.
 """
+
 from __future__ import annotations
 
 import json
@@ -22,8 +23,9 @@ def _committed() -> list[dict]:
 
 
 def _properties_by_pattern() -> dict[str, dict]:
-    return {body["index_patterns"][0]: body["template"]["mappings"]["properties"]
-            for body in t.INDEX_TEMPLATES.values()}
+    return {
+        body["index_patterns"][0]: body["template"]["mappings"]["properties"] for body in t.INDEX_TEMPLATES.values()
+    }
 
 
 def _data_view_patterns(objects: list[dict]) -> dict[str, str]:
@@ -34,20 +36,25 @@ def _data_view_patterns(objects: list[dict]) -> dict[str, str]:
 
 # Every field that carries money or a rating, across all six templates. Each
 # must survive six decimal places, the same as the decimal(38,6) cache columns.
-PRICE_FIELDS = (("marketplace-offers-current", "current_price"),
-                ("marketplace-offers-current", "list_price"),
-                ("marketplace-offers-current", "rating_value"))
+PRICE_FIELDS = (
+    ("marketplace-offers-current", "current_price"),
+    ("marketplace-offers-current", "list_price"),
+    ("marketplace-offers-current", "rating_value"),
+)
 
-IDENTIFIER_FIELDS = (("marketplace-changes", "event_id"), ("marketplace-changes", "offer_id"),
-                     ("marketplace-changes", "current_observation_id"),
-                     ("marketplace-offers-current", "offer_id"),
-                     ("marketplace-offers-current", "platform_listing_id"),
-                     ("marketplace-source-health", "marketplace_code"),
-                     ("marketplace-crawl-attempts", "attempt_id"),
-                     ("marketplace-crawl-attempts", "crawl_run_id"),
-                     ("marketplace-crawl-attempts", "task_id"),
-                     ("marketplace-speed-batches", "query_id"),
-                     ("marketplace-dlq", "dlq_id"))
+IDENTIFIER_FIELDS = (
+    ("marketplace-changes", "event_id"),
+    ("marketplace-changes", "offer_id"),
+    ("marketplace-changes", "current_observation_id"),
+    ("marketplace-offers-current", "offer_id"),
+    ("marketplace-offers-current", "platform_listing_id"),
+    ("marketplace-source-health", "marketplace_code"),
+    ("marketplace-crawl-attempts", "attempt_id"),
+    ("marketplace-crawl-attempts", "crawl_run_id"),
+    ("marketplace-crawl-attempts", "task_id"),
+    ("marketplace-speed-batches", "query_id"),
+    ("marketplace-dlq", "dlq_id"),
+)
 
 
 @pytest.mark.parametrize("template,field", PRICE_FIELDS)
@@ -135,6 +142,7 @@ def test_installing_the_templates_puts_each_one_by_name():
 
 # --- test 29: the committed saved objects ------------------------------------
 
+
 def test_the_committed_export_is_what_the_builder_produces():
     # The .ndjson is generated; a hand edit to either side would otherwise
     # drift silently.
@@ -179,8 +187,7 @@ def test_each_dashboard_has_panels_and_a_reference_for_every_one_of_them():
         for panel in panels:
             index = panel["panelIndex"]
             assert panel["gridData"]["i"] == index
-            owned = {name for name in reference_names if name.startswith(f"{index}:")
-                     or name == f"panel_{index}"}
+            owned = {name for name in reference_names if name.startswith(f"{index}:") or name == f"panel_{index}"}
             assert owned, f"panel {index} of {dashboard['id']} references nothing"
 
 
@@ -203,7 +210,9 @@ def test_every_lens_panel_reads_a_field_its_index_template_declares():
                 # Lens reads columnOrder, and it wants every bucket before
                 # every metric; a metric listed first renders an empty panel.
                 buckets = [layer["columns"][name]["isBucketed"] for name in layer["columnOrder"]]
-                assert buckets == sorted(buckets, reverse=True), f"{dashboard['id']}/{index} orders a metric before a bucket"
+                assert buckets == sorted(buckets, reverse=True), (
+                    f"{dashboard['id']}/{index} orders a metric before a bucket"
+                )
                 for column in layer["columns"].values():
                     field = column.get("sourceField")
                     # ___records___ is Lens's name for "count the documents".
@@ -219,8 +228,7 @@ def test_every_saved_search_column_is_a_field_its_index_template_declares():
     searches = [obj for obj in objects if obj["type"] == "search"]
     assert searches
     for search in searches:
-        data_view = next(reference["id"] for reference in search["references"]
-                         if reference["type"] == "index-pattern")
+        data_view = next(reference["id"] for reference in search["references"] if reference["type"] == "index-pattern")
         declared = properties[patterns[data_view]]
         for column in search["attributes"]["columns"]:
             assert column in declared, f"{search['id']} shows undeclared {column}"
@@ -245,9 +253,11 @@ def test_a_panel_that_says_latency_says_which_latency_it_means():
             text = f"{attributes['title']} {attributes['description']}".lower()
             if "latency" not in text:
                 continue
-            fields = {column.get("sourceField") for layer in
-                      attributes["state"]["datasourceStates"]["formBased"]["layers"].values()
-                      for column in layer["columns"].values()}
+            fields = {
+                column.get("sourceField")
+                for layer in attributes["state"]["datasourceStates"]["formBased"]["layers"].values()
+                for column in layer["columns"].values()
+            }
             if "duration_ms" in fields:
                 # Micro-batch duration. The change contract carries no
                 # processed time, so end-to-end latency cannot be shown here.
@@ -264,9 +274,11 @@ def test_the_micro_batch_panel_is_never_titled_plain_latency():
             if panel["type"] != "lens":
                 continue
             attributes = panel["embeddableConfig"]["attributes"]
-            fields = {column.get("sourceField") for layer in
-                      attributes["state"]["datasourceStates"]["formBased"]["layers"].values()
-                      for column in layer["columns"].values()}
+            fields = {
+                column.get("sourceField")
+                for layer in attributes["state"]["datasourceStates"]["formBased"]["layers"].values()
+                for column in layer["columns"].values()
+            }
             if "duration_ms" in fields:
                 assert "duration" in attributes["title"].lower()
 
@@ -274,12 +286,23 @@ def test_the_micro_batch_panel_is_never_titled_plain_latency():
 def test_the_dashboards_cover_every_panel_the_plan_lists():
     text = d.NDJSON_PATH.read_text(encoding="utf-8")
 
-    for expected in ("Recent changes", "Large price drops", "New and stale offers",
-                     "Changes by change_type", "Offers by availability",
-                     "Source last success, circuit state and consecutive failures",
-                     "Freshness", "Crawl attempts by error_kind", "HTTP status distribution",
-                     "Fetch latency", "Parsed and rejected", "Observation rate",
-                     "DLQ records by stage", "Speed micro-batch duration", "Rows per speed micro-batch"):
+    for expected in (
+        "Recent changes",
+        "Large price drops",
+        "New and stale offers",
+        "Changes by change_type",
+        "Offers by availability",
+        "Source last success, circuit state and consecutive failures",
+        "Freshness",
+        "Crawl attempts by error_kind",
+        "HTTP status distribution",
+        "Fetch latency",
+        "Parsed and rejected",
+        "Observation rate",
+        "DLQ records by stage",
+        "Speed micro-batch duration",
+        "Rows per speed micro-batch",
+    ):
         assert expected in text, f"no panel for {expected}"
 
 
@@ -287,7 +310,7 @@ def test_a_public_counter_change_is_never_called_a_sale():
     text = d.NDJSON_PATH.read_text(encoding="utf-8").lower()
 
     assert "not a sale" in text
-    for forbidden in ("units sold", "sales volume", "demand signal\"", "revenue"):
+    for forbidden in ("units sold", "sales volume", 'demand signal"', "revenue"):
         assert forbidden not in text
 
 
@@ -300,9 +323,11 @@ def test_the_phase_five_shell_is_superseded_by_id_not_left_behind():
 
 
 def test_the_builder_refuses_a_data_view_no_template_installs(monkeypatch):
-    monkeypatch.setattr(d, "DATA_VIEWS", (*d.DATA_VIEWS,
-                                          {"id": "dv-x", "title": "marketplace-nothing-*",
-                                           "name": "x", "timeFieldName": "t"}))
+    monkeypatch.setattr(
+        d,
+        "DATA_VIEWS",
+        (*d.DATA_VIEWS, {"id": "dv-x", "title": "marketplace-nothing-*", "name": "x", "timeFieldName": "t"}),
+    )
 
     with pytest.raises(SystemExit, match="marketplace-nothing"):
         d.main()

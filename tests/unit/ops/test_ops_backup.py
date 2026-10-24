@@ -4,15 +4,16 @@ Offline. The lake is a dict, PostgreSQL is a fake that records what it was
 asked to dump and restore, and ``pg_dump`` never runs — what is asserted here
 is the ordering and the verification, which is where a backup goes wrong.
 """
+
 from __future__ import annotations
-from tests.paths import FIXTURES, REPO_ROOT
 
 import json
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
+from ecomdata.ops import backup as b
 from ecomdata.processing.batch.manifest import (
     CURRENT_POINTER_PATH,
     GoldManifest,
@@ -20,13 +21,15 @@ from ecomdata.processing.batch.manifest import (
     serialize_manifest,
 )
 from ecomdata.settings import MARKETPLACE_MANIFEST_SCHEMA_VERSION
-from ecomdata.ops import backup as b
+from tests.paths import REPO_ROOT
 
-AS_OF = datetime(2026, 10, 4, 7, tzinfo=timezone.utc)
+AS_OF = datetime(2026, 10, 4, 7, tzinfo=UTC)
 RUN_ID = "mp-20261004T0700Z"
 GOLD_RUN_URI = "s3a://ecommerce-gold/marketplace/run_id=mp-20261004T0700Z"
-RAW_URI = ("s3a://ecommerce-bronze/marketplace/raw/marketplace=tiki/observed_date=2026-10-04/"
-           "hour=06/crawl_run_id=crawl-1/raw_artifact_id=raw-1/body.bin")
+RAW_URI = (
+    "s3a://ecommerce-bronze/marketplace/raw/marketplace=tiki/observed_date=2026-10-04/"
+    "hour=06/crawl_run_id=crawl-1/raw_artifact_id=raw-1/body.bin"
+)
 
 
 def _pointer(run_id: str = RUN_ID) -> bytes:
@@ -77,10 +80,13 @@ class FakeDb:
         if "crawl_request_attempt" in sql:
             # The real column predicate, applied here so the test exercises
             # which attempts are sampled rather than how the SQL is spelled.
-            return [(uri,) for uri, error_kind, parsed in self.attempts
-                    if uri is not None
-                    and ("error_kind IS NULL" not in sql or error_kind is None)
-                    and ("parsed_count > 0" not in sql or parsed > 0)]
+            return [
+                (uri,)
+                for uri, error_kind, parsed in self.attempts
+                if uri is not None
+                and ("error_kind IS NULL" not in sql or error_kind is None)
+                and ("parsed_count > 0" not in sql or parsed > 0)
+            ]
         raise AssertionError(f"unexpected query: {sql}")
 
     def dump_schema(self, schema, destination):
@@ -106,16 +112,21 @@ class FakeDb:
 
 
 def _full_lake() -> FakeLake:
-    return FakeLake({
-        ("gold", CURRENT_POINTER_PATH): _pointer(),
-        ("gold", "marketplace/run_id=mp-20261004T0700Z/offer_current/part-0.parquet"): b"parquet",
-        ("gold", "marketplace/run_id=mp-20261004T0700Z/offer_current/_SUCCESS"): b"",
-        ("gold", "marketplace/manifests/run_id=mp-20261004T0700Z/manifest.json"): _pointer(),
-        ("gold", "marketplace/run_id=mp-20260101T0000Z/offer_current/part-0.parquet"): b"old run",
-        ("bronze", "marketplace/raw/marketplace=tiki/observed_date=2026-10-04/hour=06/"
-                   "crawl_run_id=crawl-1/raw_artifact_id=raw-1/body.bin"): b"raw body",
-        ("silver", "marketplace/offer_observations/marketplace=tiki/observed_date=2026-10-04/o1.json"): b"{}",
-    })
+    return FakeLake(
+        {
+            ("gold", CURRENT_POINTER_PATH): _pointer(),
+            ("gold", "marketplace/run_id=mp-20261004T0700Z/offer_current/part-0.parquet"): b"parquet",
+            ("gold", "marketplace/run_id=mp-20261004T0700Z/offer_current/_SUCCESS"): b"",
+            ("gold", "marketplace/manifests/run_id=mp-20261004T0700Z/manifest.json"): _pointer(),
+            ("gold", "marketplace/run_id=mp-20260101T0000Z/offer_current/part-0.parquet"): b"old run",
+            (
+                "bronze",
+                "marketplace/raw/marketplace=tiki/observed_date=2026-10-04/hour=06/"
+                "crawl_run_id=crawl-1/raw_artifact_id=raw-1/body.bin",
+            ): b"raw body",
+            ("silver", "marketplace/offer_observations/marketplace=tiki/observed_date=2026-10-04/o1.json"): b"{}",
+        }
+    )
 
 
 def _backup(tmp_path, lake=None, db=None, **kwargs):
@@ -127,6 +138,7 @@ def _backup(tmp_path, lake=None, db=None, **kwargs):
 
 
 # --- test 24: every copied object is hashed, and one changed byte is fatal ---
+
 
 def test_the_manifest_records_a_sha256_and_a_size_for_every_copied_object(tmp_path):
     manifest, _, _, scoped = _backup(tmp_path)
@@ -173,6 +185,7 @@ def test_a_truncated_file_of_the_same_prefix_is_caught_by_size(tmp_path):
 
 # --- test 25: a backup whose pointer and cache disagree is refused -----------
 
+
 def test_a_backup_is_refused_when_the_pointer_and_the_cache_name_different_runs(tmp_path):
     db = FakeDb(cache_run_id="mp-20261003T0700Z")
 
@@ -204,6 +217,7 @@ def test_the_two_run_ids_are_both_recorded_so_the_check_is_auditable(tmp_path):
 
 
 # --- test 26: restore writes current.json last -------------------------------
+
 
 def test_restore_writes_the_pointer_last_and_postgres_before_the_lake(tmp_path):
     _backup(tmp_path)
@@ -238,6 +252,7 @@ def test_every_backed_up_object_comes_back(tmp_path):
 
 
 # --- what is and is not copied (plan 12.1) -----------------------------------
+
 
 def test_bronze_and_silver_are_copied_whole(tmp_path):
     manifest, lake, _, _ = _backup(tmp_path)
@@ -300,8 +315,9 @@ def test_an_unknown_backup_schema_version_is_refused(tmp_path):
 def test_an_object_the_stack_names_but_does_not_have_fails_the_backup(tmp_path):
     lake = _full_lake()
     del lake.objects[("gold", "marketplace/manifests/run_id=mp-20261004T0700Z/manifest.json")]
-    lake.get = lambda zone, key: (None if key.endswith("manifest.json") and "manifests" in key
-                                  else FakeLake.get(lake, zone, key))
+    lake.get = lambda zone, key: (
+        None if key.endswith("manifest.json") and "manifests" in key else FakeLake.get(lake, zone, key)
+    )
     # Removing it from the listing too would simply copy less; the case that
     # matters is a key that lists and then cannot be read.
     lake.objects[("gold", "marketplace/manifests/run_id=mp-20261004T0700Z/manifest.json")] = b"x"
@@ -311,6 +327,7 @@ def test_an_object_the_stack_names_but_does_not_have_fails_the_backup(tmp_path):
 
 
 # --- the deterministic reparse sample ----------------------------------------
+
 
 def test_the_reparse_sample_is_deterministic_and_spread_out():
     uris = [f"s3a://b/raw_artifact_id=raw-{index:02d}" for index in range(20)]
@@ -333,6 +350,7 @@ def test_a_sample_larger_than_the_population_takes_everything():
 
 # --- the restore checks (plan 12.3 step 3) -----------------------------------
 
+
 def _restored(tmp_path):
     _backup(tmp_path)
     lake, db = FakeLake(), FakeDb()
@@ -343,9 +361,14 @@ def _restored(tmp_path):
 def test_the_restore_checks_pass_on_a_faithful_restore(tmp_path):
     lake, db, manifest = _restored(tmp_path)
 
-    results = b.restore_checks(lake, db, manifest, sample_size=1,
-                               rows_at=lambda uri: 12,
-                               reparse=lambda uris: {"counts": {"IDENTICAL": len(uris)}})
+    results = b.restore_checks(
+        lake,
+        db,
+        manifest,
+        sample_size=1,
+        rows_at=lambda uri: 12,
+        reparse=lambda uris: {"counts": {"IDENTICAL": len(uris)}},
+    )
 
     assert [result.status for result in results] == [b.PASS] * 3
 
@@ -379,9 +402,9 @@ def test_a_dataset_missing_its_success_marker_fails_rather_than_counting_zero(tm
 def test_a_diverged_reparse_fails_the_restore(tmp_path):
     _, db, _ = _restored(tmp_path)
 
-    result = b.check_reparse_sample(db, sample_size=1,
-                                    reparse=lambda uris: {"counts": {"DIVERGED": 1},
-                                                          "problems": [{"raw_artifact_id": "raw-1"}]})
+    result = b.check_reparse_sample(
+        db, sample_size=1, reparse=lambda uris: {"counts": {"DIVERGED": 1}, "problems": [{"raw_artifact_id": "raw-1"}]}
+    )
 
     assert result.status == b.FAIL
 
@@ -402,8 +425,9 @@ def test_a_check_that_raises_is_a_failure_carrying_its_error(tmp_path):
     def explode(uri):
         raise RuntimeError("MinIO is down")
 
-    results = b.restore_checks(lake, db, manifest, sample_size=1, rows_at=explode,
-                               reparse=lambda uris: {"counts": {"IDENTICAL": len(uris)}})
+    results = b.restore_checks(
+        lake, db, manifest, sample_size=1, rows_at=explode, reparse=lambda uris: {"counts": {"IDENTICAL": len(uris)}}
+    )
     failed = [result for result in results if result.status == b.FAIL]
 
     assert len(failed) == 1 and "MinIO is down" in str(failed[0].observed)
@@ -411,8 +435,7 @@ def test_a_check_that_raises_is_a_failure_carrying_its_error(tmp_path):
 
 def test_the_report_is_sorted_and_deterministic(tmp_path):
     lake, db, manifest = _restored(tmp_path)
-    kwargs = dict(sample_size=1, rows_at=lambda uri: 12,
-                  reparse=lambda uris: {"counts": {"IDENTICAL": len(uris)}})
+    kwargs = dict(sample_size=1, rows_at=lambda uri: 12, reparse=lambda uris: {"counts": {"IDENTICAL": len(uris)}})
 
     first = b.report(b.restore_checks(lake, db, manifest, **kwargs))
 
@@ -423,6 +446,7 @@ def test_the_report_is_sorted_and_deterministic(tmp_path):
 
 
 # --- zone keys ---------------------------------------------------------------
+
 
 def test_a_gold_uri_resolves_to_a_key_inside_its_zone():
     assert b.zone_key("s3a://ecommerce-gold/marketplace/run_id=x", "gold") == "marketplace/run_id=x"
@@ -435,11 +459,14 @@ def test_a_uri_from_another_profile_still_resolves_to_the_same_key():
 
 # --- the CLI -----------------------------------------------------------------
 
+
 def test_the_ops_cli_lists_backup_restore_and_backups():
     import subprocess
     import sys
 
-    result = subprocess.run([sys.executable, "-m", "ecomdata.ops", "--help"], capture_output=True, text=True, timeout=120)
+    result = subprocess.run(
+        [sys.executable, "-m", "ecomdata.ops", "--help"], capture_output=True, text=True, timeout=120
+    )
 
     assert result.returncode == 0
     for command in ("backup", "restore", "backups"):
@@ -450,13 +477,16 @@ def test_restore_requires_the_backup_it_is_asked_for():
     import subprocess
     import sys
 
-    result = subprocess.run([sys.executable, "-m", "ecomdata.ops", "restore"], capture_output=True, text=True, timeout=120)
+    result = subprocess.run(
+        [sys.executable, "-m", "ecomdata.ops", "restore"], capture_output=True, text=True, timeout=120
+    )
 
     assert result.returncode != 0
     assert "--from" in result.stderr
 
 
 # --- which attempts the reparse sample may be drawn from ---------------------
+
 
 def _attempt(uri, *, error_kind=None, parsed=7):
     return (uri, error_kind, parsed)
@@ -468,14 +498,17 @@ def test_an_attempt_that_published_nothing_is_never_sampled(tmp_path):
     Reparsing it reports NEW_OBSERVATIONS, correctly — and a restore check
     that sampled it would fail on a perfectly faithful copy."""
     _, db, _ = _restored(tmp_path)
-    db.attempts = [_attempt("s3a://b/publish-error", error_kind="PUBLISH_ERROR", parsed=0),
-                   _attempt("s3a://b/parse-error", error_kind="PARSE_ERROR", parsed=0),
-                   _attempt("s3a://b/good-1"), _attempt("s3a://b/good-2")]
+    db.attempts = [
+        _attempt("s3a://b/publish-error", error_kind="PUBLISH_ERROR", parsed=0),
+        _attempt("s3a://b/parse-error", error_kind="PARSE_ERROR", parsed=0),
+        _attempt("s3a://b/good-1"),
+        _attempt("s3a://b/good-2"),
+    ]
     sampled = []
 
-    result = b.check_reparse_sample(db, sample_size=4,
-                                    reparse=lambda uris: (sampled.extend(uris),
-                                                          {"counts": {"IDENTICAL": len(uris)}})[1])
+    result = b.check_reparse_sample(
+        db, sample_size=4, reparse=lambda uris: (sampled.extend(uris), {"counts": {"IDENTICAL": len(uris)}})[1]
+    )
 
     assert sampled == ["s3a://b/good-1", "s3a://b/good-2"]
     assert result.status == b.PASS
@@ -487,13 +520,12 @@ def test_a_partially_published_attempt_is_never_sampled_either(tmp_path):
     cannot tell a partial publish from a complete one by count alone — but a
     partial one is always FAILED with an error_kind, and that it can."""
     _, db, _ = _restored(tmp_path)
-    db.attempts = [_attempt("s3a://b/partial", error_kind="PUBLISH_ERROR", parsed=3),
-                   _attempt("s3a://b/good")]
+    db.attempts = [_attempt("s3a://b/partial", error_kind="PUBLISH_ERROR", parsed=3), _attempt("s3a://b/good")]
     sampled = []
 
-    b.check_reparse_sample(db, sample_size=4,
-                           reparse=lambda uris: (sampled.extend(uris),
-                                                 {"counts": {"IDENTICAL": len(uris)}})[1])
+    b.check_reparse_sample(
+        db, sample_size=4, reparse=lambda uris: (sampled.extend(uris), {"counts": {"IDENTICAL": len(uris)}})[1]
+    )
 
     assert sampled == ["s3a://b/good"]
 
@@ -509,15 +541,18 @@ def test_an_audit_with_only_unpublished_attempts_fails_rather_than_sampling_none
 
 # --- validate on a stack that was just restored ------------------------------
 
+
 def _check(name, status):
     return b.CheckResult(name, status, None, None)
 
 
 def test_the_derived_stores_are_allowed_to_be_empty_after_a_restore():
-    results = [_check("bronze_present", b.PASS),
-               _check("es_changes_unique", b.FAIL),
-               _check("kafka_to_silver_lag", b.FAIL),
-               _check("redis_offer_state_present", b.FAIL)]
+    results = [
+        _check("bronze_present", b.PASS),
+        _check("es_changes_unique", b.FAIL),
+        _check("kafka_to_silver_lag", b.FAIL),
+        _check("redis_offer_state_present", b.FAIL),
+    ]
 
     ok, tolerated, unexpected = b.judge_restored_validate(results)
 
@@ -545,8 +580,7 @@ def test_a_fully_green_validate_passes_the_restored_judgement_too():
 
 def test_the_tolerated_checks_are_exactly_the_stores_that_are_not_backed_up():
     # Pinned so widening the allowance is a deliberate edit with a reason.
-    assert b.RESTORED_STACK_EXPECTED_EMPTY == ("es_changes_unique", "kafka_to_silver_lag",
-                                               "redis_offer_state_present")
+    assert b.RESTORED_STACK_EXPECTED_EMPTY == ("es_changes_unique", "kafka_to_silver_lag", "redis_offer_state_present")
 
 
 def test_the_mp_script_holds_no_stray_control_characters():
@@ -558,7 +592,6 @@ def test_the_mp_script_holds_no_stray_control_characters():
     surfaced minutes later as "the quality gate refused the restored Silver",
     which was not what had happened.
     """
-    from pathlib import Path
 
     script = (REPO_ROOT / "scripts" / "mp.ps1").read_text(encoding="utf-8")
     stray = {character for character in script if ord(character) < 32 and character not in "\n\r\t"}

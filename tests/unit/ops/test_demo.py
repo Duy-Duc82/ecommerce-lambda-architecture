@@ -1,11 +1,11 @@
 """The demo and bench profiles, and the scripted demo — Phase 9 plan section 11."""
 from __future__ import annotations
-from tests.paths import FIXTURES, REPO_ROOT
 
 import re
-from pathlib import Path
 
 import pytest
+
+from tests.paths import REPO_ROOT
 
 ROOT = REPO_ROOT
 COMPOSE = (ROOT / "docker-compose.yml").read_text(encoding="utf-8")
@@ -46,8 +46,7 @@ def test_the_new_profiles_keep_every_service_s_old_profile():
 
 
 def test_a_demo_record_is_never_filed_with_the_drill_evidence(tmp_path, monkeypatch):
-    from ecomdata.ops import demo
-    from ecomdata.ops import drills
+    from ecomdata.ops import demo, drills
 
     monkeypatch.setattr(drills, "RECORDS", tmp_path)
     rec = demo.DemoRecord("demo-d3")

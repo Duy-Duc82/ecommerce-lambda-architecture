@@ -2,7 +2,7 @@
 import subprocess
 import sys
 from contextlib import contextmanager
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta, timezone
 
 import pytest
 
@@ -12,7 +12,7 @@ from ecomdata.processing.batch.warehouse import (
     write_run_scoped_gold,
 )
 
-AS_OF = datetime(2026, 9, 5, 10, tzinfo=timezone.utc)
+AS_OF = datetime(2026, 9, 5, 10, tzinfo=UTC)
 
 
 class FakeWriter:
@@ -74,7 +74,7 @@ def test_context_normalizes_utc_and_validates_run_id():
         "run_1", AS_OF, "file:///silver", "file:///gold"
     )
 
-    assert context.as_of.tzinfo == timezone.utc
+    assert context.as_of.tzinfo == UTC
 
 
 def test_context_converts_an_offset_as_of_to_utc():
@@ -85,7 +85,7 @@ def test_context_converts_an_offset_as_of_to_utc():
     )
 
     assert context.as_of == AS_OF
-    assert context.as_of.tzinfo == timezone.utc
+    assert context.as_of.tzinfo == UTC
 
 
 @pytest.mark.parametrize(
@@ -231,8 +231,8 @@ def test_importing_the_batch_modules_opens_no_client_or_session():
 # ----------------------------------------------------------------------------
 from ecomdata.processing.batch import manifest as marketplace_manifest
 from ecomdata.processing.batch import marts as marketplace_marts
-from ecomdata.processing.batch import repositories as marketplace_postgres
 from ecomdata.processing.batch import quality as marketplace_quality
+from ecomdata.processing.batch import repositories as marketplace_postgres
 from ecomdata.processing.batch import warehouse
 from ecomdata.processing.batch.manifest import PROMOTED, PromotionResult
 from ecomdata.processing.batch.quality import QualityDecision, QualityGateFailure, QualityResult
@@ -818,7 +818,7 @@ def test_the_cli_names_the_configured_gold_root_as_the_serving_one(monkeypatch, 
 # ----------------------------------------------------------------------------
 from tests.spark_support import requires_spark
 
-CUT_AS_OF = datetime(2026, 9, 5, 10, tzinfo=timezone.utc)
+CUT_AS_OF = datetime(2026, 9, 5, 10, tzinfo=UTC)
 
 
 @requires_spark

@@ -1,5 +1,7 @@
 """Explicit registry for counters whose deltas may be trusted."""
+
 from __future__ import annotations
+
 from dataclasses import dataclass
 
 
@@ -23,7 +25,8 @@ _FIELDS = ("rating_count", "review_count", "sold_count")
 
 def counter_semantics_for(marketplace: str) -> tuple[CounterSemantic, ...]:
     code = marketplace.strip().lower()
-    if code not in _DEFAULT: return ()
+    if code not in _DEFAULT:
+        return ()
     version, monotonic = _DEFAULT[code]
     return tuple(CounterSemantic(code, field, True, monotonic, version) for field in _FIELDS)
 

@@ -4,21 +4,20 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Callable
 from urllib.parse import quote
 
-from ecomdata.domain.identity import make_raw_artifact_id
-from ecomdata.infra.object_store import put_bytes
-from ecomdata.domain.serialization import serialize_for_wire
-from ecomdata.domain.observations import RawArtifact, create_raw_artifact
 from ecomdata.domain.acquisition import (
     FetchResult,
     ListingPageRequest,
     RawPersistenceError,
 )
-
+from ecomdata.domain.identity import make_raw_artifact_id
+from ecomdata.domain.observations import RawArtifact, create_raw_artifact
+from ecomdata.domain.serialization import serialize_for_wire
+from ecomdata.infra.object_store import put_bytes
 
 RAW_METADATA_SCHEMA_VERSION = "marketplace-raw-artifact-metadata.v1"
 

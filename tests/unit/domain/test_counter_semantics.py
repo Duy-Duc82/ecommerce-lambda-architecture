@@ -3,6 +3,8 @@
 The delta arithmetic itself lives in the Spark marts and is covered in
 tests/test_marketplace_marts.py.
 """
+import dataclasses
+
 import pytest
 
 from ecomdata.domain.counter_semantics import (
@@ -73,5 +75,5 @@ def test_a_semantic_version_change_makes_a_different_entry():
 def test_counter_semantic_is_frozen():
     item = counter_semantic("tiki", "sold_count")
 
-    with pytest.raises(Exception):
+    with pytest.raises(dataclasses.FrozenInstanceError):
         item.enabled = False

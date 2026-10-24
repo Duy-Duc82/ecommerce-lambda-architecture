@@ -2,8 +2,9 @@
 
 Object storage is a dict. No MinIO, PostgreSQL, Spark session or network.
 """
+
 import json
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -25,11 +26,11 @@ from ecomdata.processing.batch.manifest import (
     serialize_manifest,
     write_run_manifest,
 )
-from ecomdata.processing.batch.repositories import DATASETS
 from ecomdata.processing.batch.quality import QualityDecision
+from ecomdata.processing.batch.repositories import DATASETS
 from ecomdata.processing.batch.warehouse import GoldWriteResult, MarketplaceBatchContext
 
-AS_OF = datetime(2026, 9, 29, tzinfo=timezone.utc)
+AS_OF = datetime(2026, 9, 29, tzinfo=UTC)
 
 
 class FakeStore:
@@ -54,8 +55,14 @@ def context(run_id="run-1", *, as_of=AS_OF):
 
 def decision(run_id="run-1", *, passed=True, failures=0):
     return QualityDecision(
-        run_id=run_id, passed=passed, rule_version="quality-rules.v1", evaluated_at=AS_OF,
-        mandatory_total=13, mandatory_failures=failures, advisory_failures=0, skipped=0,
+        run_id=run_id,
+        passed=passed,
+        rule_version="quality-rules.v1",
+        evaluated_at=AS_OF,
+        mandatory_total=13,
+        mandatory_failures=failures,
+        advisory_failures=0,
+        skipped=0,
     )
 
 
@@ -68,8 +75,10 @@ def writes(run_id="run-1"):
 
 def manifest(run_id="run-1", *, as_of=AS_OF, passed=True, previous=None):
     return build_gold_manifest(
-        writes(run_id), decision(run_id, passed=passed, failures=0 if passed else 2),
-        context(run_id, as_of=as_of), previous_run_id=previous,
+        writes(run_id),
+        decision(run_id, passed=passed, failures=0 if passed else 2),
+        context(run_id, as_of=as_of),
+        previous_run_id=previous,
     )
 
 
@@ -156,7 +165,9 @@ def test_a_refused_run_writes_its_manifest_and_leaves_the_pointer_alone():
     promote_manifest(good, writer=store.write, reader=store.read, expected_current_run_id=None)
     pointer_before = store.objects[(GOLD_ZONE, CURRENT_POINTER_PATH)]
 
-    result = promote_manifest(manifest("run-2", passed=False), writer=store.write, reader=store.read, expected_current_run_id="run-1")
+    result = promote_manifest(
+        manifest("run-2", passed=False), writer=store.write, reader=store.read, expected_current_run_id="run-1"
+    )
 
     assert result.promoted is False
     assert result.reason == QUALITY_FAILED
@@ -211,7 +222,12 @@ def test_promoting_the_run_that_is_already_current_writes_nothing():
 # 39
 def test_an_older_as_of_is_refused_unless_backfill_is_allowed():
     store = FakeStore()
-    promote_manifest(manifest("run-2", as_of=AS_OF + timedelta(days=2)), writer=store.write, reader=store.read, expected_current_run_id=None)
+    promote_manifest(
+        manifest("run-2", as_of=AS_OF + timedelta(days=2)),
+        writer=store.write,
+        reader=store.read,
+        expected_current_run_id=None,
+    )
     older = manifest("run-1", as_of=AS_OF)
 
     refused = promote_manifest(older, writer=store.write, reader=store.read, expected_current_run_id="run-2")
@@ -219,24 +235,34 @@ def test_an_older_as_of_is_refused_unless_backfill_is_allowed():
     assert refused.reason == BACKFILL_REFUSED
     assert read_current_manifest(reader=store.read).run_id == "run-2"
 
-    allowed = promote_manifest(older, writer=store.write, reader=store.read, allow_backfill=True, expected_current_run_id="run-2")
+    allowed = promote_manifest(
+        older, writer=store.write, reader=store.read, allow_backfill=True, expected_current_run_id="run-2"
+    )
     assert allowed.promoted is True
     assert read_current_manifest(reader=store.read).run_id == "run-1"
 
 
 # 39
-@pytest.mark.parametrize("candidate, allow_backfill, expected", [
-    (lambda: manifest("run-1", as_of=AS_OF), False, BACKFILL_REFUSED),
-    (lambda: manifest("run-1", as_of=AS_OF), True, None),
-    (lambda: manifest("run-2", as_of=AS_OF + timedelta(days=2)), False, ALREADY_CURRENT),
-    (lambda: manifest("run-3", as_of=AS_OF, passed=False), False, QUALITY_FAILED),
-    (lambda: manifest("run-4", as_of=AS_OF + timedelta(days=3)), False, None),
-])
+@pytest.mark.parametrize(
+    "candidate, allow_backfill, expected",
+    [
+        (lambda: manifest("run-1", as_of=AS_OF), False, BACKFILL_REFUSED),
+        (lambda: manifest("run-1", as_of=AS_OF), True, None),
+        (lambda: manifest("run-2", as_of=AS_OF + timedelta(days=2)), False, ALREADY_CURRENT),
+        (lambda: manifest("run-3", as_of=AS_OF, passed=False), False, QUALITY_FAILED),
+        (lambda: manifest("run-4", as_of=AS_OF + timedelta(days=3)), False, None),
+    ],
+)
 def test_the_refusal_check_agrees_with_promotion_and_writes_nothing(candidate, allow_backfill, expected):
     # The orchestrator asks this before publishing the cache, so it must give
     # the answer promote_manifest gives afterwards.
     store = FakeStore()
-    promote_manifest(manifest("run-2", as_of=AS_OF + timedelta(days=2)), writer=store.write, reader=store.read, expected_current_run_id=None)
+    promote_manifest(
+        manifest("run-2", as_of=AS_OF + timedelta(days=2)),
+        writer=store.write,
+        reader=store.read,
+        expected_current_run_id=None,
+    )
     current = read_current_manifest(reader=store.read)
     document = candidate()
     writes_before = len(store.writes)
@@ -244,7 +270,9 @@ def test_the_refusal_check_agrees_with_promotion_and_writes_nothing(candidate, a
     assert promotion_refusal(document, current, allow_backfill=allow_backfill) == expected
     assert len(store.writes) == writes_before
 
-    result = promote_manifest(document, writer=store.write, reader=store.read, allow_backfill=allow_backfill, expected_current_run_id="run-2")
+    result = promote_manifest(
+        document, writer=store.write, reader=store.read, allow_backfill=allow_backfill, expected_current_run_id="run-2"
+    )
     assert result.reason == (expected or PROMOTED)
 
 
@@ -255,13 +283,21 @@ def test_a_pointer_that_moved_is_a_conflict_and_nothing_is_written(expected):
     if expected is not None:
         promote_manifest(manifest("run-1"), writer=store.write, reader=store.read, expected_current_run_id=None)
     # Another run promotes after this one read the pointer.
-    promote_manifest(manifest("run-2", as_of=AS_OF + timedelta(days=1)), writer=store.write, reader=store.read,
-                     expected_current_run_id=expected)
+    promote_manifest(
+        manifest("run-2", as_of=AS_OF + timedelta(days=1)),
+        writer=store.write,
+        reader=store.read,
+        expected_current_run_id=expected,
+    )
     writes_before = list(store.writes)
     pointer_before = store.objects[(GOLD_ZONE, CURRENT_POINTER_PATH)]
 
-    result = promote_manifest(manifest("run-3", as_of=AS_OF + timedelta(days=2)), writer=store.write, reader=store.read,
-                              expected_current_run_id=expected)
+    result = promote_manifest(
+        manifest("run-3", as_of=AS_OF + timedelta(days=2)),
+        writer=store.write,
+        reader=store.read,
+        expected_current_run_id=expected,
+    )
 
     assert result.promoted is False
     assert result.reason == PROMOTION_CONFLICT

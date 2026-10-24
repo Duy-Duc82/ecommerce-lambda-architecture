@@ -21,12 +21,13 @@ from __future__ import annotations
 
 import argparse
 import json
-from datetime import datetime, timedelta, timezone
-from typing import Any, Callable
+from collections.abc import Callable
+from datetime import UTC, datetime, timedelta
+from typing import Any
 
 from ecomdata.infra.lifecycle import StopSignal, install_signal_handlers
 
-_EPOCH = datetime(1970, 1, 1, tzinfo=timezone.utc)
+_EPOCH = datetime(1970, 1, 1, tzinfo=UTC)
 
 
 def _check(interval_seconds: int, lag_seconds: int) -> None:
@@ -42,12 +43,12 @@ def window_as_of(now: datetime, *, interval_seconds: int, lag_seconds: int) -> d
     _check(interval_seconds, lag_seconds)
     if now.tzinfo is None:
         raise ValueError("now must be timezone-aware")
-    elapsed = int((now.astimezone(timezone.utc) - _EPOCH).total_seconds()) - lag_seconds
+    elapsed = int((now.astimezone(UTC) - _EPOCH).total_seconds()) - lag_seconds
     return _EPOCH + timedelta(seconds=elapsed - elapsed % interval_seconds)
 
 
 def run_id_for(as_of: datetime) -> str:
-    return "mp-" + as_of.astimezone(timezone.utc).strftime("%Y%m%dT%H%MZ")
+    return "mp-" + as_of.astimezone(UTC).strftime("%Y%m%dT%H%MZ")
 
 
 def next_wake(now: datetime, *, interval_seconds: int, lag_seconds: int) -> datetime:
@@ -147,11 +148,14 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Marketplace batch scheduler")
     parser.add_argument("--max-ticks", type=int, default=None, help="stop after N ticks (tests and smoke only)")
     args = parser.parse_args()
-    from ecomdata.processing.batch.warehouse import run_marketplace_warehouse
     from ecomdata.infra.postgres import postgres_connection_factory
+    from ecomdata.processing.batch.warehouse import run_marketplace_warehouse
     from ecomdata.settings import (
-        MARKETPLACE_BATCH_AS_OF_LAG_SECONDS, MARKETPLACE_BATCH_INTERVAL_SECONDS,
-        MARKETPLACE_GOLD_DATASET, MARKETPLACE_SILVER_DATASET, data_lake_uri,
+        MARKETPLACE_BATCH_AS_OF_LAG_SECONDS,
+        MARKETPLACE_BATCH_INTERVAL_SECONDS,
+        MARKETPLACE_GOLD_DATASET,
+        MARKETPLACE_SILVER_DATASET,
+        data_lake_uri,
     )
 
     stop = StopSignal()
@@ -164,7 +168,7 @@ def main() -> None:
                          silver_uri=silver_uri, gold_root_uri=gold_root_uri,
                          interval_seconds=MARKETPLACE_BATCH_INTERVAL_SECONDS,
                          lag_seconds=MARKETPLACE_BATCH_AS_OF_LAG_SECONDS),
-        clock=lambda: datetime.now(timezone.utc),
+        clock=lambda: datetime.now(UTC),
         stop=stop,
         interval_seconds=MARKETPLACE_BATCH_INTERVAL_SECONDS,
         lag_seconds=MARKETPLACE_BATCH_AS_OF_LAG_SECONDS,

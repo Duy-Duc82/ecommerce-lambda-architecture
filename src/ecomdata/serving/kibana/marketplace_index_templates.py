@@ -225,8 +225,10 @@ def index_patterns() -> tuple[str, ...]:
 def projector_indices() -> tuple[str, ...]:
     """The four indices ops/es_projector.py writes, in template order."""
     from ecomdata.settings import (
-        ES_INDEX_MARKETPLACE_CRAWL_ATTEMPTS, ES_INDEX_MARKETPLACE_DLQ,
-        ES_INDEX_MARKETPLACE_SOURCE_HEALTH, ES_INDEX_MARKETPLACE_SPEED_BATCHES,
+        ES_INDEX_MARKETPLACE_CRAWL_ATTEMPTS,
+        ES_INDEX_MARKETPLACE_DLQ,
+        ES_INDEX_MARKETPLACE_SOURCE_HEALTH,
+        ES_INDEX_MARKETPLACE_SPEED_BATCHES,
     )
 
     return (ES_INDEX_MARKETPLACE_SOURCE_HEALTH, ES_INDEX_MARKETPLACE_CRAWL_ATTEMPTS,

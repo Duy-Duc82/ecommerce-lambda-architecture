@@ -8,8 +8,9 @@ PostgreSQL ran out of connections. The factory here closes what it opens.
 """
 from __future__ import annotations
 
+from collections.abc import Callable
 from contextlib import contextmanager
-from typing import Any, Callable
+from typing import Any
 
 
 def postgres_connection_factory() -> Callable[[], Any]:

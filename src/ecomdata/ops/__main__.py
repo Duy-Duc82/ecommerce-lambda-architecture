@@ -18,12 +18,13 @@ lives here.
     restore --from ID [--path DIR] section 12.3, into a fresh project only
     backups [--path DIR]          list what is in the backup directory
 """
+
 from __future__ import annotations
 
 import argparse
 import json
 import sys
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 INIT_SQL = Path(__file__).resolve().parents[3] / "scripts" / "init_postgres.sql"
@@ -44,23 +45,36 @@ def migrate() -> int:
 
 
 def seed_smoke() -> int:
-    from ecomdata.settings import CRAWL_MAX_ATTEMPTS
+    from ecomdata.infra.postgres import postgres_connection_factory
     from ecomdata.ingestion.frontier import PostgresCrawlFrontier
     from ecomdata.ingestion.scheduling import CrawlTier
     from ecomdata.ingestion.seed import MARKETPLACE_IDS, seed
-    from ecomdata.infra.postgres import postgres_connection_factory
-    from ecomdata.ops.smoke import SMOKE_CATEGORIES, SMOKE_PAGES
-
-    from ecomdata.ops.smoke import activate
+    from ecomdata.ops.smoke import SMOKE_CATEGORIES, SMOKE_PAGES, activate
+    from ecomdata.settings import CRAWL_MAX_ATTEMPTS
 
     factory = postgres_connection_factory()
-    created = seed(PostgresCrawlFrontier(factory), marketplace_code="tiki",
-                   marketplace_id=MARKETPLACE_IDS["tiki"], categories=SMOKE_CATEGORIES, pages=SMOKE_PAGES,
-                   tier=CrawlTier.ACTIVE, priority=0, max_attempts=CRAWL_MAX_ATTEMPTS)
+    created = seed(
+        PostgresCrawlFrontier(factory),
+        marketplace_code="tiki",
+        marketplace_id=MARKETPLACE_IDS["tiki"],
+        categories=SMOKE_CATEGORIES,
+        pages=SMOKE_PAGES,
+        tier=CrawlTier.ACTIVE,
+        priority=0,
+        max_attempts=CRAWL_MAX_ATTEMPTS,
+    )
     # A smoke run before this one parked its tasks; seeding alone is a no-op then.
     reactivated = activate(factory)
-    print(json.dumps({"event": "seeded_smoke", "created": created, "reactivated": reactivated,
-                      "tasks": len(SMOKE_CATEGORIES) * SMOKE_PAGES}))
+    print(
+        json.dumps(
+            {
+                "event": "seeded_smoke",
+                "created": created,
+                "reactivated": reactivated,
+                "tasks": len(SMOKE_CATEGORIES) * SMOKE_PAGES,
+            }
+        )
+    )
     return 0
 
 
@@ -76,7 +90,9 @@ def smoke_wait(timeout: float) -> int:
     from ecomdata.ops.smoke import smoke_targets, wait
     from ecomdata.ops.validate import LiveSources
 
-    met = wait(LiveSources(), targets=smoke_targets(), timeout_seconds=timeout, log=lambda line: print(line, flush=True))
+    met = wait(
+        LiveSources(), targets=smoke_targets(), timeout_seconds=timeout, log=lambda line: print(line, flush=True)
+    )
     return 0 if met else 1
 
 
@@ -101,15 +117,17 @@ def batch_plan(settle: int, *, after_last_crawl: bool = False, sleep=None, now=N
 
     from ecomdata.processing.batch.scheduler import run_id_for
 
-    clock = now or (lambda: datetime.now(timezone.utc))
+    clock = now or (lambda: datetime.now(UTC))
     if after_last_crawl:
         from ecomdata.ops.validate import LiveSources
 
-        (last,), = LiveSources().query("SELECT max(completed_at) FROM audit.crawl_run")
+        ((last,),) = LiveSources().query("SELECT max(completed_at) FROM audit.crawl_run")
         if last is None:
             raise SystemExit("no finished crawl run to anchor the window on")
         target = last + timedelta(seconds=settle)
-        as_of = target.replace(second=0, microsecond=0) + (timedelta(minutes=1) if target.second or target.microsecond else timedelta())
+        as_of = target.replace(second=0, microsecond=0) + (
+            timedelta(minutes=1) if target.second or target.microsecond else timedelta()
+        )
         # as_of must not lie in the future: the gate refuses observations past it.
         while clock() <= as_of:
             (sleep or time.sleep)(max(1.0, (as_of - clock()).total_seconds() + 1))
@@ -128,27 +146,49 @@ def _store(path: str):
 def run_backup(path: str, backup_id: str | None) -> int:
     from ecomdata.ops.backup import LiveLake, LivePostgres, backup, tool_versions
 
-    manifest = backup(LiveLake(), LivePostgres(), _store(path), backup_id=backup_id,
-                      tools=tool_versions(), log=lambda line: print(line, flush=True))
-    print(json.dumps({"event": "backup_written", "backup_id": manifest["backup_id"],
-                      "pointer_run_id": manifest["pointer_run_id"], "counts": manifest["counts"],
-                      "files": len(manifest["files"]),
-                      "path": str(Path(path) / manifest["backup_id"])}, sort_keys=True))
+    manifest = backup(
+        LiveLake(),
+        LivePostgres(),
+        _store(path),
+        backup_id=backup_id,
+        tools=tool_versions(),
+        log=lambda line: print(line, flush=True),
+    )
+    print(
+        json.dumps(
+            {
+                "event": "backup_written",
+                "backup_id": manifest["backup_id"],
+                "pointer_run_id": manifest["pointer_run_id"],
+                "counts": manifest["counts"],
+                "files": len(manifest["files"]),
+                "path": str(Path(path) / manifest["backup_id"]),
+            },
+            sort_keys=True,
+        )
+    )
     return 0
 
 
 def run_restore(path: str, backup_id: str, sample_size: int) -> int:
-    from ecomdata.ops.backup import LiveLake, LivePostgres, PASS, report, restore, restore_checks
+    from ecomdata.ops.backup import PASS, LiveLake, LivePostgres, report, restore, restore_checks
 
     lake, db = LiveLake(), LivePostgres()
-    manifest = restore(lake, db, _store(path), backup_id=backup_id,
-                       log=lambda line: print(line, flush=True))
+    manifest = restore(lake, db, _store(path), backup_id=backup_id, log=lambda line: print(line, flush=True))
     results = restore_checks(lake, db, manifest, sample_size=sample_size)
     print(report(results))
     # The fourth check of plan 12.3 needs Spark, so mp.ps1 runs it next; this
     # prints what it needs rather than leaving the operator to look it up.
-    print(json.dumps({"event": "quality_only_batch_next", "as_of": manifest["pointer_as_of"],
-                      "pointer_run_id": manifest["pointer_run_id"]}, sort_keys=True))
+    print(
+        json.dumps(
+            {
+                "event": "quality_only_batch_next",
+                "as_of": manifest["pointer_as_of"],
+                "pointer_run_id": manifest["pointer_run_id"],
+            },
+            sort_keys=True,
+        )
+    )
     return 0 if all(result.status == PASS for result in results) else 1
 
 
@@ -159,8 +199,14 @@ def list_backups(path: str) -> int:
     found = []
     for manifest_path in sorted(root.glob(f"*/{MANIFEST_NAME}")):
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-        found.append({"backup_id": manifest["backup_id"], "created_at": manifest["created_at"],
-                      "pointer_run_id": manifest["pointer_run_id"], "counts": manifest["counts"]})
+        found.append(
+            {
+                "backup_id": manifest["backup_id"],
+                "created_at": manifest["created_at"],
+                "pointer_run_id": manifest["pointer_run_id"],
+                "counts": manifest["counts"],
+            }
+        )
     print(json.dumps({"root": str(root), "backups": found}, indent=2, sort_keys=True))
     return 0
 
@@ -177,11 +223,18 @@ def run_validate(json_path: str | None, *, restored: bool = False) -> int:
         from ecomdata.ops.backup import judge_restored_validate
 
         ok, tolerated, unexpected = judge_restored_validate(results)
-        print(json.dumps({"event": "validate_restored", "passed": ok, "tolerated": tolerated,
-                          "unexpected": unexpected,
-                          "why": "Kafka, Elasticsearch and Redis are not backed up (plan 12.1); "
-                                 "they refill from new crawls"},
-                         sort_keys=True))
+        print(
+            json.dumps(
+                {
+                    "event": "validate_restored",
+                    "passed": ok,
+                    "tolerated": tolerated,
+                    "unexpected": unexpected,
+                    "why": "Kafka, Elasticsearch and Redis are not backed up (plan 12.1); they refill from new crawls",
+                },
+                sort_keys=True,
+            )
+        )
         return 0 if ok else 1
     return 0 if all(r.status == PASS for r in results) else 1
 
@@ -191,14 +244,28 @@ def status() -> int:
 
     src = LiveSources()
     last = {
-        "crawl_attempt": src.query("SELECT task_id, status, started_at FROM audit.crawl_request_attempt ORDER BY started_at DESC LIMIT 1"),
-        "speed_batch": src.query("SELECT batch_id, status, started_at FROM audit.marketplace_speed_batch ORDER BY started_at DESC LIMIT 1"),
-        "batch_run": src.query("SELECT run_id, status, as_of FROM audit.marketplace_batch_run ORDER BY started_at DESC LIMIT 1"),
+        "crawl_attempt": src.query(
+            "SELECT task_id, status, started_at FROM audit.crawl_request_attempt ORDER BY started_at DESC LIMIT 1"
+        ),
+        "speed_batch": src.query(
+            "SELECT batch_id, status, started_at FROM audit.marketplace_speed_batch ORDER BY started_at DESC LIMIT 1"
+        ),
+        "batch_run": src.query(
+            "SELECT run_id, status, as_of FROM audit.marketplace_batch_run ORDER BY started_at DESC LIMIT 1"
+        ),
     }
     pointer = src.current_pointer()
-    print(json.dumps({**{k: (list(v[0]) if v else None) for k, v in last.items()},
-                      "pointer": pointer and {"run_id": pointer["run_id"], "as_of": pointer["as_of"]}},
-                     sort_keys=True, default=str, indent=2))
+    print(
+        json.dumps(
+            {
+                **{k: (list(v[0]) if v else None) for k, v in last.items()},
+                "pointer": pointer and {"run_id": pointer["run_id"], "as_of": pointer["as_of"]},
+            },
+            sort_keys=True,
+            default=str,
+            indent=2,
+        )
+    )
     return 0
 
 
@@ -207,12 +274,14 @@ def main(argv: list[str] | None = None) -> int:
     if argv[:1] == ["seed"]:
         # Pass straight through: seed_frontier owns its own arguments.
         from ecomdata.ingestion import seed as seed_frontier
+
         sys.argv = ["ecomdata.ingestion.seed", *argv[1:]]
         seed_frontier.main()
         return 0
     if argv[:1] == ["evaluate"]:
         # Phase 9 plan section 9: its own arguments, like seed.
         from ecomdata.ops.evaluate import main as evaluate
+
         return evaluate(argv[1:])
     parser = argparse.ArgumentParser(prog="python -m ecomdata.ops", description="Marketplace operations commands")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -225,12 +294,17 @@ def main(argv: list[str] | None = None) -> int:
     quiet_parser = sub.add_parser("wait-quiet")
     quiet_parser.add_argument("--timeout", type=float, default=180)
     plan_parser = sub.add_parser("batch-plan")
-    plan_parser.add_argument("--settle", type=int, default=None, help="defaults to MARKETPLACE_QUALITY_RECONCILIATION_SETTLE_SECONDS")
-    plan_parser.add_argument("--after-last-crawl", action="store_true", help="anchor on the newest finished crawl run (the smoke)")
+    plan_parser.add_argument(
+        "--settle", type=int, default=None, help="defaults to MARKETPLACE_QUALITY_RECONCILIATION_SETTLE_SECONDS"
+    )
+    plan_parser.add_argument(
+        "--after-last-crawl", action="store_true", help="anchor on the newest finished crawl run (the smoke)"
+    )
     validate_parser = sub.add_parser("validate")
     validate_parser.add_argument("--json", dest="json_path", default=None)
-    validate_parser.add_argument("--restored", action="store_true",
-                                 help="tolerate the empty Elasticsearch and Redis of a just-restored stack")
+    validate_parser.add_argument(
+        "--restored", action="store_true", help="tolerate the empty Elasticsearch and Redis of a just-restored stack"
+    )
     sub.add_parser("status")
     backup_parser = sub.add_parser("backup")
     backup_parser.add_argument("--path", default=DEFAULT_BACKUP_ROOT)
@@ -238,8 +312,7 @@ def main(argv: list[str] | None = None) -> int:
     restore_parser = sub.add_parser("restore")
     restore_parser.add_argument("--from", dest="backup_id", required=True)
     restore_parser.add_argument("--path", default=DEFAULT_BACKUP_ROOT)
-    restore_parser.add_argument("--sample", type=int, default=None,
-                                help="raw artifacts to reparse (default 5)")
+    restore_parser.add_argument("--sample", type=int, default=None, help="raw artifacts to reparse (default 5)")
     sub.add_parser("storage-snapshot", help="record what each store holds, once per UTC day (read-only)")
     backups_parser = sub.add_parser("backups")
     backups_parser.add_argument("--path", default=DEFAULT_BACKUP_ROOT)
@@ -256,18 +329,22 @@ def main(argv: list[str] | None = None) -> int:
         return wait_quiet(args.timeout)
     if args.command == "batch-plan":
         from ecomdata.settings import MARKETPLACE_QUALITY_RECONCILIATION_SETTLE_SECONDS
-        return batch_plan(MARKETPLACE_QUALITY_RECONCILIATION_SETTLE_SECONDS if args.settle is None else args.settle,
-                          after_last_crawl=args.after_last_crawl)
+
+        return batch_plan(
+            MARKETPLACE_QUALITY_RECONCILIATION_SETTLE_SECONDS if args.settle is None else args.settle,
+            after_last_crawl=args.after_last_crawl,
+        )
     if args.command == "validate":
         return run_validate(args.json_path, restored=args.restored)
     if args.command == "backup":
         return run_backup(args.path, args.backup_id)
     if args.command == "restore":
         from ecomdata.ops.backup import DEFAULT_REPARSE_SAMPLE
-        return run_restore(args.path, args.backup_id,
-                           DEFAULT_REPARSE_SAMPLE if args.sample is None else args.sample)
+
+        return run_restore(args.path, args.backup_id, DEFAULT_REPARSE_SAMPLE if args.sample is None else args.sample)
     if args.command == "storage-snapshot":
         from ecomdata.ops.storage import run_snapshot
+
         return 0 if run_snapshot()["measured"] else 1
     if args.command == "backups":
         return list_backups(args.path)

@@ -16,12 +16,14 @@ counting only attempts since the smoke began keeps every run honest.
 ``since`` is PostgreSQL's ``now()`` when the wait starts, so every comparison
 is between instants the stack recorded itself.
 """
+
 from __future__ import annotations
 
 import json
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Callable
+from typing import Any
 
 SMOKE_CATEGORIES = ("9001", "9002", "9003")
 SMOKE_PAGES = 2
@@ -54,7 +56,8 @@ def park(connection_factory) -> int:
         cur.execute(
             "UPDATE audit.crawl_frontier SET status = 'DISABLED', lease_owner = NULL, lease_expires_at = NULL, "
             f"updated_at = now() WHERE marketplace_code = 'tiki' AND target = ANY(%s) AND status IN {_PENDING}",
-            (smoke_targets(),))
+            (smoke_targets(),),
+        )
         return cur.rowcount
 
 
@@ -70,7 +73,8 @@ def activate(connection_factory) -> int:
             "UPDATE audit.crawl_frontier SET status = 'READY', scheduled_for = now(), attempts = 0, "
             "last_error_kind = NULL, last_error = NULL, last_http_status = NULL, updated_at = now() "
             "WHERE marketplace_code = 'tiki' AND target = ANY(%s) AND status IN ('DISABLED', 'FAILED')",
-            (smoke_targets(),))
+            (smoke_targets(),),
+        )
         return cur.rowcount
 
 
@@ -81,14 +85,19 @@ class Condition:
     observed: Any
 
 
-_SMOKE_ATTEMPTS = ("FROM audit.crawl_request_attempt a JOIN audit.crawl_frontier f USING (task_id) "
-                   "WHERE f.marketplace_code = 'tiki' AND f.target = ANY(%s) AND a.started_at >= %s")
+_SMOKE_ATTEMPTS = (
+    "FROM audit.crawl_request_attempt a JOIN audit.crawl_frontier f USING (task_id) "
+    "WHERE f.marketplace_code = 'tiki' AND f.target = ANY(%s) AND a.started_at >= %s"
+)
 
 
 def crawl_condition(src, *, targets, since) -> Condition:
-    rows = dict(src.query(
-        f"SELECT f.target, count(*) {_SMOKE_ATTEMPTS} AND a.status = ANY(%s) GROUP BY 1",
-        (list(targets), since, list(SUCCEEDED_ATTEMPTS))))
+    rows = dict(
+        src.query(
+            f"SELECT f.target, count(*) {_SMOKE_ATTEMPTS} AND a.status = ANY(%s) GROUP BY 1",
+            (list(targets), since, list(SUCCEEDED_ATTEMPTS)),
+        )
+    )
     counts = {target: int(rows.get(target, 0)) for target in targets}
     return Condition("each_task_succeeded_twice", all(n >= 2 for n in counts.values()), sorted(counts.values()))
 
@@ -96,22 +105,26 @@ def crawl_condition(src, *, targets, since) -> Condition:
 def silver_condition(src, *, targets, since) -> Condition:
     from ecomdata.settings import MARKETPLACE_SILVER_DATASET, data_lake_uri
 
-    parsed = dict(src.query(
-        f"SELECT a.crawl_run_id, sum(a.parsed_count) {_SMOKE_ATTEMPTS} GROUP BY 1", (list(targets), since)))
+    parsed = dict(
+        src.query(f"SELECT a.crawl_run_id, sum(a.parsed_count) {_SMOKE_ATTEMPTS} GROUP BY 1", (list(targets), since))
+    )
     expected = sum(int(n) for n in parsed.values())
     found = 0
     for uri in src.list_objects(data_lake_uri("silver", MARKETPLACE_SILVER_DATASET)):
         payload = src.read_object(uri)
         if payload is not None and json.loads(payload).get("crawl_run_id") in parsed:
             found += 1
-    return Condition("silver_holds_parsed_observations", expected > 0 and found == expected,
-                     {"expected": expected, "found": found})
+    return Condition(
+        "silver_holds_parsed_observations", expected > 0 and found == expected, {"expected": expected, "found": found}
+    )
 
 
 def speed_condition(src, *, since) -> Condition:
-    (count,), = src.query(
+    ((count,),) = src.query(
         "SELECT count(*) FROM audit.marketplace_speed_batch WHERE status = 'SUCCEEDED' AND change_rows > 0 "
-        "AND started_at >= %s", (since,))
+        "AND started_at >= %s",
+        (since,),
+    )
     return Condition("speed_emitted_changes", int(count) > 0, int(count))
 
 
@@ -128,14 +141,24 @@ def wait(
 ) -> bool:
     """Poll until all three conditions hold, or the timeout passes; True if they held."""
     if since is None:
-        (since,), = src.query("SELECT now()")
+        ((since,),) = src.query("SELECT now()")
     deadline = monotonic() + timeout_seconds
     while True:
-        conditions = [crawl_condition(src, targets=targets, since=since),
-                      silver_condition(src, targets=targets, since=since),
-                      speed_condition(src, since=since)]
-        log(json.dumps({"event": "smoke_wait", "conditions": {c.name: {"met": c.met, "observed": c.observed} for c in conditions}},
-                       sort_keys=True, default=str))
+        conditions = [
+            crawl_condition(src, targets=targets, since=since),
+            silver_condition(src, targets=targets, since=since),
+            speed_condition(src, since=since),
+        ]
+        log(
+            json.dumps(
+                {
+                    "event": "smoke_wait",
+                    "conditions": {c.name: {"met": c.met, "observed": c.observed} for c in conditions},
+                },
+                sort_keys=True,
+                default=str,
+            )
+        )
         if all(c.met for c in conditions):
             return True
         if monotonic() >= deadline:
@@ -157,8 +180,8 @@ def wait_for_quiet(
     The quiet period of plan 9.2: validate's lag check is only meaningful once
     nothing new is being published.
     """
-    from ecomdata.settings import KAFKA_SILVER_CONSUMER_GROUP
     from ecomdata.domain.topics import MARKETPLACE_OBSERVATIONS
+    from ecomdata.settings import KAFKA_SILVER_CONSUMER_GROUP
 
     deadline = monotonic() + timeout_seconds
     while True:

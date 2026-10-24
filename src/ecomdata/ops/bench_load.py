@@ -35,14 +35,18 @@ import hashlib
 import json
 import os
 import time
+from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass, replace
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
-from typing import Any, Callable, Iterable, Iterator
+from typing import Any
 
 from ecomdata.domain.observations import (
-    MarketplaceObservationV1, create_marketplace_offer, create_observation_event, create_offer_observation,
+    MarketplaceObservationV1,
+    create_marketplace_offer,
+    create_observation_event,
+    create_offer_observation,
 )
 from ecomdata.ops.stub_source import FIXTURE, PRICE_STEPS
 
@@ -162,8 +166,8 @@ def send(events: Iterable[MarketplaceObservationV1], producer: Any, pacer: Pacer
     load the pipeline must absorb, not the crawler's own publish rate, which
     the crawl scenario measures separately.
     """
-    from ecomdata.domain.wire import canonical_json
     from ecomdata.domain.topics import MARKETPLACE_OBSERVATIONS
+    from ecomdata.domain.wire import canonical_json
 
     futures, sent = [], 0
     for event in events:
@@ -214,7 +218,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     refuse_live()
 
-    clock = lambda: datetime.now(timezone.utc)  # noqa: E731
+    clock = lambda: datetime.now(UTC)  # noqa: E731
     if args.source == "silver-export":
         if not args.path:
             parser.error("--source silver-export needs --path")

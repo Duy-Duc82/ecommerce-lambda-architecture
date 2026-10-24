@@ -7,10 +7,9 @@ Every baseline below is hand-computed in the test body rather than derived from
 the implementation, because a test that recomputes the production formula only
 proves the formula is consistent with itself.
 """
-from tests.paths import FIXTURES, REPO_ROOT
+
 from datetime import date, timedelta
 from decimal import Decimal
-from pathlib import Path
 
 import pytest
 
@@ -18,15 +17,13 @@ from ecomdata.processing.batch.anomaly import (
     ANOMALY_COLUMNS,
     build_price_anomaly_daily,
 )
+from tests.paths import REPO_ROOT
 from tests.spark_support import requires_spark
 
 pytestmark = requires_spark
 
 DAY_ONE = date(2026, 9, 1)
-HISTORY_SCHEMA = (
-    "marketplace string, offer_id string, observed_date date, "
-    "currency string, last_price decimal(38,6)"
-)
+HISTORY_SCHEMA = "marketplace string, offer_id string, observed_date date, currency string, last_price decimal(38,6)"
 RULE = "anomaly-rules.test"
 
 
@@ -206,9 +203,7 @@ def test_a_flat_baseline_never_reports_an_anomaly(spark):
 
 # 11
 def test_a_currency_change_restarts_the_baseline(spark):
-    rows = series(["100", "101", "102", "103"]) + series(
-        ["4"], start=DAY_ONE + timedelta(days=4), currency="USD"
-    )
+    rows = series(["100", "101", "102", "103"]) + series(["4"], start=DAY_ONE + timedelta(days=4), currency="USD")
     result = by_date(build(history(spark, rows)))
     switched = result[DAY_ONE + timedelta(days=4)]
 
@@ -235,9 +230,17 @@ def test_money_columns_stay_decimal(spark):
     types = dict(build(history(spark, series(["10", "20"]))).dtypes)
 
     for name in (
-        "evaluated_price", "baseline_median", "baseline_mad", "baseline_p25",
-        "baseline_p75", "baseline_iqr", "deviation_amount", "lower_fence",
-        "upper_fence", "mad_threshold", "iqr_multiplier",
+        "evaluated_price",
+        "baseline_median",
+        "baseline_mad",
+        "baseline_p25",
+        "baseline_p75",
+        "baseline_iqr",
+        "deviation_amount",
+        "lower_fence",
+        "upper_fence",
+        "mad_threshold",
+        "iqr_multiplier",
     ):
         assert types[name] == "decimal(38,6)", name
     # The score and the percentage are ratios, not money.
@@ -306,4 +309,7 @@ def test_the_cache_key_matches_the_price_history_grain():
     # The CREATE for new databases, and an idempotent re-key for databases
     # created with the old key.
     assert keys == [grain, grain]
-    assert "ALTER TABLE cache.marketplace_price_anomaly_daily DROP CONSTRAINT IF EXISTS marketplace_price_anomaly_daily_pkey" in sql
+    assert (
+        "ALTER TABLE cache.marketplace_price_anomaly_daily DROP CONSTRAINT IF EXISTS marketplace_price_anomaly_daily_pkey"
+        in sql
+    )

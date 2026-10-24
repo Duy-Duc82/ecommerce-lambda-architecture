@@ -1,21 +1,27 @@
 """Benchmark summaries and the report — Phase 9 plan section 8 (tests 13-14)."""
+
 from __future__ import annotations
-from tests.paths import FIXTURES, REPO_ROOT
 
 import json
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
 from ecomdata.ops import bench
+from tests.paths import REPO_ROOT
 
-T0 = datetime(2026, 10, 4, 14, tzinfo=timezone.utc)
+T0 = datetime(2026, 10, 4, 14, tzinfo=UTC)
 
 
 def _attempt(second, *, status="SUCCEEDED", latency=100, parsed=40, raw=1000, duration=1):
-    return {"status": status, "started_at": T0 + timedelta(seconds=second),
-            "completed_at": T0 + timedelta(seconds=second + duration), "latency_ms": latency,
-            "parsed_count": parsed, "raw_bytes": raw}
+    return {
+        "status": status,
+        "started_at": T0 + timedelta(seconds=second),
+        "completed_at": T0 + timedelta(seconds=second + duration),
+        "latency_ms": latency,
+        "parsed_count": parsed,
+        "raw_bytes": raw,
+    }
 
 
 def test_percentile_is_nearest_rank_and_ignores_missing_values():
@@ -30,8 +36,11 @@ def test_spread_reports_median_min_max_over_runs():
 
 
 def test_runs_are_summarised_metric_by_metric_numbers_only():
-    runs = [{"metrics": {"rps": 10.0, "status": "SUCCEEDED"}}, {"metrics": {"rps": 30.0, "status": "SUCCEEDED"}},
-            {"metrics": {"rps": 20.0, "status": "QUALITY_FAILED"}}]
+    runs = [
+        {"metrics": {"rps": 10.0, "status": "SUCCEEDED"}},
+        {"metrics": {"rps": 30.0, "status": "SUCCEEDED"}},
+        {"metrics": {"rps": 20.0, "status": "QUALITY_FAILED"}},
+    ]
 
     assert bench.summarise_runs(runs) == {"rps": {"median": 20.0, "min": 10.0, "max": 30.0, "runs": 3}}
 
@@ -63,20 +72,41 @@ def test_silver_latency_states_its_one_second_resolution():
 
 def test_speed_metrics_count_busy_time_and_do_not_average_percentiles():
     batches = [
-        {"input_rows": 100, "started_at": T0, "completed_at": T0 + timedelta(seconds=2),
-         "latency_p50_ms": 1000, "latency_p95_ms": 3000, "latency_max_ms": 3500},
-        {"input_rows": 300, "started_at": T0 + timedelta(seconds=30), "completed_at": T0 + timedelta(seconds=40),
-         "latency_p50_ms": 5000, "latency_p95_ms": 9000, "latency_max_ms": 9500},
-        {"input_rows": 0, "started_at": T0 + timedelta(seconds=60), "completed_at": T0 + timedelta(seconds=61),
-         "latency_p50_ms": None, "latency_p95_ms": None, "latency_max_ms": None},
+        {
+            "input_rows": 100,
+            "started_at": T0,
+            "completed_at": T0 + timedelta(seconds=2),
+            "latency_p50_ms": 1000,
+            "latency_p95_ms": 3000,
+            "latency_max_ms": 3500,
+        },
+        {
+            "input_rows": 300,
+            "started_at": T0 + timedelta(seconds=30),
+            "completed_at": T0 + timedelta(seconds=40),
+            "latency_p50_ms": 5000,
+            "latency_p95_ms": 9000,
+            "latency_max_ms": 9500,
+        },
+        {
+            "input_rows": 0,
+            "started_at": T0 + timedelta(seconds=60),
+            "completed_at": T0 + timedelta(seconds=61),
+            "latency_p50_ms": None,
+            "latency_p95_ms": None,
+            "latency_max_ms": None,
+        },
     ]
-    progress = [{"num_input_rows": 100, "trigger_execution_ms": 2000}, {"num_input_rows": 300, "trigger_execution_ms": 10000},
-                {"num_input_rows": 0, "trigger_execution_ms": 50}]
+    progress = [
+        {"num_input_rows": 100, "trigger_execution_ms": 2000},
+        {"num_input_rows": 300, "trigger_execution_ms": 10000},
+        {"num_input_rows": 0, "trigger_execution_ms": 50},
+    ]
 
     m = bench.speed_metrics(batches, progress, sent=400, send_seconds=20, drain_seconds=12.5)
 
     assert m["input_rows"] == 400 and m["batches_with_rows"] == 2
-    assert m["processed_rows_per_second"] == pytest.approx(10.0)     # 400 rows over 40 busy seconds
+    assert m["processed_rows_per_second"] == pytest.approx(10.0)  # 400 rows over 40 busy seconds
     assert m["offered_rate"] == 20
     assert (m["batch_duration_p50_ms"], m["batch_duration_p95_ms"]) == (2000, 10000)
     assert m["latency_batch_p50_median_ms"] == 3000
@@ -98,16 +128,23 @@ def test_docker_stats_lines_are_parsed_in_mebibytes():
 
 
 def test_resources_are_summarised_per_container():
-    samples = [{"name": "bench-kafka", "cpu_pct": 10.0, "mem_mib": 500.0},
-               {"name": "bench-kafka", "cpu_pct": 30.0, "mem_mib": 700.0}]
+    samples = [
+        {"name": "bench-kafka", "cpu_pct": 10.0, "mem_mib": 500.0},
+        {"name": "bench-kafka", "cpu_pct": 30.0, "mem_mib": 700.0},
+    ]
 
     assert bench.resource_summary(samples) == {
-        "bench-kafka": {"cpu_mean_pct": 20.0, "cpu_max_pct": 30.0, "mem_max_mib": 700.0, "samples": 2}}
+        "bench-kafka": {"cpu_mean_pct": 20.0, "cpu_max_pct": 30.0, "mem_max_mib": 700.0, "samples": 2}
+    }
 
 
 def _result(scenario="ingest", dataset="replayed_fixture", variant="n=10000"):
-    return {"scenario": scenario, "dataset": dataset, "variant": variant,
-            "summary": {"silver_records_per_second": {"median": 812.5, "min": 790.0, "max": 840.1, "runs": 3}}}
+    return {
+        "scenario": scenario,
+        "dataset": dataset,
+        "variant": variant,
+        "summary": {"silver_records_per_second": {"median": 812.5, "min": 790.0, "max": 840.1, "runs": 3}},
+    }
 
 
 def test_the_report_carries_the_dataset_label_on_every_row():
@@ -141,7 +178,6 @@ def test_a_benchmark_runs_in_the_bench_project(monkeypatch):
 
 
 def test_mp_refuses_a_benchmark_on_the_live_stack():
-    from pathlib import Path
 
     script = (REPO_ROOT / "scripts" / "mp.ps1").read_text(encoding="utf-8")
     assert 'Assert-NotLive "bench"' in script
@@ -184,8 +220,16 @@ def test_silver_latency_is_put_on_the_host_clock():
 
 
 def test_speed_latency_is_put_on_the_host_clock_but_batch_duration_is_not():
-    batches = [{"input_rows": 10, "started_at": T0, "completed_at": T0 + timedelta(seconds=2),
-                "latency_p50_ms": 34000, "latency_p95_ms": 38000, "latency_max_ms": 40000}]
+    batches = [
+        {
+            "input_rows": 10,
+            "started_at": T0,
+            "completed_at": T0 + timedelta(seconds=2),
+            "latency_p50_ms": 34000,
+            "latency_p95_ms": 38000,
+            "latency_max_ms": 40000,
+        }
+    ]
     progress = [{"num_input_rows": 10, "trigger_execution_ms": 2000}]
 
     m = bench.speed_metrics(batches, progress, sent=10, send_seconds=1, drain_seconds=3, clock_offset_seconds=30)
@@ -195,8 +239,14 @@ def test_speed_latency_is_put_on_the_host_clock_but_batch_duration_is_not():
 
 
 def _batch_row(status):
-    return {"status": status, "quality_status": "PASS" if status == "SUCCEEDED" else "FAIL", "started_at": T0,
-            "completed_at": T0 + timedelta(seconds=40), "silver_rows": 10_000, "gold_rows": 8011}
+    return {
+        "status": status,
+        "quality_status": "PASS" if status == "SUCCEEDED" else "FAIL",
+        "started_at": T0,
+        "completed_at": T0 + timedelta(seconds=40),
+        "silver_rows": 10_000,
+        "gold_rows": 8011,
+    }
 
 
 def test_a_succeeded_batch_reports_its_time():
@@ -212,11 +262,14 @@ def test_a_batch_failing_only_the_reconciliation_replay_cannot_pass_is_reported_
     assert m["quality_failing_checks"] == ["silver_parse_attempt_reconciliation"]
 
 
-@pytest.mark.parametrize("status,failing", [
-    ("QUALITY_FAILED", ["silver_parse_attempt_reconciliation", "gold_offer_current_unique"]),
-    ("QUALITY_FAILED", []),
-    ("FAILED", []),
-])
+@pytest.mark.parametrize(
+    "status,failing",
+    [
+        ("QUALITY_FAILED", ["silver_parse_attempt_reconciliation", "gold_offer_current_unique"]),
+        ("QUALITY_FAILED", []),
+        ("FAILED", []),
+    ],
+)
 def test_a_batch_that_failed_for_any_other_reason_fails_the_run(status, failing):
     with pytest.raises(bench.BenchFailed, match=status):
         bench.batch_outcome("bench-1", _batch_row(status), failing)

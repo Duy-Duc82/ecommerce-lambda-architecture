@@ -6,7 +6,9 @@ Superset reads only ``cache``: when the gate blocks publication nothing reaches
 ``cache``, so a quality dashboard fed only from there would go blank exactly
 when it matters most.
 """
+
 from __future__ import annotations
+
 import json
 
 CACHE_DATASETS = ["marketplace_price_anomaly_daily"]
@@ -50,4 +52,5 @@ def main() -> None:
     print(json.dumps(dashboard_spec(), indent=2, sort_keys=True))
 
 
-if __name__ == "__main__": main()
+if __name__ == "__main__":
+    main()

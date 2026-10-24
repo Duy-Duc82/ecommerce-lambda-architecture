@@ -1,6 +1,6 @@
 import json
 from dataclasses import replace
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta, timezone
 from decimal import Decimal
 
 import pytest
@@ -11,7 +11,6 @@ from ecomdata.domain.identity import (
     make_raw_artifact_id,
     make_seller_id,
 )
-from ecomdata.domain.serialization import serialize_for_wire
 from ecomdata.domain.observations import (
     CHANGE_SCHEMA_VERSION,
     OBSERVATION_EVENT_TYPE,
@@ -22,10 +21,7 @@ from ecomdata.domain.observations import (
     Marketplace,
     MarketplaceChangeType,
     MarketplaceChangeV1,
-    MarketplaceObservationV1,
     ObservationPayload,
-    OfferActiveStatus,
-    OfferObservation,
     OfficialStatus,
     RawArtifact,
     ResourceType,
@@ -35,10 +31,10 @@ from ecomdata.domain.observations import (
     create_offer_observation,
     create_raw_artifact,
 )
+from ecomdata.domain.serialization import serialize_for_wire
 
-
-FETCHED_AT = datetime(2026, 9, 4, 8, 30, tzinfo=timezone.utc)
-OBSERVED_AT = datetime(2026, 9, 4, 8, 30, 1, tzinfo=timezone.utc)
+FETCHED_AT = datetime(2026, 9, 4, 8, 30, tzinfo=UTC)
+OBSERVED_AT = datetime(2026, 9, 4, 8, 30, 1, tzinfo=UTC)
 RAW_SHA256 = "a" * 64
 
 
@@ -178,9 +174,7 @@ def test_raw_artifact_factory_creates_expected_deterministic_id():
         adapter_version="test-v1",
         raw_bytes=42,
     )
-    assert artifact.raw_artifact_id == make_raw_artifact_id(
-        "TIKI", "https://tiki.vn/p1.html", FETCHED_AT, RAW_SHA256
-    )
+    assert artifact.raw_artifact_id == make_raw_artifact_id("TIKI", "https://tiki.vn/p1.html", FETCHED_AT, RAW_SHA256)
 
 
 @pytest.mark.parametrize(
@@ -210,7 +204,7 @@ def test_seller_normalizes_timestamps_to_utc_and_validates_ordering():
         last_seen_at=FETCHED_AT,
         official_status=OfficialStatus.UNKNOWN,
     )
-    assert seller.first_seen_at == datetime(2026, 9, 4, 8, 0, tzinfo=timezone.utc)
+    assert seller.first_seen_at == datetime(2026, 9, 4, 8, 0, tzinfo=UTC)
     with pytest.raises(ValueError, match="last_seen_at"):
         Seller(
             seller_id="seller-id",
@@ -338,15 +332,20 @@ def test_change_contract_rejects_price_change_without_previous_observation():
         )
 
 
-@pytest.mark.parametrize("factory", [
-    lambda: CrawlRun("run-1", "marketplace-tiki", datetime(2026, 9, 4, 8, 30), None, CrawlRunStatus.RUNNING, adapter_version="v1"),
-    lambda: make_raw_artifact(fetched_at=datetime(2026, 9, 4, 8, 30)),
-    lambda: Seller("seller-id", "marketplace-tiki", "seller-1", datetime(2026, 9, 4, 8, 30), FETCHED_AT),
-    lambda: make_offer_with_times(datetime(2026, 9, 4, 8, 30), FETCHED_AT),
-    lambda: make_observation_with_times(datetime(2026, 9, 4, 8, 30), FETCHED_AT),
-    lambda: replace(make_event(), occurred_at=datetime(2026, 9, 4, 8, 30)),
-    lambda: replace(make_change(), detected_at=datetime(2026, 9, 4, 8, 30)),
-])
+@pytest.mark.parametrize(
+    "factory",
+    [
+        lambda: CrawlRun(
+            "run-1", "marketplace-tiki", datetime(2026, 9, 4, 8, 30), None, CrawlRunStatus.RUNNING, adapter_version="v1"
+        ),
+        lambda: make_raw_artifact(fetched_at=datetime(2026, 9, 4, 8, 30)),
+        lambda: Seller("seller-id", "marketplace-tiki", "seller-1", datetime(2026, 9, 4, 8, 30), FETCHED_AT),
+        lambda: make_offer_with_times(datetime(2026, 9, 4, 8, 30), FETCHED_AT),
+        lambda: make_observation_with_times(datetime(2026, 9, 4, 8, 30), FETCHED_AT),
+        lambda: replace(make_event(), occurred_at=datetime(2026, 9, 4, 8, 30)),
+        lambda: replace(make_change(), detected_at=datetime(2026, 9, 4, 8, 30)),
+    ],
+)
 def test_every_timestamped_marketplace_dataclass_rejects_naive_timestamps(factory):
     with pytest.raises(ValueError, match="timezone-aware"):
         factory()

@@ -1,7 +1,8 @@
 """Topic registry tests against the brief section 11 topic design."""
+import dataclasses
+
 import pytest
 
-from ecomdata.settings import KAFKA_MARKETPLACE_PARTITIONS
 from ecomdata.domain.topics import (
     MARKETPLACE_CHANGES,
     MARKETPLACE_OBSERVATIONS,
@@ -9,6 +10,7 @@ from ecomdata.domain.topics import (
     MARKETPLACE_TOPIC_SPECS,
     TopicSpec,
 )
+from ecomdata.settings import KAFKA_MARKETPLACE_PARTITIONS
 
 
 def test_registry_declares_exactly_the_three_brief_topics():
@@ -38,7 +40,7 @@ def test_registry_exposes_each_topic_individually():
 
 
 def test_topic_spec_is_frozen():
-    with pytest.raises(Exception):
+    with pytest.raises(dataclasses.FrozenInstanceError):
         MARKETPLACE_OBSERVATIONS.name = "other"
 
 

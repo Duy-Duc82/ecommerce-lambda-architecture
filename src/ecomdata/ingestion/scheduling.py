@@ -9,18 +9,11 @@ from __future__ import annotations
 
 import socket
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from email.utils import parsedate_to_datetime
 from enum import Enum
 
-from ecomdata.domain.identity import deterministic_id
-from ecomdata.domain.observations import ResourceType
-from ecomdata.settings import (
-    CRAWL_ACTIVE_CADENCE_MINUTES,
-    CRAWL_COLD_CADENCE_MINUTES,
-    CRAWL_NORMAL_CADENCE_MINUTES,
-)
 from ecomdata.domain.acquisition import (
     CanonicalRecordError,
     FetchTransportError,
@@ -29,6 +22,13 @@ from ecomdata.domain.acquisition import (
     ObservationPublishError,
     RawPersistenceError,
     RobotsDeniedError,
+)
+from ecomdata.domain.identity import deterministic_id
+from ecomdata.domain.observations import ResourceType
+from ecomdata.settings import (
+    CRAWL_ACTIVE_CADENCE_MINUTES,
+    CRAWL_COLD_CADENCE_MINUTES,
+    CRAWL_NORMAL_CADENCE_MINUTES,
 )
 
 
@@ -81,7 +81,7 @@ def _aware_utc(value: datetime, field_name: str) -> datetime:
         raise TypeError(f"{field_name} must be a datetime")
     if value.tzinfo is None or value.utcoffset() is None:
         raise ValueError(f"{field_name} must be timezone-aware")
-    return value.astimezone(timezone.utc)
+    return value.astimezone(UTC)
 
 
 def _required_text(value: object, field_name: str) -> str:
@@ -296,7 +296,7 @@ def parse_retry_after(value: str | None, now: datetime) -> int | None:
     if moment is None:
         return None
     if moment.tzinfo is None or moment.utcoffset() is None:
-        moment = moment.replace(tzinfo=timezone.utc)
+        moment = moment.replace(tzinfo=UTC)
     return max(0, int((moment - now).total_seconds()))
 
 

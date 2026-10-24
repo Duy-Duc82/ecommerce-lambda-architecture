@@ -20,6 +20,7 @@ the profile). The crawl universe is the smoke's (``ecomdata.ops.smoke``): drills
 re-enable those made-up targets, point the crawler at the stub and park the
 targets again when done. Nothing here contacts the live marketplace.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -28,10 +29,11 @@ import os
 import subprocess
 import sys
 import time
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any, Callable, Iterable
+from typing import Any
 
 ROOT = Path(__file__).resolve().parents[3]
 RECORDS = ROOT / "data" / "ops" / "drills"
@@ -100,7 +102,7 @@ def container(service: str) -> str:
 
 
 def _now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 @dataclass
@@ -117,8 +119,16 @@ class Record:
     def write(self) -> Path:
         RECORDS.mkdir(parents=True, exist_ok=True)
         path = RECORDS / f"{self.name}.json"
-        path.write_text(json.dumps({"drill": self.name, "passed": self.passed, "error": self.error, "steps": self.steps},
-                                   indent=2, sort_keys=True, default=str) + "\n", encoding="utf-8")
+        path.write_text(
+            json.dumps(
+                {"drill": self.name, "passed": self.passed, "error": self.error, "steps": self.steps},
+                indent=2,
+                sort_keys=True,
+                default=str,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
         return path
 
 
@@ -146,8 +156,7 @@ class Stack:
     # -- Docker --
     @staticmethod
     def run(args: list[str], *, env: dict | None = None, check: bool = True) -> subprocess.CompletedProcess:
-        result = subprocess.run(args, cwd=ROOT, capture_output=True, text=True,
-                                env={**os.environ, **(env or {})})
+        result = subprocess.run(args, cwd=ROOT, capture_output=True, text=True, env={**os.environ, **(env or {})})
         if check and result.returncode != 0:
             raise DrillFailed(f"{' '.join(args)} failed ({result.returncode}): {result.stderr.strip()[-500:]}")
         return result
@@ -185,9 +194,18 @@ class Stack:
         return self._project
 
     def project_volumes(self, name_contains: str) -> list[str]:
-        return self.run(["docker", "volume", "ls", "-q",
-                         "--filter", f"label=com.docker.compose.project={self.project()}",
-                         "--filter", f"name={name_contains}"]).stdout.split()
+        return self.run(
+            [
+                "docker",
+                "volume",
+                "ls",
+                "-q",
+                "--filter",
+                f"label=com.docker.compose.project={self.project()}",
+                "--filter",
+                f"name={name_contains}",
+            ]
+        ).stdout.split()
 
     def container_started_at(self, service: str) -> str:
         result = self.run(["docker", "inspect", "-f", "{{.State.StartedAt}}", container(service)], check=False)
@@ -213,9 +231,11 @@ class Stack:
         with postgres_connection_factory()() as connection, connection.cursor() as cur:
             connection.autocommit = True
             while True:
-                cur.execute("SELECT query_id, batch_id FROM audit.marketplace_speed_batch "
-                            "WHERE status = 'RUNNING' AND started_at >= %s ORDER BY started_at DESC LIMIT 1",
-                            (since,))
+                cur.execute(
+                    "SELECT query_id, batch_id FROM audit.marketplace_speed_batch "
+                    "WHERE status = 'RUNNING' AND started_at >= %s ORDER BY started_at DESC LIMIT 1",
+                    (since,),
+                )
                 row = cur.fetchone()
                 if row:
                     self.kill("speed")
@@ -228,11 +248,13 @@ class Stack:
         """Observations the crawler acknowledged to Kafka — the speed backlog."""
         from ecomdata.ops.smoke import smoke_targets
 
-        (total,), = self.query(
+        ((total,),) = self.query(
             "SELECT coalesce(sum(a.parsed_count), 0) FROM audit.crawl_request_attempt a "
             "JOIN audit.crawl_frontier f USING (task_id) "
             "WHERE f.marketplace_code = 'tiki' AND f.target = ANY(%s) AND a.completed_at >= %s "
-            "AND a.status IN ('SUCCEEDED', 'PARTIAL')", (smoke_targets(), since))
+            "AND a.status IN ('SUCCEEDED', 'PARTIAL')",
+            (smoke_targets(), since),
+        )
         return int(total)
 
     def stranded_speed_batches(self, since: datetime, *, stale_seconds: int) -> list[tuple]:
@@ -240,20 +262,36 @@ class Stack:
         return self.query(
             "SELECT query_id, batch_id, status, input_rows, change_rows, started_at FROM audit.marketplace_speed_batch "
             "WHERE started_at >= %s AND status = 'RUNNING' AND started_at < now() - %s * interval '1 second' "
-            "ORDER BY started_at", (since, stale_seconds))
+            "ORDER BY started_at",
+            (since, stale_seconds),
+        )
 
     def status(self, service: str) -> str:
-        result = self.run(["docker", "inspect", "-f", "{{.State.Status}}/{{if .State.Health}}{{.State.Health.Status}}{{end}}",
-                           container(service)], check=False)
+        result = self.run(
+            [
+                "docker",
+                "inspect",
+                "-f",
+                "{{.State.Status}}/{{if .State.Health}}{{.State.Health.Status}}{{end}}",
+                container(service),
+            ],
+            check=False,
+        )
         return result.stdout.strip() if result.returncode == 0 else "absent"
 
     def wait_healthy(self, service: str, timeout: float = 180) -> None:
-        wait_until(lambda: (self.status(service).endswith("/healthy"), self.status(service)),
-                   timeout=timeout, what=f"{service} healthy", poll=3)
+        wait_until(
+            lambda: (self.status(service).endswith("/healthy"), self.status(service)),
+            timeout=timeout,
+            what=f"{service} healthy",
+            poll=3,
+        )
 
     def stub_mode(self, mode: str) -> None:
-        code = ("import urllib.request,sys; urllib.request.urlopen(urllib.request.Request("
-                "'http://localhost:8000/_stub/mode', data=sys.argv[1].encode()), timeout=10)")
+        code = (
+            "import urllib.request,sys; urllib.request.urlopen(urllib.request.Request("
+            "'http://localhost:8000/_stub/mode', data=sys.argv[1].encode()), timeout=10)"
+        )
         self.run(["docker", "exec", container("stub-source"), "python", "-c", code, mode])
 
     # -- PostgreSQL and the lake --
@@ -269,7 +307,7 @@ class Stack:
             cur.execute(sql, params)
 
     def db_now(self) -> datetime:
-        (now,), = self.query("SELECT now()")
+        ((now,),) = self.query("SELECT now()")
         return now
 
     def activate(self) -> int:
@@ -300,7 +338,8 @@ class Stack:
             "SELECT a.task_id, a.status, a.error_kind, a.parsed_count, a.raw_uri, a.started_at, a.completed_at, f.target "
             "FROM audit.crawl_request_attempt a JOIN audit.crawl_frontier f USING (task_id) "
             "WHERE f.marketplace_code = 'tiki' AND f.target = ANY(%s) AND a.started_at >= %s ORDER BY a.started_at",
-            (smoke_targets(), since))
+            (smoke_targets(), since),
+        )
 
     def every_target_succeeded_since(self, since: datetime) -> tuple[bool, Any]:
         from ecomdata.ops.smoke import smoke_targets
@@ -315,16 +354,21 @@ class Stack:
             raise DrillFailed("the Silver sink did not catch up")
 
     def speed_batches_since(self, since: datetime) -> list[tuple]:
-        return self.query("SELECT query_id, batch_id, status, input_rows, change_rows, started_at "
-                          "FROM audit.marketplace_speed_batch WHERE started_at >= %s ORDER BY started_at", (since,))
+        return self.query(
+            "SELECT query_id, batch_id, status, input_rows, change_rows, started_at "
+            "FROM audit.marketplace_speed_batch WHERE started_at >= %s ORDER BY started_at",
+            (since,),
+        )
 
     def speed_batch(self, query_id: str, batch_id: int) -> tuple | None:
         """One micro-batch by its key. A retry updates this row in place, so
         the same (query_id, batch_id) is how a drill proves the *same* batch
         was retried rather than a later one quietly taking its place."""
-        rows = self.query("SELECT query_id, batch_id, status, input_rows, change_rows, started_at, completed_at, "
-                          "error_message FROM audit.marketplace_speed_batch WHERE query_id = %s AND batch_id = %s",
-                          (query_id, batch_id))
+        rows = self.query(
+            "SELECT query_id, batch_id, status, input_rows, change_rows, started_at, completed_at, "
+            "error_message FROM audit.marketplace_speed_batch WHERE query_id = %s AND batch_id = %s",
+            (query_id, batch_id),
+        )
         return rows[0] if rows else None
 
     def redis_recent_changes(self) -> list[str]:
@@ -340,40 +384,79 @@ class Stack:
         once no micro-batch has carried a row for longer than the trigger,
         there is nothing left to carry. Returns how many did.
         """
+
         def settled() -> tuple[bool, Any]:
             carried = [r for r in self.speed_batches_since(since) if r[3] > 0 or r[4] > 0]
             if not carried:
                 return False, {"batches_with_rows": 0}
-            idle = (datetime.now(timezone.utc) - carried[-1][5]).total_seconds()
+            idle = (datetime.now(UTC) - carried[-1][5]).total_seconds()
             return idle > quiet_seconds, {"batches_with_rows": len(carried), "idle_seconds": round(idle)}
 
-        observed = wait_until(settled, timeout=timeout, poll=15,
-                              what=f"the speed query to go {quiet_seconds}s without a batch carrying rows")
+        observed = wait_until(
+            settled,
+            timeout=timeout,
+            poll=15,
+            what=f"the speed query to go {quiet_seconds}s without a batch carrying rows",
+        )
         return observed["batches_with_rows"]
 
     # -- the batch --
     def plan_batch(self) -> dict:
         """The run_id and as_of the smoke would use for everything crawled so far."""
-        plan = self.run(COMPOSE + ["--profile", "ops", "run", "--rm", "--no-deps", "ops", "python", "-m", "ecomdata.ops",
-                                   "batch-plan", "--after-last-crawl"],
-                        env={"MARKETPLACE_QUALITY_RECONCILIATION_SETTLE_SECONDS": str(BATCH_SETTLE_SECONDS)})
+        plan = self.run(
+            COMPOSE
+            + [
+                "--profile",
+                "ops",
+                "run",
+                "--rm",
+                "--no-deps",
+                "ops",
+                "python",
+                "-m",
+                "ecomdata.ops",
+                "batch-plan",
+                "--after-last-crawl",
+            ],
+            env={"MARKETPLACE_QUALITY_RECONCILIATION_SETTLE_SECONDS": str(BATCH_SETTLE_SECONDS)},
+        )
         return json.loads(plan.stdout.strip().splitlines()[-1])
 
     def batch_command(self, run_id: str, as_of: str, *extra: str) -> list[str]:
-        return COMPOSE + ["--profile", "batch", "run", "--rm", "--no-deps", "batch-once", "python3", "-m",
-                          "ecomdata.processing.batch.warehouse", "--run-id", run_id, "--as-of", as_of, *extra]
+        return COMPOSE + [
+            "--profile",
+            "batch",
+            "run",
+            "--rm",
+            "--no-deps",
+            "batch-once",
+            "python3",
+            "-m",
+            "ecomdata.processing.batch.warehouse",
+            "--run-id",
+            run_id,
+            "--as-of",
+            as_of,
+            *extra,
+        ]
 
     def run_batch(self, run_id: str, as_of: str, *extra: str) -> subprocess.CompletedProcess:
-        return self.run(self.batch_command(run_id, as_of, *extra),
-                        env={"MARKETPLACE_QUALITY_RECONCILIATION_SETTLE_SECONDS": str(BATCH_SETTLE_SECONDS)},
-                        check=False)
+        return self.run(
+            self.batch_command(run_id, as_of, *extra),
+            env={"MARKETPLACE_QUALITY_RECONCILIATION_SETTLE_SECONDS": str(BATCH_SETTLE_SECONDS)},
+            check=False,
+        )
 
     def start_batch(self, run_id: str, as_of: str, *extra: str) -> subprocess.Popen:
         """Launch a batch without waiting -- D10 needs two of them racing."""
-        return subprocess.Popen(self.batch_command(run_id, as_of, *extra), cwd=ROOT,
-                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
-                                env={**os.environ,
-                                     "MARKETPLACE_QUALITY_RECONCILIATION_SETTLE_SECONDS": str(BATCH_SETTLE_SECONDS)})
+        return subprocess.Popen(
+            self.batch_command(run_id, as_of, *extra),
+            cwd=ROOT,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            env={**os.environ, "MARKETPLACE_QUALITY_RECONCILIATION_SETTLE_SECONDS": str(BATCH_SETTLE_SECONDS)},
+        )
 
     def batch_after_last_crawl(self) -> tuple[int, str]:
         """One batch over everything crawled so far, as the smoke runs it."""
@@ -381,45 +464,57 @@ class Stack:
         return self.run_batch(plan["run_id"], plan["as_of"]).returncode, plan["run_id"]
 
     def batch_run(self, run_id: str) -> tuple | None:
-        rows = self.query("SELECT run_id, status, cache_published, error_message FROM audit.marketplace_batch_run "
-                          "WHERE run_id = %s", (run_id,))
+        rows = self.query(
+            "SELECT run_id, status, cache_published, error_message FROM audit.marketplace_batch_run WHERE run_id = %s",
+            (run_id,),
+        )
         return rows[0] if rows else None
 
     def quality_results(self, run_id: str) -> list[tuple]:
-        return self.query("SELECT check_name, status, observed_value FROM audit.marketplace_quality_result "
-                          "WHERE run_id = %s ORDER BY check_name", (run_id,))
+        return self.query(
+            "SELECT check_name, status, observed_value FROM audit.marketplace_quality_result "
+            "WHERE run_id = %s ORDER BY check_name",
+            (run_id,),
+        )
 
     def serving_version(self) -> dict:
         """What is being served right now: the pointer, the cache version, its size."""
         pointer = self.src.current_pointer() or {}
         rows = self.query("SELECT run_id FROM audit.marketplace_cache_version WHERE singleton")
-        (offers,), = self.query("SELECT count(*) FROM cache.marketplace_offer_current")
-        return {"pointer_run_id": pointer.get("run_id"), "cache_run_id": rows[0][0] if rows else None,
-                "cache_offer_rows": int(offers)}
+        ((offers,),) = self.query("SELECT count(*) FROM cache.marketplace_offer_current")
+        return {
+            "pointer_run_id": pointer.get("run_id"),
+            "cache_run_id": rows[0][0] if rows else None,
+            "cache_offer_rows": int(offers),
+        }
 
     # -- the two documented mutations, each with its own reverse --
-    def insert_mismatched_attempt(self, crawl_run_id: str, task_id: str, completed_at: datetime,
-                                  parsed_count: int) -> int:
+    def insert_mismatched_attempt(
+        self, crawl_run_id: str, task_id: str, completed_at: datetime, parsed_count: int
+    ) -> int:
         """D8's one SQL statement: a settled attempt whose count Silver denies.
 
         Returns the BIGSERIAL key, which is how the drill later deletes exactly
         this row and nothing else.
         """
-        (attempt_id,), = self.query(
+        ((attempt_id,),) = self.query(
             "INSERT INTO audit.crawl_request_attempt (crawl_run_id, task_id, attempt_number, started_at, "
             "completed_at, status, parsed_count, rejected_count, error_message) "
             "VALUES (%s, %s, %s, %s, %s, 'SUCCEEDED', %s, 0, %s) RETURNING attempt_id",
-            (crawl_run_id, task_id, 99, completed_at, completed_at, parsed_count, DRILL_D8_MARKER))
+            (crawl_run_id, task_id, 99, completed_at, completed_at, parsed_count, DRILL_D8_MARKER),
+        )
         return int(attempt_id)
 
     def delete_attempt(self, attempt_id: int) -> list:
-        return self.query("DELETE FROM audit.crawl_request_attempt WHERE attempt_id = %s RETURNING attempt_id",
-                          (attempt_id,))
+        return self.query(
+            "DELETE FROM audit.crawl_request_attempt WHERE attempt_id = %s RETURNING attempt_id", (attempt_id,)
+        )
 
     def planted_attempts(self) -> list[tuple]:
         """Any D8 row still in the audit, by its marker. Nothing else matches."""
-        return self.query("SELECT attempt_id FROM audit.crawl_request_attempt WHERE error_message = %s",
-                          (DRILL_D8_MARKER,))
+        return self.query(
+            "SELECT attempt_id FROM audit.crawl_request_attempt WHERE error_message = %s", (DRILL_D8_MARKER,)
+        )
 
     def add_rejecting_constraint(self, offer_id: str) -> None:
         """D9's one SQL statement: refuse exactly one cache row at publication.
@@ -429,36 +524,40 @@ class Stack:
         reverse is ``drop_rejecting_constraint``, called from the drill's
         ``finally``.
         """
-        self.execute(f"ALTER TABLE cache.marketplace_offer_current ADD CONSTRAINT {DRILL_D9_CONSTRAINT} "
-                     "CHECK (offer_id <> %s) NOT VALID", (offer_id,))
+        self.execute(
+            f"ALTER TABLE cache.marketplace_offer_current ADD CONSTRAINT {DRILL_D9_CONSTRAINT} "
+            "CHECK (offer_id <> %s) NOT VALID",
+            (offer_id,),
+        )
 
     def drop_rejecting_constraint(self) -> None:
         self.execute(f"ALTER TABLE cache.marketplace_offer_current DROP CONSTRAINT IF EXISTS {DRILL_D9_CONSTRAINT}")
 
     def constraint_exists(self, name: str) -> bool:
-        (count,), = self.query("SELECT count(*) FROM pg_constraint WHERE conname = %s", (name,))
+        ((count,),) = self.query("SELECT count(*) FROM pg_constraint WHERE conname = %s", (name,))
         return count > 0
 
     # -- D7 --
     def source_state(self) -> tuple:
-        rows = self.query("SELECT consecutive_failures, opened_until FROM audit.crawl_source_state "
-                          "WHERE marketplace_code = 'tiki'")
+        rows = self.query(
+            "SELECT consecutive_failures, opened_until FROM audit.crawl_source_state WHERE marketplace_code = 'tiki'"
+        )
         return rows[0] if rows else (0, None)
 
     def attempt_count(self) -> int:
-        (total,), = self.query("SELECT count(*) FROM audit.crawl_request_attempt")
+        ((total,),) = self.query("SELECT count(*) FROM audit.crawl_request_attempt")
         return int(total)
 
     def frontier_status(self, task_id: str) -> str:
-        (status,), = self.query("SELECT status FROM audit.crawl_frontier WHERE task_id = %s", (task_id,))
+        ((status,),) = self.query("SELECT status FROM audit.crawl_frontier WHERE task_id = %s", (task_id,))
         return status
 
     def kafka_end_offsets(self) -> dict:
         """End offset per partition of the observations topic: what reparse must not move."""
         import kafka
 
-        from ecomdata.settings import KAFKA_BOOTSTRAP_SERVERS
         from ecomdata.domain.topics import MARKETPLACE_OBSERVATIONS
+        from ecomdata.settings import KAFKA_BOOTSTRAP_SERVERS
 
         consumer = kafka.KafkaConsumer(bootstrap_servers=KAFKA_BOOTSTRAP_SERVERS, consumer_timeout_ms=10000)
         try:
@@ -513,11 +612,31 @@ class Stack:
 
         ``ref`` is a ``ecomdata.ingestion.reparse.RawArtifactRef``.
         """
-        result = self.run(COMPOSE + ["--profile", "ops", "run", "--rm", "--no-deps", "ops",
-                                     "python", "-m", "ecomdata.ingestion.reparse",
-                                     "--marketplace", ref.marketplace_code, "--observed-date", ref.observed_date,
-                                     "--hour", ref.hour, "--crawl-run-id", ref.crawl_run_id,
-                                     "--raw-artifact-id", ref.raw_artifact_id], check=False)
+        result = self.run(
+            COMPOSE
+            + [
+                "--profile",
+                "ops",
+                "run",
+                "--rm",
+                "--no-deps",
+                "ops",
+                "python",
+                "-m",
+                "ecomdata.ingestion.reparse",
+                "--marketplace",
+                ref.marketplace_code,
+                "--observed-date",
+                ref.observed_date,
+                "--hour",
+                ref.hour,
+                "--crawl-run-id",
+                ref.crawl_run_id,
+                "--raw-artifact-id",
+                ref.raw_artifact_id,
+            ],
+            check=False,
+        )
         lines = [line for line in result.stdout.strip().splitlines() if line.startswith("{")]
         if not lines:
             raise DrillFailed(f"reparse printed no report (exit {result.returncode}): {result.stderr.strip()[-400:]}")
@@ -548,11 +667,15 @@ class Stack:
         def searchable() -> tuple[bool, Any]:
             seen[:] = self.es_change_ids()
             missing = wanted - set(seen)
-            return not missing, {"es_changes": len(seen), "not_searchable": len(missing),
-                                 "examples": sorted(missing)[:3]}
+            return not missing, {
+                "es_changes": len(seen),
+                "not_searchable": len(missing),
+                "examples": sorted(missing)[:3],
+            }
 
-        wait_until(searchable, timeout=timeout, poll=2,
-                   what="Elasticsearch to make every change Redis holds searchable")
+        wait_until(
+            searchable, timeout=timeout, poll=2, what="Elasticsearch to make every change Redis holds searchable"
+        )
         return list(seen)
 
 
@@ -579,15 +702,19 @@ def baseline(stack: Stack, rec: Record) -> None:
 
 def restore(stack: Stack, rec: Record) -> list[str]:
     """Back to a passing validate, whatever the drill left behind."""
-    stack.run(COMPOSE + ["up", "-d"])                 # any core service a drill stopped
-    stack.up(*SERVICES)                                # and the marketplace services
+    stack.run(COMPOSE + ["up", "-d"])  # any core service a drill stopped
+    stack.up(*SERVICES)  # and the marketplace services
     stack.wait_healthy("stub-source")
     stack.stub_mode("ok")
     stack.stop_crawler()
     stack.quiet()
     # The speed query may still be finishing the last micro-batch.
-    failing = wait_until(lambda: (not _failing(stack.validate()), _failing(stack.validate())),
-                         timeout=240, what="validate to pass after recovery", poll=15)
+    failing = wait_until(
+        lambda: (not _failing(stack.validate()), _failing(stack.validate())),
+        timeout=240,
+        what="validate to pass after recovery",
+        poll=15,
+    )
     rec.step("restored", failing=failing or [])
     return failing or []
 
@@ -595,6 +722,7 @@ def restore(stack: Stack, rec: Record) -> list[str]:
 # ---------------------------------------------------------------------------
 # D1-D6
 # ---------------------------------------------------------------------------
+
 
 def d1_source_errors(stack: Stack, rec: Record) -> None:
     """429, then 500, then a timeout: classified, retried, circuit opened, then recovered."""
@@ -608,29 +736,50 @@ def d1_source_errors(stack: Stack, rec: Record) -> None:
         stack.stub_mode(mode)
         rec.step("inject", stub_mode=mode)
         mode_since = stack.db_now()
-        rows = wait_until(lambda: ((r := [a for a in stack.attempts_since(mode_since) if a[2] == kind]) != [], r),
-                          timeout=240, what=f"an attempt classified {kind}")
+        rows = wait_until(
+            lambda mode_since=mode_since, kind=kind: ((r := [a for a in stack.attempts_since(mode_since) if a[2] == kind]) != [], r),
+            timeout=240,
+            what=f"an attempt classified {kind}",
+        )
         rec.step("observe", stub_mode=mode, error_kind=kind, attempts=len(rows))
         if kind == "RATE_LIMITED":
             # Retry-After: 1 s. The task is not due again before the header allows.
             task_id, completed = rows[0][0], rows[0][6]
-            (scheduled,), = stack.query("SELECT scheduled_for FROM audit.crawl_frontier WHERE task_id = %s", (task_id,))
+            ((scheduled,),) = stack.query(
+                "SELECT scheduled_for FROM audit.crawl_frontier WHERE task_id = %s", (task_id,)
+            )
             if scheduled < completed + timedelta(seconds=1):
                 raise DrillFailed(f"Retry-After ignored: due {scheduled} after a 429 at {completed}")
             rec.step("observe", retry_after_honoured=True, scheduled_for=scheduled, completed_at=completed)
     state = wait_until(
-        lambda: ((row := stack.query("SELECT consecutive_failures, opened_until FROM audit.crawl_source_state "
-                                     "WHERE marketplace_code = 'tiki'")) and row[0][1] is not None, row),
-        timeout=180, what="the circuit to open")
+        lambda: (
+            (
+                row := stack.query(
+                    "SELECT consecutive_failures, opened_until FROM audit.crawl_source_state "
+                    "WHERE marketplace_code = 'tiki'"
+                )
+            )
+            and row[0][1] is not None,
+            row,
+        ),
+        timeout=180,
+        what="the circuit to open",
+    )
     rec.step("observe", circuit=state, threshold=CRAWL_CIRCUIT_FAILURE_THRESHOLD)
     stack.stub_mode("ok")
     recovered_from = stack.db_now()
     rec.step("recover", stub_mode="ok")
-    wait_until(lambda: stack.every_target_succeeded_since(recovered_from), timeout=300,
-               what="every target to succeed once the source recovers")
+    wait_until(
+        lambda: stack.every_target_succeeded_since(recovered_from),
+        timeout=300,
+        what="every target to succeed once the source recovers",
+    )
     # No task gave up while it still had attempts left.
-    gave_up = stack.query("SELECT task_id, attempts, max_attempts FROM audit.crawl_frontier "
-                          "WHERE status = 'FAILED' AND attempts < max_attempts AND updated_at >= %s", (since,))
+    gave_up = stack.query(
+        "SELECT task_id, attempts, max_attempts FROM audit.crawl_frontier "
+        "WHERE status = 'FAILED' AND attempts < max_attempts AND updated_at >= %s",
+        (since,),
+    )
     stack.stop_crawler()
     rec.step("verify", failed_with_attempts_left=gave_up)
     if gave_up:
@@ -644,9 +793,12 @@ def d2_kafka_down_during_crawl(stack: Stack, rec: Record) -> None:
     wait_until(lambda: (bool(stack.attempts_since(since)), None), timeout=120, what="the crawl to start")
     stack.stop("kafka")
     rec.step("inject", stopped="kafka")
-    rows = wait_until(lambda: ((r := [a for a in stack.attempts_since(since) if a[2] == "PUBLISH_ERROR"]) != [], r),
-                      timeout=300, what="a PUBLISH_ERROR attempt")
-    for task_id, status, kind, parsed, raw_uri, *_ in rows:
+    rows = wait_until(
+        lambda: ((r := [a for a in stack.attempts_since(since) if a[2] == "PUBLISH_ERROR"]) != [], r),
+        timeout=300,
+        what="a PUBLISH_ERROR attempt",
+    )
+    for task_id, _status, _kind, parsed, raw_uri, *_ in rows:
         if raw_uri is None or not stack.src.object_exists(raw_uri):
             raise DrillFailed(f"PUBLISH_ERROR attempt of {task_id} lost its raw body: {raw_uri}")
         if not 0 <= parsed <= 2:
@@ -656,12 +808,15 @@ def d2_kafka_down_during_crawl(stack: Stack, rec: Record) -> None:
     stack.wait_healthy("kafka")
     recovered_from = stack.db_now()
     rec.step("recover", started="kafka")
-    wait_until(lambda: stack.every_target_succeeded_since(recovered_from), timeout=300,
-               what="every target to succeed after Kafka returns")
+    wait_until(
+        lambda: stack.every_target_succeeded_since(recovered_from),
+        timeout=300,
+        what="every target to succeed after Kafka returns",
+    )
     stack.stop_crawler()
     stack.quiet()
     code, run_id = stack.batch_after_last_crawl()
-    (status,), = stack.query("SELECT status FROM audit.marketplace_batch_run WHERE run_id = %s", (run_id,))
+    ((status,),) = stack.query("SELECT status FROM audit.marketplace_batch_run WHERE run_id = %s", (run_id,))
     rec.step("verify", batch=run_id, exit_code=code, status=status)
     if code != 0 or status != "SUCCEEDED":
         raise DrillFailed(f"batch {run_id} after partial publishes: exit {code}, {status} (check 8 must reconcile)")
@@ -669,9 +824,9 @@ def d2_kafka_down_during_crawl(stack: Stack, rec: Record) -> None:
 
 def d3_minio_down_during_sink(stack: Stack, rec: Record) -> None:
     """MinIO stops while the sink has work: no commit, lag grows, no DLQ; then it catches up."""
-    from ecomdata.settings import KAFKA_SILVER_CONSUMER_GROUP
     from ecomdata.domain.topics import MARKETPLACE_OBSERVATIONS
     from ecomdata.ops.smoke import silver_condition, smoke_targets
+    from ecomdata.settings import KAFKA_SILVER_CONSUMER_GROUP
 
     lag_of = lambda: stack.src.consumer_lag(KAFKA_SILVER_CONSUMER_GROUP, MARKETPLACE_OBSERVATIONS.name)  # noqa: E731
     dlq_before = len(stack.src.dlq_stages())
@@ -727,35 +882,64 @@ def d4_sinks_down_during_speed(stack: Stack, rec: Record) -> None:
         faulted = stack.db_now()
         rec.step("inject", stopped=service)
         _crawl_once(stack)
-        failed = wait_until(lambda: ((b := [r for r in stack.speed_batches_since(faulted) if r[2] == "FAILED"]) != [], b),
-                            timeout=420, what=f"a FAILED speed batch with {service} down")
+        failed = wait_until(
+            lambda faulted=faulted: ((b := [r for r in stack.speed_batches_since(faulted) if r[2] == "FAILED"]) != [], b),
+            timeout=420,
+            what=f"a FAILED speed batch with {service} down",
+        )
         query_id, batch_id, first_attempt = failed[0][0], failed[0][1], failed[0][5]
         # Still faulted: the same row must go back to RUNNING under a newer
         # started_at. That is the query retrying this batch, not moving past it.
         retried = wait_until(
-            lambda: ((row := stack.speed_batch(query_id, batch_id)) is not None and row[5] > first_attempt, row),
-            timeout=420, what=f"batch {batch_id} of {query_id} to be retried with {service} still down")
-        rec.step("observe", service=service, query_id=query_id, batch_id=batch_id,
-                 first_attempt_at=first_attempt, retry_started_at=retried[5], retry_status=retried[2],
-                 error=(retried[7] or "")[:300])
+            lambda query_id=query_id, batch_id=batch_id, first_attempt=first_attempt: (
+                (row := stack.speed_batch(query_id, batch_id)) is not None and row[5] > first_attempt, row),
+            timeout=420,
+            what=f"batch {batch_id} of {query_id} to be retried with {service} still down",
+        )
+        rec.step(
+            "observe",
+            service=service,
+            query_id=query_id,
+            batch_id=batch_id,
+            first_attempt_at=first_attempt,
+            retry_started_at=retried[5],
+            retry_status=retried[2],
+            error=(retried[7] or "")[:300],
+        )
         stack.run(COMPOSE + ["up", "-d", service])
         stack.wait_healthy(service)
         rec.step("recover", started=service)
-        ok = wait_until(lambda: ((row := stack.speed_batch(query_id, batch_id)) is not None and row[2] == "SUCCEEDED", row),
-                        timeout=600, what=f"batch {batch_id} of {query_id} to succeed after {service} returns",
-                        poll=10)
+        ok = wait_until(
+            lambda query_id=query_id, batch_id=batch_id: (
+                (row := stack.speed_batch(query_id, batch_id)) is not None and row[2] == "SUCCEEDED", row),
+            timeout=600,
+            what=f"batch {batch_id} of {query_id} to succeed after {service} returns",
+            poll=10,
+        )
         recent = stack.redis_recent_changes()
         # Redis is written after the Elasticsearch bulk, so every recent change
         # must have a document; a retry that minted new ids would not. The wait
         # is for the search refresh, not for the write — see es_changes_covering.
         ids = stack.es_changes_covering(recent)
-        rec.step("verify", service=service, query_id=query_id, batch_id=batch_id, completed_at=ok[6],
-                 input_rows=ok[3], change_rows=ok[4], es_changes=len(ids), es_distinct=len(set(ids)),
-                 redis_recent=len(recent), redis_distinct=len(set(recent)))
+        rec.step(
+            "verify",
+            service=service,
+            query_id=query_id,
+            batch_id=batch_id,
+            completed_at=ok[6],
+            input_rows=ok[3],
+            change_rows=ok[4],
+            es_changes=len(ids),
+            es_distinct=len(set(ids)),
+            redis_recent=len(recent),
+            redis_distinct=len(set(recent)),
+        )
         if len(ids) != len(set(ids)):
             raise DrillFailed(f"duplicate change documents in Elasticsearch: {len(ids)} docs, {len(set(ids))} ids")
         if len(recent) != len(set(recent)):
-            raise DrillFailed(f"duplicate members in rt:changes:recent: {len(recent)} members, {len(set(recent))} distinct")
+            raise DrillFailed(
+                f"duplicate members in rt:changes:recent: {len(recent)} members, {len(set(recent))} distinct"
+            )
 
 
 def d5_speed_restart(stack: Stack, rec: Record) -> None:
@@ -772,9 +956,12 @@ def d5_speed_restart(stack: Stack, rec: Record) -> None:
     stack.stop("speed")
     since = stack.db_now()
     stack.start_crawler()
-    backlog = wait_until(lambda: ((n := stack.observations_published_since(since)) >= MID_BATCH_MIN_BACKLOG, n),
-                         timeout=MID_BATCH_BACKLOG_TIMEOUT, poll=15,
-                         what=f"a backlog of {MID_BATCH_MIN_BACKLOG} observations for the speed query")
+    backlog = wait_until(
+        lambda: ((n := stack.observations_published_since(since)) >= MID_BATCH_MIN_BACKLOG, n),
+        timeout=MID_BATCH_BACKLOG_TIMEOUT,
+        poll=15,
+        what=f"a backlog of {MID_BATCH_MIN_BACKLOG} observations for the speed query",
+    )
     stack.stop_crawler()
     before_kill = set(stack.es_change_ids())
     started_at = stack.container_started_at("speed")
@@ -782,40 +969,66 @@ def d5_speed_restart(stack: Stack, rec: Record) -> None:
     # 2. Start it again and kill it inside the batch that drains that backlog.
     stack.up("speed")
     query_id, batch_id = stack.kill_when_batch_opens(since)
-    rec.step("inject", killed="speed", backlog_observations=backlog,
-             mid_batch={"query_id": query_id, "batch_id": batch_id}, es_changes_before=len(before_kill))
+    rec.step(
+        "inject",
+        killed="speed",
+        backlog_observations=backlog,
+        mid_batch={"query_id": query_id, "batch_id": batch_id},
+        es_changes_before=len(before_kill),
+    )
 
     def interrupted() -> tuple[bool, Any]:
         row = stack.speed_batch(query_id, batch_id)
-        open_for = (datetime.now(timezone.utc) - row[5]).total_seconds() if row else 0
+        open_for = (datetime.now(UTC) - row[5]).total_seconds() if row else 0
         return bool(row and row[2] == "RUNNING" and open_for > 15), row
 
-    stranded = wait_until(interrupted, timeout=240, poll=2,
-                          what=f"batch {batch_id} to be left RUNNING by the kill; a terminal status here "
-                               "means the kill landed between batches and interrupted nothing")
-    rec.step("observe", stranded_batch={"query_id": query_id, "batch_id": batch_id,
-                                        "status": stranded[2], "completed_at": stranded[6]})
+    stranded = wait_until(
+        interrupted,
+        timeout=240,
+        poll=2,
+        what=f"batch {batch_id} to be left RUNNING by the kill; a terminal status here "
+        "means the kill landed between batches and interrupted nothing",
+    )
+    rec.step(
+        "observe",
+        stranded_batch={"query_id": query_id, "batch_id": batch_id, "status": stranded[2], "completed_at": stranded[6]},
+    )
 
     # 3. Recover. The interrupted batch is re-run under its own id, not skipped.
-    stack.up("speed")                                  # a no-op if the restart policy got there first
+    stack.up("speed")  # a no-op if the restart policy got there first
     stack.wait_healthy("speed", timeout=300)
     restarted = stack.db_now()
     rec.step("recover", started="speed", container_started_at=stack.container_started_at("speed"), was=started_at)
-    resumed = wait_until(lambda: ((row := stack.speed_batch(query_id, batch_id)) is not None and row[2] == "SUCCEEDED", row),
-                         timeout=600, poll=5, what=f"the interrupted batch {batch_id} to be re-run and succeed")
+    resumed = wait_until(
+        lambda query_id=query_id, batch_id=batch_id: (
+                (row := stack.speed_batch(query_id, batch_id)) is not None and row[2] == "SUCCEEDED", row),
+        timeout=600,
+        poll=5,
+        what=f"the interrupted batch {batch_id} to be re-run and succeed",
+    )
     stack.start_crawler()
     wait_until(lambda: stack.every_target_succeeded_since(restarted), timeout=300, what="more crawls after the restart")
     stack.stop_crawler()
     stack.quiet()
-    wait_until(lambda: (not stack.stranded_speed_batches(since, stale_seconds=90), None),
-               timeout=420, poll=15, what="every micro-batch to reach a terminal status")
+    wait_until(
+        lambda: (not stack.stranded_speed_batches(since, stale_seconds=90), None),
+        timeout=420,
+        poll=15,
+        what="every micro-batch to reach a terminal status",
+    )
     stack.wait_speed_drained(since)
     recent = stack.redis_recent_changes()
     ids = stack.es_changes_covering(recent)
     lost = sorted(before_kill - set(ids))
-    rec.step("verify", variant="kill", resumed_batch={"query_id": query_id, "batch_id": batch_id,
-                                                      "input_rows": resumed[3], "change_rows": resumed[4]},
-             es_changes=len(ids), distinct=len(set(ids)), before=len(before_kill), lost=len(lost))
+    rec.step(
+        "verify",
+        variant="kill",
+        resumed_batch={"query_id": query_id, "batch_id": batch_id, "input_rows": resumed[3], "change_rows": resumed[4]},
+        es_changes=len(ids),
+        distinct=len(set(ids)),
+        before=len(before_kill),
+        lost=len(lost),
+    )
     if len(ids) != len(set(ids)):
         raise DrillFailed(f"the restart duplicated change documents: {len(ids)} docs, {len(set(ids))} ids")
     if lost:
@@ -830,20 +1043,31 @@ def d5_speed_restart(stack: Stack, rec: Record) -> None:
     # "replay" reuse a checkpoint that was never removed.
     volume = stack.project_volumes("speed_checkpoints")
     if not volume:
-        raise DrillFailed(f"no speed_checkpoints volume in Compose project {stack.project()!r}; "
-                          "a replay from a kept checkpoint would prove nothing")
+        raise DrillFailed(
+            f"no speed_checkpoints volume in Compose project {stack.project()!r}; "
+            "a replay from a kept checkpoint would prove nothing"
+        )
     for name in volume:
         stack.run(["docker", "volume", "rm", name])
     replay_from = stack.db_now()
     stack.up("speed", env={"MARKETPLACE_STREAM_CHECKPOINT_VERSION": "drill-d5"})
-    rec.step("inject", variant="replay", project=stack.project(), removed_volumes=volume,
-             checkpoint_version="drill-d5")
-    wait_until(lambda: (any(r[2] == "SUCCEEDED" and r[3] > 0 for r in stack.speed_batches_since(replay_from)), None),
-               timeout=300, what="the replay's first batch")
+    rec.step("inject", variant="replay", project=stack.project(), removed_volumes=volume, checkpoint_version="drill-d5")
+    wait_until(
+        lambda: (any(r[2] == "SUCCEEDED" and r[3] > 0 for r in stack.speed_batches_since(replay_from)), None),
+        timeout=300,
+        what="the replay's first batch",
+    )
     batches = stack.wait_speed_drained(replay_from)
     after = set(stack.es_changes_covering(stack.redis_recent_changes()))
-    rec.step("verify", variant="replay", batches=batches, before=len(before), after=len(after),
-             new=len(after - before), missing=len(before - after))
+    rec.step(
+        "verify",
+        variant="replay",
+        batches=batches,
+        before=len(before),
+        after=len(after),
+        new=len(after - before),
+        missing=len(before - after),
+    )
     if after != before:
         raise DrillFailed(f"replay changed the change set: {len(after - before)} new, {len(before - after)} missing")
     # Leave the default checkpoint version in place for the next drill.
@@ -856,10 +1080,13 @@ def d6_expired_lease(stack: Stack, rec: Record) -> None:
 
     stack.stub_mode("timeout")
     stack.start_crawler(CRAWL_SERVICE_WORKER_ID="drill-a")
-    held = ("SELECT task_id, lease_expires_at FROM audit.crawl_frontier WHERE status = 'LEASED' "
-            "AND lease_owner = 'drill-a' AND target = ANY(%s)")
-    wait_until(lambda: (bool(stack.query(held, (smoke_targets(),))), None), timeout=120,
-               what="worker A to hold leases", poll=1)
+    held = (
+        "SELECT task_id, lease_expires_at FROM audit.crawl_frontier WHERE status = 'LEASED' "
+        "AND lease_owner = 'drill-a' AND target = ANY(%s)"
+    )
+    wait_until(
+        lambda: (bool(stack.query(held, (smoke_targets(),))), None), timeout=120, what="worker A to hold leases", poll=1
+    )
     # Worker A is gone for good: the premise is that B, not a restarted A,
     # recovers the leases, so the restart policy is cleared before the kill.
     # `up` below recreates the container, and with it the policy from Compose.
@@ -876,20 +1103,29 @@ def d6_expired_lease(stack: Stack, rec: Record) -> None:
     rec.step("recover", started="crawl-worker (drill-b)")
     earliest_expiry = min(expiry for _, expiry in leased)
     if stack.db_now() < earliest_expiry:
-        still = stack.query("SELECT count(*) FROM audit.crawl_frontier WHERE task_id = ANY(%s) AND status = 'LEASED' "
-                            "AND lease_owner = 'drill-a'", ([t for t, _ in leased],))[0][0]
+        still = stack.query(
+            "SELECT count(*) FROM audit.crawl_frontier WHERE task_id = ANY(%s) AND status = 'LEASED' "
+            "AND lease_owner = 'drill-a'",
+            ([t for t, _ in leased],),
+        )[0][0]
         rec.step("observe", before_expiry=True, still_leased_by_a=still, of=len(leased))
         if still != len(leased):
             raise DrillFailed(f"worker B took {len(leased) - still} lease(s) before they expired")
-    wait_until(lambda: stack.every_target_succeeded_since(killed_at), timeout=300,
-               what="worker B to complete the recovered tasks")
+    wait_until(
+        lambda: stack.every_target_succeeded_since(killed_at),
+        timeout=300,
+        what="worker B to complete the recovered tasks",
+    )
     stack.stop_crawler()
     attempts = stack.attempts_since(killed_at - timedelta(minutes=5))
     by_task: dict[str, list[tuple]] = {}
     for row in attempts:
         by_task.setdefault(row[0], []).append((row[5], row[6]))
-    overlaps = [task for task, spans in by_task.items()
-                if any(a_end > b_start for (a_start, a_end), (b_start, _) in zip(sorted(spans), sorted(spans)[1:]))]
+    overlaps = [
+        task
+        for task, spans in by_task.items()
+        if any(a_end > b_start for (a_start, a_end), (b_start, _) in zip(sorted(spans), sorted(spans)[1:], strict=False))
+    ]
     recovered = [t for t, _ in leased if any(row[0] == t and row[1] in ("SUCCEEDED", "PARTIAL") for row in attempts)]
     rec.step("verify", recovered=len(recovered), of=len(leased), concurrent_attempts=overlaps)
     if overlaps:
@@ -927,20 +1163,24 @@ def d7_parser_schema_drift(stack: Stack, rec: Record) -> None:
     stack.stub_mode("drift")
     rec.step("inject", stub_mode="drift", circuit_before=circuit_before)
     stack.start_crawler()
-    rows = wait_until(lambda: ((r := [a for a in stack.attempts_since(since) if a[2] == "PARSE_ERROR"]) != [], r),
-                      timeout=300, what="an attempt classified PARSE_ERROR")
+    rows = wait_until(
+        lambda: ((r := [a for a in stack.attempts_since(since) if a[2] == "PARSE_ERROR"]) != [], r),
+        timeout=300,
+        what="an attempt classified PARSE_ERROR",
+    )
     stack.stop_crawler()
 
     # Raw kept, task terminal, circuit untouched.
     kept = []
-    for task_id, status, kind, parsed, raw_uri, *_ in rows:
+    for task_id, _status, _kind, _parsed, raw_uri, *_ in rows:
         if raw_uri is None or not stack.src.object_exists(raw_uri):
             raise DrillFailed(f"a PARSE_ERROR attempt of {task_id} lost its raw body: {raw_uri}")
         kept.append((task_id, raw_uri))
     retried = [task for task, _ in kept if stack.frontier_status(task) not in ("FAILED", "DISABLED")]
     circuit_after = stack.source_state()
-    rec.step("observe", parse_errors=len(rows), raw_kept=len(kept), circuit_after=circuit_after,
-             still_schedulable=retried)
+    rec.step(
+        "observe", parse_errors=len(rows), raw_kept=len(kept), circuit_after=circuit_after, still_schedulable=retried
+    )
     if retried:
         raise DrillFailed(f"a parse error left {retried} schedulable; it is terminal for the attempt")
     if circuit_after[0] > circuit_before[0] or (circuit_after[1] is not None and circuit_before[1] is None):
@@ -950,13 +1190,27 @@ def d7_parser_schema_drift(stack: Stack, rec: Record) -> None:
     # write nothing: no Kafka record, no Silver object, no audit attempt, and
     # neither the serving pointer nor the cache may move.
     ref = _raw_artifact_ref(kept[0][1])
-    before = {"kafka": stack.kafka_end_offsets(), "silver": stack.silver_object_count(),
-              "attempts": stack.attempt_count(), **stack.serving_version()}
+    before = {
+        "kafka": stack.kafka_end_offsets(),
+        "silver": stack.silver_object_count(),
+        "attempts": stack.attempt_count(),
+        **stack.serving_version(),
+    }
     code, report = stack.reparse(ref)
-    after = {"kafka": stack.kafka_end_offsets(), "silver": stack.silver_object_count(),
-             "attempts": stack.attempt_count(), **stack.serving_version()}
-    rec.step("observe", reparse_exit=code, reparse_counts=report.get("counts"), artifact=ref.raw_artifact_id,
-             before=before, after=after)
+    after = {
+        "kafka": stack.kafka_end_offsets(),
+        "silver": stack.silver_object_count(),
+        "attempts": stack.attempt_count(),
+        **stack.serving_version(),
+    }
+    rec.step(
+        "observe",
+        reparse_exit=code,
+        reparse_counts=report.get("counts"),
+        artifact=ref.raw_artifact_id,
+        before=before,
+        after=after,
+    )
     if report.get("counts", {}).get("PARSE_FAILED") != 1:
         raise DrillFailed(f"reparse of a drifted artifact did not report PARSE_FAILED: {report.get('counts')}")
     if code == 0:
@@ -969,8 +1223,11 @@ def d7_parser_schema_drift(stack: Stack, rec: Record) -> None:
     recovered_from = stack.db_now()
     rec.step("recover", stub_mode="ok")
     stack.start_crawler()
-    wait_until(lambda: stack.every_target_succeeded_since(recovered_from), timeout=300,
-               what="every target to succeed once the source returns a shape the adapter accepts")
+    wait_until(
+        lambda: stack.every_target_succeeded_since(recovered_from),
+        timeout=300,
+        what="every target to succeed once the source returns a shape the adapter accepts",
+    )
     stack.stop_crawler()
     rec.step("verify", reparse="PARSE_FAILED", wrote_nothing=True, raw_kept=len(kept))
 
@@ -982,8 +1239,8 @@ def _settled_crawl_run(stack: Stack, as_of: datetime) -> tuple[str, str, datetim
     settle delay before ``as_of`` and no older than the lookback, so a planted
     mismatch is only seen if it joins one of those.
     """
-    from ecomdata.settings import MARKETPLACE_QUALITY_RECONCILIATION_LOOKBACK_SECONDS
     from ecomdata.ops.smoke import smoke_targets
+    from ecomdata.settings import MARKETPLACE_QUALITY_RECONCILIATION_LOOKBACK_SECONDS
 
     newest = as_of - timedelta(seconds=BATCH_SETTLE_SECONDS)
     oldest = as_of - timedelta(seconds=MARKETPLACE_QUALITY_RECONCILIATION_LOOKBACK_SECONDS)
@@ -992,7 +1249,9 @@ def _settled_crawl_run(stack: Stack, as_of: datetime) -> tuple[str, str, datetim
         "JOIN audit.crawl_run r USING (crawl_run_id) JOIN audit.crawl_frontier f ON f.task_id = a.task_id "
         "WHERE f.marketplace_code = 'tiki' AND f.target = ANY(%s) AND a.status IN ('SUCCEEDED', 'PARTIAL') "
         "AND a.parsed_count > 0 AND r.completed_at IS NOT NULL AND r.completed_at <= %s AND r.completed_at >= %s "
-        "ORDER BY r.completed_at DESC LIMIT 1", (smoke_targets(), newest, oldest))
+        "ORDER BY r.completed_at DESC LIMIT 1",
+        (smoke_targets(), newest, oldest),
+    )
     if not rows:
         raise DrillFailed(f"no settled crawl run between {oldest} and {newest} to disagree with")
     return rows[0][0], rows[0][1], rows[0][2]
@@ -1016,17 +1275,31 @@ def d8_quality_failure(stack: Stack, rec: Record) -> None:
     attempt_id = None
     try:
         attempt_id = stack.insert_mismatched_attempt(crawl_run_id, task_id, settled_at, parsed_count=7)
-        rec.step("inject", attempt_id=attempt_id, crawl_run_id=crawl_run_id, parsed_count=7,
-                 settled_at=settled_at, run_id=plan["run_id"], as_of=plan["as_of"], before=before)
+        rec.step(
+            "inject",
+            attempt_id=attempt_id,
+            crawl_run_id=crawl_run_id,
+            parsed_count=7,
+            settled_at=settled_at,
+            run_id=plan["run_id"],
+            as_of=plan["as_of"],
+            before=before,
+        )
 
         refused = stack.run_batch(plan["run_id"], plan["as_of"])
         row = stack.batch_run(plan["run_id"])
         results = stack.quality_results(plan["run_id"])
         failing = [name for name, status, _ in results if status != "PASS"]
         during = stack.serving_version()
-        rec.step("observe", exit_code=refused.returncode, status=None if row is None else row[1],
-                 cache_published=None if row is None else row[2], quality_results=len(results),
-                 failing_checks=failing, serving=during)
+        rec.step(
+            "observe",
+            exit_code=refused.returncode,
+            status=None if row is None else row[1],
+            cache_published=None if row is None else row[2],
+            quality_results=len(results),
+            failing_checks=failing,
+            serving=during,
+        )
         if refused.returncode == 0 or row is None or row[1] != "QUALITY_FAILED":
             raise DrillFailed(f"the gate let a denied window through: exit {refused.returncode}, run {row}")
         if "silver_parse_attempt_reconciliation" not in failing:
@@ -1050,8 +1323,9 @@ def d8_quality_failure(stack: Stack, rec: Record) -> None:
     if resumed.returncode != 0 or row is None or row[1] != "SUCCEEDED":
         raise DrillFailed(f"the resume did not succeed: exit {resumed.returncode}, run {row}")
     if after["pointer_run_id"] != plan["run_id"] or after["cache_run_id"] != plan["run_id"]:
-        raise DrillFailed(f"the pointer advanced only on the successful resume, so both must name "
-                          f"{plan['run_id']}: {after}")
+        raise DrillFailed(
+            f"the pointer advanced only on the successful resume, so both must name {plan['run_id']}: {after}"
+        )
 
 
 def d9_publish_failure(stack: Stack, rec: Record) -> None:
@@ -1072,16 +1346,27 @@ def d9_publish_failure(stack: Stack, rec: Record) -> None:
     plan = stack.plan_batch()
     try:
         stack.add_rejecting_constraint(offer_id)
-        rec.step("inject", constraint=DRILL_D9_CONSTRAINT, rejected_offer=offer_id,
-                 run_id=plan["run_id"], as_of=plan["as_of"], before=before)
+        rec.step(
+            "inject",
+            constraint=DRILL_D9_CONSTRAINT,
+            rejected_offer=offer_id,
+            run_id=plan["run_id"],
+            as_of=plan["as_of"],
+            before=before,
+        )
 
         failed = stack.run_batch(plan["run_id"], plan["as_of"])
         row = stack.batch_run(plan["run_id"])
         during = stack.serving_version()
         message = (row[3] or "") if row else ""
-        rec.step("observe", exit_code=failed.returncode, status=None if row is None else row[1],
-                 cache_published=None if row is None else row[2], serving=during,
-                 error=message[:300])
+        rec.step(
+            "observe",
+            exit_code=failed.returncode,
+            status=None if row is None else row[1],
+            cache_published=None if row is None else row[2],
+            serving=during,
+            error=message[:300],
+        )
         if failed.returncode == 0 or row is None or row[1] != "FAILED":
             raise DrillFailed(f"publication was refused but the run did not fail: exit {failed.returncode}, {row}")
         if DRILL_D9_CONSTRAINT not in message:
@@ -1092,8 +1377,9 @@ def d9_publish_failure(stack: Stack, rec: Record) -> None:
             raise DrillFailed(f"the refused transaction did not roll back whole: {before} -> {during}")
     finally:
         stack.drop_rejecting_constraint()
-    rec.step("recover", constraint_dropped=DRILL_D9_CONSTRAINT,
-             still_present=stack.constraint_exists(DRILL_D9_CONSTRAINT))
+    rec.step(
+        "recover", constraint_dropped=DRILL_D9_CONSTRAINT, still_present=stack.constraint_exists(DRILL_D9_CONSTRAINT)
+    )
     if stack.constraint_exists(DRILL_D9_CONSTRAINT):
         raise DrillFailed("the drill's constraint outlived it")
 
@@ -1127,9 +1413,11 @@ def d10_concurrent_batches(stack: Stack, rec: Record) -> None:
     outcomes = {}
     for run_id, process in ((plan["run_id"], first), (contender, second)):
         stdout, stderr = process.communicate(timeout=1800)
-        outcomes[run_id] = {"exit": process.returncode,
-                            "stdout": stdout.strip().splitlines()[-1][:300] if stdout.strip() else "",
-                            "stderr": stderr.strip()[-200:]}
+        outcomes[run_id] = {
+            "exit": process.returncode,
+            "stdout": stdout.strip().splitlines()[-1][:300] if stdout.strip() else "",
+            "stderr": stderr.strip()[-200:],
+        }
     refused = [run_id for run_id, out in outcomes.items() if out["exit"] == 75]
     ran = [run_id for run_id, out in outcomes.items() if out["exit"] == 0]
     rec.step("observe", outcomes=outcomes, refused=refused, ran=ran)
@@ -1144,9 +1432,15 @@ def d10_concurrent_batches(stack: Stack, rec: Record) -> None:
     winner_row = stack.batch_run(winner)
     serving = stack.serving_version()
     versions = stack.query("SELECT count(*) FROM audit.marketplace_cache_version")[0][0]
-    rec.step("verify", winner=winner, loser=loser, loser_audit_row=loser_row,
-             winner_status=None if winner_row is None else winner_row[1], cache_versions=int(versions),
-             serving=serving)
+    rec.step(
+        "verify",
+        winner=winner,
+        loser=loser,
+        loser_audit_row=loser_row,
+        winner_status=None if winner_row is None else winner_row[1],
+        cache_versions=int(versions),
+        serving=serving,
+    )
     if loser_row is not None:
         raise DrillFailed(f"the refused run wrote an audit row: {loser_row}")
     if winner_row is None or winner_row[1] != "SUCCEEDED":
@@ -1189,9 +1483,15 @@ def d11_backup_and_restore(stack: Stack, rec: Record) -> None:
         raise DrillFailed(f"backup did not complete (exit {code})")
     backup_id = written["backup_id"]
     manifest = json.loads((_backup_root() / backup_id / "backup-manifest.json").read_text(encoding="utf-8"))
-    rec.step("inject", action="backup", backup_id=backup_id, counts=written["counts"],
-             files=written["files"], pointer_run_id=manifest["pointer_run_id"],
-             cache_run_id=manifest["cache_run_id"])
+    rec.step(
+        "inject",
+        action="backup",
+        backup_id=backup_id,
+        counts=written["counts"],
+        files=written["files"],
+        pointer_run_id=manifest["pointer_run_id"],
+        cache_run_id=manifest["cache_run_id"],
+    )
     # The backup refuses itself when these two disagree. Assert the record
     # says so rather than trusting that the refusal would have fired.
     served = {manifest["pointer_run_id"], manifest["cache_run_id"], before["pointer_run_id"]}
@@ -1216,13 +1516,33 @@ def d11_backup_and_restore(stack: Stack, rec: Record) -> None:
         # Plan 12.3 step 3's fourth check. It needs Spark, so it runs the way
         # every other Spark job does, in its own container.
         run_id = f"{plan['pointer_run_id']}-d11"[:64]
-        result = stack.compose_in(target, "--profile", "batch", "run", "--rm", "--no-deps", "batch-once",
-                                  "python3", "-m", "ecomdata.processing.batch.warehouse",
-                                  "--run-id", run_id, "--as-of", plan["as_of"], "--quality-only", check=False)
+        result = stack.compose_in(
+            target,
+            "--profile",
+            "batch",
+            "run",
+            "--rm",
+            "--no-deps",
+            "batch-once",
+            "python3",
+            "-m",
+            "ecomdata.processing.batch.warehouse",
+            "--run-id",
+            run_id,
+            "--as-of",
+            plan["as_of"],
+            "--quality-only",
+            check=False,
+        )
         batch = next((r for r in stack.json_objects(result.stdout) if "quality_status" in r), {})
-        rec.step("observe", quality_only=run_id, quality_status=batch.get("quality_status"),
-                 mandatory_failures=batch.get("mandatory_failure_count"),
-                 manifest_promoted=batch.get("manifest_promoted"), silver_rows=batch.get("silver_rows"))
+        rec.step(
+            "observe",
+            quality_only=run_id,
+            quality_status=batch.get("quality_status"),
+            mandatory_failures=batch.get("mandatory_failure_count"),
+            manifest_promoted=batch.get("manifest_promoted"),
+            silver_rows=batch.get("silver_rows"),
+        )
         if result.returncode != 0 or batch.get("quality_status") != "PASS" or batch.get("mandatory_failure_count"):
             raise DrillFailed(f"the quality gate refused the restored Silver: {batch}")
         if batch.get("manifest_promoted"):
@@ -1232,26 +1552,39 @@ def d11_backup_and_restore(stack: Stack, rec: Record) -> None:
         verdict = next((r for r in reports if r.get("event") == "validate_restored"), {})
         checks = next((r for r in reports if "checks" in r), {"checks": []})
         pointer = next((c for c in checks["checks"] if c["check"] == "pointer_matches_cache"), {})
-        rec.step("observe", validate_restored=verdict.get("passed"), tolerated=verdict.get("tolerated"),
-                 unexpected=verdict.get("unexpected"), restored_pointer=pointer.get("observed"))
+        rec.step(
+            "observe",
+            validate_restored=verdict.get("passed"),
+            tolerated=verdict.get("tolerated"),
+            unexpected=verdict.get("unexpected"),
+            restored_pointer=pointer.get("observed"),
+        )
         if code != 0 or not verdict.get("passed") or verdict.get("unexpected"):
             raise DrillFailed(f"the restored stack fails a check that is not an empty derived store: {verdict}")
         if (pointer.get("observed") or {}).get("pointer") != manifest["pointer_run_id"]:
-            raise DrillFailed(f"the restored pointer serves {pointer.get('observed')}, "
-                              f"not the backed-up {manifest['pointer_run_id']}")
+            raise DrillFailed(
+                f"the restored pointer serves {pointer.get('observed')}, not the backed-up {manifest['pointer_run_id']}"
+            )
     finally:
         # Before the harness brings the real stack back: the two projects
         # cannot both own these container names.
         stack.compose_in(target, "--profile", "*", "down", "--volumes", check=False)
 
     volumes_after = sorted(stack.project_volumes(""))
-    rec.step("verify", restored_into=target, backup_id=backup_id,
-             running_project_volumes=len(volumes_after), intact=volumes_after == volumes_before)
+    rec.step(
+        "verify",
+        restored_into=target,
+        backup_id=backup_id,
+        running_project_volumes=len(volumes_after),
+        intact=volumes_after == volumes_before,
+    )
     # "Never restore over the running stack" is the rule; this is what it
     # means in practice -- the running project's volumes were never an input.
     if volumes_after != volumes_before:
-        raise DrillFailed("the running project's volumes changed across a restore: "
-                          f"{sorted(set(volumes_before) ^ set(volumes_after))}")
+        raise DrillFailed(
+            "the running project's volumes changed across a restore: "
+            f"{sorted(set(volumes_before) ^ set(volumes_after))}"
+        )
 
 
 DRILLS: dict[str, Callable[[Stack, Record], None]] = {
@@ -1278,7 +1611,8 @@ def refuse_live(stack: Stack) -> None:
     if stack.project() == LIVE_PROJECT:
         raise LiveStackRefused(
             f"the containers under prefix '{os.environ.get('MP_CONTAINER_PREFIX', '')}' belong to "
-            f"'{LIVE_PROJECT}', the live collection stack; run drills with -EnvFile env/bench.env")
+            f"'{LIVE_PROJECT}', the live collection stack; run drills with -EnvFile env/bench.env"
+        )
 
 
 def run(name: str, stack: Stack | None = None) -> Record:

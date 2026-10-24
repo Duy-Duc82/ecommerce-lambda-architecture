@@ -14,22 +14,23 @@ import logging
 import random
 import time
 from abc import ABC, abstractmethod
+from collections.abc import Iterator
 from datetime import datetime
-from typing import Any, Iterator
+from typing import Any
 from urllib import robotparser
 from urllib.parse import urlparse
 
 import requests
-
 from legacy.kaggle.schema import normalize_price_snapshot
+
+from ecomdata.domain.acquisition import FetchResult, ListingPageRequest, ParsedListingPage
+from ecomdata.domain.observations import RawArtifact
 from ecomdata.settings import (
     CRAWL_JITTER_SECONDS,
     CRAWL_MAX_PAGES,
     CRAWL_REQUEST_DELAY_SECONDS,
     CRAWL_USER_AGENT,
 )
-from ecomdata.domain.observations import RawArtifact
-from ecomdata.domain.acquisition import FetchResult, ListingPageRequest, ParsedListingPage
 
 logger = logging.getLogger(__name__)
 

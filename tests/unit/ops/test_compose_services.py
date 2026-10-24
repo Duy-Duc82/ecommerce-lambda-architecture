@@ -6,11 +6,10 @@ dies with its dependency and is never restarted turns those drills into
 timeouts, so the policy is asserted here rather than discovered on the stack.
 """
 from __future__ import annotations
-from tests.paths import FIXTURES, REPO_ROOT
-
-from pathlib import Path
 
 import pytest
+
+from tests.paths import REPO_ROOT
 
 COMPOSE = REPO_ROOT / "docker-compose.yml"
 

@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
@@ -11,8 +11,8 @@ from ecomdata.domain.wire import canonical_json, marketplace_observation_from_wi
 from ecomdata.ops import bench_load
 from ecomdata.ops.bench_load import LoadSpec
 
-START = datetime(2026, 10, 4, 13, 0, tzinfo=timezone.utc)
-SENT_AT = datetime(2026, 10, 4, 13, 5, tzinfo=timezone.utc)
+START = datetime(2026, 10, 4, 13, 0, tzinfo=UTC)
+SENT_AT = datetime(2026, 10, 4, 13, 5, tzinfo=UTC)
 
 
 def _events(spec):

@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import fields, is_dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from enum import Enum
-from typing import Any, Mapping
+from typing import Any
 
 
 def serialize_for_wire(value: Any) -> Any:
@@ -19,7 +20,7 @@ def serialize_for_wire(value: Any) -> Any:
 
     if isinstance(value, datetime):
         if value.tzinfo is not None and value.utcoffset() is not None:
-            value = value.astimezone(timezone.utc)
+            value = value.astimezone(UTC)
         return value.isoformat()
 
     if isinstance(value, Decimal):

@@ -12,6 +12,7 @@ clock and the task itself, never from the loop.
 Importing this module opens nothing: PostgreSQL, Kafka and the HTTP adapter
 are all built inside :func:`main`.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -20,15 +21,17 @@ import json
 import os
 import random
 import socket
-from datetime import datetime, timezone
+from collections.abc import Callable
+from datetime import UTC, datetime
 from decimal import Decimal
-from typing import Any, Callable
+from typing import Any
 
+from ecomdata.domain.acquisition import AcquisitionStatus, ObservationPublishError
 from ecomdata.domain.identity import deterministic_id
+
 # Re-exported: the crawl service was their first home, and callers import them here.
 from ecomdata.infra.lifecycle import StopSignal, install_signal_handlers  # noqa: F401
 from ecomdata.infra.postgres import postgres_connection_factory  # noqa: F401
-from ecomdata.domain.acquisition import AcquisitionStatus, ObservationPublishError
 from ecomdata.ingestion.scheduling import CrawlTask
 
 
@@ -137,24 +140,31 @@ def non_decreasing_clock(source: Callable[[], datetime]) -> Callable[[], datetim
 
 
 def build_worker(*, site: str, worker_id: str, publish: Callable[[Any], Any], connection_factory: Callable[[], Any]):
-    from ecomdata.settings import (
-        CRAWL_CIRCUIT_FAILURE_THRESHOLD, CRAWL_CIRCUIT_OPEN_SECONDS, CRAWL_LEASE_SECONDS,
-        CRAWL_MAX_ATTEMPTS, CRAWL_RETRY_BASE_SECONDS, CRAWL_RETRY_JITTER_RATIO,
-        CRAWL_RETRY_MAX_SECONDS, CRAWL_WORKER_BATCH_SIZE,
-    )
     from ecomdata.ingestion.audit import CrawlAuditRepository
-    from ecomdata.ingestion.frontier import PostgresCrawlFrontier
     from ecomdata.ingestion.cli import listing_page_executor
+    from ecomdata.ingestion.frontier import PostgresCrawlFrontier
     from ecomdata.ingestion.scheduling import RetryPolicy
     from ecomdata.ingestion.worker import CrawlWorker
+    from ecomdata.settings import (
+        CRAWL_CIRCUIT_FAILURE_THRESHOLD,
+        CRAWL_CIRCUIT_OPEN_SECONDS,
+        CRAWL_LEASE_SECONDS,
+        CRAWL_MAX_ATTEMPTS,
+        CRAWL_RETRY_BASE_SECONDS,
+        CRAWL_RETRY_JITTER_RATIO,
+        CRAWL_RETRY_MAX_SECONDS,
+        CRAWL_WORKER_BATCH_SIZE,
+    )
 
-    clock = non_decreasing_clock(lambda: datetime.now(timezone.utc))  # the one wall clock, injected once
+    clock = non_decreasing_clock(lambda: datetime.now(UTC))  # the one wall clock, injected once
     return CrawlWorker(
         frontier=PostgresCrawlFrontier(connection_factory),
         audit=CrawlAuditRepository(connection_factory),
         executor=publishing_executor(listing_page_executor(site=site, clock=clock), publish=publish),
         clock=clock,
-        policy=RetryPolicy(CRAWL_MAX_ATTEMPTS, CRAWL_RETRY_BASE_SECONDS, CRAWL_RETRY_MAX_SECONDS, CRAWL_RETRY_JITTER_RATIO),
+        policy=RetryPolicy(
+            CRAWL_MAX_ATTEMPTS, CRAWL_RETRY_BASE_SECONDS, CRAWL_RETRY_MAX_SECONDS, CRAWL_RETRY_JITTER_RATIO
+        ),
         worker_id=worker_id,
         lease_seconds=CRAWL_LEASE_SECONDS,
         batch_size=CRAWL_WORKER_BATCH_SIZE,
@@ -167,13 +177,20 @@ def build_worker(*, site: str, worker_id: str, publish: Callable[[Any], Any], co
 def main() -> None:
     parser = argparse.ArgumentParser(description="Long-running marketplace crawl service")
     parser.add_argument("--site", default="tiki")
-    parser.add_argument("--worker-id", default=None, help="lease owner; defaults to CRAWL_SERVICE_WORKER_ID, then <hostname>:<pid>")
+    parser.add_argument(
+        "--worker-id", default=None, help="lease owner; defaults to CRAWL_SERVICE_WORKER_ID, then <hostname>:<pid>"
+    )
     parser.add_argument("--max-cycles", type=int, default=None, help="stop after N cycles (tests and smoke only)")
     args = parser.parse_args()
 
     from ecomdata.infra.heartbeat import heartbeat
-    from ecomdata.settings import CRAWL_SERVICE_IDLE_SECONDS, CRAWL_SERVICE_WORKER_ID, CRAWL_WORKER_POLL_SECONDS, SERVICE_HEARTBEAT_FILE
     from ecomdata.ingestion.publisher import create_marketplace_producer, publish_observation
+    from ecomdata.settings import (
+        CRAWL_SERVICE_IDLE_SECONDS,
+        CRAWL_SERVICE_WORKER_ID,
+        CRAWL_WORKER_POLL_SECONDS,
+        SERVICE_HEARTBEAT_FILE,
+    )
 
     stop = StopSignal()
     install_signal_handlers(stop)
@@ -185,9 +202,15 @@ def main() -> None:
             publish=lambda event: publish_observation(producer, event),
             connection_factory=postgres_connection_factory(),
         )
-        run_service(worker, stop=stop, idle_seconds=CRAWL_SERVICE_IDLE_SECONDS,
-                    poll_seconds=CRAWL_WORKER_POLL_SECONDS, max_cycles=args.max_cycles,
-                    log=lambda line: print(line, flush=True), beat=heartbeat(SERVICE_HEARTBEAT_FILE))
+        run_service(
+            worker,
+            stop=stop,
+            idle_seconds=CRAWL_SERVICE_IDLE_SECONDS,
+            poll_seconds=CRAWL_WORKER_POLL_SECONDS,
+            max_cycles=args.max_cycles,
+            log=lambda line: print(line, flush=True),
+            beat=heartbeat(SERVICE_HEARTBEAT_FILE),
+        )
     finally:
         producer.flush()
         producer.close()
