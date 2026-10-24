@@ -509,7 +509,9 @@ show a rating count of 0, which means *not yet rated*, not *rated zero*.
 1. Order the observations of one `offer_id` by `observed_at`, then
    `fetched_at`, then `observation_id` — the same tie-break the marts use
    (`marketplace_marts._ordered`), so two sightings at the same instant have a
-   fixed order.
+   fixed order. Sightings that share an `observed_at` are reduced to the last
+   of them before versions are cut: a version never opens and closes at the
+   same instant, and (`offer_id`, `valid_from`) stays unique.
 2. The first observation opens version 1 with `valid_from = observed_at`.
 3. Each later observation whose tuple (`product_title`, `brand`,
    `category_key`, `seller_key`) differs from the open version — `NULL`

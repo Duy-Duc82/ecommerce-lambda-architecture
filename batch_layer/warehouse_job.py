@@ -38,6 +38,7 @@ from config.settings import (  # noqa: E402
     data_lake_uri,
 )
 from config.storage import spark_hadoop_options  # noqa: E402
+from batch_layer.dim_date import build_dim_date  # noqa: E402
 
 SUPPORTED_EVENT_TYPES = ("view", "cart", "purchase")
 EVENT_TYPE_KEYS = {"view": 1, "cart": 2, "purchase": 3}
@@ -220,18 +221,9 @@ def read_canonical_silver(spark: SparkSession) -> DataFrame:
 
 
 def build_dimensions(events: DataFrame) -> dict[str, DataFrame]:
-    dim_date = events.select("event_date").distinct().select(
-        F.date_format("event_date", "yyyyMMdd").cast("int").alias("date_key"),
-        F.col("event_date").alias("full_date"),
-        F.dayofweek("event_date").cast("short").alias("day_of_week"),
-        F.date_format("event_date", "EEEE").alias("day_name"),
-        F.weekofyear("event_date").cast("short").alias("week_of_year"),
-        F.month("event_date").cast("short").alias("month"),
-        F.date_format("event_date", "MMMM").alias("month_name"),
-        F.quarter("event_date").cast("short").alias("quarter"),
-        F.year("event_date").cast("short").alias("year"),
-        F.dayofweek("event_date").isin(1, 7).alias("is_weekend"),
-    )
+    # The conformed calendar shared with the marketplace star, not just the
+    # days that happen to have events (docs/DATA_MODEL.md section 4.4).
+    dim_date = build_dim_date(events.sparkSession)
 
     categories = (
         events.select("category_id", "category_code")
