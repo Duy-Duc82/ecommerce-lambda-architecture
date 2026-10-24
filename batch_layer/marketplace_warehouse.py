@@ -14,6 +14,7 @@ from urllib.parse import quote
 from pyspark.sql import DataFrame, SparkSession
 from pyspark.sql import functions as F
 
+from config.marketplace_datasets import MART_NAMES, dataset
 from config.settings import (
     MARKETPLACE_ALLOWED_CURRENCIES,
     MARKETPLACE_ANOMALY_IQR_MULTIPLIER, MARKETPLACE_ANOMALY_MAD_THRESHOLD,
@@ -194,20 +195,19 @@ def _join_uri(root: str, *parts: str) -> str:
 
 
 def write_run_scoped_gold(marts: Mapping[str, DataFrame], context: MarketplaceBatchContext) -> dict[str, GoldWriteResult]:
-    if set(marts) != {"offer_current", "seller_current", "offer_price_history_daily", "offer_change_daily", "offer_freshness", "category_price_daily", "source_coverage_daily", "crawl_reliability_daily", "counter_delta_daily", "price_anomaly_daily"}:
+    if set(marts) != set(MART_NAMES):
         raise ValueError("marts must contain exactly the ten marketplace datasets")
     run_root = _join_uri(context.gold_root_uri, "runs", f"run_id={quote(context.run_id, safe='')}")
     results = {}
-    daily = {"offer_price_history_daily", "offer_change_daily", "category_price_daily", "source_coverage_daily", "crawl_reliability_daily", "counter_delta_daily", "price_anomaly_daily"}
     for name, frame in marts.items():
         uri = _join_uri(run_root, name)
         # Static, whatever the session says: a run directory belongs wholly to
         # this run, so a rerun must replace it, not only the partitions it
         # still has rows for.
         writer = frame.write.mode("overwrite").option("partitionOverwriteMode", "static")
-        if name in daily:
-            date_col = "observed_date" if "observed_date" in frame.columns else "request_date"
-            writer = writer.partitionBy("marketplace", date_col)
+        partitions = dataset(name).partition_columns
+        if partitions:
+            writer = writer.partitionBy(*partitions)
         writer.parquet(uri)
         results[name] = GoldWriteResult(name, uri, frame.count())
     return results

@@ -22,6 +22,7 @@ from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, Callable, Mapping, Sequence
 from urllib.parse import quote
 
+from config.marketplace_datasets import MARTS
 from config.settings import MARKETPLACE_GOLD_DATASET, MARKETPLACE_MANIFEST_SCHEMA_VERSION
 
 if TYPE_CHECKING:
@@ -40,17 +41,9 @@ PROMOTION_CONFLICT = "PROMOTION_CONFLICT"
 Writer = Callable[[str, str, bytes], str]
 Reader = Callable[[str, str], "bytes | None"]
 
-# Mirrors the daily partitioning that write_run_scoped_gold applies, so a
-# consumer can find a dataset's layout without listing the object store.
-_DAILY_PARTITIONS = {
-    "offer_price_history_daily": ("marketplace", "observed_date"),
-    "offer_change_daily": ("marketplace", "observed_date"),
-    "category_price_daily": ("marketplace", "observed_date"),
-    "source_coverage_daily": ("marketplace", "observed_date"),
-    "counter_delta_daily": ("marketplace", "observed_date"),
-    "price_anomaly_daily": ("marketplace", "observed_date"),
-    "crawl_reliability_daily": ("marketplace", "request_date"),
-}
+# The same registry entries write_run_scoped_gold partitions by, so a consumer
+# can find a dataset's layout without listing the object store.
+_DAILY_PARTITIONS = {d.name: d.partition_columns for d in MARTS if d.partition_columns}
 
 
 def run_manifest_path(run_id: str) -> str:

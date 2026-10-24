@@ -9,24 +9,14 @@ from typing import TYPE_CHECKING, Any, Callable, Mapping, Sequence
 
 import psycopg2
 
+from config.marketplace_datasets import MARTS
 from config.settings import POSTGRES_DB, POSTGRES_HOST, POSTGRES_PASSWORD, POSTGRES_PORT, POSTGRES_USER
 from batch_layer.marketplace_warehouse import MarketplaceBatchContext
 
 if TYPE_CHECKING:
     from batch_layer.marketplace_quality import QualityDecision, QualityResult
 
-DATASET_COLUMNS = {
-    "offer_current": ["offer_id", "marketplace", "marketplace_id", "platform_listing_id", "seller_id", "product_title", "brand", "category_path", "source_url", "currency", "active_status", "first_seen_at", "last_seen_at", "current_observation_id", "observed_at", "fetched_at", "current_price", "list_price", "shipping_price", "rating_value", "rating_scale", "rating_count", "review_count", "sold_count", "availability", "ranking_position", "raw_uri", "raw_sha256", "adapter_version", "crawl_run_id"],
-    "seller_current": ["seller_id", "marketplace", "marketplace_id", "first_seen_at", "last_seen_at", "observed_offer_count"],
-    "offer_price_history_daily": ["marketplace", "offer_id", "observed_date", "currency", "first_observed_at", "last_observed_at", "first_price", "last_price", "min_price", "max_price", "avg_price", "first_list_price", "last_list_price", "observation_count", "distinct_price_count", "last_availability", "last_observation_id"],
-    "offer_change_daily": ["marketplace", "offer_id", "observed_date", "currency", "transition_count", "price_change_count", "price_drop_count", "price_increase_count", "absolute_price_change_sum", "signed_price_change_sum", "max_price_drop", "max_price_increase", "rating_change_count", "counter_change_count", "availability_change_count"],
-    "offer_freshness": ["as_of", "marketplace", "offer_id", "last_observation_id", "last_observed_at", "age_seconds", "freshness_status", "stale_after_seconds", "freshness_rule_version"],
-    "category_price_daily": ["marketplace", "category_path", "observed_date", "currency", "observed_offer_count", "observation_count", "min_price", "p25_price", "median_price", "p75_price", "max_price", "avg_price"],
-    "source_coverage_daily": ["marketplace", "observed_date", "eligible_offer_count", "observed_offer_count", "missing_offer_count", "fresh_offer_count", "stale_offer_count", "observation_count", "parsed_count", "rejected_count", "coverage_rate", "rejection_rate", "freshness_rule_version"],
-    "crawl_reliability_daily": ["marketplace", "request_date", "request_count", "succeeded_count", "failed_count", "success_rate", "avg_latency_ms", "p95_latency_ms", "raw_bytes", "parsed_count", "rejected_count", "rate_limited_count", "transport_error_count", "server_error_count", "parse_error_count", "validation_error_count"],
-    "counter_delta_daily": ["marketplace", "offer_id", "observed_date", "counter_name", "first_value", "last_value", "raw_delta_sum", "valid_delta_sum", "valid_transition_count", "invalid_transition_count", "elapsed_seconds_valid", "velocity_proxy_per_hour", "counter_reset_or_invalid", "invalid_reasons_json", "counter_rule_version"],
-    "price_anomaly_daily": ["marketplace", "offer_id", "observed_date", "currency", "evaluated_price", "baseline_sample_size", "baseline_median", "baseline_mad", "baseline_p25", "baseline_p75", "baseline_iqr", "deviation_amount", "deviation_percent", "robust_score", "lower_fence", "upper_fence", "anomaly_method", "anomaly_status", "anomaly_reason", "window_days", "min_samples", "mad_threshold", "iqr_multiplier", "anomaly_rule_version"],
-}
+DATASET_COLUMNS = {d.name: list(d.columns) for d in MARTS}
 DATASETS = tuple(DATASET_COLUMNS)
 _IDENT = re.compile(r"^[a-z][a-z0-9_]{0,62}$")
 

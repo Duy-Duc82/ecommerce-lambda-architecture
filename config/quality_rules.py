@@ -15,21 +15,17 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
+from config.marketplace_datasets import MART_NAMES
+
 MANDATORY = "MANDATORY"
 ADVISORY = "ADVISORY"
 
 SEVERITIES = (MANDATORY, ADVISORY)
 CHECK_NAME_RE = re.compile(r"^[a-z][a-z0-9_]{0,62}$")
 
-# The ten Gold datasets, repeated here rather than imported so config stays
-# free of batch_layer. A test asserts this matches the publisher's allowlist,
-# which is what catches the two drifting apart.
-GOLD_DATASETS = (
-    "offer_current", "seller_current", "offer_price_history_daily",
-    "offer_change_daily", "offer_freshness", "category_price_daily",
-    "source_coverage_daily", "crawl_reliability_daily", "counter_delta_daily",
-    "price_anomaly_daily",
-)
+# The ten Gold marts, from the dataset registry (itself config, so this module
+# still imports nothing from batch_layer).
+GOLD_DATASETS = MART_NAMES
 SOURCE_DATASETS = ("silver", "audit")
 
 
