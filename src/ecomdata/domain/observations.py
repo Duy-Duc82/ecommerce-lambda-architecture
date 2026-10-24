@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import datetime
 from decimal import Decimal
 from enum import Enum
 from typing import Any
-from urllib.parse import urlparse
 
+from ecomdata.domain import validation as v
 from ecomdata.domain.identity import (
     make_observation_id,
     make_offer_id,
@@ -67,95 +67,6 @@ _RAW_URI_SCHEMES = {"s3a", "s3", "file"}
 
 
 
-def _require_text(value: str, field_name: str) -> str:
-    if not isinstance(value, str):
-        raise ValueError(f"{field_name} must be text")
-    value = value.strip()
-    if not value:
-        raise ValueError(f"{field_name} is required")
-    return value
-
-
-def _optional_text(value: str | None, field_name: str) -> str | None:
-    if value is None:
-        return None
-    if not isinstance(value, str):
-        raise ValueError(f"{field_name} must be text")
-    value = value.strip()
-    return value or None
-
-
-def _require_aware_datetime(value: datetime, field_name: str) -> datetime:
-    if not isinstance(value, datetime):
-        raise ValueError(f"{field_name} must be a datetime")
-    if value.tzinfo is None or value.utcoffset() is None:
-        raise ValueError(f"{field_name} must be timezone-aware")
-    return value.astimezone(UTC)
-
-
-def _require_non_negative_decimal(value: Decimal | None, field_name: str) -> None:
-    if value is None:
-        return
-    if not isinstance(value, Decimal):
-        raise ValueError(f"{field_name} must be a Decimal")
-    if not value.is_finite() or value < 0:
-        raise ValueError(f"{field_name} must be non-negative and finite")
-
-
-def _require_non_negative_int(value: int | None, field_name: str) -> None:
-    if value is None:
-        return
-    if isinstance(value, bool) or not isinstance(value, int):
-        raise ValueError(f"{field_name} must be an integer, not bool")
-    if value < 0:
-        raise ValueError(f"{field_name} must be non-negative")
-
-
-def _require_sha256(value: str, field_name: str) -> str:
-    value = _require_text(value, field_name)
-    if not _SHA256_PATTERN.fullmatch(value):
-        raise ValueError(f"{field_name} must be exactly 64 hexadecimal characters")
-    return value.lower()
-
-
-def _require_http_url(value: str, field_name: str) -> str:
-    value = _require_text(value, field_name)
-    try:
-        parsed = urlparse(value)
-        hostname = parsed.hostname
-    except ValueError as exc:
-        raise ValueError(f"{field_name} must be a valid HTTP(S) URL") from exc
-    if parsed.scheme.lower() not in {"http", "https"} or not hostname:
-        raise ValueError(f"{field_name} must be a valid HTTP(S) URL")
-    return value
-
-
-def _require_currency(value: str) -> str:
-    value = _require_text(value, "currency")
-    if not _CURRENCY_PATTERN.fullmatch(value):
-        raise ValueError("currency must be exactly three ASCII letters")
-    return value.upper()
-
-
-def _require_enum[E: Enum](value: Any, enum_type: type[E], field_name: str) -> E:
-    if not isinstance(value, enum_type):
-        raise ValueError(f"{field_name} must be a {enum_type.__name__}")
-    return value
-
-
-def _require_raw_uri(value: str, field_name: str = "raw_uri") -> str:
-    value = _require_text(value, field_name)
-    parsed = urlparse(value)
-    scheme = parsed.scheme.lower()
-    if scheme not in _RAW_URI_SCHEMES:
-        raise ValueError(f"{field_name} must use s3a, s3, or file scheme")
-    if scheme in {"s3", "s3a"} and not parsed.hostname:
-        raise ValueError(f"{field_name} must include a bucket hostname")
-    if scheme == "file" and not parsed.path:
-        raise ValueError(f"{field_name} must include a file path")
-    return value
-
-
 @dataclass(frozen=True)
 class Marketplace:
     marketplace_id: str
@@ -168,13 +79,13 @@ class Marketplace:
     active: bool = True
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "marketplace_id", _require_text(self.marketplace_id, "marketplace_id"))
-        object.__setattr__(self, "code", _require_text(self.code, "code").lower())
-        object.__setattr__(self, "name", _require_text(self.name, "name"))
-        object.__setattr__(self, "base_url", _require_http_url(self.base_url, "base_url"))
-        object.__setattr__(self, "default_currency", _require_currency(self.default_currency))
-        object.__setattr__(self, "locale", _require_text(self.locale, "locale"))
-        object.__setattr__(self, "semantics_version", _require_text(self.semantics_version, "semantics_version"))
+        object.__setattr__(self, "marketplace_id", v.require_text(self.marketplace_id, "marketplace_id"))
+        object.__setattr__(self, "code", v.require_text(self.code, "code").lower())
+        object.__setattr__(self, "name", v.require_text(self.name, "name"))
+        object.__setattr__(self, "base_url", v.http_url(self.base_url, "base_url"))
+        object.__setattr__(self, "default_currency", v.currency_code(self.default_currency))
+        object.__setattr__(self, "locale", v.require_text(self.locale, "locale"))
+        object.__setattr__(self, "semantics_version", v.require_text(self.semantics_version, "semantics_version"))
         if type(self.active) is not bool:
             raise ValueError("active must be a boolean")
 
@@ -196,19 +107,19 @@ class CrawlRun:
     error_summary: dict[str, Any] | None = None
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "crawl_run_id", _require_text(self.crawl_run_id, "crawl_run_id"))
-        object.__setattr__(self, "marketplace_id", _require_text(self.marketplace_id, "marketplace_id"))
-        started_at = _require_aware_datetime(self.started_at, "started_at")
+        object.__setattr__(self, "crawl_run_id", v.require_text(self.crawl_run_id, "crawl_run_id"))
+        object.__setattr__(self, "marketplace_id", v.require_text(self.marketplace_id, "marketplace_id"))
+        started_at = v.aware_utc(self.started_at, "started_at")
         object.__setattr__(self, "started_at", started_at)
         if self.completed_at is not None:
-            completed_at = _require_aware_datetime(self.completed_at, "completed_at")
+            completed_at = v.aware_utc(self.completed_at, "completed_at")
             object.__setattr__(self, "completed_at", completed_at)
             if completed_at < started_at:
                 raise ValueError("completed_at must not be before started_at")
-        _require_enum(self.status, CrawlRunStatus, "status")
+        v.enum_member(self.status, CrawlRunStatus, "status")
         for field_name in ("requested", "succeeded", "failed", "raw_bytes", "parsed", "rejected"):
-            _require_non_negative_int(getattr(self, field_name), field_name)
-        object.__setattr__(self, "adapter_version", _require_text(self.adapter_version, "adapter_version"))
+            v.optional_non_negative_int(getattr(self, field_name), field_name)
+        object.__setattr__(self, "adapter_version", v.require_text(self.adapter_version, "adapter_version"))
         if self.error_summary is not None and not isinstance(self.error_summary, dict):
             raise ValueError("error_summary must be a dictionary")
         if self.status is CrawlRunStatus.RUNNING and self.completed_at is not None:
@@ -235,22 +146,22 @@ class RawArtifact:
     raw_bytes: int
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "raw_artifact_id", _require_text(self.raw_artifact_id, "raw_artifact_id"))
-        object.__setattr__(self, "crawl_run_id", _require_text(self.crawl_run_id, "crawl_run_id"))
-        object.__setattr__(self, "marketplace_id", _require_text(self.marketplace_id, "marketplace_id"))
-        object.__setattr__(self, "request_url", _require_http_url(self.request_url, "request_url"))
-        _require_enum(self.resource_type, ResourceType, "resource_type")
-        object.__setattr__(self, "fetched_at", _require_aware_datetime(self.fetched_at, "fetched_at"))
+        object.__setattr__(self, "raw_artifact_id", v.require_text(self.raw_artifact_id, "raw_artifact_id"))
+        object.__setattr__(self, "crawl_run_id", v.require_text(self.crawl_run_id, "crawl_run_id"))
+        object.__setattr__(self, "marketplace_id", v.require_text(self.marketplace_id, "marketplace_id"))
+        object.__setattr__(self, "request_url", v.http_url(self.request_url, "request_url"))
+        v.enum_member(self.resource_type, ResourceType, "resource_type")
+        object.__setattr__(self, "fetched_at", v.aware_utc(self.fetched_at, "fetched_at"))
         if self.http_status is not None:
             if isinstance(self.http_status, bool) or not isinstance(self.http_status, int):
                 raise ValueError("http_status must be an integer")
             if not 100 <= self.http_status <= 599:
                 raise ValueError("http_status must be between 100 and 599")
-        object.__setattr__(self, "content_type", _optional_text(self.content_type, "content_type"))
-        object.__setattr__(self, "body_sha256", _require_sha256(self.body_sha256, "body_sha256"))
-        object.__setattr__(self, "raw_uri", _require_raw_uri(self.raw_uri))
-        object.__setattr__(self, "adapter_version", _require_text(self.adapter_version, "adapter_version"))
-        _require_non_negative_int(self.raw_bytes, "raw_bytes")
+        object.__setattr__(self, "content_type", v.optional_text(self.content_type, "content_type"))
+        object.__setattr__(self, "body_sha256", v.sha256_hex(self.body_sha256, "body_sha256"))
+        object.__setattr__(self, "raw_uri", v.raw_uri(self.raw_uri))
+        object.__setattr__(self, "adapter_version", v.require_text(self.adapter_version, "adapter_version"))
+        v.optional_non_negative_int(self.raw_bytes, "raw_bytes")
 
 
 @dataclass(frozen=True)
@@ -265,19 +176,19 @@ class Seller:
     official_status: OfficialStatus = OfficialStatus.UNKNOWN
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "seller_id", _require_text(self.seller_id, "seller_id"))
-        object.__setattr__(self, "marketplace_id", _require_text(self.marketplace_id, "marketplace_id"))
-        object.__setattr__(self, "platform_seller_id", _require_text(self.platform_seller_id, "platform_seller_id"))
-        first_seen_at = _require_aware_datetime(self.first_seen_at, "first_seen_at")
-        last_seen_at = _require_aware_datetime(self.last_seen_at, "last_seen_at")
+        object.__setattr__(self, "seller_id", v.require_text(self.seller_id, "seller_id"))
+        object.__setattr__(self, "marketplace_id", v.require_text(self.marketplace_id, "marketplace_id"))
+        object.__setattr__(self, "platform_seller_id", v.require_text(self.platform_seller_id, "platform_seller_id"))
+        first_seen_at = v.aware_utc(self.first_seen_at, "first_seen_at")
+        last_seen_at = v.aware_utc(self.last_seen_at, "last_seen_at")
         object.__setattr__(self, "first_seen_at", first_seen_at)
         object.__setattr__(self, "last_seen_at", last_seen_at)
         if last_seen_at < first_seen_at:
             raise ValueError("last_seen_at must be greater than or equal to first_seen_at")
-        object.__setattr__(self, "seller_name", _optional_text(self.seller_name, "seller_name"))
+        object.__setattr__(self, "seller_name", v.optional_text(self.seller_name, "seller_name"))
         if self.seller_url is not None:
-            object.__setattr__(self, "seller_url", _require_http_url(self.seller_url, "seller_url"))
-        _require_enum(self.official_status, OfficialStatus, "official_status")
+            object.__setattr__(self, "seller_url", v.http_url(self.seller_url, "seller_url"))
+        v.enum_member(self.official_status, OfficialStatus, "official_status")
 
 
 @dataclass(frozen=True)
@@ -296,22 +207,22 @@ class MarketplaceOffer:
     active_status: OfferActiveStatus = OfferActiveStatus.UNKNOWN
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "offer_id", _require_text(self.offer_id, "offer_id"))
-        object.__setattr__(self, "marketplace_id", _require_text(self.marketplace_id, "marketplace_id"))
-        object.__setattr__(self, "platform_listing_id", _require_text(self.platform_listing_id, "platform_listing_id"))
-        object.__setattr__(self, "seller_id", _optional_text(self.seller_id, "seller_id"))
-        object.__setattr__(self, "product_title", _require_text(self.product_title, "product_title"))
-        object.__setattr__(self, "brand", _optional_text(self.brand, "brand"))
-        object.__setattr__(self, "category_path", _optional_text(self.category_path, "category_path"))
-        object.__setattr__(self, "source_url", _require_http_url(self.source_url, "source_url"))
-        object.__setattr__(self, "currency", _require_currency(self.currency))
-        first_seen_at = _require_aware_datetime(self.first_seen_at, "first_seen_at")
-        last_seen_at = _require_aware_datetime(self.last_seen_at, "last_seen_at")
+        object.__setattr__(self, "offer_id", v.require_text(self.offer_id, "offer_id"))
+        object.__setattr__(self, "marketplace_id", v.require_text(self.marketplace_id, "marketplace_id"))
+        object.__setattr__(self, "platform_listing_id", v.require_text(self.platform_listing_id, "platform_listing_id"))
+        object.__setattr__(self, "seller_id", v.optional_text(self.seller_id, "seller_id"))
+        object.__setattr__(self, "product_title", v.require_text(self.product_title, "product_title"))
+        object.__setattr__(self, "brand", v.optional_text(self.brand, "brand"))
+        object.__setattr__(self, "category_path", v.optional_text(self.category_path, "category_path"))
+        object.__setattr__(self, "source_url", v.http_url(self.source_url, "source_url"))
+        object.__setattr__(self, "currency", v.currency_code(self.currency))
+        first_seen_at = v.aware_utc(self.first_seen_at, "first_seen_at")
+        last_seen_at = v.aware_utc(self.last_seen_at, "last_seen_at")
         object.__setattr__(self, "first_seen_at", first_seen_at)
         object.__setattr__(self, "last_seen_at", last_seen_at)
         if last_seen_at < first_seen_at:
             raise ValueError("last_seen_at must be greater than or equal to first_seen_at")
-        _require_enum(self.active_status, OfferActiveStatus, "active_status")
+        v.enum_member(self.active_status, OfferActiveStatus, "active_status")
 
 
 @dataclass(frozen=True)
@@ -339,11 +250,11 @@ class OfferObservation:
     crawl_run_id: str = ""
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "observation_id", _require_text(self.observation_id, "observation_id"))
-        object.__setattr__(self, "offer_id", _require_text(self.offer_id, "offer_id"))
-        object.__setattr__(self, "observed_at", _require_aware_datetime(self.observed_at, "observed_at"))
-        object.__setattr__(self, "fetched_at", _require_aware_datetime(self.fetched_at, "fetched_at"))
-        _require_non_negative_decimal(self.current_price, "current_price")
+        object.__setattr__(self, "observation_id", v.require_text(self.observation_id, "observation_id"))
+        object.__setattr__(self, "offer_id", v.require_text(self.offer_id, "offer_id"))
+        object.__setattr__(self, "observed_at", v.aware_utc(self.observed_at, "observed_at"))
+        object.__setattr__(self, "fetched_at", v.aware_utc(self.fetched_at, "fetched_at"))
+        v.non_negative_decimal(self.current_price, "current_price")
         for field_name in (
             "list_price",
             "shipping_price",
@@ -352,16 +263,16 @@ class OfferObservation:
             "rating_value",
             "rating_scale",
         ):
-            _require_non_negative_decimal(getattr(self, field_name), field_name)
+            v.non_negative_decimal(getattr(self, field_name), field_name)
         if self.discount_percent is not None and self.discount_percent > 100:
             raise ValueError("discount_percent must be between 0 and 100")
         for field_name in ("rating_count", "review_count", "sold_count"):
-            _require_non_negative_int(getattr(self, field_name), field_name)
-        _require_enum(self.availability, Availability, "availability")
+            v.optional_non_negative_int(getattr(self, field_name), field_name)
+        v.enum_member(self.availability, Availability, "availability")
         if self.promotion is not None and not isinstance(self.promotion, dict):
             raise ValueError("promotion must be a dictionary")
         if self.ranking_position is not None:
-            _require_non_negative_int(self.ranking_position, "ranking_position")
+            v.optional_non_negative_int(self.ranking_position, "ranking_position")
             if self.ranking_position == 0:
                 raise ValueError("ranking_position must be greater than zero")
         if self.rating_value is not None:
@@ -371,10 +282,10 @@ class OfferObservation:
                 raise ValueError("rating_scale must be greater than zero")
             if self.rating_value > self.rating_scale:
                 raise ValueError("rating_value cannot exceed rating_scale")
-        object.__setattr__(self, "raw_uri", _require_raw_uri(self.raw_uri))
-        object.__setattr__(self, "raw_sha256", _require_sha256(self.raw_sha256, "raw_sha256"))
-        object.__setattr__(self, "adapter_version", _require_text(self.adapter_version, "adapter_version"))
-        object.__setattr__(self, "crawl_run_id", _require_text(self.crawl_run_id, "crawl_run_id"))
+        object.__setattr__(self, "raw_uri", v.raw_uri(self.raw_uri))
+        object.__setattr__(self, "raw_sha256", v.sha256_hex(self.raw_sha256, "raw_sha256"))
+        object.__setattr__(self, "adapter_version", v.require_text(self.adapter_version, "adapter_version"))
+        object.__setattr__(self, "crawl_run_id", v.require_text(self.crawl_run_id, "crawl_run_id"))
 
 
 @dataclass(frozen=True)
@@ -405,17 +316,17 @@ class MarketplaceObservationV1:
     payload: ObservationPayload
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "event_id", _require_text(self.event_id, "event_id"))
-        object.__setattr__(self, "schema_version", _require_text(self.schema_version, "schema_version"))
-        object.__setattr__(self, "event_type", _require_text(self.event_type, "event_type"))
-        occurred_at = _require_aware_datetime(self.occurred_at, "occurred_at")
-        produced_at = _require_aware_datetime(self.produced_at, "produced_at")
+        object.__setattr__(self, "event_id", v.require_text(self.event_id, "event_id"))
+        object.__setattr__(self, "schema_version", v.require_text(self.schema_version, "schema_version"))
+        object.__setattr__(self, "event_type", v.require_text(self.event_type, "event_type"))
+        occurred_at = v.aware_utc(self.occurred_at, "occurred_at")
+        produced_at = v.aware_utc(self.produced_at, "produced_at")
         object.__setattr__(self, "occurred_at", occurred_at)
         object.__setattr__(self, "produced_at", produced_at)
-        object.__setattr__(self, "marketplace", _require_text(self.marketplace, "marketplace"))
-        object.__setattr__(self, "partition_key", _require_text(self.partition_key, "partition_key"))
-        object.__setattr__(self, "crawl_run_id", _require_text(self.crawl_run_id, "crawl_run_id"))
-        object.__setattr__(self, "raw_uri", _require_raw_uri(self.raw_uri))
+        object.__setattr__(self, "marketplace", v.require_text(self.marketplace, "marketplace"))
+        object.__setattr__(self, "partition_key", v.require_text(self.partition_key, "partition_key"))
+        object.__setattr__(self, "crawl_run_id", v.require_text(self.crawl_run_id, "crawl_run_id"))
+        object.__setattr__(self, "raw_uri", v.raw_uri(self.raw_uri))
         if not isinstance(self.payload, ObservationPayload):
             raise ValueError("payload must be an ObservationPayload")
         if self.schema_version != OBSERVATION_SCHEMA_VERSION:
@@ -449,24 +360,24 @@ class MarketplaceChangeV1:
     rule_version: str
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "event_id", _require_text(self.event_id, "event_id"))
-        object.__setattr__(self, "schema_version", _require_text(self.schema_version, "schema_version"))
-        _require_enum(self.change_type, MarketplaceChangeType, "change_type")
-        object.__setattr__(self, "detected_at", _require_aware_datetime(self.detected_at, "detected_at"))
-        object.__setattr__(self, "marketplace", _require_text(self.marketplace, "marketplace"))
-        object.__setattr__(self, "offer_id", _require_text(self.offer_id, "offer_id"))
+        object.__setattr__(self, "event_id", v.require_text(self.event_id, "event_id"))
+        object.__setattr__(self, "schema_version", v.require_text(self.schema_version, "schema_version"))
+        v.enum_member(self.change_type, MarketplaceChangeType, "change_type")
+        object.__setattr__(self, "detected_at", v.aware_utc(self.detected_at, "detected_at"))
+        object.__setattr__(self, "marketplace", v.require_text(self.marketplace, "marketplace"))
+        object.__setattr__(self, "offer_id", v.require_text(self.offer_id, "offer_id"))
         object.__setattr__(
             self,
             "previous_observation_id",
-            _optional_text(self.previous_observation_id, "previous_observation_id"),
+            v.optional_text(self.previous_observation_id, "previous_observation_id"),
         )
         object.__setattr__(
             self,
             "current_observation_id",
-            _require_text(self.current_observation_id, "current_observation_id"),
+            v.require_text(self.current_observation_id, "current_observation_id"),
         )
-        object.__setattr__(self, "field_name", _optional_text(self.field_name, "field_name"))
-        object.__setattr__(self, "rule_version", _require_text(self.rule_version, "rule_version"))
+        object.__setattr__(self, "field_name", v.optional_text(self.field_name, "field_name"))
+        object.__setattr__(self, "rule_version", v.require_text(self.rule_version, "rule_version"))
         if self.schema_version != CHANGE_SCHEMA_VERSION:
             raise ValueError("schema_version must equal CHANGE_SCHEMA_VERSION")
         if self.change_type is not MarketplaceChangeType.NEW_OFFER and self.previous_observation_id is None:
@@ -602,8 +513,8 @@ def create_observation_event(
     platform_listing_id: str,
     produced_at: datetime,
 ) -> MarketplaceObservationV1:
-    marketplace_code = _require_text(marketplace_code, "marketplace_code").lower()
-    platform_listing_id = _require_text(platform_listing_id, "platform_listing_id")
+    marketplace_code = v.require_text(marketplace_code, "marketplace_code").lower()
+    platform_listing_id = v.require_text(platform_listing_id, "platform_listing_id")
     return MarketplaceObservationV1(
         event_id=observation.observation_id,
         schema_version=OBSERVATION_SCHEMA_VERSION,

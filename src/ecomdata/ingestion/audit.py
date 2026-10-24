@@ -9,36 +9,15 @@ from __future__ import annotations
 import json
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
 from typing import Any
 
+from ecomdata.domain import validation as v
 from ecomdata.domain.observations import CrawlRun
 from ecomdata.ingestion.scheduling import FailureKind
 
 _ERROR_LIMIT = 2000
 _ATTEMPT_STATUS = frozenset({"SUCCEEDED", "PARTIAL", "FAILED"})
-
-
-def _utc(value: datetime, field_name: str) -> datetime:
-    if not isinstance(value, datetime):
-        raise TypeError(f"{field_name} must be a datetime")
-    if value.tzinfo is None or value.utcoffset() is None:
-        raise ValueError(f"{field_name} must be timezone-aware")
-    return value.astimezone(UTC)
-
-
-def _count(value: Any, field_name: str) -> int:
-    if isinstance(value, bool) or not isinstance(value, int):
-        raise ValueError(f"{field_name} must be an integer")
-    if value < 0:
-        raise ValueError(f"{field_name} must be non-negative")
-    return value
-
-
-def _code(marketplace_code: str) -> str:
-    if not isinstance(marketplace_code, str) or not marketplace_code.strip():
-        raise ValueError("marketplace_code is required")
-    return marketplace_code.strip().lower()
 
 
 @dataclass(frozen=True)
@@ -67,20 +46,20 @@ class CrawlAttemptAudit:
         if self.status not in _ATTEMPT_STATUS:
             raise ValueError("status must be SUCCEEDED, PARTIAL or FAILED")
         object.__setattr__(
-            self, "attempt_number", _count(self.attempt_number, "attempt_number")
+            self, "attempt_number", v.non_bool_int(self.attempt_number, "attempt_number", minimum=0)
         )
         if self.attempt_number < 1:
             raise ValueError("attempt_number must be at least 1")
-        object.__setattr__(self, "started_at", _utc(self.started_at, "started_at"))
-        object.__setattr__(self, "completed_at", _utc(self.completed_at, "completed_at"))
+        object.__setattr__(self, "started_at", v.aware_utc(self.started_at, "started_at", error=TypeError))
+        object.__setattr__(self, "completed_at", v.aware_utc(self.completed_at, "completed_at", error=TypeError))
         if self.completed_at < self.started_at:
             raise ValueError("completed_at cannot precede started_at")
         for name in ("raw_bytes", "parsed_count", "rejected_count"):
-            object.__setattr__(self, name, _count(getattr(self, name), name))
+            object.__setattr__(self, name, v.non_bool_int(getattr(self, name), name, minimum=0))
         if self.latency_ms is not None:
-            object.__setattr__(self, "latency_ms", _count(self.latency_ms, "latency_ms"))
+            object.__setattr__(self, "latency_ms", v.non_bool_int(self.latency_ms, "latency_ms", minimum=0))
         if self.http_status is not None:
-            status = _count(self.http_status, "http_status")
+            status = v.non_bool_int(self.http_status, "http_status", minimum=0)
             if not 100 <= status <= 599:
                 raise ValueError("http_status must be a valid HTTP status")
         if self.error_kind is not None and not isinstance(self.error_kind, FailureKind):
@@ -173,8 +152,8 @@ class CrawlAuditRepository:
         There is no boolean column: the circuit is open exactly while
         opened_until is still in the future, so a stale row heals by itself.
         """
-        code = _code(marketplace_code)
-        now = _utc(now, "now")
+        code = v.require_text(marketplace_code, "marketplace_code").lower()
+        now = v.aware_utc(now, "now", error=TypeError)
         with self.connection_factory() as conn, conn.cursor() as cur:
             cur.execute(
                 "SELECT opened_until FROM audit.crawl_source_state WHERE marketplace_code = %s",
@@ -183,12 +162,12 @@ class CrawlAuditRepository:
             row = cur.fetchone() if hasattr(cur, "fetchone") else None
         if not row or row[0] is None:
             return False
-        return _utc(row[0], "opened_until") > now
+        return v.aware_utc(row[0], "opened_until", error=TypeError) > now
 
     def record_source_success(self, marketplace_code: str, at: datetime) -> None:
         """Reset the failure streak and close the circuit."""
-        code = _code(marketplace_code)
-        at = _utc(at, "at")
+        code = v.require_text(marketplace_code, "marketplace_code").lower()
+        at = v.aware_utc(at, "at", error=TypeError)
         with self.connection_factory() as conn, conn.cursor() as cur:
             cur.execute(
                 "INSERT INTO audit.crawl_source_state (marketplace_code,"
@@ -214,8 +193,8 @@ class CrawlAuditRepository:
         data-quality problem with this response, not evidence the source is
         unhealthy, so it must not hold the whole source back.
         """
-        code = _code(marketplace_code)
-        at = _utc(at, "at")
+        code = v.require_text(marketplace_code, "marketplace_code").lower()
+        at = v.aware_utc(at, "at", error=TypeError)
         if isinstance(threshold, bool) or not isinstance(threshold, int) or threshold < 1:
             raise ValueError("threshold must be a positive integer")
         if isinstance(open_seconds, bool) or not isinstance(open_seconds, int) or open_seconds < 1:

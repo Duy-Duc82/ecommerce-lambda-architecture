@@ -9,6 +9,8 @@ from decimal import Decimal
 from enum import Enum
 from typing import Any
 
+from ecomdata.domain import validation as v
+
 _SHA256_PATTERN = re.compile(r"[0-9a-fA-F]{64}\Z")
 _PREFIX_PATTERN = re.compile(r"[a-z0-9_]+\Z")
 
@@ -39,27 +41,11 @@ def _normalize_identity_part(value: Any) -> str:
     raise TypeError(f"unsupported identity part type: {type(value).__name__}")
 
 
-def _require_text(value: Any, field_name: str) -> str:
-    if not isinstance(value, str):
-        raise TypeError(f"{field_name} must be a string")
-    normalized = value.strip()
-    if not normalized:
-        raise ValueError(f"{field_name} is required")
-    return normalized
-
-
 def _require_identity_value(value: Any, field_name: str) -> Any:
     normalized = _normalize_identity_part(value)
     if not normalized:
         raise ValueError(f"{field_name} is required")
     return value
-
-
-def _require_sha256(value: str, field_name: str) -> str:
-    normalized = _require_text(value, field_name)
-    if not _SHA256_PATTERN.fullmatch(normalized):
-        raise ValueError(f"{field_name} must be exactly 64 hexadecimal characters")
-    return normalized.lower()
 
 
 def deterministic_id(prefix: str, *parts: Any) -> str:
@@ -87,10 +73,10 @@ def make_raw_artifact_id(
     """Build the identity of one fetched raw response."""
     return deterministic_id(
         "raw",
-        _require_text(marketplace_code, "marketplace_code"),
-        _require_text(request_url, "request_url"),
+        v.require_text(marketplace_code, "marketplace_code", error=TypeError),
+        v.require_text(request_url, "request_url", error=TypeError),
         fetched_at,
-        _require_sha256(body_sha256, "body_sha256"),
+        v.sha256_hex(body_sha256, "body_sha256", error=TypeError),
     )
 
 
@@ -101,8 +87,8 @@ def make_offer_id(
     """Build the stable identity of a marketplace listing."""
     return deterministic_id(
         "offer",
-        _require_text(marketplace_code, "marketplace_code"),
-        _require_text(platform_listing_id, "platform_listing_id"),
+        v.require_text(marketplace_code, "marketplace_code", error=TypeError),
+        v.require_text(platform_listing_id, "platform_listing_id", error=TypeError),
     )
 
 
@@ -113,8 +99,8 @@ def make_seller_id(
     """Build the stable identity of a marketplace seller."""
     return deterministic_id(
         "seller",
-        _require_text(marketplace_code, "marketplace_code"),
-        _require_text(platform_seller_id, "platform_seller_id"),
+        v.require_text(marketplace_code, "marketplace_code", error=TypeError),
+        v.require_text(platform_seller_id, "platform_seller_id", error=TypeError),
     )
 
 
@@ -127,10 +113,10 @@ def make_observation_id(
     """Build the identity of one observation of a listing."""
     return deterministic_id(
         "obs",
-        _require_text(marketplace_code, "marketplace_code"),
-        _require_text(platform_listing_id, "platform_listing_id"),
+        v.require_text(marketplace_code, "marketplace_code", error=TypeError),
+        v.require_text(platform_listing_id, "platform_listing_id", error=TypeError),
         observed_at,
-        _require_sha256(raw_sha256, "raw_sha256"),
+        v.sha256_hex(raw_sha256, "raw_sha256", error=TypeError),
     )
 
 
@@ -143,8 +129,8 @@ def make_change_id(
     """Build the identity of one derived marketplace change."""
     return deterministic_id(
         "change",
-        _require_text(offer_id, "offer_id"),
-        _require_text(current_observation_id, "current_observation_id"),
+        v.require_text(offer_id, "offer_id", error=TypeError),
+        v.require_text(current_observation_id, "current_observation_id", error=TypeError),
         _require_identity_value(change_type, "change_type"),
-        _require_text(rule_version, "rule_version"),
+        v.require_text(rule_version, "rule_version", error=TypeError),
     )

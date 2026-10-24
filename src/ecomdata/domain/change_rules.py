@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, replace
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
 from decimal import Decimal
 from enum import Enum
 from typing import Any
 
+from ecomdata.domain import validation as v
 from ecomdata.domain.identity import make_change_id
 from ecomdata.domain.observations import Availability, MarketplaceChangeType, MarketplaceObservationV1
 from ecomdata.domain.serialization import serialize_for_wire
@@ -71,12 +72,6 @@ class ChangeDetectionResult:
     changes: tuple[Any, ...]
 
 
-def _utc(value: datetime) -> datetime:
-    if value.tzinfo is None or value.utcoffset() is None:
-        raise ValueError("datetime must be timezone-aware")
-    return value.astimezone(UTC)
-
-
 def state_from_observation(event: MarketplaceObservationV1) -> OfferState:
     offer, obs = event.payload.offer, event.payload.observation
     return OfferState(
@@ -92,8 +87,8 @@ def state_from_observation(event: MarketplaceObservationV1) -> OfferState:
         offer.currency,
         offer.active_status.value,
         obs.observation_id,
-        _utc(obs.observed_at),
-        _utc(event.produced_at),
+        v.aware_utc(obs.observed_at, "datetime"),
+        v.aware_utc(event.produced_at, "datetime"),
         obs.current_price,
         obs.list_price,
         obs.rating_value,
@@ -147,7 +142,7 @@ def _change(
         make_change_id(state.offer_id, current_id, kind, rule_version),
         "marketplace-change.v1",
         kind,
-        _utc(detected_at),
+        v.aware_utc(detected_at, "datetime"),
         state.marketplace,
         state.offer_id,
         previous_id,
@@ -170,7 +165,7 @@ def detect_observation_changes(
     incoming = state_from_observation(event)
     if previous is not None:
         ordering = (incoming.observed_at, incoming.observation_id)
-        current_ordering = (_utc(previous.observed_at), previous.observation_id)
+        current_ordering = (v.aware_utc(previous.observed_at, "datetime"), previous.observation_id)
         if incoming.observation_id == previous.observation_id:
             return ChangeDetectionResult(ObservationDisposition.DUPLICATE, previous, ())
         if ordering < current_ordering:
@@ -288,7 +283,7 @@ def detect_observation_changes(
 def detect_stale_change(state: OfferState, config: ChangeRuleConfig) -> tuple[OfferState, Any | None]:
     if state.stale_emitted:
         return state, None
-    boundary = _utc(state.observed_at) + timedelta(seconds=config.stale_after_seconds)
+    boundary = v.aware_utc(state.observed_at, "datetime") + timedelta(seconds=config.stale_after_seconds)
     stale_state = replace(state, stale_emitted=True)
     change = _change(
         stale_state,
@@ -314,7 +309,7 @@ def offer_state_from_json(value: str) -> OfferState:
         raise ValueError("offer state must be a JSON object")
 
     def dt(name):
-        return _utc(datetime.fromisoformat(raw[name].replace("Z", "+00:00")))
+        return v.aware_utc(datetime.fromisoformat(raw[name].replace("Z", "+00:00")), name)
 
     return OfferState(
         raw["marketplace"],

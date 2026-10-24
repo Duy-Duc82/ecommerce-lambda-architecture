@@ -10,11 +10,11 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import datetime
 from enum import Enum
 from typing import Any, Protocol
-from urllib.parse import urlparse
 
+from ecomdata.domain import validation as v
 from ecomdata.domain.observations import (
     MarketplaceObservationV1,
     RawArtifact,
@@ -102,58 +102,6 @@ class ObservationPublishError(Exception):
         self.__cause__ = cause
 
 
-def _require_text(value: Any, field_name: str) -> str:
-    if not isinstance(value, str):
-        raise ValueError(f"{field_name} must be text")
-    value = value.strip()
-    if not value:
-        raise ValueError(f"{field_name} is required")
-    return value
-
-
-def _optional_text(value: Any, field_name: str) -> str | None:
-    if value is None:
-        return None
-    if not isinstance(value, str):
-        raise ValueError(f"{field_name} must be text")
-    value = value.strip()
-    return value or None
-
-
-def _aware_utc(value: Any, field_name: str) -> datetime:
-    if not isinstance(value, datetime):
-        raise ValueError(f"{field_name} must be a datetime")
-    if value.tzinfo is None or value.utcoffset() is None:
-        raise ValueError(f"{field_name} must be timezone-aware")
-    return value.astimezone(UTC)
-
-
-def _non_bool_int(value: Any, field_name: str, *, minimum: int = 0) -> int:
-    if isinstance(value, bool) or not isinstance(value, int):
-        raise ValueError(f"{field_name} must be an integer, not bool")
-    if value < minimum:
-        raise ValueError(f"{field_name} must be at least {minimum}")
-    return value
-
-
-def _http_url(value: Any, field_name: str) -> str:
-    value = _require_text(value, field_name)
-    try:
-        parsed = urlparse(value)
-        hostname = parsed.hostname
-    except ValueError as exc:
-        raise ValueError(f"{field_name} must be a valid HTTP(S) URL") from exc
-    if parsed.scheme.lower() not in {"http", "https"} or not hostname:
-        raise ValueError(f"{field_name} must be a valid HTTP(S) URL")
-    return value
-
-
-def _error(value: Any, field_name: str = "error") -> Exception:
-    if not isinstance(value, Exception):
-        raise ValueError(f"{field_name} must be an Exception")
-    return value
-
-
 def _error_message(error: Exception) -> str:
     return str(error)[:2000]
 
@@ -167,10 +115,10 @@ class ListingPageRequest:
     resource_type: ResourceType = ResourceType.LISTING_PAGE
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "marketplace_code", _require_text(self.marketplace_code, "marketplace_code").lower())
-        object.__setattr__(self, "marketplace_id", _require_text(self.marketplace_id, "marketplace_id"))
-        object.__setattr__(self, "target", _require_text(self.target, "target"))
-        _non_bool_int(self.page, "page", minimum=1)
+        object.__setattr__(self, "marketplace_code", v.require_text(self.marketplace_code, "marketplace_code").lower())
+        object.__setattr__(self, "marketplace_id", v.require_text(self.marketplace_id, "marketplace_id"))
+        object.__setattr__(self, "target", v.require_text(self.target, "target"))
+        v.non_bool_int(self.page, "page", minimum=1)
         if not isinstance(self.resource_type, ResourceType):
             raise ValueError("resource_type must be a ResourceType")
         if self.resource_type is not ResourceType.LISTING_PAGE:
@@ -188,23 +136,23 @@ class FetchResult:
     elapsed_ms: int | None = None
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "request_url", _http_url(self.request_url, "request_url"))
-        object.__setattr__(self, "fetched_at", _aware_utc(self.fetched_at, "fetched_at"))
-        _non_bool_int(self.http_status, "http_status", minimum=100)
+        object.__setattr__(self, "request_url", v.http_url(self.request_url, "request_url"))
+        object.__setattr__(self, "fetched_at", v.aware_utc(self.fetched_at, "fetched_at"))
+        v.non_bool_int(self.http_status, "http_status", minimum=100)
         if self.http_status > 599:
             raise ValueError("http_status must be between 100 and 599")
         if not isinstance(self.body, bytes):
             raise ValueError("body must be bytes")
-        object.__setattr__(self, "content_type", _optional_text(self.content_type, "content_type"))
-        object.__setattr__(self, "retry_after", _optional_text(self.retry_after, "retry_after"))
+        object.__setattr__(self, "content_type", v.optional_text(self.content_type, "content_type"))
+        object.__setattr__(self, "retry_after", v.optional_text(self.retry_after, "retry_after"))
         if self.elapsed_ms is not None:
-            _non_bool_int(self.elapsed_ms, "elapsed_ms")
+            v.non_bool_int(self.elapsed_ms, "elapsed_ms")
 
 
 def encode_listing_page_task_target(target: str, page: int) -> str:
     """Encode a generic target/page pair for Phase 3's string task field."""
-    target = _require_text(target, "target")
-    _non_bool_int(page, "page", minimum=1)
+    target = v.require_text(target, "target")
+    v.non_bool_int(page, "page", minimum=1)
     return json.dumps(
         {"page": page, "target": target},
         ensure_ascii=False,
@@ -223,8 +171,8 @@ def decode_listing_page_task_target(value: str) -> tuple[str, int]:
         raise ValueError("task target must be valid JSON") from exc
     if not isinstance(decoded, dict) or set(decoded) != {"page", "target"}:
         raise ValueError("task target must contain exactly page and target")
-    target = _require_text(decoded["target"], "target")
-    page = _non_bool_int(decoded["page"], "page", minimum=1)
+    target = v.require_text(decoded["target"], "target")
+    page = v.non_bool_int(decoded["page"], "page", minimum=1)
     return target, page
 
 
@@ -236,14 +184,14 @@ class RecordRejection:
     platform_listing_id: str | None = None
 
     def __post_init__(self) -> None:
-        _non_bool_int(self.record_index, "record_index")
+        v.non_bool_int(self.record_index, "record_index")
         if self.stage not in {AcquisitionStage.PARSE, AcquisitionStage.VALIDATION}:
             raise ValueError("record rejection stage must be PARSE or VALIDATION")
-        _error(self.error)
+        v.exception(self.error)
         object.__setattr__(
             self,
             "platform_listing_id",
-            _optional_text(self.platform_listing_id, "platform_listing_id"),
+            v.optional_text(self.platform_listing_id, "platform_listing_id"),
         )
 
     @property
@@ -272,14 +220,14 @@ class ParsedListingPage:
             raise ValueError("rejections must be a tuple")
         if not all(isinstance(item, RecordRejection) for item in self.rejections):
             raise ValueError("rejections must contain RecordRejection values")
-        _non_bool_int(self.source_record_count, "source_record_count")
-        _non_bool_int(self.duplicate_count, "duplicate_count")
+        v.non_bool_int(self.source_record_count, "source_record_count")
+        v.non_bool_int(self.duplicate_count, "duplicate_count")
         if len({item.event_id for item in self.observations}) != len(self.observations):
             raise ValueError("observations must not contain duplicate event IDs")
         if len(self.observations) + len(self.rejections) + self.duplicate_count != self.source_record_count:
             raise ValueError("accepted + rejected + duplicate rows must equal source_record_count")
         if self.last_page is not None:
-            _non_bool_int(self.last_page, "last_page", minimum=1)
+            v.non_bool_int(self.last_page, "last_page", minimum=1)
 
 
 @dataclass(frozen=True)
@@ -290,7 +238,7 @@ class AcquisitionFailure:
     def __post_init__(self) -> None:
         if not isinstance(self.stage, AcquisitionStage):
             raise ValueError("stage must be an AcquisitionStage")
-        _error(self.error)
+        v.exception(self.error)
 
     @property
     def error_type(self) -> str:
@@ -327,25 +275,25 @@ class Phase2AcquisitionReport:
     def __post_init__(self) -> None:
         if not isinstance(self.status, AcquisitionStatus):
             raise ValueError("status must be an AcquisitionStatus")
-        object.__setattr__(self, "marketplace_code", _require_text(self.marketplace_code, "marketplace_code").lower())
-        object.__setattr__(self, "marketplace_id", _require_text(self.marketplace_id, "marketplace_id"))
-        object.__setattr__(self, "target", _require_text(self.target, "target"))
-        _non_bool_int(self.page, "page", minimum=1)
+        object.__setattr__(self, "marketplace_code", v.require_text(self.marketplace_code, "marketplace_code").lower())
+        object.__setattr__(self, "marketplace_id", v.require_text(self.marketplace_id, "marketplace_id"))
+        object.__setattr__(self, "target", v.require_text(self.target, "target"))
+        v.non_bool_int(self.page, "page", minimum=1)
         if not isinstance(self.resource_type, ResourceType):
             raise ValueError("resource_type must be a ResourceType")
-        object.__setattr__(self, "crawl_run_id", _require_text(self.crawl_run_id, "crawl_run_id"))
-        object.__setattr__(self, "request_url", _http_url(self.request_url, "request_url"))
-        started_at = _aware_utc(self.started_at, "started_at")
-        completed_at = _aware_utc(self.completed_at, "completed_at")
+        object.__setattr__(self, "crawl_run_id", v.require_text(self.crawl_run_id, "crawl_run_id"))
+        object.__setattr__(self, "request_url", v.http_url(self.request_url, "request_url"))
+        started_at = v.aware_utc(self.started_at, "started_at")
+        completed_at = v.aware_utc(self.completed_at, "completed_at")
         object.__setattr__(self, "started_at", started_at)
         object.__setattr__(self, "completed_at", completed_at)
         if completed_at < started_at:
             raise ValueError("completed_at must not be before started_at")
         if self.http_status is not None:
-            _non_bool_int(self.http_status, "http_status", minimum=100)
+            v.non_bool_int(self.http_status, "http_status", minimum=100)
             if self.http_status > 599:
                 raise ValueError("http_status must be between 100 and 599")
-        object.__setattr__(self, "retry_after", _optional_text(self.retry_after, "retry_after"))
+        object.__setattr__(self, "retry_after", v.optional_text(self.retry_after, "retry_after"))
         if not isinstance(self.observations, tuple):
             raise ValueError("observations must be a tuple")
         if not all(isinstance(item, MarketplaceObservationV1) for item in self.observations):
@@ -354,14 +302,14 @@ class Phase2AcquisitionReport:
             raise ValueError("rejections must be a tuple")
         if not all(isinstance(item, RecordRejection) for item in self.rejections):
             raise ValueError("rejections must contain RecordRejection values")
-        _non_bool_int(self.source_record_count, "source_record_count")
-        _non_bool_int(self.duplicate_count, "duplicate_count")
+        v.non_bool_int(self.source_record_count, "source_record_count")
+        v.non_bool_int(self.duplicate_count, "duplicate_count")
         if len(self.observations) + len(self.rejections) + self.duplicate_count != self.source_record_count:
             raise ValueError("accepted + rejected + duplicate rows must equal source_record_count")
         if self.last_page is not None:
-            _non_bool_int(self.last_page, "last_page", minimum=1)
+            v.non_bool_int(self.last_page, "last_page", minimum=1)
         if self.raw_metadata_uri is not None:
-            object.__setattr__(self, "raw_metadata_uri", _require_text(self.raw_metadata_uri, "raw_metadata_uri"))
+            object.__setattr__(self, "raw_metadata_uri", v.require_text(self.raw_metadata_uri, "raw_metadata_uri"))
         if self.raw_artifact is not None and not isinstance(self.raw_artifact, RawArtifact):
             raise ValueError("raw_artifact must be a RawArtifact")
         if self.failure is not None and not isinstance(self.failure, AcquisitionFailure):

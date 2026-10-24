@@ -16,6 +16,7 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Protocol
 
+from ecomdata.domain import validation as v
 from ecomdata.domain.acquisition import AcquisitionStatus, ObservationPublishError, Phase2AcquisitionReport
 from ecomdata.domain.observations import CrawlRun, CrawlRunStatus
 from ecomdata.ingestion.audit import CrawlAttemptAudit, CrawlAuditRepository
@@ -55,12 +56,6 @@ class CycleResult:
     failed: int
     skipped_circuit_open: int
     recovered_leases: int
-
-
-def _utc(value: datetime, field_name: str) -> datetime:
-    if value.tzinfo is None or value.utcoffset() is None:
-        raise ValueError(f"{field_name} must be timezone-aware")
-    return value.astimezone(UTC)
 
 
 def _retry_after(report: Phase2AcquisitionReport | None, error: Exception) -> str | None:
@@ -113,7 +108,7 @@ class CrawlWorker:
 
     def run_once(self, *, crawl_run_id_for: Callable[[CrawlTask], str]) -> CycleResult:
         """Run one polling cycle. Never sleeps; an outer CLI owns the interval."""
-        now = _utc(self.clock(), "clock")
+        now = v.aware_utc(self.clock(), "clock")
         recovered = self.frontier.recover_expired_leases(now=now)
         tasks = self.frontier.lease_due(
             worker_id=self.worker_id,
@@ -146,7 +141,7 @@ class CrawlWorker:
         )
 
     def _run_task(self, task: CrawlTask, crawl_run_id: str) -> str:
-        started_at = _utc(self.clock(), "clock")
+        started_at = v.aware_utc(self.clock(), "clock")
         if self.audit.source_is_open(task.marketplace_code, started_at):
             # Hand the task back untouched: a held-back source is not a failure
             # of this task, so neither its attempts nor the source streak move.
@@ -177,7 +172,7 @@ class CrawlWorker:
         except Exception as exc:  # the taxonomy decides what this means
             error = exc
 
-        completed_at = _utc(self.clock(), "clock")
+        completed_at = v.aware_utc(self.clock(), "clock")
         if error is None and report is not None and report.status is not AcquisitionStatus.FAILED:
             return self._on_success(task, run, report, started_at, completed_at)
         return self._on_failure(task, run, report, error, started_at, completed_at)

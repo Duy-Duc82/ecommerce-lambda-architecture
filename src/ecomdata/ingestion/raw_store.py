@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from urllib.parse import quote
 
+from ecomdata.domain import validation as v
 from ecomdata.domain.acquisition import (
     FetchResult,
     ListingPageRequest,
@@ -28,14 +29,8 @@ class PersistedRawArtifact:
     metadata_uri: str
 
 
-def _require_text(value: object, field_name: str) -> str:
-    if not isinstance(value, str) or not value.strip():
-        raise ValueError(f"{field_name} is required")
-    return value.strip()
-
-
 def _component(value: str) -> str:
-    return quote(_require_text(value, "path component"), safe="-_.~")
+    return quote(v.require_text(value, "path component"), safe="-_.~")
 
 
 def _canonical_json(value: object) -> bytes:
@@ -84,8 +79,8 @@ def persist_fetch_result(
         raise TypeError("request must be a ListingPageRequest")
     if not isinstance(fetch_result, FetchResult):
         raise TypeError("fetch_result must be a FetchResult")
-    crawl_run_id = _require_text(crawl_run_id, "crawl_run_id")
-    adapter_version = _require_text(adapter_version, "adapter_version")
+    crawl_run_id = v.require_text(crawl_run_id, "crawl_run_id")
+    adapter_version = v.require_text(adapter_version, "adapter_version")
     if not callable(writer):
         raise TypeError("writer must be callable")
 
@@ -147,7 +142,7 @@ def persist_fetch_result(
         ) from exc
 
     try:
-        metadata_uri = _require_text(metadata_uri, "metadata_uri")
+        metadata_uri = v.require_text(metadata_uri, "metadata_uri")
     except Exception as exc:
         raise RawPersistenceError(
             f"raw metadata writer returned an invalid URI: {exc}",

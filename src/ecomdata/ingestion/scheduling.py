@@ -14,6 +14,7 @@ from decimal import Decimal
 from email.utils import parsedate_to_datetime
 from enum import Enum
 
+from ecomdata.domain import validation as v
 from ecomdata.domain.acquisition import (
     CanonicalRecordError,
     FetchTransportError,
@@ -76,28 +77,6 @@ _RETRYABLE_KINDS = frozenset(
 _RETRYABLE_CLIENT_STATUS = frozenset({408, 425, 429})
 
 
-def _aware_utc(value: datetime, field_name: str) -> datetime:
-    if not isinstance(value, datetime):
-        raise TypeError(f"{field_name} must be a datetime")
-    if value.tzinfo is None or value.utcoffset() is None:
-        raise ValueError(f"{field_name} must be timezone-aware")
-    return value.astimezone(UTC)
-
-
-def _required_text(value: object, field_name: str) -> str:
-    if not isinstance(value, str) or not value.strip():
-        raise ValueError(f"{field_name} is required")
-    return value.strip()
-
-
-def _non_bool_int(value: object, field_name: str, *, minimum: int = 0) -> int:
-    if isinstance(value, bool) or not isinstance(value, int):
-        raise ValueError(f"{field_name} must be an integer")
-    if value < minimum:
-        raise ValueError(f"{field_name} must be at least {minimum}")
-    return value
-
-
 @dataclass(frozen=True)
 class CrawlTask:
     task_id: str
@@ -120,7 +99,7 @@ class CrawlTask:
 
     def __post_init__(self) -> None:
         for name in ("task_id", "marketplace_code", "marketplace_id", "target"):
-            object.__setattr__(self, name, _required_text(getattr(self, name), name))
+            object.__setattr__(self, name, v.require_text(getattr(self, name), name))
         for name, enum_type in (
             ("resource_type", ResourceType),
             ("tier", CrawlTier),
@@ -132,29 +111,29 @@ class CrawlTask:
             self.last_error_kind, FailureKind
         ):
             raise ValueError("last_error_kind must be a FailureKind")
-        object.__setattr__(self, "priority", _non_bool_int(self.priority, "priority"))
-        object.__setattr__(self, "attempts", _non_bool_int(self.attempts, "attempts"))
+        object.__setattr__(self, "priority", v.non_bool_int(self.priority, "priority"))
+        object.__setattr__(self, "attempts", v.non_bool_int(self.attempts, "attempts"))
         object.__setattr__(
             self,
             "max_attempts",
-            _non_bool_int(self.max_attempts, "max_attempts", minimum=1),
+            v.non_bool_int(self.max_attempts, "max_attempts", minimum=1),
         )
         if self.attempts > self.max_attempts:
             raise ValueError("attempts cannot exceed max_attempts")
         object.__setattr__(
-            self, "scheduled_for", _aware_utc(self.scheduled_for, "scheduled_for")
+            self, "scheduled_for", v.aware_utc(self.scheduled_for, "scheduled_for", error=TypeError)
         )
         for name in ("lease_expires_at", "last_success_at"):
             value = getattr(self, name)
             if value is not None:
-                object.__setattr__(self, name, _aware_utc(value, name))
+                object.__setattr__(self, name, v.aware_utc(value, name, error=TypeError))
         if self.status is CrawlTaskStatus.LEASED:
             if not self.lease_owner or self.lease_expires_at is None:
                 raise ValueError("LEASED requires lease_owner and lease_expires_at")
         elif self.lease_owner is not None or self.lease_expires_at is not None:
             raise ValueError(f"{self.status.value} must not hold a lease")
         if self.last_http_status is not None:
-            status = _non_bool_int(self.last_http_status, "last_http_status", minimum=100)
+            status = v.non_bool_int(self.last_http_status, "last_http_status", minimum=100)
             if status > 599:
                 raise ValueError("last_http_status must be a valid HTTP status")
 
@@ -173,7 +152,7 @@ class RetryPolicy:
             ("max_seconds", 1),
         ):
             object.__setattr__(
-                self, name, _non_bool_int(getattr(self, name), name, minimum=minimum)
+                self, name, v.non_bool_int(getattr(self, name), name, minimum=minimum)
             )
         if self.max_seconds < self.base_seconds:
             raise ValueError("max_seconds must be at least base_seconds")
@@ -196,9 +175,9 @@ class RetryDecision:
         if self.retryable:
             if self.delay_seconds is None or self.next_attempt_at is None:
                 raise ValueError("a retryable decision needs a delay and a time")
-            _non_bool_int(self.delay_seconds, "delay_seconds", minimum=1)
+            v.non_bool_int(self.delay_seconds, "delay_seconds", minimum=1)
             object.__setattr__(
-                self, "next_attempt_at", _aware_utc(self.next_attempt_at, "next_attempt_at")
+                self, "next_attempt_at", v.aware_utc(self.next_attempt_at, "next_attempt_at", error=TypeError)
             )
         elif self.delay_seconds is not None or self.next_attempt_at is not None:
             raise ValueError("a terminal decision carries no delay")
@@ -219,10 +198,10 @@ def make_crawl_task_id(
         raise ValueError("resource_type must be a ResourceType")
     return deterministic_id(
         "task",
-        _required_text(marketplace_code, "marketplace_code").lower(),
+        v.require_text(marketplace_code, "marketplace_code").lower(),
         resource_type,
-        _required_text(target, "target"),
-        _aware_utc(scheduled_for, "scheduled_for"),
+        v.require_text(target, "target"),
+        v.aware_utc(scheduled_for, "scheduled_for", error=TypeError),
     )
 
 
@@ -238,7 +217,7 @@ def cadence_minutes(tier: CrawlTier) -> int:
 
 def next_scheduled_for(tier: CrawlTier, after: datetime) -> datetime:
     """The next occurrence of a target one cadence after the given time."""
-    return _aware_utc(after, "after") + timedelta(minutes=cadence_minutes(tier))
+    return v.aware_utc(after, "after", error=TypeError) + timedelta(minutes=cadence_minutes(tier))
 
 
 def classify_failure(error: Exception, http_status: int | None = None) -> FailureKind:
@@ -284,7 +263,7 @@ def parse_retry_after(value: str | None, now: datetime) -> int | None:
         return None
     if not isinstance(value, str) or not value.strip():
         return None
-    now = _aware_utc(now, "now")
+    now = v.aware_utc(now, "now", error=TypeError)
     text = value.strip()
     if text.lstrip("+").isdigit():
         seconds = int(text)
@@ -331,8 +310,8 @@ def decide_retry(
         raise TypeError("error must be an exception")
     if not isinstance(policy, RetryPolicy):
         raise TypeError("policy must be a RetryPolicy")
-    attempts = _non_bool_int(attempts, "attempts", minimum=1)
-    now = _aware_utc(now, "now")
+    attempts = v.non_bool_int(attempts, "attempts", minimum=1)
+    now = v.aware_utc(now, "now", error=TypeError)
     kind = classify_failure(error, http_status)
 
     if kind not in _RETRYABLE_KINDS or attempts >= policy.max_attempts:

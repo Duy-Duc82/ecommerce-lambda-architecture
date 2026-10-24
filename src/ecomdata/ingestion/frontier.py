@@ -7,9 +7,10 @@ an error message are remote text and are never interpolated into a statement.
 from __future__ import annotations
 
 from collections.abc import Callable
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
 from typing import Any
 
+from ecomdata.domain import validation as v
 from ecomdata.domain.observations import ResourceType
 from ecomdata.ingestion.scheduling import (
     CrawlTask,
@@ -35,20 +36,6 @@ _FRONTIER_COLUMNS = ", ".join(f"f.{column.strip()}" for column in _COLUMNS.split
 
 class LeaseLostError(RuntimeError):
     """A completion was attempted for a task this worker no longer holds."""
-
-
-def _utc(value: datetime, field_name: str) -> datetime:
-    if not isinstance(value, datetime):
-        raise TypeError(f"{field_name} must be a datetime")
-    if value.tzinfo is None or value.utcoffset() is None:
-        raise ValueError(f"{field_name} must be timezone-aware")
-    return value.astimezone(UTC)
-
-
-def _worker(worker_id: str) -> str:
-    if not isinstance(worker_id, str) or not worker_id.strip():
-        raise ValueError("worker_id is required")
-    return worker_id.strip()
 
 
 def _truncate(message: str | None) -> str | None:
@@ -132,8 +119,8 @@ class PostgresCrawlFrontier:
         SKIP LOCKED so a second worker steps over them instead of blocking,
         and the UPDATE increments attempts exactly once per lease.
         """
-        worker_id = _worker(worker_id)
-        now = _utc(now, "now")
+        worker_id = v.require_text(worker_id, "worker_id")
+        now = v.aware_utc(now, "now", error=TypeError)
         if isinstance(lease_seconds, bool) or not isinstance(lease_seconds, int) or lease_seconds <= 0:
             raise ValueError("lease_seconds must be a positive integer")
         if isinstance(limit, bool) or not isinstance(limit, int) or limit <= 0:
@@ -168,9 +155,9 @@ class PostgresCrawlFrontier:
         next_scheduled_for: datetime,
     ) -> None:
         """Close this occurrence and enqueue the next one in one transaction."""
-        worker_id = _worker(worker_id)
-        completed_at = _utc(completed_at, "completed_at")
-        next_scheduled_for = _utc(next_scheduled_for, "next_scheduled_for")
+        worker_id = v.require_text(worker_id, "worker_id")
+        completed_at = v.aware_utc(completed_at, "completed_at", error=TypeError)
+        next_scheduled_for = v.aware_utc(next_scheduled_for, "next_scheduled_for", error=TypeError)
         with self.connection_factory() as conn, conn.cursor() as cur:
             cur.execute(
                 "UPDATE audit.crawl_frontier SET status = 'SUCCEEDED', lease_owner = NULL,"
@@ -238,7 +225,7 @@ class PostgresCrawlFrontier:
         error_message: str,
     ) -> None:
         """Park the same row in RETRY_WAIT until the decided time."""
-        worker_id = _worker(worker_id)
+        worker_id = v.require_text(worker_id, "worker_id")
         if not isinstance(decision, RetryDecision):
             raise TypeError("decision must be a RetryDecision")
         if not decision.retryable:
@@ -273,8 +260,8 @@ class PostgresCrawlFrontier:
         error_message: str,
     ) -> None:
         """Close this occurrence as terminal; no further attempt is scheduled."""
-        worker_id = _worker(worker_id)
-        completed_at = _utc(completed_at, "completed_at")
+        worker_id = v.require_text(worker_id, "worker_id")
+        completed_at = v.aware_utc(completed_at, "completed_at", error=TypeError)
         if not isinstance(failure_kind, FailureKind):
             raise ValueError("failure_kind must be a FailureKind")
         with self.connection_factory() as conn, conn.cursor() as cur:
@@ -301,7 +288,7 @@ class PostgresCrawlFrontier:
         A crashed worker leaves LEASED rows behind; without this a restart
         would never touch them again.
         """
-        now = _utc(now, "now")
+        now = v.aware_utc(now, "now", error=TypeError)
         with self.connection_factory() as conn, conn.cursor() as cur:
             cur.execute(
                 "UPDATE audit.crawl_frontier SET status = 'RETRY_WAIT', lease_owner = NULL,"
