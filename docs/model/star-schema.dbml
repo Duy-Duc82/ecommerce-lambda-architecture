@@ -1,4 +1,4 @@
-// Phase 10 marketplace star schema (proposed, docs/PLAN_PHASE10_DIMENSIONAL_MODEL.md).
+// Phase 10 marketplace star schema (docs/DATA_MODEL.md section 4).
 // Paste into https://dbdiagram.io/d to draw it.
 
 Project marketplace_dw {
@@ -25,35 +25,37 @@ TableGroup facts {
 }
 
 Table dw.dim_date {
-  date_key int [pk, note: 'yyyymmdd']
-  full_date date [unique, not null]
+  date_key int [pk, note: 'yyyymmdd; -1 unknown']
+  full_date date [unique]
   day_of_week smallint
-  iso_week smallint
+  day_name varchar
+  week_of_year smallint [note: 'ISO week']
   month smallint
+  month_name varchar
   quarter smallint
   year smallint
   is_weekend boolean
   is_double_day_sale boolean [note: '1/1, 2/2 ... 12/12']
   is_vn_holiday boolean
-  Note: 'Conformed with the Kaggle behavior star.'
+  Note: 'Conformed with the Kaggle behavior star: one builder for both.'
 }
 
 Table dw.dim_marketplace {
-  marketplace_key smallint [pk]
+  marketplace_key bigint [pk]
   marketplace_code varchar [unique, not null, note: 'tiki']
   marketplace_id varchar
   marketplace_name varchar
   platform_type varchar [note: 'marketplace | retailer | classifieds | price_comparison']
   country char(2)
-  currency char(3)
+  default_currency char(3)
   first_crawled_at timestamptz
   Note: 'SCD1. A new marketplace is a new row.'
 }
 
 Table dw.dim_seller {
   seller_key bigint [pk]
-  seller_id varchar [unique, not null]
-  marketplace_key smallint [ref: > dw.dim_marketplace.marketplace_key]
+  seller_id varchar [unique, not null, note: 'already marketplace-scoped (make_seller_id)']
+  marketplace_key bigint [ref: > dw.dim_marketplace.marketplace_key]
   first_seen_at timestamptz
   last_seen_at timestamptz
   observed_listing_count int
@@ -61,44 +63,49 @@ Table dw.dim_seller {
 }
 
 Table dw.dim_category {
-  category_key int [pk]
-  category_id varchar [unique, not null]
-  marketplace_key smallint [ref: > dw.dim_marketplace.marketplace_key]
+  category_key bigint [pk, note: 'xxhash64(marketplace_code, category_id)']
+  marketplace_key bigint [ref: > dw.dim_marketplace.marketplace_key]
+  category_id varchar [not null]
   category_name varchar [null]
-  parent_key int [ref: > dw.dim_category.category_key]
-  level smallint
+  category_slug varchar [null, note: 'from a frontier target <slug>/c<id>']
+  parent_key bigint [ref: > dw.dim_category.category_key]
+  level smallint [note: 'root = 1']
   full_path varchar [note: '1/2/1789/1795']
   is_leaf boolean
+  indexes {
+    (marketplace_key, category_id) [unique]
+  }
   Note: 'Ragged hierarchy (4-8 levels): the one deliberate snowflake.'
 }
 
 Table dw.bridge_category_ancestry {
-  ancestor_key int [ref: > dw.dim_category.category_key]
-  descendant_key int [ref: > dw.dim_category.category_key]
-  depth smallint
+  ancestor_key bigint [ref: > dw.dim_category.category_key]
+  descendant_key bigint [ref: > dw.dim_category.category_key]
+  depth smallint [note: '0 = the node itself']
   indexes {
     (ancestor_key, descendant_key) [pk]
   }
-  Note: 'Closure table: every product under node X in one join.'
+  Note: 'Closure table: every listing under node X in one join.'
 }
 
 Table dw.dim_product_listing {
   listing_key bigint [pk, note: 'xxhash64(offer_id, valid_from)']
+  offer_key bigint [not null, note: 'durable: xxhash64(offer_id)']
   offer_id varchar [not null]
-  marketplace_key smallint [ref: > dw.dim_marketplace.marketplace_key]
+  marketplace_key bigint [ref: > dw.dim_marketplace.marketplace_key]
   platform_listing_id varchar
   product_title text [note: 'SCD2']
   brand varchar [null, note: 'SCD2; empty for 13.9% of products']
-  category_key int [ref: > dw.dim_category.category_key, note: 'SCD2']
+  category_key bigint [ref: > dw.dim_category.category_key, note: 'SCD2']
   seller_key bigint [ref: > dw.dim_seller.seller_key, note: 'SCD2']
   source_url text [note: 'SCD1']
-  currency char(3)
   valid_from timestamptz [not null]
   valid_to timestamptz [note: 'exclusive; 9999-12-31 for the current row']
   is_current boolean
   version int
   indexes {
     (offer_id, valid_from) [unique]
+    offer_key
   }
 }
 
@@ -108,93 +115,123 @@ Table dw.dim_offer_status {
   active_status varchar
   has_discount boolean
   has_rating boolean
-  Note: 'Junk dimension, about 30 rows.'
+  Note: 'Junk dimension: 3 x 3 x 2 x 2 = 36 rows, plus the unknown row.'
 }
 
 Table dw.fact_offer_observation {
   observation_id varchar [pk, note: 'degenerate dimension']
   date_key int [ref: > dw.dim_date.date_key]
-  marketplace_key smallint [ref: > dw.dim_marketplace.marketplace_key]
+  marketplace_key bigint [ref: > dw.dim_marketplace.marketplace_key]
   listing_key bigint [ref: > dw.dim_product_listing.listing_key, note: 'version valid at observed_at']
+  offer_key bigint [note: 'durable']
   seller_key bigint [ref: > dw.dim_seller.seller_key]
-  category_key int [ref: > dw.dim_category.category_key]
+  category_key bigint [ref: > dw.dim_category.category_key]
   offer_status_key smallint [ref: > dw.dim_offer_status.offer_status_key]
   observed_at timestamptz
+  fetched_at timestamptz
+  currency char(3)
   current_price numeric(38,6)
   list_price numeric(38,6)
+  shipping_price numeric(38,6)
+  discount_amount numeric(38,6)
   discount_percent numeric(9,4)
-  rating_value numeric(4,2)
+  rating_value numeric(38,6)
+  rating_scale numeric(38,6)
   rating_count bigint
   review_count bigint
   sold_count bigint
   ranking_position int
   crawl_run_id varchar [note: 'lineage']
   raw_uri text [note: 'lineage to Bronze body.bin']
-  Note: 'Transaction fact. Grain: one sighting of one listing at one instant.'
+  raw_sha256 char(64) [note: 'lineage']
+  adapter_version varchar [note: 'lineage; counter semantics']
+  Note: 'Transaction fact. Grain: one sighting of one offer by the crawler at one instant.'
 }
 
 Table dw.fact_price_snapshot_daily {
   date_key int [ref: > dw.dim_date.date_key]
-  listing_key bigint [ref: > dw.dim_product_listing.listing_key]
+  offer_key bigint [note: 'durable']
   currency char(3)
-  marketplace_key smallint [ref: > dw.dim_marketplace.marketplace_key]
+  listing_key bigint [ref: > dw.dim_product_listing.listing_key, note: 'version at the day\'s last sighting']
+  marketplace_key bigint [ref: > dw.dim_marketplace.marketplace_key]
   seller_key bigint [ref: > dw.dim_seller.seller_key]
-  category_key int [ref: > dw.dim_category.category_key]
+  category_key bigint [ref: > dw.dim_category.category_key]
   offer_status_key smallint [ref: > dw.dim_offer_status.offer_status_key, note: 'end of day']
+  first_observed_at timestamptz
+  last_observed_at timestamptz
+  last_observation_id varchar
   open_price numeric(38,6)
   close_price numeric(38,6)
   min_price numeric(38,6)
   max_price numeric(38,6)
   avg_price numeric(38,6)
+  first_list_price numeric(38,6)
+  last_list_price numeric(38,6)
   observation_count int
   distinct_price_count int
   in_stock_ratio numeric(5,4)
   indexes {
-    (date_key, listing_key, currency) [pk]
+    (date_key, offer_key, currency) [pk]
   }
-  Note: 'Periodic snapshot. Grain: one listing x day x currency with at least one sighting.'
+  Note: 'Periodic snapshot (sparse). Grain: one offer x UTC day x currency with at least one sighting.'
 }
 
 Table dw.fact_price_change {
-  price_change_id varchar [pk]
+  observation_id varchar [pk, note: 'the sighting that showed the new price']
+  previous_observation_id varchar
   date_key int [ref: > dw.dim_date.date_key]
-  marketplace_key smallint [ref: > dw.dim_marketplace.marketplace_key]
+  marketplace_key bigint [ref: > dw.dim_marketplace.marketplace_key]
   listing_key bigint [ref: > dw.dim_product_listing.listing_key]
+  offer_key bigint [note: 'durable']
   seller_key bigint [ref: > dw.dim_seller.seller_key]
-  category_key int [ref: > dw.dim_category.category_key]
-  changed_at timestamptz
+  category_key bigint [ref: > dw.dim_category.category_key]
+  changed_at timestamptz [note: 'when the crawler saw it']
+  previous_observed_at timestamptz
+  currency char(3)
+  previous_currency char(3)
   old_price numeric(38,6)
   new_price numeric(38,6)
-  delta numeric(38,6)
-  pct_change numeric(9,4)
-  minutes_since_previous numeric(10,2)
-  direction varchar [note: 'up | down']
-  is_large_drop boolean
-  reverted_within_next_obs boolean
-  Note: 'Transaction fact (derived). Grain: one change of a listing price versus its previous sighting.'
+  price_delta numeric(38,6)
+  pct_change numeric(18,6) [note: 'NULL when the currency changed or old_price = 0']
+  minutes_since_previous numeric(12,2)
+  direction varchar [note: 'UP | DOWN']
+  is_large_drop boolean [note: 'the speed layer rule']
+  change_rule_version varchar
+  Note: 'Transaction fact (derived). Grain: one sighting whose price differs from the offer\'s previous sighting.'
 }
 
 Table dw.fact_counter_daily {
   date_key int [ref: > dw.dim_date.date_key]
-  listing_key bigint [ref: > dw.dim_product_listing.listing_key]
-  counter_name varchar
-  marketplace_key smallint [ref: > dw.dim_marketplace.marketplace_key]
+  offer_key bigint [note: 'durable']
+  counter_name varchar [note: 'rating_count | review_count | sold_count']
+  listing_key bigint [ref: > dw.dim_product_listing.listing_key, note: 'version at the day\'s last sighting']
+  marketplace_key bigint [ref: > dw.dim_marketplace.marketplace_key]
   first_value bigint
   last_value bigint
+  raw_delta_sum bigint
   valid_delta_sum bigint
+  valid_transition_count int
   invalid_transition_count int
+  elapsed_seconds_valid bigint
   velocity_proxy_per_hour double
+  counter_reset_or_invalid boolean
+  invalid_reasons_json text
+  counter_rule_version varchar
   indexes {
-    (date_key, listing_key, counter_name) [pk]
+    (date_key, offer_key, counter_name) [pk]
   }
-  Note: 'Periodic snapshot. Public counters (sold_count, review_count); a proxy, not sales.'
+  Note: 'Periodic snapshot (sparse). Public counters; a proxy, not sales.'
 }
 
 Table dw.fact_crawl_attempt {
-  attempt_id varchar [pk]
+  attempt_id bigint [pk, note: 'audit.crawl_request_attempt sequence']
   date_key int [ref: > dw.dim_date.date_key]
-  marketplace_key smallint [ref: > dw.dim_marketplace.marketplace_key]
-  category_key int [ref: > dw.dim_category.category_key, note: 'category page crawled']
+  marketplace_key bigint [ref: > dw.dim_marketplace.marketplace_key]
+  category_key bigint [ref: > dw.dim_category.category_key, note: '-1 if not a category page']
+  crawl_run_id varchar
+  task_id varchar
+  resource_type varchar
+  attempt_number int
   started_at timestamptz
   completed_at timestamptz
   status varchar
@@ -202,7 +239,8 @@ Table dw.fact_crawl_attempt {
   error_kind varchar
   latency_ms bigint
   raw_bytes bigint
-  parsed_count int
-  rejected_count int
-  Note: 'Transaction fact. Grain: one attempt to crawl one page.'
+  parsed_count bigint
+  rejected_count bigint
+  raw_uri text
+  Note: 'Transaction fact. Grain: one HTTP attempt to fetch one page.'
 }

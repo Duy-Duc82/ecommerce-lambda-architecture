@@ -1,81 +1,89 @@
--- Phase 10 marketplace star schema (proposed, docs/PLAN_PHASE10_DIMENSIONAL_MODEL.md), PostgreSQL DDL.
+-- Phase 10 marketplace star schema (docs/DATA_MODEL.md section 4), PostgreSQL DDL.
 -- To see it as a diagram: run in an empty database, then use DBeaver (schema dw > View Diagram)
--- or pgAdmin (ERD Tool). Not wired into the pipeline yet.
+-- or pgAdmin (ERD Tool). Surrogate keys are deterministic xxhash64 values; -1 is the unknown member.
 
 CREATE SCHEMA IF NOT EXISTS dw;
 
+-- Conformed with the Kaggle behavior star: one builder for both.
 CREATE TABLE dw.dim_date (
-    date_key            integer PRIMARY KEY,            -- yyyymmdd
-    full_date           date NOT NULL UNIQUE,
-    day_of_week         smallint NOT NULL,
-    iso_week            smallint NOT NULL,
-    month               smallint NOT NULL,
-    quarter             smallint NOT NULL,
-    year                smallint NOT NULL,
-    is_weekend          boolean NOT NULL,
-    is_double_day_sale  boolean NOT NULL,                -- 1/1, 2/2 ... 12/12
-    is_vn_holiday       boolean NOT NULL
+    date_key            integer PRIMARY KEY,            -- yyyymmdd; -1 unknown
+    full_date           date UNIQUE,                    -- NULL only on the unknown row
+    day_of_week         smallint,
+    day_name            varchar(16),
+    week_of_year        smallint,                       -- ISO week
+    month               smallint,
+    month_name          varchar(16),
+    quarter             smallint,
+    year                smallint,
+    is_weekend          boolean,
+    is_double_day_sale  boolean,                        -- 1/1, 2/2 ... 12/12
+    is_vn_holiday       boolean
 );
 
 CREATE TABLE dw.dim_marketplace (
-    marketplace_key     smallint PRIMARY KEY,
-    marketplace_code    varchar(32) NOT NULL UNIQUE,     -- tiki
-    marketplace_id      varchar(64),
+    marketplace_key     bigint PRIMARY KEY,
+    marketplace_code    varchar(32) NOT NULL UNIQUE,    -- tiki
+    marketplace_id      varchar(128),
     marketplace_name    varchar(128),
-    platform_type       varchar(32),                     -- marketplace | retailer | classifieds | price_comparison
+    platform_type       varchar(32),                    -- marketplace | retailer | classifieds | price_comparison
     country             char(2),
-    currency            char(3),
+    default_currency    char(3),
     first_crawled_at    timestamptz
 );
 
+-- SCD1. seller_id is already scoped to its marketplace (make_seller_id).
 CREATE TABLE dw.dim_seller (
     seller_key              bigint PRIMARY KEY,
     seller_id               varchar(128) NOT NULL UNIQUE,
-    marketplace_key         smallint NOT NULL REFERENCES dw.dim_marketplace (marketplace_key),
+    marketplace_key         bigint NOT NULL REFERENCES dw.dim_marketplace (marketplace_key),
     first_seen_at           timestamptz,
     last_seen_at            timestamptz,
     observed_listing_count  integer
 );
 
+-- Ragged hierarchy (4-8 levels): the one deliberate snowflake.
 CREATE TABLE dw.dim_category (
-    category_key     integer PRIMARY KEY,
-    category_id      varchar(64) NOT NULL UNIQUE,
-    marketplace_key  smallint NOT NULL REFERENCES dw.dim_marketplace (marketplace_key),
-    category_name    varchar(256),                       -- NULL when no name could be resolved
-    parent_key       integer REFERENCES dw.dim_category (category_key),
-    level            smallint NOT NULL,
-    full_path        varchar(512) NOT NULL,              -- 1/2/1789/1795
-    is_leaf          boolean NOT NULL
+    category_key     bigint PRIMARY KEY,                -- xxhash64(marketplace_code, category_id)
+    marketplace_key  bigint NOT NULL REFERENCES dw.dim_marketplace (marketplace_key),
+    category_id      varchar(64) NOT NULL,
+    category_name    varchar(256),                      -- NULL when no name could be resolved
+    category_slug    varchar(256),                      -- from a frontier target <slug>/c<id>
+    parent_key       bigint REFERENCES dw.dim_category (category_key),
+    level            smallint NOT NULL,                 -- root = 1
+    full_path        varchar(512) NOT NULL,             -- 1/2/1789/1795
+    is_leaf          boolean NOT NULL,
+    UNIQUE (marketplace_key, category_id)
 );
 
--- Closure table for the ragged category tree (4-8 levels).
+-- Closure table: one row per (ancestor, descendant), the node itself at depth 0.
 CREATE TABLE dw.bridge_category_ancestry (
-    ancestor_key    integer NOT NULL REFERENCES dw.dim_category (category_key),
-    descendant_key  integer NOT NULL REFERENCES dw.dim_category (category_key),
+    ancestor_key    bigint NOT NULL REFERENCES dw.dim_category (category_key),
+    descendant_key  bigint NOT NULL REFERENCES dw.dim_category (category_key),
     depth           smallint NOT NULL,
     PRIMARY KEY (ancestor_key, descendant_key)
 );
 
--- SCD Type 2 on product_title, brand, category_key, seller_key.
+-- SCD Type 2 on product_title, brand, category_key, seller_key; SCD1 on source_url.
 CREATE TABLE dw.dim_product_listing (
-    listing_key          bigint PRIMARY KEY,             -- xxhash64(offer_id, valid_from)
+    listing_key          bigint PRIMARY KEY,            -- xxhash64(offer_id, valid_from)
+    offer_key            bigint NOT NULL,               -- durable: xxhash64(offer_id)
     offer_id             varchar(128) NOT NULL,
-    marketplace_key      smallint NOT NULL REFERENCES dw.dim_marketplace (marketplace_key),
+    marketplace_key      bigint NOT NULL REFERENCES dw.dim_marketplace (marketplace_key),
     platform_listing_id  varchar(128),
     product_title        text,
-    brand                varchar(256),                   -- empty for 13.9% of products
-    category_key         integer NOT NULL REFERENCES dw.dim_category (category_key),
+    brand                varchar(256),                  -- empty for 13.9% of products
+    category_key         bigint NOT NULL REFERENCES dw.dim_category (category_key),
     seller_key           bigint NOT NULL REFERENCES dw.dim_seller (seller_key),
     source_url           text,
-    currency             char(3),
     valid_from           timestamptz NOT NULL,
-    valid_to             timestamptz NOT NULL,           -- exclusive; 9999-12-31 for the current row
+    valid_to             timestamptz NOT NULL,          -- exclusive; 9999-12-31 for the current row
     is_current           boolean NOT NULL,
     version              integer NOT NULL,
     UNIQUE (offer_id, valid_from)
 );
+CREATE INDEX ix_dim_product_listing_offer_key ON dw.dim_product_listing (offer_key);
 
--- Junk dimension.
+-- Junk dimension: 3 x 3 x 2 x 2 = 36 rows, plus the unknown row.
 CREATE TABLE dw.dim_offer_status (
     offer_status_key  smallint PRIMARY KEY,
     availability      varchar(32),
@@ -84,94 +92,125 @@ CREATE TABLE dw.dim_offer_status (
     has_rating        boolean
 );
 
--- Transaction fact: one sighting of one listing at one instant.
+-- Transaction fact. Grain: one sighting of one offer by the crawler at one instant.
 CREATE TABLE dw.fact_offer_observation (
-    observation_id    varchar(128) PRIMARY KEY,          -- degenerate dimension
+    observation_id    varchar(128) PRIMARY KEY,         -- degenerate dimension
     date_key          integer NOT NULL REFERENCES dw.dim_date (date_key),
-    marketplace_key   smallint NOT NULL REFERENCES dw.dim_marketplace (marketplace_key),
+    marketplace_key   bigint NOT NULL REFERENCES dw.dim_marketplace (marketplace_key),
     listing_key       bigint NOT NULL REFERENCES dw.dim_product_listing (listing_key),
+    offer_key         bigint NOT NULL,                  -- durable
     seller_key        bigint NOT NULL REFERENCES dw.dim_seller (seller_key),
-    category_key      integer NOT NULL REFERENCES dw.dim_category (category_key),
+    category_key      bigint NOT NULL REFERENCES dw.dim_category (category_key),
     offer_status_key  smallint NOT NULL REFERENCES dw.dim_offer_status (offer_status_key),
     observed_at       timestamptz NOT NULL,
+    fetched_at        timestamptz NOT NULL,
+    currency          char(3) NOT NULL,
     current_price     numeric(38,6) NOT NULL,
     list_price        numeric(38,6),
+    shipping_price    numeric(38,6),
+    discount_amount   numeric(38,6),
     discount_percent  numeric(9,4),
-    rating_value      numeric(4,2),
+    rating_value      numeric(38,6),
+    rating_scale      numeric(38,6),
     rating_count      bigint,
     review_count      bigint,
     sold_count        bigint,
     ranking_position  integer,
     crawl_run_id      varchar(128),
-    raw_uri           text
+    raw_uri           text,
+    raw_sha256        char(64),
+    adapter_version   varchar(64)
 );
 
--- Periodic snapshot: one listing x day x currency with at least one sighting.
+-- Periodic snapshot (sparse). Grain: one offer x UTC day x currency with at least one sighting.
 CREATE TABLE dw.fact_price_snapshot_daily (
     date_key              integer NOT NULL REFERENCES dw.dim_date (date_key),
-    listing_key           bigint NOT NULL REFERENCES dw.dim_product_listing (listing_key),
+    offer_key             bigint NOT NULL,              -- durable
     currency              char(3) NOT NULL,
-    marketplace_key       smallint NOT NULL REFERENCES dw.dim_marketplace (marketplace_key),
+    listing_key           bigint NOT NULL REFERENCES dw.dim_product_listing (listing_key),  -- at the day's last sighting
+    marketplace_key       bigint NOT NULL REFERENCES dw.dim_marketplace (marketplace_key),
     seller_key            bigint NOT NULL REFERENCES dw.dim_seller (seller_key),
-    category_key          integer NOT NULL REFERENCES dw.dim_category (category_key),
+    category_key          bigint NOT NULL REFERENCES dw.dim_category (category_key),
     offer_status_key      smallint NOT NULL REFERENCES dw.dim_offer_status (offer_status_key),
+    first_observed_at     timestamptz NOT NULL,
+    last_observed_at      timestamptz NOT NULL,
+    last_observation_id   varchar(128) NOT NULL,
     open_price            numeric(38,6),
     close_price           numeric(38,6),
     min_price             numeric(38,6),
     max_price             numeric(38,6),
     avg_price             numeric(38,6),
+    first_list_price      numeric(38,6),
+    last_list_price       numeric(38,6),
     observation_count     integer NOT NULL,
     distinct_price_count  integer NOT NULL,
     in_stock_ratio        numeric(5,4),
-    PRIMARY KEY (date_key, listing_key, currency)
+    PRIMARY KEY (date_key, offer_key, currency)
 );
 
--- Transaction fact (derived): one change of a listing price versus its previous sighting.
+-- Transaction fact (derived). Grain: one sighting whose price differs from the offer's previous sighting.
 CREATE TABLE dw.fact_price_change (
-    price_change_id           varchar(128) PRIMARY KEY,
-    date_key                  integer NOT NULL REFERENCES dw.dim_date (date_key),
-    marketplace_key           smallint NOT NULL REFERENCES dw.dim_marketplace (marketplace_key),
-    listing_key               bigint NOT NULL REFERENCES dw.dim_product_listing (listing_key),
-    seller_key                bigint NOT NULL REFERENCES dw.dim_seller (seller_key),
-    category_key              integer NOT NULL REFERENCES dw.dim_category (category_key),
-    changed_at                timestamptz NOT NULL,
-    old_price                 numeric(38,6) NOT NULL,
-    new_price                 numeric(38,6) NOT NULL,
-    delta                     numeric(38,6) NOT NULL,
-    pct_change                numeric(9,4),
-    minutes_since_previous    numeric(10,2),
-    direction                 varchar(8) NOT NULL,       -- up | down
-    is_large_drop             boolean NOT NULL,
-    reverted_within_next_obs  boolean
+    observation_id           varchar(128) PRIMARY KEY,  -- the sighting that showed the new price
+    previous_observation_id  varchar(128) NOT NULL,
+    date_key                 integer NOT NULL REFERENCES dw.dim_date (date_key),
+    marketplace_key          bigint NOT NULL REFERENCES dw.dim_marketplace (marketplace_key),
+    listing_key              bigint NOT NULL REFERENCES dw.dim_product_listing (listing_key),
+    offer_key                bigint NOT NULL,           -- durable
+    seller_key               bigint NOT NULL REFERENCES dw.dim_seller (seller_key),
+    category_key             bigint NOT NULL REFERENCES dw.dim_category (category_key),
+    changed_at               timestamptz NOT NULL,      -- when the crawler saw it, not when the site changed it
+    previous_observed_at     timestamptz NOT NULL,
+    currency                 char(3) NOT NULL,
+    previous_currency        char(3) NOT NULL,
+    old_price                numeric(38,6) NOT NULL,
+    new_price                numeric(38,6) NOT NULL,
+    price_delta              numeric(38,6) NOT NULL,
+    pct_change               numeric(18,6),             -- NULL when the currency changed or old_price = 0
+    minutes_since_previous   numeric(12,2),
+    direction                varchar(8) NOT NULL,       -- UP | DOWN
+    is_large_drop            boolean NOT NULL,
+    change_rule_version      varchar(64) NOT NULL
 );
 
--- Periodic snapshot of public counters (a proxy, not sales).
+-- Periodic snapshot (sparse) of public counters: a proxy, not sales.
 CREATE TABLE dw.fact_counter_daily (
     date_key                  integer NOT NULL REFERENCES dw.dim_date (date_key),
-    listing_key               bigint NOT NULL REFERENCES dw.dim_product_listing (listing_key),
-    counter_name              varchar(32) NOT NULL,
-    marketplace_key           smallint NOT NULL REFERENCES dw.dim_marketplace (marketplace_key),
+    offer_key                 bigint NOT NULL,          -- durable
+    counter_name              varchar(32) NOT NULL,     -- rating_count | review_count | sold_count
+    listing_key               bigint NOT NULL REFERENCES dw.dim_product_listing (listing_key),  -- at the day's last sighting
+    marketplace_key           bigint NOT NULL REFERENCES dw.dim_marketplace (marketplace_key),
     first_value               bigint,
     last_value                bigint,
-    valid_delta_sum           bigint,
-    invalid_transition_count  integer,
+    raw_delta_sum             bigint,
+    valid_delta_sum           bigint NOT NULL,
+    valid_transition_count    integer NOT NULL,
+    invalid_transition_count  integer NOT NULL,
+    elapsed_seconds_valid     bigint NOT NULL,
     velocity_proxy_per_hour   double precision,
-    PRIMARY KEY (date_key, listing_key, counter_name)
+    counter_reset_or_invalid  boolean NOT NULL,
+    invalid_reasons_json      text,
+    counter_rule_version      varchar(64) NOT NULL,
+    PRIMARY KEY (date_key, offer_key, counter_name)
 );
 
--- Transaction fact: one attempt to crawl one page.
+-- Transaction fact. Grain: one HTTP attempt to fetch one page.
 CREATE TABLE dw.fact_crawl_attempt (
-    attempt_id       varchar(128) PRIMARY KEY,
+    attempt_id       bigint PRIMARY KEY,                -- audit.crawl_request_attempt sequence
     date_key         integer NOT NULL REFERENCES dw.dim_date (date_key),
-    marketplace_key  smallint NOT NULL REFERENCES dw.dim_marketplace (marketplace_key),
-    category_key     integer NOT NULL REFERENCES dw.dim_category (category_key),
+    marketplace_key  bigint NOT NULL REFERENCES dw.dim_marketplace (marketplace_key),
+    category_key     bigint NOT NULL REFERENCES dw.dim_category (category_key),  -- -1 if not a category page
+    crawl_run_id     varchar(128),
+    task_id          varchar(80),
+    resource_type    varchar(32),
+    attempt_number   integer,
     started_at       timestamptz,
     completed_at     timestamptz,
-    status           varchar(32) NOT NULL,
+    status           varchar(16) NOT NULL,
     http_status      integer,
     error_kind       varchar(32),
     latency_ms       bigint,
     raw_bytes        bigint,
-    parsed_count     integer,
-    rejected_count   integer
+    parsed_count     bigint,
+    rejected_count   bigint,
+    raw_uri          text
 );
