@@ -1,6 +1,6 @@
 """Kibana dashboard for the advisor demo: data flowing through the speed layer minute by minute.
 
-Built with the repository's own Lens helpers (display/kibana/marketplace_dashboards.py) on the data views
+Built with the repository's own Lens helpers (src/ecomdata/serving/kibana/marketplace_dashboards.py) on the data views
 the marketplace setup already imported. Imported with overwrite, so a re-run replaces it.
 
 usage: python observability/build_kibana_demo_dashboard.py [http://localhost:5602]
@@ -10,8 +10,7 @@ from pathlib import Path
 
 import requests
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from display.kibana import marketplace_dashboards as kd  # noqa: E402
+from ecomdata.serving.kibana import marketplace_dashboards as kd  # noqa: E402
 
 KIBANA = sys.argv[1] if len(sys.argv) > 1 else "http://localhost:5602"
 CRAWL, SPEED, CHANGES, OFFERS = ("dv-marketplace-crawl-attempts", "dv-marketplace-speed-batches",

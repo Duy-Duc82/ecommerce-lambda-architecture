@@ -1,0 +1,94 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ecomdata"
+version = "0.10.0"
+description = "Marketplace price-observation data platform: ELT ingestion, Spark batch and speed layers, Airflow orchestration."
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+authors = [{ name = "Duong Duc Duy" }]
+# Ranges only. The exact versions the images install live in one place,
+# constraints.txt; requirements/*.txt are generated from the lists below
+# (python scripts/sync_requirements.py).
+dependencies = [
+    "requests>=2.32",
+    "python-dotenv>=1.0",
+    "kafka-python-ng>=2.2.3",
+    "minio>=7.2.15",
+    "psycopg2-binary>=2.9.10",
+    "redis>=7.4",
+    "elasticsearch>=8.18,<9",
+    "pyarrow>=24.0",
+]
+
+[project.optional-dependencies]
+spark = [
+    "pyspark>=4.0.1,<4.1",
+    "pandas>=2.2",
+    "numpy>=2.2",
+]
+browser = [
+    "playwright==1.55.0",
+]
+airflow = [
+    "apache-airflow>=3.3,<3.4",
+    "apache-airflow-providers-docker>=4.0",
+]
+dev = [
+    "pytest>=8.0",
+    "ruff>=0.17",
+    "import-linter>=2.15",
+    "PyYAML>=6.0",
+]
+legacy = [
+    "scikit-learn>=1.6.1",
+    "darts>=0.27.0",
+    "pyod>=1.1.0",
+    "torch>=2.3.0,<2.6",
+]
+
+[project.scripts]
+ecomdata-ops = "ecomdata.ops.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["ecomdata*"]
+
+[tool.setuptools.package-data]
+"ecomdata.serving.kibana" = ["saved_objects/*.ndjson"]
+
+# ---------------------------------------------------------------- pytest
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# Repository root on sys.path: the tests package and legacy/ are imported
+# from it. ecomdata itself comes from the editable install.
+pythonpath = ["."]
+markers = [
+    "drill: a Phase 8 failure drill against a running stack (ecomdata.ops.drills)",
+    "spark: needs a local Spark session (tests/spark)",
+    "integration: reaches a live marketplace over the network (tests/integration)",
+    "legacy: the Kaggle pipeline kept under legacy/kaggle (tests/legacy)",
+    "airflow: needs apache-airflow importable (run inside the Airflow image)",
+]
+addopts = "-m 'not drill and not integration'"
+
+# ---------------------------------------------------------------- ruff
+[tool.ruff]
+target-version = "py312"
+line-length = 120
+src = ["src", "tests", "services"]
+extend-exclude = ["legacy", "docs", "observability"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
+ignore = []
+
+[tool.ruff.lint.isort]
+known-first-party = ["ecomdata", "tests", "services"]
+
+# ---------------------------------------------------------------- import-linter
+[tool.importlinter]
+root_packages = ["ecomdata"]
+include_external_packages = true

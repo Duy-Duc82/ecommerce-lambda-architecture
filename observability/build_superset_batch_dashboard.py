@@ -1,6 +1,6 @@
 """Superset dashboard for the batch layer's outputs (Gold marts in cache.*, batch audit in audit.*).
 
-Charts read the datasets superset-init imported from display/superset/datasources.yaml; two virtual
+Charts read the datasets superset-init imported from docker/superset/datasources.yaml; two virtual
 datasets join change/counter marts to offer titles. Every chart gets a query_context, and the script
 asks the chart-data API for each one and fails if any returns an error or no rows.
 

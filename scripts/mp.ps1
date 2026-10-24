@@ -3,7 +3,7 @@
 # ============================================================
 # A thin wrapper. Docker itself (up, down, the one-shot Spark batch) is driven
 # from here; everything that reads or writes the stack runs as
-# `python -m ops ...` inside the `ops` container, so it works from any shell.
+# `python -m ecomdata.ops ...` inside the `ops` container, so it works from any shell.
 #
 #   .\scripts\mp.ps1 up [-With crawl,ingest,speed,batch,serve,ops]
 #   .\scripts\mp.ps1 down [-Volumes]
@@ -129,7 +129,7 @@ function Get-ProfileArgs([string[]]$Profiles) {
 }
 
 function Invoke-Ops([string[]]$Arguments) {
-    & docker @($OpsRun + @("python", "-m", "ops") + $Arguments) | Write-Host
+    & docker @($OpsRun + @("python", "-m", "ecomdata.ops") + $Arguments) | Write-Host
     return $LASTEXITCODE
 }
 
@@ -141,7 +141,7 @@ function Get-OpsOutput([string[]]$Arguments) {
 
 function Invoke-Batch([string]$RunId, [string]$Instant, [string[]]$Extra) {
     $batch = $Compose + @("--profile", "batch", "run", "--rm", "--no-deps", "batch-once",
-        "python3", "-m", "batch_layer.marketplace_warehouse", "--run-id", $RunId, "--as-of", $Instant)
+        "python3", "-m", "ecomdata.processing.batch.warehouse", "--run-id", $RunId, "--as-of", $Instant)
     & docker @($batch + $Extra) | Write-Host
     return $LASTEXITCODE
 }
@@ -184,7 +184,7 @@ function Invoke-Smoke {
             return 1
         }
         # 5. One batch over the window just crawled: Silver -> Gold -> quality -> PostgreSQL -> pointer.
-        $plan = (Get-OpsOutput @("python", "-m", "ops", "batch-plan", "--after-last-crawl")) | ConvertFrom-Json
+        $plan = (Get-OpsOutput @("python", "-m", "ecomdata.ops", "batch-plan", "--after-last-crawl")) | ConvertFrom-Json
         if ((Invoke-Batch $plan.run_id $plan.as_of @()) -ne 0) {
             Write-Host "SMOKE FAILED: batch $($plan.run_id)" -ForegroundColor Red
             return 1
@@ -199,7 +199,7 @@ function Invoke-Smoke {
         if ($seeded) {
             & docker @($Compose + @("--profile", "crawl", "stop", "crawl-worker")) | Write-Host
             if ((Invoke-Ops @("park-smoke")) -ne 0) {
-                Write-Host "WARNING: could not park the smoke tasks; run: .\scripts\mp.ps1 status, then python -m ops park-smoke" -ForegroundColor Yellow
+                Write-Host "WARNING: could not park the smoke tasks; run: .\scripts\mp.ps1 status, then python -m ecomdata.ops park-smoke" -ForegroundColor Yellow
             }
         }
         foreach ($name in $smokeEnv.Keys) {
@@ -231,12 +231,12 @@ function Invoke-Restore([string]$Id, [string]$Target) {
         Invoke-Docker ($restoreCompose + @("up", "-d"))
         # The core's healthchecks gate everything else; `up` already waited on
         # the init containers, so this only needs PostgreSQL to answer.
-        & docker @($restoreOps + @("python", "-m", "ops", "migrate")) | Write-Host
+        & docker @($restoreOps + @("python", "-m", "ecomdata.ops", "migrate")) | Write-Host
         if ($LASTEXITCODE -ne 0) { Write-Host "RESTORE FAILED: migrate" -ForegroundColor Red; return 1 }
         # Keep the output: its last line names the window the quality-only
         # batch must judge, so the host never has to find the backup manifest
         # on disk and guess where the backup root is mounted.
-        $restoreOut = & docker @($restoreOps + @("python", "-m", "ops", "restore", "--from", $Id))
+        $restoreOut = & docker @($restoreOps + @("python", "-m", "ecomdata.ops", "restore", "--from", $Id))
         $restoreOut | Write-Host
         if ($LASTEXITCODE -ne 0) { Write-Host "RESTORE FAILED: the restore checks did not pass" -ForegroundColor Red; return 1 }
         $planLine = $restoreOut | Where-Object { $_ -match '"event": "quality_only_batch_next"' } | Select-Object -Last 1
@@ -248,7 +248,7 @@ function Invoke-Restore([string]$Id, [string]$Target) {
         # under a new run id, over the restored Silver and audit.
         $runId = "$($plan.pointer_run_id)-restorecheck"
         $batch = $restoreCompose + @("--profile", "batch", "run", "--rm", "--no-deps", "batch-once",
-            "python3", "-m", "batch_layer.marketplace_warehouse", "--run-id", $runId, "--as-of", $plan.as_of, "--quality-only")
+            "python3", "-m", "ecomdata.processing.batch.warehouse", "--run-id", $runId, "--as-of", $plan.as_of, "--quality-only")
         & docker @($batch) | Write-Host
         if ($LASTEXITCODE -ne 0) {
             Write-Host "RESTORE FAILED: the quality-only batch $runId did not succeed" -ForegroundColor Red
@@ -259,7 +259,7 @@ function Invoke-Restore([string]$Id, [string]$Target) {
         # Elasticsearch and Redis are not backed up (plan 12.1), so a stack
         # that has not crawled yet has all three empty and its broker has
         # never seen the Silver consumer group. Anything else is real.
-        & docker @($restoreOps + @("python", "-m", "ops", "validate", "--restored")) | Write-Host
+        & docker @($restoreOps + @("python", "-m", "ecomdata.ops", "validate", "--restored")) | Write-Host
         if ($LASTEXITCODE -ne 0) { Write-Host "RESTORE FAILED: validate" -ForegroundColor Red; return 1 }
         Write-Host "RESTORE PASSED into project '$Target'" -ForegroundColor Green
         Write-Host "Kafka, Elasticsearch and Redis are empty by design; they refill from new crawls." -ForegroundColor Yellow
@@ -308,7 +308,7 @@ try {
         "batch" {
             if (-not $AsOf) { throw "batch needs -AsOf <ISO instant>" }
             $runId = Get-OpsOutput @("python", "-c",
-                "import sys; from datetime import datetime; from batch_layer.marketplace_scheduler import run_id_for; print(run_id_for(datetime.fromisoformat(sys.argv[1].replace('Z','+00:00'))))",
+                "import sys; from datetime import datetime; from ecomdata.processing.batch.scheduler import run_id_for; print(run_id_for(datetime.fromisoformat(sys.argv[1].replace('Z','+00:00'))))",
                 $AsOf)
             $extra = @()
             if ($AllowBackfill) { $extra += "--allow-backfill" }
@@ -327,12 +327,12 @@ try {
             # live stack through its published ports.
             $python = Join-Path $ProjectRoot ".venv\Scripts\python.exe"
             if (-not (Test-Path $python)) { $python = "python" }
-            & $python -m ops.evidence @Rest | Write-Host
+            & $python -m ecomdata.ops.evidence @Rest | Write-Host
             $ExitCode = $LASTEXITCODE
         }
         "demo" {
             # Phase 9 plan section 11.2: the smoke brings the pipeline up and
-            # publishes one batch, then ops.demo narrates what it proves.
+            # publishes one batch, then ecomdata.ops.demo narrates what it proves.
             # --without-serve leaves Kibana and Superset out, for a machine
             # whose memory is already shared with the live stack.
             Assert-NotLive "demo"
@@ -348,7 +348,7 @@ try {
                 $savedProfile = $env:DATA_LAKE_PROFILE
                 $env:DATA_LAKE_PROFILE = "minio"
                 try {
-                    & $python -m ops.demo @demoArgs
+                    & $python -m ecomdata.ops.demo @demoArgs
                     $ExitCode = $LASTEXITCODE
                 } finally {
                     $env:DATA_LAKE_PROFILE = $savedProfile
@@ -371,7 +371,7 @@ try {
             $savedProfile = $env:DATA_LAKE_PROFILE
             $env:DATA_LAKE_PROFILE = "minio"
             try {
-                & $python -m ops.bench @Rest | Write-Host
+                & $python -m ecomdata.ops.bench @Rest | Write-Host
                 $ExitCode = $LASTEXITCODE
             } finally {
                 $env:DATA_LAKE_PROFILE = $savedProfile
@@ -387,7 +387,7 @@ try {
             $savedProfile = $env:DATA_LAKE_PROFILE
             $env:DATA_LAKE_PROFILE = "minio"
             try {
-                & $python -m ops.drills $name | Write-Host
+                & $python -m ecomdata.ops.drills $name | Write-Host
                 $ExitCode = $LASTEXITCODE
             } finally {
                 $env:DATA_LAKE_PROFILE = $savedProfile
