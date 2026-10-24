@@ -14,7 +14,7 @@ from pathlib import Path
 import redis
 
 
-from ecomdata.settings import REDIS_DB, REDIS_HOST, REDIS_PORT
+from legacy.kaggle.kaggle_settings import REDIS_DB, REDIS_HOST, REDIS_PORT
 
 EVENT_TYPES = ("view", "cart", "purchase")
 

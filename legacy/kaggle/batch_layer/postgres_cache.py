@@ -12,7 +12,7 @@ import pandas as pd
 import psycopg2
 from psycopg2.extras import execute_values
 
-from ecomdata.settings import (
+from legacy.kaggle.kaggle_settings import (
     POSTGRES_DB,
     POSTGRES_HOST,
     POSTGRES_PASSWORD,

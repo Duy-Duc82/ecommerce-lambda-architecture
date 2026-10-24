@@ -28,7 +28,7 @@ from pyspark.sql import functions as F
 from pyspark.sql.types import DecimalType, TimestampType
 
 
-from ecomdata.settings import (  # noqa: E402
+from legacy.kaggle.kaggle_settings import (  # noqa: E402
     POSTGRES_DB,
     POSTGRES_HOST,
     POSTGRES_PASSWORD,
@@ -36,7 +36,7 @@ from ecomdata.settings import (  # noqa: E402
     POSTGRES_USER,
     data_lake_uri,
 )
-from ecomdata.infra.storage import spark_hadoop_options  # noqa: E402
+from legacy.kaggle.storage import spark_hadoop_options  # noqa: E402
 from ecomdata.processing.batch.dim_date import build_dim_date  # noqa: E402
 
 SUPPORTED_EVENT_TYPES = ("view", "cart", "purchase")

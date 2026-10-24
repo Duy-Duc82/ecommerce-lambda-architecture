@@ -19,7 +19,7 @@ import pandas as pd
 import psycopg2
 
 
-from ecomdata.settings import (
+from legacy.kaggle.kaggle_settings import (
     BASE_DIR,
     POSTGRES_DB,
     POSTGRES_HOST,

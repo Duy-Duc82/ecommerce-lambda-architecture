@@ -18,7 +18,7 @@ from pathlib import Path
 import psycopg2
 
 
-from ecomdata.settings import POSTGRES_DB, POSTGRES_HOST, POSTGRES_PASSWORD, POSTGRES_PORT, POSTGRES_USER
+from legacy.kaggle.kaggle_settings import POSTGRES_DB, POSTGRES_HOST, POSTGRES_PASSWORD, POSTGRES_PORT, POSTGRES_USER
 
 VIEWS = {
     # Daily revenue with its forecast(s) side by side for a "actual vs forecast" chart.

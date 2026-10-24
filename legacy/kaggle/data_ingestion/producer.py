@@ -23,7 +23,7 @@ from typing import Any, Iterator
 
 
 from legacy.kaggle.schema import normalize_event, to_wire
-from ecomdata.settings import BASE_DIR, KAFKA_BOOTSTRAP_SERVERS, KAFKA_TOPIC_EVENTS
+from legacy.kaggle.kaggle_settings import BASE_DIR, KAFKA_BOOTSTRAP_SERVERS, KAFKA_TOPIC_EVENTS
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)

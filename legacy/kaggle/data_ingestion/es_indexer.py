@@ -22,7 +22,7 @@ from pathlib import Path
 from typing import Any
 
 
-from ecomdata.settings import ES_HOST, ES_INDEX_EVENTS, KAFKA_BOOTSTRAP_SERVERS, KAFKA_TOPIC_EVENTS
+from legacy.kaggle.kaggle_settings import ES_HOST, ES_INDEX_EVENTS, KAFKA_BOOTSTRAP_SERVERS, KAFKA_TOPIC_EVENTS
 
 try:
     from kafka import KafkaConsumer

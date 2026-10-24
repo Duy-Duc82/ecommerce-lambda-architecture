@@ -25,7 +25,7 @@ from pyspark.sql import SparkSession
 from pyspark.sql import functions as F
 
 
-from ecomdata.settings import (
+from legacy.kaggle.kaggle_settings import (
     CHECKPOINTS_DIR,
     ES_HOST,
     ES_INDEX_METRICS,
