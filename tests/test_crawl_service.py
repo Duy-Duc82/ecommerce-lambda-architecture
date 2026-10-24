@@ -409,3 +409,29 @@ def test_an_empty_heartbeat_path_writes_nothing(tmp_path, monkeypatch):
     heartbeat("")()
 
     assert list(tmp_path.iterdir()) == []
+
+
+def test_the_service_clock_holds_its_last_reading_when_the_wall_clock_steps_back():
+    readings = iter([NOW, NOW - timedelta(seconds=30), NOW - timedelta(seconds=1), NOW + timedelta(seconds=5)])
+    clock = service.non_decreasing_clock(lambda: next(readings))
+
+    assert [clock() for _ in range(4)] == [NOW, NOW, NOW, NOW + timedelta(seconds=5)]
+
+
+def test_a_backward_clock_step_mid_task_no_longer_kills_the_worker():
+    # 2026-10-12: the Docker VM clock stepped back during a fetch, so the
+    # attempt's completed_at preceded its started_at and the audit raised.
+    from tests.test_crawl_worker import FakeAudit, FakeFrontier, _worker
+
+    # Reads: the cycle's lease time, the attempt's started_at, then completed_at 30 s earlier.
+    readings = iter([NOW, NOW, NOW - timedelta(seconds=30)] + [NOW + timedelta(seconds=1)] * 10)
+    frontier, audit = FakeFrontier(tasks=[_task()]), FakeAudit()
+    worker = _worker(
+        frontier, audit, lambda *, task, crawl_run_id: FakeReport(),
+        clock=service.non_decreasing_clock(lambda: next(readings)),
+    )
+
+    result = worker.run_once(crawl_run_id_for=lambda task: "run-1")
+
+    assert result.succeeded == 1
+    assert audit.attempts[0].completed_at >= audit.attempts[0].started_at

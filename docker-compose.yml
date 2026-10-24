@@ -146,7 +146,9 @@ services:
     profiles: ["crawl", "demo", "bench"]
     container_name: ${MP_CONTAINER_PREFIX:-}crawl-worker
     restart: unless-stopped
-    command: ["python", "-m", "crawler.service"]
+    # CRAWL_SITE picks the adapter: "tiki" (listing API) or "tiki-html"
+    # (public category page, __NEXT_DATA__). Both publish marketplace "tiki".
+    command: ["python", "-m", "crawler.service", "--site", "${CRAWL_SITE:-tiki}"]
     environment:
       <<: *marketplace-env
       # A drill starts a second worker under another ID; two workers sharing

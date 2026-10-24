@@ -112,6 +112,30 @@ def run_service(
     return cycles
 
 
+def non_decreasing_clock(source: Callable[[], datetime]) -> Callable[[], datetime]:
+    """Wrap a wall clock so that no reading is earlier than the one before it.
+
+    The Docker (WSL2) VM clock steps backwards when it resyncs with the host
+    (seen 2026-10-12: twice in 90 minutes). A step between an attempt's
+    ``started_at`` and ``completed_at`` broke the acquisition report's and the
+    attempt audit's ordering checks, and the audit error killed the worker
+    process mid-task. After a backward step this clock holds the last reading
+    until the wall clock passes it again, so timestamps inside one process
+    never go backwards; for that interval they run behind real time by at most
+    the size of the step.
+    """
+    last: list[datetime | None] = [None]
+
+    def clock() -> datetime:
+        now = source()
+        if last[0] is not None and now < last[0]:
+            return last[0]
+        last[0] = now
+        return now
+
+    return clock
+
+
 def build_worker(*, site: str, worker_id: str, publish: Callable[[Any], Any], connection_factory: Callable[[], Any]):
     from config.settings import (
         CRAWL_CIRCUIT_FAILURE_THRESHOLD, CRAWL_CIRCUIT_OPEN_SECONDS, CRAWL_LEASE_SECONDS,
@@ -124,7 +148,7 @@ def build_worker(*, site: str, worker_id: str, publish: Callable[[Any], Any], co
     from crawler.scheduling import RetryPolicy
     from crawler.worker import CrawlWorker
 
-    clock = lambda: datetime.now(timezone.utc)  # noqa: E731 - the one wall clock, injected once
+    clock = non_decreasing_clock(lambda: datetime.now(timezone.utc))  # the one wall clock, injected once
     return CrawlWorker(
         frontier=PostgresCrawlFrontier(connection_factory),
         audit=CrawlAuditRepository(connection_factory),
