@@ -1,30 +1,32 @@
-"""Contracts shared by raw-first marketplace acquisition and its callers.
+"""Contracts of acquiring one listing page, shared by the pipeline and its callers.
 
-The objects in this module describe one bounded listing-page request.  They do
-not perform HTTP, storage, scheduling or publication.  Keeping the boundary
-small lets Phase 3 wrap acquisition with leases/retries and lets Phase 4
-publish only validated observations.
+Acquisition is ELT: a :class:`Fetcher` returns a :class:`FetchBundle` (the
+document and any responses the browser captured), the raw store keeps it, an
+:class:`Extractor` finds the rows in it, and the rows travel on as
+:class:`~ecomdata.domain.records.SourceRecord` envelopes with every field the
+source sent. Nothing here performs I/O; the objects only describe one bounded
+request and what came of it.
 """
-
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from collections.abc import Mapping
+from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 from typing import Any, Protocol
 
 from ecomdata.domain import validation as v
-from ecomdata.domain.observations import (
-    MarketplaceObservationV1,
-    RawArtifact,
-    ResourceType,
-)
+from ecomdata.domain.observations import RawArtifact, ResourceType
+from ecomdata.domain.records import SourceRecord
+
+ROLE_DOCUMENT = "document"
+ROLE_XHR = "xhr"
+PART_ROLES = (ROLE_DOCUMENT, ROLE_XHR)
 
 
 class AcquisitionStatus(str, Enum):
     SUCCEEDED = "SUCCEEDED"
-    PARTIAL = "PARTIAL"
     FAILED = "FAILED"
 
 
@@ -37,68 +39,73 @@ class AcquisitionStage(str, Enum):
     VALIDATION = "VALIDATION"
 
 
-class Phase2AcquisitionError(Exception):
+class AcquisitionError(Exception):
     """Base class for expected acquisition-boundary failures."""
 
 
-class RobotsDeniedError(Phase2AcquisitionError):
+class RobotsDeniedError(AcquisitionError):
     pass
 
 
-class FetchTransportError(Phase2AcquisitionError):
+class FetchTransportError(AcquisitionError):
     pass
 
 
-class HttpResponseError(Phase2AcquisitionError):
+class FetchBlockedError(AcquisitionError):
+    """The source answered with a block, challenge or captcha page.
+
+    Never retried quickly and never worked around: it opens the source circuit
+    so the crawl backs off (plan risk K2).
+    """
+
+    def __init__(self, message: str, *, evidence: str | None = None):
+        self.evidence = evidence
+        super().__init__(message)
+
+
+class HttpResponseError(AcquisitionError):
     def __init__(self, status_code: int, retry_after: str | None = None):
         self.status_code = status_code
         self.retry_after = retry_after
         super().__init__(f"HTTP response status {status_code}")
 
 
-class RawPersistenceError(Phase2AcquisitionError):
-    def __init__(
-        self,
-        message: str,
-        *,
-        write_stage: str,
-        raw_artifact: RawArtifact | None = None,
-    ):
-        if write_stage not in {"BODY", "METADATA"}:
-            raise ValueError("write_stage must be BODY or METADATA")
+WRITE_STAGES = frozenset({"PART", "MANIFEST", "RECORDS"})
+
+
+class RawPersistenceError(AcquisitionError):
+    def __init__(self, message: str, *, write_stage: str, raw_artifact: RawArtifact | None = None):
+        if write_stage not in WRITE_STAGES:
+            raise ValueError(f"write_stage must be one of {sorted(WRITE_STAGES)}")
         self.write_stage = write_stage
         self.raw_artifact = raw_artifact
         super().__init__(message)
 
 
-class ListingPageParseError(Phase2AcquisitionError):
+class ListingPageParseError(AcquisitionError):
     pass
 
 
-class CanonicalRecordError(Phase2AcquisitionError):
-    pass
+class RecordBuildError(AcquisitionError):
+    """A row cannot be wrapped in a record envelope."""
 
 
-class ObservationPublishError(Exception):
-    """An attempt stored and parsed its response but could not publish it all.
+class RecordPublishError(Exception):
+    """An attempt stored its page but could not publish every record.
 
-    Not a Phase 2 acquisition failure: the fetch, the raw write and the parse
-    all succeeded. ``acknowledged`` counts the observations Kafka accepted
-    before the failure, in publish order, and is what the attempt audit
-    records as parsed — only those can ever reach Silver.
+    Not an acquisition failure: the fetch, the raw write and the extraction all
+    succeeded. ``acknowledged`` counts the records Kafka accepted before the
+    failure, in publish order; the attempt audit records that as parsed, since
+    only those can reach Silver.
     """
 
     def __init__(self, *, report: Any, acknowledged: int, cause: BaseException):
-        observations = len(getattr(report, "observations", ()) or ())
-        if (
-            isinstance(acknowledged, bool)
-            or not isinstance(acknowledged, int)
-            or not 0 <= acknowledged < max(observations, 1)
-        ):
-            raise ValueError(f"acknowledged must be between 0 and {max(observations - 1, 0)}, got {acknowledged!r}")
+        records = len(getattr(report, "records", ()) or ())
+        if isinstance(acknowledged, bool) or not isinstance(acknowledged, int) or not 0 <= acknowledged < max(records, 1):
+            raise ValueError(f"acknowledged must be between 0 and {max(records - 1, 0)}, got {acknowledged!r}")
         self.report = report
         self.acknowledged = acknowledged
-        super().__init__(f"published {acknowledged} of {observations} observations: {cause}")
+        super().__init__(f"published {acknowledged} of {records} records: {cause}")
         self.__cause__ = cause
 
 
@@ -122,43 +129,97 @@ class ListingPageRequest:
         if not isinstance(self.resource_type, ResourceType):
             raise ValueError("resource_type must be a ResourceType")
         if self.resource_type is not ResourceType.LISTING_PAGE:
-            raise ValueError("Phase 2 accepts only LISTING_PAGE requests")
+            raise ValueError("only LISTING_PAGE requests are acquired")
 
 
 @dataclass(frozen=True)
-class FetchResult:
-    request_url: str
-    fetched_at: datetime
+class FetchPart:
+    """One HTTP response: the page document, or a response the browser captured."""
+
+    url: str
     http_status: int
     content_type: str | None
     body: bytes
-    retry_after: str | None = None
+    role: str = ROLE_DOCUMENT
     elapsed_ms: int | None = None
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "request_url", v.http_url(self.request_url, "request_url"))
-        object.__setattr__(self, "fetched_at", v.aware_utc(self.fetched_at, "fetched_at"))
-        v.non_bool_int(self.http_status, "http_status", minimum=100)
-        if self.http_status > 599:
-            raise ValueError("http_status must be between 100 and 599")
+        object.__setattr__(self, "url", v.http_url(self.url, "url"))
+        v.http_status(self.http_status)
         if not isinstance(self.body, bytes):
             raise ValueError("body must be bytes")
         object.__setattr__(self, "content_type", v.optional_text(self.content_type, "content_type"))
-        object.__setattr__(self, "retry_after", v.optional_text(self.retry_after, "retry_after"))
+        if self.role not in PART_ROLES:
+            raise ValueError(f"role must be one of {PART_ROLES}")
         if self.elapsed_ms is not None:
             v.non_bool_int(self.elapsed_ms, "elapsed_ms")
 
 
+@dataclass(frozen=True)
+class FetchBundle:
+    """Everything one fetch returned: exactly one document part, plus captured responses."""
+
+    request_url: str
+    fetched_at: datetime
+    parts: tuple[FetchPart, ...]
+    retry_after: str | None = None
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "request_url", v.http_url(self.request_url, "request_url"))
+        object.__setattr__(self, "fetched_at", v.aware_utc(self.fetched_at, "fetched_at"))
+        if not isinstance(self.parts, tuple) or not all(isinstance(part, FetchPart) for part in self.parts):
+            raise ValueError("parts must be a tuple of FetchPart")
+        if sum(1 for part in self.parts if part.role == ROLE_DOCUMENT) != 1:
+            raise ValueError("a bundle holds exactly one document part")
+        object.__setattr__(self, "retry_after", v.optional_text(self.retry_after, "retry_after"))
+
+    @property
+    def document(self) -> FetchPart:
+        return next(part for part in self.parts if part.role == ROLE_DOCUMENT)
+
+    @property
+    def captured(self) -> tuple[FetchPart, ...]:
+        return tuple(part for part in self.parts if part.role != ROLE_DOCUMENT)
+
+    @property
+    def http_status(self) -> int:
+        return self.document.http_status
+
+    @property
+    def content_type(self) -> str | None:
+        return self.document.content_type
+
+    @property
+    def body(self) -> bytes:
+        return self.document.body
+
+    @property
+    def total_bytes(self) -> int:
+        return sum(len(part.body) for part in self.parts)
+
+
+@dataclass(frozen=True)
+class ExtractedPage:
+    """What an extractor found: the listing rows as sent, and the page around them."""
+
+    rows: tuple[Mapping[str, Any], ...]
+    page_context: Mapping[str, Any] = field(default_factory=dict)
+    last_page: int | None = None
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.rows, tuple) or not all(isinstance(row, Mapping) for row in self.rows):
+            raise ValueError("rows must be a tuple of objects")
+        if not isinstance(self.page_context, Mapping):
+            raise ValueError("page_context must be an object")
+        if self.last_page is not None:
+            v.non_bool_int(self.last_page, "last_page", minimum=1)
+
+
 def encode_listing_page_task_target(target: str, page: int) -> str:
-    """Encode a generic target/page pair for Phase 3's string task field."""
+    """Encode a generic target/page pair for the frontier's string task field."""
     target = v.require_text(target, "target")
     v.non_bool_int(page, "page", minimum=1)
-    return json.dumps(
-        {"page": page, "target": target},
-        ensure_ascii=False,
-        sort_keys=True,
-        separators=(",", ":"),
-    )
+    return json.dumps({"page": page, "target": target}, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
 
 
 def decode_listing_page_task_target(value: str) -> tuple[str, int]:
@@ -174,60 +235,6 @@ def decode_listing_page_task_target(value: str) -> tuple[str, int]:
     target = v.require_text(decoded["target"], "target")
     page = v.non_bool_int(decoded["page"], "page", minimum=1)
     return target, page
-
-
-@dataclass(frozen=True)
-class RecordRejection:
-    record_index: int
-    stage: AcquisitionStage
-    error: Exception
-    platform_listing_id: str | None = None
-
-    def __post_init__(self) -> None:
-        v.non_bool_int(self.record_index, "record_index")
-        if self.stage not in {AcquisitionStage.PARSE, AcquisitionStage.VALIDATION}:
-            raise ValueError("record rejection stage must be PARSE or VALIDATION")
-        v.exception(self.error)
-        object.__setattr__(
-            self,
-            "platform_listing_id",
-            v.optional_text(self.platform_listing_id, "platform_listing_id"),
-        )
-
-    @property
-    def error_type(self) -> str:
-        return type(self.error).__name__
-
-    @property
-    def error_message(self) -> str:
-        return _error_message(self.error)
-
-
-@dataclass(frozen=True)
-class ParsedListingPage:
-    observations: tuple[MarketplaceObservationV1, ...]
-    rejections: tuple[RecordRejection, ...]
-    source_record_count: int
-    duplicate_count: int
-    last_page: int | None
-
-    def __post_init__(self) -> None:
-        if not isinstance(self.observations, tuple):
-            raise ValueError("observations must be a tuple")
-        if not all(isinstance(item, MarketplaceObservationV1) for item in self.observations):
-            raise ValueError("observations must contain MarketplaceObservationV1 values")
-        if not isinstance(self.rejections, tuple):
-            raise ValueError("rejections must be a tuple")
-        if not all(isinstance(item, RecordRejection) for item in self.rejections):
-            raise ValueError("rejections must contain RecordRejection values")
-        v.non_bool_int(self.source_record_count, "source_record_count")
-        v.non_bool_int(self.duplicate_count, "duplicate_count")
-        if len({item.event_id for item in self.observations}) != len(self.observations):
-            raise ValueError("observations must not contain duplicate event IDs")
-        if len(self.observations) + len(self.rejections) + self.duplicate_count != self.source_record_count:
-            raise ValueError("accepted + rejected + duplicate rows must equal source_record_count")
-        if self.last_page is not None:
-            v.non_bool_int(self.last_page, "last_page", minimum=1)
 
 
 @dataclass(frozen=True)
@@ -250,7 +257,7 @@ class AcquisitionFailure:
 
 
 @dataclass(frozen=True)
-class Phase2AcquisitionReport:
+class AcquisitionReport:
     status: AcquisitionStatus
     marketplace_code: str
     marketplace_id: str
@@ -265,12 +272,12 @@ class Phase2AcquisitionReport:
     retry_after: str | None
     raw_artifact: RawArtifact | None
     raw_metadata_uri: str | None
-    observations: tuple[MarketplaceObservationV1, ...]
-    rejections: tuple[RecordRejection, ...]
-    source_record_count: int
-    duplicate_count: int
+    records: tuple[SourceRecord, ...]
+    records_uri: str | None
     last_page: int | None
     failure: AcquisitionFailure | None
+    # Rows and page-context records the page held; ``records`` is what is published.
+    row_count: int = 0
 
     def __post_init__(self) -> None:
         if not isinstance(self.status, AcquisitionStatus):
@@ -290,92 +297,75 @@ class Phase2AcquisitionReport:
         if completed_at < started_at:
             raise ValueError("completed_at must not be before started_at")
         if self.http_status is not None:
-            v.non_bool_int(self.http_status, "http_status", minimum=100)
-            if self.http_status > 599:
-                raise ValueError("http_status must be between 100 and 599")
+            v.http_status(self.http_status)
         object.__setattr__(self, "retry_after", v.optional_text(self.retry_after, "retry_after"))
-        if not isinstance(self.observations, tuple):
-            raise ValueError("observations must be a tuple")
-        if not all(isinstance(item, MarketplaceObservationV1) for item in self.observations):
-            raise ValueError("observations must contain MarketplaceObservationV1 values")
-        if not isinstance(self.rejections, tuple):
-            raise ValueError("rejections must be a tuple")
-        if not all(isinstance(item, RecordRejection) for item in self.rejections):
-            raise ValueError("rejections must contain RecordRejection values")
-        v.non_bool_int(self.source_record_count, "source_record_count")
-        v.non_bool_int(self.duplicate_count, "duplicate_count")
-        if len(self.observations) + len(self.rejections) + self.duplicate_count != self.source_record_count:
-            raise ValueError("accepted + rejected + duplicate rows must equal source_record_count")
+        if not isinstance(self.records, tuple) or not all(isinstance(item, SourceRecord) for item in self.records):
+            raise ValueError("records must be a tuple of SourceRecord")
+        v.non_bool_int(self.row_count, "row_count")
         if self.last_page is not None:
             v.non_bool_int(self.last_page, "last_page", minimum=1)
         if self.raw_metadata_uri is not None:
             object.__setattr__(self, "raw_metadata_uri", v.require_text(self.raw_metadata_uri, "raw_metadata_uri"))
+        if self.records_uri is not None:
+            object.__setattr__(self, "records_uri", v.require_text(self.records_uri, "records_uri"))
         if self.raw_artifact is not None and not isinstance(self.raw_artifact, RawArtifact):
             raise ValueError("raw_artifact must be a RawArtifact")
         if self.failure is not None and not isinstance(self.failure, AcquisitionFailure):
             raise ValueError("failure must be an AcquisitionFailure")
 
         if self.status is AcquisitionStatus.SUCCEEDED:
-            if self.failure is not None or self.rejections:
-                raise ValueError("SUCCEEDED report cannot contain failure or rejections")
-            if self.raw_artifact is None or self.raw_metadata_uri is None:
-                raise ValueError("successful report requires raw artifact and metadata URI")
-        elif self.status is AcquisitionStatus.PARTIAL:
-            if self.failure is not None or not self.observations or not self.rejections:
-                raise ValueError("PARTIAL report requires observations and rejections only")
-            if self.raw_artifact is None or self.raw_metadata_uri is None:
-                raise ValueError("partial report requires raw artifact and metadata URI")
+            if self.failure is not None:
+                raise ValueError("SUCCEEDED report cannot contain a failure")
+            if self.raw_artifact is None or self.raw_metadata_uri is None or self.records_uri is None:
+                raise ValueError("successful report requires the raw artifact, its manifest URI and the records URI")
         else:
             if self.failure is None:
                 raise ValueError("FAILED report requires a failure")
-            if self.observations:
-                raise ValueError("FAILED report cannot contain accepted observations")
+            if self.records:
+                raise ValueError("FAILED report cannot contain records")
 
         if self.raw_artifact is None:
             if self.raw_metadata_uri is not None:
-                raise ValueError("metadata URI requires a raw artifact")
-        else:
-            if self.raw_artifact.marketplace_id != self.marketplace_id:
-                raise ValueError("raw artifact marketplace_id does not match report")
-            if self.raw_artifact.crawl_run_id != self.crawl_run_id:
-                raise ValueError("raw artifact crawl_run_id does not match report")
-            if self.raw_artifact.resource_type is not self.resource_type:
-                raise ValueError("raw artifact resource_type does not match report")
-            # The fetch happened inside this acquisition, so its instant must
-            # lie inside the transaction's own window. A fetched_at outside it
-            # means the adapter and the orchestrator read different clocks, and
-            # every downstream partition keyed on fetched_at would then be
-            # stamped by whichever clock the machine happened to have.
-            if not started_at <= self.raw_artifact.fetched_at <= completed_at:
-                raise ValueError("raw artifact fetched_at must lie between started_at and completed_at")
-            if self.raw_metadata_uri is None and not (
-                self.failure is not None
-                and self.failure.stage is AcquisitionStage.STORAGE
-                and isinstance(self.failure.error, RawPersistenceError)
-            ):
-                raise ValueError("raw artifact requires metadata URI unless metadata storage failed")
-            for event in self.observations:
-                observation = event.payload.observation
-                if event.marketplace != self.marketplace_code:
-                    raise ValueError("observation marketplace does not match report")
-                if event.crawl_run_id != self.crawl_run_id:
-                    raise ValueError("observation crawl_run_id does not match report")
-                if event.raw_uri != observation.raw_uri:
-                    raise ValueError("event raw URI does not match observation")
-                if observation.raw_uri != self.raw_artifact.raw_uri:
-                    raise ValueError("observation raw URI does not match artifact")
-                if observation.raw_sha256 != self.raw_artifact.body_sha256:
-                    raise ValueError("observation checksum does not match artifact")
-                if observation.adapter_version != self.raw_artifact.adapter_version:
-                    raise ValueError("observation adapter version does not match artifact")
+                raise ValueError("manifest URI requires a raw artifact")
+            return
+        if self.raw_artifact.marketplace_id != self.marketplace_id:
+            raise ValueError("raw artifact marketplace_id does not match report")
+        if self.raw_artifact.crawl_run_id != self.crawl_run_id:
+            raise ValueError("raw artifact crawl_run_id does not match report")
+        if self.raw_artifact.resource_type is not self.resource_type:
+            raise ValueError("raw artifact resource_type does not match report")
+        # The fetch happened inside this acquisition, so its instant must lie
+        # inside the report's own window. Outside it, the fetcher and the
+        # pipeline read different clocks, and every partition keyed on
+        # fetched_at would be stamped by whichever clock the machine had.
+        if not started_at <= self.raw_artifact.fetched_at <= completed_at:
+            raise ValueError("raw artifact fetched_at must lie between started_at and completed_at")
+        if self.raw_metadata_uri is None and not (
+            self.failure is not None
+            and self.failure.stage is AcquisitionStage.STORAGE
+            and isinstance(self.failure.error, RawPersistenceError)
+        ):
+            raise ValueError("raw artifact requires a manifest URI unless the manifest write failed")
+        for record in self.records:
+            if record.source_code != self.marketplace_code:
+                raise ValueError("record source does not match report")
+            if record.crawl_run_id != self.crawl_run_id:
+                raise ValueError("record crawl_run_id does not match report")
+            if record.raw_artifact_id != self.raw_artifact.raw_artifact_id:
+                raise ValueError("record raw artifact does not match the report's artifact")
+            if record.body_sha256 != self.raw_artifact.body_sha256:
+                raise ValueError("record checksum does not match artifact")
+            if record.adapter_version != self.raw_artifact.adapter_version:
+                raise ValueError("record adapter version does not match artifact")
 
     @property
-    def canonical_observation_count(self) -> int:
-        return len(self.observations)
+    def record_count(self) -> int:
+        """Listing rows kept; ``audit.crawl_request_attempt.parsed_count``."""
+        return self.row_count
 
     @property
     def rejected_count(self) -> int:
-        return len(self.rejections)
+        return 0
 
     @property
     def raw_bytes(self) -> int:
@@ -383,28 +373,30 @@ class Phase2AcquisitionReport:
 
     @property
     def page_exhausted(self) -> bool:
-        return self.source_record_count == 0 or (self.last_page is not None and self.page >= self.last_page)
+        return self.row_count == 0 or (self.last_page is not None and self.page >= self.last_page)
 
     @property
     def is_task_success(self) -> bool:
-        return self.status in {AcquisitionStatus.SUCCEEDED, AcquisitionStatus.PARTIAL}
+        return self.status is AcquisitionStatus.SUCCEEDED
 
 
-class ListingPageAdapter(Protocol):
-    site_name: str
-    marketplace_id: str
-    adapter_version: str
+class Fetcher(Protocol):
+    """How a source's pages are downloaded (strategy: HTTP, browser, API)."""
 
-    def request_url(self, target: str, page: int) -> str: ...
-    def allowed(self, request_url: str) -> bool: ...
-    def throttle(self) -> None: ...
-    def fetch_listing_page(self, request: ListingPageRequest) -> FetchResult: ...
-    def parse_listing_page(
-        self,
-        *,
-        request: ListingPageRequest,
-        fetch_result: FetchResult,
-        raw_artifact: RawArtifact,
-        crawl_run_id: str,
-        produced_at: datetime,
-    ) -> ParsedListingPage: ...
+    def request_url(self, request: ListingPageRequest) -> str: ...
+
+    def allowed(self, url: str) -> bool: ...
+
+    def throttle(self, url: str) -> None: ...
+
+    def fetch(self, request: ListingPageRequest, url: str) -> FetchBundle: ...
+
+    def close(self) -> None: ...
+
+
+class Extractor(Protocol):
+    """Finds the listing rows and the page context in a fetched bundle; changes nothing."""
+
+    def request_url(self, base_url: str, target: str, page: int) -> str: ...
+
+    def extract(self, bundle: FetchBundle) -> ExtractedPage: ...

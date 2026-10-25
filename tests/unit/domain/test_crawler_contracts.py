@@ -1,128 +1,84 @@
 from datetime import UTC, datetime, timedelta, timezone
-from decimal import Decimal
 
 import pytest
 
 from ecomdata.domain.acquisition import (
     AcquisitionFailure,
+    AcquisitionReport,
     AcquisitionStage,
     AcquisitionStatus,
-    FetchResult,
+    ExtractedPage,
+    FetchBlockedError,
+    FetchBundle,
+    FetchPart,
     HttpResponseError,
     ListingPageRequest,
-    ParsedListingPage,
-    Phase2AcquisitionReport,
     RawPersistenceError,
-    RecordRejection,
+    RecordPublishError,
     decode_listing_page_task_target,
     encode_listing_page_task_target,
 )
-from ecomdata.domain.observations import (
-    Availability,
-    ResourceType,
-    create_marketplace_offer,
-    create_observation_event,
-    create_offer_observation,
-    create_raw_artifact,
-)
+from ecomdata.domain.observations import ResourceType, create_raw_artifact
+from ecomdata.domain.records import build_records
+from ecomdata.domain.sources import TIKI
 
-UTC = UTC
 STARTED = datetime(2026, 9, 4, 8, 30, tzinfo=UTC)
 FETCHED = STARTED + timedelta(seconds=1)
 RAW_SHA = "a" * 64
+URL = "https://tiki.vn/dien-thoai/c1789"
 
 
 def _request(page=1):
-    return ListingPageRequest("TIKI", "marketplace-tiki", "1846", page)
+    return ListingPageRequest("TIKI", "marketplace-tiki", "dien-thoai/c1789", page)
 
 
-def _artifact():
+def _artifact(fetched_at=FETCHED):
     return create_raw_artifact(
         marketplace_code="tiki",
         crawl_run_id="run-1",
         marketplace_id="marketplace-tiki",
-        request_url="https://tiki.vn/api/listings?category=1846&page=1&limit=40",
+        request_url=URL,
         resource_type=ResourceType.LISTING_PAGE,
-        fetched_at=FETCHED,
+        fetched_at=fetched_at,
         http_status=200,
-        content_type="application/json",
+        content_type="text/html",
         body_sha256=RAW_SHA,
-        raw_uri="file:///tmp/raw/body.bin",
-        adapter_version="tiki-listing-v1",
+        raw_uri="file:///tmp/raw/part-0.bin.gz",
+        adapter_version=TIKI.adapter_version,
         raw_bytes=10,
     )
 
 
-def _event():
-    offer = create_marketplace_offer(
-        marketplace_code="tiki",
-        marketplace_id="marketplace-tiki",
-        platform_listing_id="p1",
-        seller_id=None,
-        product_title="Product",
-        brand=None,
-        category_path="1846",
-        source_url="https://tiki.vn/p1.html",
-        currency="VND",
-        first_seen_at=FETCHED,
-        last_seen_at=FETCHED,
-    )
-    observation = create_offer_observation(
-        marketplace_code="tiki",
-        platform_listing_id="p1",
-        offer_id=offer.offer_id,
-        observed_at=FETCHED,
-        fetched_at=FETCHED,
-        current_price=Decimal("100.00"),
-        raw_uri="file:///tmp/raw/body.bin",
-        raw_sha256=RAW_SHA,
-        adapter_version="tiki-listing-v1",
-        crawl_run_id="run-1",
-        availability=Availability.UNKNOWN,
-    )
-    return create_observation_event(
-        marketplace_code="tiki",
-        offer=offer,
-        observation=observation,
-        platform_listing_id="p1",
-        produced_at=FETCHED,
+def _records(artifact=None, rows=({"id": 1},)):
+    return build_records(
+        TIKI, request=_request(), raw_artifact=artifact or _artifact(), rows=rows, page_context={"h1": "x"}
     )
 
 
-def _report(
-    status,
-    *,
-    observations=(),
-    rejections=(),
-    failure=None,
-    artifact=None,
-    metadata="file:///tmp/raw/metadata.json",
-    source_count=None,
-):
-    if source_count is None:
-        source_count = len(observations) + len(rejections)
-    return Phase2AcquisitionReport(
-        status=status,
-        marketplace_code="tiki",
-        marketplace_id="marketplace-tiki",
-        target="1846",
-        page=1,
-        resource_type=ResourceType.LISTING_PAGE,
-        crawl_run_id="run-1",
-        request_url="https://tiki.vn/api/listings?category=1846&page=1&limit=40",
-        started_at=STARTED,
-        completed_at=FETCHED,
-        http_status=200 if artifact else None,
-        retry_after=None,
-        raw_artifact=artifact,
-        raw_metadata_uri=metadata if artifact and metadata else None,
-        observations=tuple(observations),
-        rejections=tuple(rejections),
-        source_record_count=source_count,
-        duplicate_count=0,
-        last_page=1,
-        failure=failure,
-    )
+def _report(status, *, records=(), failure=None, artifact=None, metadata="file:///tmp/raw/metadata.json", **extra):
+    fields = {
+        "status": status,
+        "marketplace_code": "tiki",
+        "marketplace_id": "marketplace-tiki",
+        "target": "dien-thoai/c1789",
+        "page": 1,
+        "resource_type": ResourceType.LISTING_PAGE,
+        "crawl_run_id": "run-1",
+        "request_url": URL,
+        "started_at": STARTED,
+        "completed_at": FETCHED,
+        "http_status": 200 if artifact else None,
+        "retry_after": None,
+        "raw_artifact": artifact,
+        "raw_metadata_uri": metadata if artifact and metadata else None,
+        "records": tuple(records),
+        "records_uri": "file:///tmp/records.jsonl.gz" if records else None,
+        "last_page": 1,
+        "failure": failure,
+        "row_count": max(0, len(records) - 1),
+    }
+    fields.update(extra)
+    return AcquisitionReport(**fields)
 
 
 def test_listing_request_normalizes_and_restricts_page_resource():
@@ -135,20 +91,39 @@ def test_listing_request_normalizes_and_restricts_page_resource():
         ListingPageRequest("tiki", "marketplace-tiki", "1846", True)
 
 
-def test_fetch_result_preserves_bytes_and_normalizes_time():
-    result = FetchResult(
-        "https://example.test/listings",
-        datetime(2026, 9, 4, 15, 30, tzinfo=timezone(timedelta(hours=7))),
-        200,
-        " application/json; charset=utf-8 ",
-        b"\xff\x00raw",
-        elapsed_ms=0,
-    )
-    assert result.fetched_at == datetime(2026, 9, 4, 8, 30, tzinfo=UTC)
-    assert result.content_type == "application/json; charset=utf-8"
-    assert result.body == b"\xff\x00raw"
+def test_a_fetch_part_preserves_bytes_and_checks_its_role():
+    part = FetchPart("https://example.test/listings", 200, " application/json; charset=utf-8 ", b"\xff\x00raw")
+    assert part.content_type == "application/json; charset=utf-8"
+    assert part.body == b"\xff\x00raw"
     with pytest.raises(ValueError, match="bool"):
-        FetchResult("https://example.test", FETCHED, True, None, b"")
+        FetchPart("https://example.test", True, None, b"")
+    with pytest.raises(ValueError, match="role"):
+        FetchPart("https://example.test", 200, None, b"", role="other")
+
+
+def test_a_bundle_holds_exactly_one_document_and_normalizes_time():
+    document = FetchPart(URL, 200, "text/html", b"<html>")
+    xhr = FetchPart(URL + "?ajax=true", 200, "application/json", b"{}", role="xhr")
+    bundle = FetchBundle(URL, datetime(2026, 9, 4, 15, 30, tzinfo=timezone(timedelta(hours=7))), (document, xhr))
+
+    assert bundle.fetched_at == datetime(2026, 9, 4, 8, 30, tzinfo=UTC)
+    assert bundle.document is document and bundle.captured == (xhr,)
+    assert bundle.http_status == 200 and bundle.body == b"<html>" and bundle.total_bytes == 8
+    with pytest.raises(ValueError, match="exactly one document"):
+        FetchBundle(URL, FETCHED, (document, document))
+    with pytest.raises(ValueError, match="exactly one document"):
+        FetchBundle(URL, FETCHED, (xhr,))
+    with pytest.raises(ValueError, match="timezone-aware"):
+        FetchBundle(URL, datetime(2026, 9, 4, 8, 30), (document,))
+
+
+def test_an_extracted_page_holds_objects_only():
+    page = ExtractedPage(rows=({"id": 1},), page_context={"a": 1}, last_page=3)
+    assert page.last_page == 3
+    with pytest.raises(ValueError, match="rows"):
+        ExtractedPage(rows=([1],))
+    with pytest.raises(ValueError, match="rows"):
+        ExtractedPage(rows=[{"id": 1}])
 
 
 def test_task_target_encoding_is_canonical_and_round_trips_unicode():
@@ -165,150 +140,116 @@ def test_task_target_decoder_rejects_invalid_shape(value):
         decode_listing_page_task_target(value)
 
 
-def test_parsed_page_counts_reconcile():
-    rejection = RecordRejection(1, AcquisitionStage.VALIDATION, ValueError("bad"), "p2")
-    page = ParsedListingPage((_event(),), (rejection,), 3, 1, 2)
-    assert page.source_record_count == 3
-    with pytest.raises(ValueError, match="source_record_count"):
-        ParsedListingPage((_event(),), (rejection,), 2, 1, 2)
-
-
 def test_report_properties_and_success_invariants():
-    report = _report(AcquisitionStatus.SUCCEEDED, observations=(_event(),), artifact=_artifact())
-    assert report.canonical_observation_count == 1
+    report = _report(AcquisitionStatus.SUCCEEDED, records=_records(), artifact=_artifact())
+    assert report.record_count == 1
     assert report.rejected_count == 0
     assert report.raw_bytes == 10
     assert report.page_exhausted is True
     assert report.is_task_success is True
 
 
-def test_partial_requires_both_valid_and_rejected_rows():
-    rejection = RecordRejection(1, AcquisitionStage.VALIDATION, ValueError("bad"))
-    report = _report(
-        AcquisitionStatus.PARTIAL,
-        observations=(_event(),),
-        rejections=(rejection,),
-        artifact=_artifact(),
-        source_count=2,
-    )
-    assert report.is_task_success is True
-    with pytest.raises(ValueError, match="PARTIAL"):
-        _report(AcquisitionStatus.PARTIAL, artifact=_artifact(), source_count=0)
+def test_a_success_needs_its_raw_artifact_manifest_and_records_file():
+    with pytest.raises(ValueError, match="successful report requires"):
+        _report(AcquisitionStatus.SUCCEEDED, records=_records(), artifact=_artifact(), records_uri=None)
+    with pytest.raises(ValueError, match="successful report requires"):
+        _report(AcquisitionStatus.SUCCEEDED, records=_records(), artifact=None)
 
 
-def test_failed_report_can_retain_body_when_metadata_write_failed():
+def test_a_failed_report_has_a_failure_and_no_records():
+    failure = AcquisitionFailure(AcquisitionStage.HTTP, HttpResponseError(500, None))
+    report = _report(AcquisitionStatus.FAILED, failure=failure, artifact=_artifact())
+    assert report.is_task_success is False and report.record_count == 0
+    with pytest.raises(ValueError, match="requires a failure"):
+        _report(AcquisitionStatus.FAILED)
+    with pytest.raises(ValueError, match="cannot contain records"):
+        _report(AcquisitionStatus.FAILED, failure=failure, artifact=_artifact(), records=_records())
+
+
+def test_failed_report_can_retain_the_parts_when_the_manifest_write_failed():
     failure = AcquisitionFailure(
         AcquisitionStage.STORAGE,
-        RawPersistenceError("metadata failed", write_stage="METADATA", raw_artifact=_artifact()),
+        RawPersistenceError("manifest failed", write_stage="MANIFEST", raw_artifact=_artifact()),
     )
-    report = _report(
-        AcquisitionStatus.FAILED,
-        failure=failure,
-        artifact=_artifact(),
-        metadata=None,
-        source_count=0,
-    )
+    report = _report(AcquisitionStatus.FAILED, failure=failure, artifact=_artifact(), metadata=None)
     assert report.raw_artifact is not None
     assert report.raw_metadata_uri is None
-    assert report.is_task_success is False
+
+
+def test_a_persistence_error_names_a_known_write_stage():
+    with pytest.raises(ValueError, match="write_stage"):
+        RawPersistenceError("x", write_stage="BODY")
 
 
 def test_report_rejects_lineage_mismatch():
-    artifact = _artifact()
-    event = _event()
-    # The event points to the fixture artifact, so changing the report run is
-    # detected by the report invariant before any downstream publish.
     with pytest.raises(ValueError, match="crawl_run_id"):
-        Phase2AcquisitionReport(
-            status=AcquisitionStatus.SUCCEEDED,
-            marketplace_code="tiki",
-            marketplace_id="marketplace-tiki",
-            target="1846",
-            page=1,
-            resource_type=ResourceType.LISTING_PAGE,
-            crawl_run_id="different-run",
-            request_url="https://tiki.vn/api/listings",
-            started_at=STARTED,
-            completed_at=FETCHED,
-            http_status=200,
-            retry_after=None,
-            raw_artifact=artifact,
-            raw_metadata_uri="file:///tmp/raw/metadata.json",
-            observations=(event,),
-            rejections=(),
-            source_record_count=1,
-            duplicate_count=0,
-            last_page=1,
-            failure=None,
-        )
+        _report(AcquisitionStatus.SUCCEEDED, records=_records(), artifact=_artifact(), crawl_run_id="different-run")
 
 
-def test_fetch_result_rejects_naive_timestamp():
-    with pytest.raises(ValueError, match="timezone-aware"):
-        FetchResult("https://example.test", datetime(2026, 9, 4, 8, 30), 200, None, b"")
+def test_report_rejects_a_record_of_another_artifact():
+    other = create_raw_artifact(
+        marketplace_code="tiki",
+        crawl_run_id="run-1",
+        marketplace_id="marketplace-tiki",
+        request_url=URL,
+        resource_type=ResourceType.LISTING_PAGE,
+        fetched_at=FETCHED,
+        http_status=200,
+        content_type="text/html",
+        body_sha256="b" * 64,
+        raw_uri="file:///tmp/raw/other.bin.gz",
+        adapter_version=TIKI.adapter_version,
+        raw_bytes=10,
+    )
+    with pytest.raises(ValueError, match="raw artifact"):
+        _report(AcquisitionStatus.SUCCEEDED, records=_records(other), artifact=_artifact())
 
 
 # --- fetch instant must sit inside the acquisition window -------------------
-# This is the invariant that would have caught an adapter reading a different
-# clock from the orchestrator: the report's own timestamps came from the
-# injected clock while fetched_at came from wall time, so the report claimed a
-# fetch that happened after the transaction had already completed.
+# This is the invariant that would have caught a fetcher reading a different
+# clock from the pipeline: the report's own timestamps came from the injected
+# clock while fetched_at came from wall time, so the report claimed a fetch
+# that happened after the acquisition had already completed.
 
 
-def _report_with_artifact_fetched_at(fetched_at, *, started_at=STARTED, completed_at=FETCHED):
-    artifact = create_raw_artifact(
-        marketplace_code="tiki",
-        crawl_run_id="run-1",
-        marketplace_id="marketplace-tiki",
-        request_url="https://tiki.vn/api/listings?category=1846&page=1&limit=40",
-        resource_type=ResourceType.LISTING_PAGE,
-        fetched_at=fetched_at,
-        http_status=200,
-        content_type="application/json",
-        body_sha256=RAW_SHA,
-        raw_uri="file:///tmp/raw/body.bin",
-        adapter_version="tiki-listing-v1",
-        raw_bytes=10,
-    )
-    return Phase2AcquisitionReport(
-        status=AcquisitionStatus.FAILED,
-        marketplace_code="tiki",
-        marketplace_id="marketplace-tiki",
-        target="1846",
-        page=1,
-        resource_type=ResourceType.LISTING_PAGE,
-        crawl_run_id="run-1",
-        request_url="https://tiki.vn/api/listings",
+def _failed_report_fetched_at(fetched_at, *, started_at=STARTED, completed_at=FETCHED):
+    return _report(
+        AcquisitionStatus.FAILED,
+        artifact=_artifact(fetched_at),
         started_at=started_at,
         completed_at=completed_at,
         http_status=500,
-        retry_after=None,
-        raw_artifact=artifact,
-        raw_metadata_uri="file:///tmp/raw/metadata.json",
-        observations=(),
-        rejections=(),
-        source_record_count=0,
-        duplicate_count=0,
-        last_page=None,
         failure=AcquisitionFailure(AcquisitionStage.HTTP, HttpResponseError(500, None)),
     )
 
 
 def test_report_accepts_a_fetch_inside_its_own_window():
-    report = _report_with_artifact_fetched_at(STARTED + timedelta(milliseconds=500))
-    assert report.raw_artifact is not None
+    assert _failed_report_fetched_at(STARTED + timedelta(milliseconds=500)).raw_artifact is not None
 
 
 def test_report_accepts_a_fetch_on_either_boundary():
-    assert _report_with_artifact_fetched_at(STARTED) is not None
-    assert _report_with_artifact_fetched_at(FETCHED) is not None
+    assert _failed_report_fetched_at(STARTED) is not None
+    assert _failed_report_fetched_at(FETCHED) is not None
 
 
 def test_report_rejects_a_fetch_after_completion():
     with pytest.raises(ValueError, match="fetched_at must lie between"):
-        _report_with_artifact_fetched_at(FETCHED + timedelta(seconds=1))
+        _failed_report_fetched_at(FETCHED + timedelta(seconds=1))
 
 
 def test_report_rejects_a_fetch_before_the_acquisition_started():
     with pytest.raises(ValueError, match="fetched_at must lie between"):
-        _report_with_artifact_fetched_at(STARTED - timedelta(seconds=1))
+        _failed_report_fetched_at(STARTED - timedelta(seconds=1))
+
+
+def test_a_publish_error_counts_what_kafka_acknowledged():
+    report = _report(AcquisitionStatus.SUCCEEDED, records=_records(rows=({"id": 1}, {"id": 2})), artifact=_artifact())
+    error = RecordPublishError(report=report, acknowledged=1, cause=TimeoutError("kafka"))
+    assert error.acknowledged == 1 and error.report is report
+    with pytest.raises(ValueError, match="acknowledged"):
+        RecordPublishError(report=report, acknowledged=3, cause=TimeoutError("kafka"))
+
+
+def test_a_block_carries_its_evidence():
+    error = FetchBlockedError("challenge page", evidence="<script>")
+    assert error.evidence == "<script>"

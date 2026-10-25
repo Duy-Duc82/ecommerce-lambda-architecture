@@ -131,6 +131,31 @@ class CrawlRun:
 
 
 @dataclass(frozen=True)
+class RawPart:
+    """One stored response of a raw artifact (the document, or a captured XHR)."""
+
+    index: int
+    url: str
+    http_status: int
+    content_type: str | None
+    role: str
+    sha256: str
+    bytes: int
+    encoding: str = "gzip"
+
+    def __post_init__(self) -> None:
+        v.non_bool_int(self.index, "index")
+        object.__setattr__(self, "url", v.http_url(self.url, "url"))
+        v.http_status(self.http_status)
+        object.__setattr__(self, "content_type", v.optional_text(self.content_type, "content_type"))
+        object.__setattr__(self, "role", v.require_text(self.role, "role"))
+        object.__setattr__(self, "sha256", v.sha256_hex(self.sha256, "sha256"))
+        v.non_bool_int(self.bytes, "bytes")
+        if self.encoding not in ("gzip", "identity"):
+            raise ValueError("encoding must be gzip or identity")
+
+
+@dataclass(frozen=True)
 class RawArtifact:
     raw_artifact_id: str
     crawl_run_id: str
@@ -144,6 +169,9 @@ class RawArtifact:
     raw_uri: str
     adapter_version: str
     raw_bytes: int
+    # Empty for a v1 artifact (one uncompressed ``body.bin``); the stored
+    # responses of a v2 artifact, whose ``body_sha256`` is the manifest's.
+    parts: tuple[RawPart, ...] = ()
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "raw_artifact_id", v.require_text(self.raw_artifact_id, "raw_artifact_id"))
@@ -403,6 +431,7 @@ def create_raw_artifact(
     raw_uri: str,
     adapter_version: str,
     raw_bytes: int,
+    parts: tuple[RawPart, ...] = (),
 ) -> RawArtifact:
     raw_artifact_id = make_raw_artifact_id(marketplace_code, request_url, fetched_at, body_sha256)
     return RawArtifact(
@@ -418,6 +447,7 @@ def create_raw_artifact(
         raw_uri=raw_uri,
         adapter_version=adapter_version,
         raw_bytes=raw_bytes,
+        parts=tuple(parts),
     )
 
 

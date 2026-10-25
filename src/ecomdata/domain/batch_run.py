@@ -3,7 +3,7 @@
 ::
 
     CREATED -> SILVER_BUILT -> GOLD_WRITTEN -> QUALITY_PASSED -> PUBLISHED -> PROMOTED
-                                            \-> QUALITY_FAILED
+                                            +-> QUALITY_FAILED
     any non-terminal state -> FAILED;  QUALITY_PASSED -> HELD  (kept off the serving version)
 
 The cache is published before the ``current`` pointer moves, as it was before

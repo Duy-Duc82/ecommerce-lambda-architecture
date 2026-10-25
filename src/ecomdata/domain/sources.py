@@ -67,6 +67,8 @@ class SourceSpec:
     # Listing pages beyond the first carry different rows (False for Tiki,
     # whose ?page=2 serves page 1 again).
     paginated: bool = False
+    # Targets crawled when none is named (``<CODE>_CATEGORIES`` overrides them).
+    default_targets: tuple[str, ...] = ()
     # Politeness floor between two requests to this source, in seconds. The
     # configured delay can be larger, never smaller.
     min_delay_seconds: float = 2.0
@@ -195,6 +197,18 @@ TIKI = SourceSpec(
     discovery="ecomdata.ingestion.sources.tiki.discovery:TikiSitemapDiscovery",
     currency="VND",
     paginated=False,
+    # Nine broad top-level categories as <slug>/c<id>, ids from the sitemap (2026-10-25).
+    default_targets=(
+        "laptop-may-vi-tinh-linh-kien/c1846",
+        "nha-sach-tiki/c8322",
+        "dien-gia-dung/c1882",
+        "lam-dep-suc-khoe/c1520",
+        "thoi-trang-nu/c931",
+        "thoi-trang-nam/c915",
+        "bach-hoa-online/c4384",
+        "dien-thoai-may-tinh-bang/c1789",
+        "cross-border-hang-quoc-te/c17166",
+    ),
     min_delay_seconds=2.0,
     counters=(("rating_count", True), ("review_count", True), ("sold_count", True)),
     extractor_version="1",
