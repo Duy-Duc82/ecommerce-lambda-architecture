@@ -5,7 +5,7 @@
 # from here; everything that reads or writes the stack runs as
 # `python -m ecomdata.ops ...` inside the `ops` container, so it works from any shell.
 #
-#   .\scripts\mp.ps1 up [-With crawl,ingest,speed,batch,serve,ops]
+#   .\scripts\mp.ps1 up [-With crawl,speed,batch,serve,ops]
 #   .\scripts\mp.ps1 down [-Volumes]
 #   .\scripts\mp.ps1 status
 #   .\scripts\mp.ps1 migrate
@@ -27,6 +27,9 @@
 #   env/bench.env   benchmarks (`bench crawl|ingest|speed|batch|all|report`),
 #                   smoke and drills, beside the live stack
 #   env/demo.env    the offline demo: `demo [--auto] [--snapshot] [--skip-faults] [--without-serve]`
+#   env/refactor.env  the refactor end-to-end stack (mp-refactor, prefix rf-)
+#   env/tiki-html.env the long Tiki run (mp-tikihtml, prefix th-)
+# Each loads env/base.env and env/ports.<stack>.env first.
 # ============================================================
 
 param(
@@ -34,7 +37,7 @@ param(
     [ValidateSet("up", "down", "status", "migrate", "seed", "smoke", "validate", "batch", "drill",
                  "backup", "restore", "bench", "evaluate", "demo", "evidence")]
     [string]$Command,
-    [string[]]$With = @("crawl", "ingest", "speed", "batch"),
+    [string[]]$With = @("crawl", "speed", "batch"),
     [switch]$Volumes,
     [int]$TimeoutSeconds = 900,
     [string]$Json,
@@ -71,16 +74,30 @@ function ConvertFrom-EnvValue([string]$Raw) {
     return ($value -replace '\s+#.*$', '').Trim()
 }
 
-if ($EnvFile) {
-    $envPath = if ([System.IO.Path]::IsPathRooted($EnvFile)) { $EnvFile } else { Join-Path $ProjectRoot $EnvFile }
-    if (-not (Test-Path $envPath)) { Write-Host "no such env file: $EnvFile" -ForegroundColor Red; Pop-Location; exit 1 }
-    foreach ($line in Get-Content $envPath) {
+# Settings layer as env/base.env, then env/ports.<stack>.env, then the named
+# file; each later file overrides the earlier. Without -EnvFile only base.env
+# is read (it carries the secrets compose requires).
+function Import-EnvFile([string]$Path) {
+    foreach ($line in Get-Content $Path) {
         if ($line -match '^\s*([A-Za-z_][A-Za-z0-9_]*)=(.*)$') {
             $name, $raw = $Matches[1], $Matches[2]
-            $SavedEnv[$name] = [Environment]::GetEnvironmentVariable($name, "Process")
+            if (-not $SavedEnv.ContainsKey($name)) {
+                $SavedEnv[$name] = [Environment]::GetEnvironmentVariable($name, "Process")
+            }
             [Environment]::SetEnvironmentVariable($name, (ConvertFrom-EnvValue $raw), "Process")
         }
     }
+}
+
+$BaseEnv = Join-Path $ProjectRoot "env/base.env"
+if (Test-Path $BaseEnv) { Import-EnvFile $BaseEnv }
+if ($EnvFile) {
+    $envPath = if ([System.IO.Path]::IsPathRooted($EnvFile)) { $EnvFile } else { Join-Path $ProjectRoot $EnvFile }
+    if (-not (Test-Path $envPath)) { Write-Host "no such env file: $EnvFile" -ForegroundColor Red; Pop-Location; exit 1 }
+    $stack = [System.IO.Path]::GetFileNameWithoutExtension($envPath)
+    $portsPath = Join-Path (Split-Path -Parent $envPath) "ports.$stack.env"
+    if (Test-Path $portsPath) { Import-EnvFile $portsPath }
+    Import-EnvFile $envPath
 }
 
 function Get-CurrentProject {
@@ -110,7 +127,10 @@ function Assert-NotLive([string]$What) {
 }
 
 # Explicit file: an old untracked docker-compose.override.yml must not apply.
-$Compose = @("compose", "-f", "docker-compose.yml")
+# The project directory is compose/ (paths in the file are relative to it), so
+# the repository's own .env is passed explicitly when there is one.
+$Compose = @("compose", "-f", "compose/docker-compose.yml")
+if (Test-Path (Join-Path $ProjectRoot ".env")) { $Compose = @("compose", "--env-file", ".env", "-f", "compose/docker-compose.yml") }
 $OpsRun = $Compose + @("--profile", "ops", "run", "--rm", "--no-deps", "ops")
 
 # Each helper writes docker's output with Write-Host, never to the pipeline,
@@ -141,7 +161,7 @@ function Get-OpsOutput([string[]]$Arguments) {
 
 function Invoke-Batch([string]$RunId, [string]$Instant, [string[]]$Extra) {
     $batch = $Compose + @("--profile", "batch", "run", "--rm", "--no-deps", "batch-once",
-        "python3", "-m", "ecomdata.processing.batch", "run", "--all", "--run-id", $RunId, "--as-of", $Instant)
+        "python3", "-m", "ecomdata.processing.batch", "run", "--run-id", $RunId, "--as-of", $Instant, "--all")
     & docker @($batch + $Extra) | Write-Host
     return $LASTEXITCODE
 }
@@ -165,7 +185,7 @@ function Invoke-Smoke {
     $seeded = $false
     try {
         New-Item -ItemType Directory -Force -Path (Join-Path $ProjectRoot "data\ops") | Out-Null
-        Invoke-Docker ($Compose + (Get-ProfileArgs @("smoke", "crawl", "ingest", "speed", "batch", "ops")) +
+        Invoke-Docker ($Compose + (Get-ProfileArgs @("smoke", "crawl", "speed", "batch", "legacy-scheduler", "ops")) +
             @("up", "-d", "--build", "stub-source", "crawl-worker", "speed", "batch-scheduler"))
         # 2. Migrate, then seed the fixed smoke universe (re-enabling parked tasks).
         if ((Invoke-Ops @("migrate")) -ne 0) { Write-Host "SMOKE FAILED: migrate" -ForegroundColor Red; return 1 }
@@ -176,11 +196,11 @@ function Invoke-Smoke {
             Write-Host "SMOKE FAILED: the streaming slice did not complete" -ForegroundColor Red
             return 1
         }
-        # 4. A quiet period: stop the crawler and let the Silver sink catch up,
-        #    or validate's lag check would measure a stream still flowing.
+        # 4. A quiet period: stop the crawler and wait until no crawl task is leased,
+        #    or validate would reconcile a Bronze still being written.
         Invoke-Docker ($Compose + @("--profile", "crawl", "stop", "crawl-worker"))
         if ((Invoke-Ops @("wait-quiet", "--timeout", "180")) -ne 0) {
-            Write-Host "SMOKE FAILED: the Silver sink did not catch up" -ForegroundColor Red
+            Write-Host "SMOKE FAILED: a crawl task is still leased" -ForegroundColor Red
             return 1
         }
         # 5. One batch over the window just crawled: Silver -> Gold -> quality -> PostgreSQL -> pointer.
@@ -225,7 +245,7 @@ function Invoke-Restore([string]$Id, [string]$Target) {
         throw "the '$current' stack is up; `mp down` it first, or its fixed container names collide with '$Target'"
     }
 
-    $restoreCompose = @("compose", "-f", "docker-compose.yml", "-p", $Target)
+    $restoreCompose = @("compose", "-f", "compose/docker-compose.yml", "-p", $Target)
     $restoreOps = $restoreCompose + @("--profile", "ops", "run", "--rm", "--no-deps", "ops")
     try {
         Invoke-Docker ($restoreCompose + @("up", "-d"))
@@ -248,7 +268,7 @@ function Invoke-Restore([string]$Id, [string]$Target) {
         # under a new run id, over the restored Silver and audit.
         $runId = "$($plan.pointer_run_id)-restorecheck"
         $batch = $restoreCompose + @("--profile", "batch", "run", "--rm", "--no-deps", "batch-once",
-            "python3", "-m", "ecomdata.processing.batch", "run", "--all", "--run-id", $runId, "--as-of", $plan.as_of, "--quality-only")
+            "python3", "-m", "ecomdata.processing.batch", "run", "--run-id", $runId, "--as-of", $plan.as_of, "--all", "--quality-only")
         & docker @($batch) | Write-Host
         if ($LASTEXITCODE -ne 0) {
             Write-Host "RESTORE FAILED: the quality-only batch $runId did not succeed" -ForegroundColor Red
@@ -266,7 +286,7 @@ function Invoke-Restore([string]$Id, [string]$Target) {
         return 0
     } finally {
         Write-Host "The restored stack is still up as project '$Target'. Remove it with:" -ForegroundColor Yellow
-        Write-Host "  docker compose -f docker-compose.yml -p $Target --profile * down --volumes" -ForegroundColor Yellow
+        Write-Host "  docker compose -f compose/docker-compose.yml -p $Target --profile * down --volumes" -ForegroundColor Yellow
     }
 }
 
