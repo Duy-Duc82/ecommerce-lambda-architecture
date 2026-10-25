@@ -1,0 +1,59 @@
+WARNING: Using incubator modules: jdk.incubator.vector
+Using Spark's default log4j profile: org/apache/spark/log4j2-defaults.properties
+Setting default log level to "WARN".
+To adjust logging level use sc.setLogLevel(newLevel). For SparkR, use setLogLevel(newLevel).
+26/10/17 18:20:36 WARN NativeCodeLoader: Unable to load native-hadoop library for your platform... using builtin-java classes where applicable
+10000 rule_mad_pandas 0.003
+[Stage 0:>                                                          (0 + 4) / 4]                                                                                10000 rule_mad_pyspark_local4 1.315
+10000 isolation_forest 0.318
+10000 ecod 0.254
+10000 lof_k20 0.058
+100000 rule_mad_pandas 0.015
+[Stage 16:>                                                         (0 + 4) / 4][Stage 16:===========================================>              (3 + 1) / 4]                                                                                100000 rule_mad_pyspark_local4 0.857
+100000 isolation_forest 1.024
+100000 ecod 0.143
+100000 lof_k20 1.062
+1000000 rule_mad_pandas 0.153
+26/10/17 18:21:02 WARN TaskSetManager: Stage 32 contains a task of very large size (6412 KiB). The maximum recommended task size is 1000 KiB.
+[Stage 32:>                                                         (0 + 4) / 4][Stage 32:===========================================>              (3 + 1) / 4]26/10/17 18:21:05 WARN TaskSetManager: Stage 33 contains a task of very large size (6412 KiB). The maximum recommended task size is 1000 KiB.
+                                                                                26/10/17 18:21:05 WARN TaskSetManager: Stage 36 contains a task of very large size (6412 KiB). The maximum recommended task size is 1000 KiB.
+26/10/17 18:21:05 WARN TaskSetManager: Stage 37 contains a task of very large size (6412 KiB). The maximum recommended task size is 1000 KiB.
+26/10/17 18:21:05 WARN TaskSetManager: Stage 38 contains a task of very large size (6412 KiB). The maximum recommended task size is 1000 KiB.
+26/10/17 18:21:06 WARN TaskSetManager: Stage 39 contains a task of very large size (6412 KiB). The maximum recommended task size is 1000 KiB.
+[Stage 39:>                                                         (0 + 4) / 4][Stage 44:>                                                         (0 + 4) / 6][Stage 44:======================================>                   (4 + 2) / 6]                                                                                1000000 rule_mad_pyspark_local4 2.363
+1000000 isolation_forest 8.271
+1000000 ecod 1.723
+1000000 lof_k20 47.973
+{
+ "source_rows": 935,
+ "runs": {
+  "rule_mad_pandas": {
+   "10000": 0.003,
+   "100000": 0.015,
+   "1000000": 0.153
+  },
+  "rule_mad_pyspark_local4": {
+   "10000": 1.315,
+   "100000": 0.857,
+   "1000000": 2.363
+  },
+  "isolation_forest": {
+   "10000": 0.318,
+   "100000": 1.024,
+   "1000000": 8.271
+  },
+  "ecod": {
+   "10000": 0.254,
+   "100000": 0.143,
+   "1000000": 1.723
+  },
+  "lof_k20": {
+   "10000": 0.058,
+   "100000": 1.062,
+   "1000000": 47.973
+  }
+ }
+}
+SUCCESS: The process with PID 23932 (child process of PID 9504) has been terminated.
+SUCCESS: The process with PID 9504 (child process of PID 22636) has been terminated.
+SUCCESS: The process with PID 22636 (child process of PID 7716) has been terminated.

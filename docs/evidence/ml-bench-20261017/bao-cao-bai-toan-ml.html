@@ -1,0 +1,339 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Bài toán ML theo nguồn</title>
+<style>
+:root{
+  --bg:#f5f6f4; --card:#ffffff; --fg:#1c2321; --muted:#5b6764; --line:#dbe0dd; --accent:#1f6f62; --accent-soft:#e2efeb;
+  --ok:#1f7a45; --ok-bg:#e2f3e7; --bad:#b3261e; --bad-bg:#fbe4e2; --warn:#946000; --warn-bg:#fbefd6;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:17px/1.65 "Segoe UI",system-ui,Roboto,sans-serif;padding:36px 16px 72px}
+main{max-width:1080px;margin:0 auto;display:flex;flex-direction:column;gap:40px}
+h1{font-size:2.05rem;margin:0 0 6px;line-height:1.2}
+h2{font-size:1.45rem;margin:0 0 16px;padding-bottom:8px;border-bottom:2px solid var(--line)}
+h3{font-size:1.12rem;margin:22px 0 10px}
+p{margin:0}
+section{display:flex;flex-direction:column;gap:12px}
+.sub{color:var(--muted)}
+code{font-family:Consolas,"Cascadia Mono",ui-monospace,monospace;font-size:.86em;background:var(--accent-soft);padding:1px 5px;border-radius:4px;overflow-wrap:anywhere}
+.tw{overflow-x:auto;background:var(--card);border:1px solid var(--line);border-radius:12px}
+table{border-collapse:collapse;width:100%;min-width:820px}
+table.narrow{min-width:560px}
+th,td{padding:10px 13px;text-align:left;vertical-align:top;border-bottom:1px solid var(--line);font-size:.92rem}
+th{background:#eef1ef;font-size:.83rem;color:var(--muted)}
+tr:last-child td{border-bottom:0}
+tr.tier td{background:#f3f6f4;font-weight:700;color:var(--accent)}
+tr.win td{background:var(--ok-bg)}
+td.r{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+.chip{display:inline-block;font-size:.8rem;font-weight:700;padding:3px 10px;border-radius:999px;white-space:nowrap}
+.ok{color:var(--ok);background:var(--ok-bg)} .bad{color:var(--bad);background:var(--bad-bg)} .warn{color:var(--warn);background:var(--warn-bg)}
+.box{background:var(--accent-soft);border-radius:12px;padding:20px 22px;display:flex;flex-direction:column;gap:10px}
+.box code{background:#fff}
+.why{background:var(--card);border-left:4px solid var(--warn);border-radius:0 12px 12px 0;padding:16px 20px;display:flex;flex-direction:column;gap:8px}
+ul,ol{margin:0;padding-left:1.3em;display:flex;flex-direction:column;gap:7px}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#141917; --card:#1c2321; --fg:#e4ebe8; --muted:#9aa8a4; --line:#2e3835; --accent:#6cc4b2; --accent-soft:#1f302c;
+  --ok:#7fd49c; --ok-bg:#1d3326; --bad:#f2a49d; --bad-bg:#3a2220; --warn:#e8c26a; --warn-bg:#3a3020;}
+  :root:not([data-theme="light"]) th, :root:not([data-theme="light"]) tr.tier td{background:#232b29}
+  :root:not([data-theme="light"]) .box code{background:var(--card)}}
+</style>
+</head>
+<body>
+<main>
+
+<header>
+  <h1>Bài toán ML / thống kê cho từng loại nguồn dữ liệu</h1>
+  <p class="sub">Thử nghiệm trên dữ liệu crawl thật, 17/10/2026 11:06–18:10 UTC và 22/10/2026 13:55–15:59 UTC · Python 3.12, scikit-learn 1.9.1, PyOD 3.6.6, lifelines 0.30.3, rapidfuzz 3.14.6, LightGBM 4.7.0, PySpark 4.0.4 (local[4]) · Máy dev RAM 15 GB · Script và số liệu: <code>docs/evidence/ml-bench-20261017/</code></p>
+</header>
+
+<section>
+  <h2>1. Kết luận</h2>
+  <p>Dữ liệu chia thành 3 loại nguồn. Mỗi loại có cấu trúc khác nhau, nên bài toán phù hợp cũng khác. Ở cả 3 loại, chỗ phân chia giữa hai layer là như nhau: <b>batch tính mốc chuẩn hoặc huấn luyện, speed chỉ tra mốc đó để chấm điểm từng sự kiện</b>. Ở cả 3 loại, phương pháp thắng đều là thống kê robust đơn giản. Các mô hình học máy được thử đều thua về chất lượng, tốc độ, hoặc cả hai.</p>
+  <div class="tw"><table>
+    <tr><th>Loại nguồn</th><th>Batch: bài toán chọn</th><th>Speed: bài toán chọn</th><th>Số đo chính</th></tr>
+    <tr><td><b>1. Rao vặt</b><br>Chợ Tốt, Bonbanh<br><span class="sub">mỗi tin một máy, một giá</span></td><td><b>Mốc giá thị trường theo (model, dung lượng)</b> bằng median/MAD hoặc IQR, rồi gắn cờ tin giá bất thường</td><td><b>Robust z cho tin mới</b>, tra mốc chuẩn của batch</td><td>AUC 0,926; 24/25 kết quả thật đúng; 0,1 µs/tin. Độ phủ mốc chuẩn mới 12,6% (bị giới hạn bởi robots.txt)</td></tr>
+    <tr><td><b>2. Bán lẻ / sàn</b><br>Tiki, ĐMX, FPT, Phong Vũ, TGDD<br><span class="sub">cùng offer quan sát lặp lại</span></td><td><b>Giá bất thường theo lịch sử offer</b> bằng % lệch so với rolling median, thay cho luật MAD hiện tại. Theo danh mục (Tiki): <b>Isolation Forest</b> để xếp hạng, luật "giá &gt; giá gốc" làm cảnh báo (mục 7.1)</td><td><b>Phát hiện đổi giá</b> bằng luật <code>giá ≠ giá trước</code></td><td>Luật đổi giá: recall 1,00, không cảnh báo sai. % lệch rolling median: F1 0,858, chấm được 100% chuỗi; luật MAD hiện tại chỉ chấm được 3,4%</td></tr>
+    <tr><td><b>3. So giá chéo</b><br>Websosanh + FPT / CellphoneS<br><span class="sub">một sản phẩm, nhiều shop</span></td><td><b>Ghép sản phẩm giữa site</b> theo mã part number, rồi TF-IDF + Logistic Regression</td><td>So giá với dải [lowPrice, highPrice] của sản phẩm đã ghép. <span class="sub">Ít giá trị: không có giá nào đổi trong 4 giờ, nên chạy batch hằng ngày</span></td><td>F1 0,968–0,970 khi có mã; 0,34–0,39 khi không có mã</td></tr>
+  </table></div>
+</section>
+
+<section>
+  <h2>2. Cách đánh giá</h2>
+  <ul>
+    <li><b>Dữ liệu:</b> lấy bằng HTTP GET thường, mỗi host chạy tuần tự, theo robots.txt. Máy ngủ từ 12:19 đến 14:06 UTC, nên khoảng đó không có dữ liệu.
+      <ul>
+        <li>Chợ Tốt: 3.188 tin từ 6 lượt quét 260 trang model điện thoại toàn quốc; 1.271 tin mới từ 105 lần poll trang 1 của 3 danh mục; 2.462 lượt kiểm tra trang chi tiết để theo dõi vòng đời tin.</li>
+        <li>ĐMX: 4 danh mục, mỗi 10 phút, 2.769 quan sát giá của 151 offer.</li>
+        <li>Tiki: 300 danh mục cố định, 3 lượt, 7.744 sản phẩm.</li>
+        <li>Sitemap laptop: FPT Shop (371 URL), CellphoneS (7.992), Websosanh tin học (29.636). 197 cặp FPT ↔ Websosanh, đo 2 lượt cách nhau khoảng 4 giờ.</li>
+      </ul>
+    </li>
+    <li><b>Đánh giá khi có nhãn:</b> cross-validation 5-fold. Ngưỡng chọn trên fold train rồi áp dụng cho fold test, không chỉnh trên dữ liệu test.</li>
+    <li><b>Đánh giá khi không có nhãn:</b> làm hai cách. (a) Chèn bất thường giả vào dữ liệu thật, lặp 10 seed, báo mean ± sd. (b) Đọc tay top 25 kết quả thật của mỗi phương pháp.</li>
+    <li><b>Chi phí:</b> thời gian fit/score ở 10k / 100k / 1M dòng, và độ trễ chấm điểm mỗi sự kiện (p50/p99).</li>
+    <li><b>Tiêu chí xếp hạng:</b> (1) chất lượng đo được, (2) có dữ liệu đủ dùng ngay hay không, (3) chi phí và độ trễ so với layer, (4) giải thích được kết quả.</li>
+  </ul>
+</section>
+
+<section>
+  <h2>3. Loại 1: Rao vặt (Chợ Tốt)</h2>
+  <p><b>Đặc điểm dữ liệu:</b> mỗi tin là một máy riêng, chỉ có một giá, không có lịch sử giá của chính tin đó. Muốn biết giá có bất thường hay không thì phải so với các tin <i>khác</i> cùng model và dung lượng. Có thêm trường tình trạng, tin cửa hàng hay cá nhân (<code>company_ad</code>), số ảnh, số tin đã bán của người bán và tiêu đề.</p>
+
+  <h3>3.1 Batch: phát hiện tin giá bất thường</h3>
+  <p><b>Mốc chuẩn</b> theo (model, dung lượng) khi nhóm có ≥ 8 tin, chiếm 75,1% số tin. Các tin còn lại (24,9%) dùng mốc của cả model.</p>
+  <p><b>Đánh giá A, chèn bất thường giả:</b> nhân giá của 3% số tin (95 tin mỗi lần chạy) với một hệ số trong {0,2; 0,35; 0,5; 2; 3; 5}, lặp 10 seed, trên 3.183 tin.</p>
+  <div class="tw"><table>
+    <tr><th>Phương pháp</th><th>ROC-AUC</th><th>Average precision</th><th>Precision</th><th>Recall</th><th>F1</th><th>Fit</th></tr>
+    <tr class="win"><td>M1 Hàng rào IQR 1,5 theo nhóm</td><td class="r">0,926 ± 0,010</td><td class="r">0,404 ± 0,034</td><td class="r">0,290</td><td class="r">0,711</td><td class="r">0,411</td><td class="r">2,1 ms</td></tr>
+    <tr class="win"><td>M2 Robust z (MAD, log giá) theo nhóm, |z| &gt; 3,5</td><td class="r">0,926 ± 0,010</td><td class="r">0,358 ± 0,020</td><td class="r">0,288</td><td class="r">0,651</td><td class="r">0,399</td><td class="r">2,1 ms</td></tr>
+    <tr><td>M4 LOF (k = 20), 9 đặc trưng</td><td class="r">0,852 ± 0,018</td><td class="r">0,113 ± 0,008</td><td class="r">0,104</td><td class="r">0,790</td><td class="r">0,183</td><td class="r">28 ms</td></tr>
+    <tr><td>M5 ECOD (PyOD), 9 đặc trưng</td><td class="r">0,832 ± 0,014</td><td class="r">0,109 ± 0,011</td><td class="r">0,126</td><td class="r">0,213</td><td class="r">0,158</td><td class="r">30 ms</td></tr>
+    <tr><td>M3 Isolation Forest (200 cây), 9 đặc trưng</td><td class="r">0,764 ± 0,019</td><td class="r">0,073 ± 0,009</td><td class="r">0,070</td><td class="r">0,522</td><td class="r">0,124</td><td class="r">224 ms</td></tr>
+  </table></div>
+  <p class="sub">9 đặc trưng: log(giá / median nhóm), máy cũ, tin cửa hàng, số ảnh, log số tin đã bán, và 4 cờ từ tiêu đề (lỗi/hỏng, trả góp, thu mua, "99%/like new"). Precision của mọi phương pháp đều thấp vì dữ liệu thật vốn đã có khoảng 5,5% tin bất thường. Những tin đó không được gắn nhãn khi chèn, nên bị tính là false positive. Vì vậy AUC và AP là thước đo chính ở bảng này.</p>
+
+  <p><b>Đánh giá B, đọc tay top 25 trên dữ liệu thật</b> (snapshot 11:40 UTC, 89 tin ứng viên). Nhãn gán theo tiêu đề và tỷ lệ giá/median; luật gán nhãn ghi trong <code>results/chotot_audit_labelled.json</code>.</p>
+  <div class="tw"><table>
+    <tr><th>Phương pháp</th><th>Giá bất thường thật</th><th>W: gắn sai model / bán nhiều máy</th><th>S: lệch mạnh, không có lý do</th><th>D: có lỗi ghi trong tiêu đề</th><th>F: trả góp / nợ xấu</th><th>N: bình thường</th></tr>
+    <tr class="win"><td>M1 IQR</td><td class="r">24/25</td><td class="r">10</td><td class="r">11</td><td class="r">1</td><td class="r">2</td><td class="r">1</td></tr>
+    <tr class="win"><td>M2 Robust z (MAD)</td><td class="r">24/25</td><td class="r">8</td><td class="r">9</td><td class="r">4</td><td class="r">3</td><td class="r">1</td></tr>
+    <tr><td>M5 ECOD</td><td class="r">18/25</td><td class="r">2</td><td class="r">0</td><td class="r">12</td><td class="r">4</td><td class="r">7</td></tr>
+    <tr><td>M3 Isolation Forest</td><td class="r">15/25</td><td class="r">0</td><td class="r">1</td><td class="r">11</td><td class="r">3</td><td class="r">10</td></tr>
+    <tr><td>M4 LOF</td><td class="r">5/25</td><td class="r">2</td><td class="r">0</td><td class="r">0</td><td class="r">3</td><td class="r">20</td></tr>
+  </table></div>
+  <ul>
+    <li><b>Luật theo nhóm (M1, M2)</b> tìm ra hai loại có giá trị:
+      <ul>
+        <li><b>Tin gắn sai model (W):</b> ví dụ "Xiaomi 18 Pro Max" bị xếp vào nhóm 11T Pro. Đây là lỗi chất lượng dữ liệu, và nếu không lọc thì những tin này làm lệch mốc giá.</li>
+        <li><b>Tin lệch mạnh mà không có lý do (S):</b> ví dụ iPhone 16 Pro giá 7 tr, trong khi median là 17,3 tr.</li>
+      </ul>
+    </li>
+    <li><b>Isolation Forest và ECOD</b> chủ yếu bắt các máy hỏng (D), vì cờ "lỗi/hỏng" trong tiêu đề là một đặc trưng của mô hình. Các tin này đã tự giải thích được, nên chỉ dùng để <i>loại</i> chúng khỏi mốc chuẩn.</li>
+    <li><b>LOF</b> chọn ra 20/25 tin bình thường, phần lớn là quảng cáo trả góp có giá đúng mức thị trường.</li>
+  </ul>
+
+  <h3>3.2 Speed: chấm điểm tin mới</h3>
+  <div class="tw"><table class="narrow">
+    <tr><th>Cách chấm (262 tin điện thoại mới)</th><th>Độ trễ p50</th><th>Độ trễ p99</th></tr>
+    <tr class="win"><td>Robust z: tra (median, MAD) theo khoá rồi tính một phép chia</td><td class="r">0,1 µs</td><td class="r">1,8 µs</td></tr>
+    <tr><td>Hàng rào IQR: tra (Q1, Q3)</td><td class="r">0,1 µs</td><td class="r">6,7 µs</td></tr>
+    <tr><td>ECOD <code>decision_function</code> cho 1 dòng</td><td class="r">2.464 µs</td><td class="r">2.891 µs</td></tr>
+    <tr><td>Isolation Forest <code>score_samples</code> cho 1 dòng</td><td class="r">6.630 µs</td><td class="r">7.523 µs</td></tr>
+  </table></div>
+  <ul>
+    <li>Ở p50, luật nhanh hơn mô hình khoảng 4 bậc độ lớn. Đây là số đo tra dict trong tiến trình; round-trip Redis (HGET) chưa đo vì Docker đang tắt.</li>
+    <li><b>Điểm nghẽn là độ phủ, không phải tốc độ.</b>
+      <ul>
+        <li>Nếu mốc chuẩn chỉ lấy từ 260 trang model, <b>6,5%</b> tin mới có mốc.</li>
+        <li>Nếu mốc chuẩn tích luỹ từ mọi tin đã crawl trước đó (đúng cách batch layer sẽ làm), độ phủ là <b>12,6%</b> trên cả luồng và <b>28,4%</b> ở 1/3 cuối.</li>
+        <li>Nguyên nhân: robots.txt cấm <code>?page=</code>, nên mỗi model chỉ có 20 tin mỗi lượt. Độ phủ chỉ tăng khi tích luỹ nhiều ngày, hoặc khi quét thêm nhiều trang model.</li>
+      </ul>
+    </li>
+    <li>Tốc độ tin mới: 74 tin điện thoại/giờ, 81 tin đồ điện tử/giờ, 20 tin laptop/giờ (chiều tối thứ Bảy). Chỉ 1% số lần poll có cả 20 tin trên trang 1 đều mới, nên poll trang 1 mỗi 3 phút là đủ, gần như không bỏ sót.</li>
+  </ul>
+
+  <h3>3.3 Batch: survival thời gian tới khi tin bị gỡ</h3>
+  <p>Theo dõi 1.110 tin mới: 48 tin bị gỡ (trang trả HTTP 410), 1.062 tin bị censor. Thời gian theo dõi: trung vị 2,8 giờ, tối đa 7,2 giờ.</p>
+  <div class="tw"><table class="narrow">
+    <tr><th>Mô hình</th><th>Kết quả (5-fold)</th></tr>
+    <tr><td>Kaplan-Meier: S(1h) · S(3h) · S(6h)</td><td class="r">0,996 · 0,979 · 0,923</td></tr>
+    <tr><td>KM S(6h) theo danh mục: điện thoại · đồ điện tử · laptop</td><td class="r">0,906 · 0,923 · 0,977</td></tr>
+    <tr class="win"><td>Cox PH, đầy đủ đặc trưng: C-index</td><td class="r">0,706 ± 0,099</td></tr>
+    <tr><td>Cox PH, chỉ tỷ lệ giá: C-index</td><td class="r">0,587 ± 0,073</td></tr>
+    <tr><td>LightGBM "gỡ trong 3 giờ" (552 tin, 19 ca dương): AUC</td><td class="r">0,557</td></tr>
+  </table></div>
+  <ul>
+    <li><b>Biến có ý nghĩa duy nhất:</b> tin của cửa hàng bị gỡ chậm hơn (hazard ratio 0,57, p = 0,0006). Tỷ lệ giá so với median không có ý nghĩa (p = 0,21).</li>
+    <li><b>Hạn chế:</b>
+      <ul>
+        <li>Chỉ có 48 biến cố, nên C-index có độ lệch chuẩn khoảng 0,1.</li>
+        <li>Thời điểm gỡ chỉ biết trong khoảng giữa hai lần kiểm tra: 90 phút, có lần gần 3 giờ vì máy ngủ. Dữ liệu thực chất là interval-censored.</li>
+        <li>LightGBM gần như đoán ngẫu nhiên.</li>
+      </ul>
+      Cần theo dõi 3–5 ngày, mỗi lượt cách nhau ngắn hơn, mới kết luận chắc được.</li>
+  </ul>
+
+  <div class="box">
+    <p><b>Xếp hạng cho rao vặt:</b></p>
+    <ol>
+      <li><b>Batch, chọn:</b> mốc giá thị trường theo (model, dung lượng) bằng median/MAD hoặc IQR, gắn cờ tin bất thường. AUC 0,926; 24/25 kết quả thật đúng; 1M dòng chạy 0,15 s (pandas) hoặc 2,4 s (Spark). Giải thích được bằng "giá = x lần trung vị".</li>
+      <li><b>Speed, chọn:</b> robust z cho từng tin mới, tra mốc chuẩn ở Redis. Độ trễ dưới 2 µs ở p99. Cần tích luỹ mốc chuẩn nhiều ngày để vượt độ phủ 12,6%.</li>
+      <li><b>Batch, thứ 2:</b> survival với Cox PH, C-index 0,71. Có tín hiệu nhưng chưa đủ biến cố.</li>
+      <li><b>Không chọn:</b> Isolation Forest, ECOD, LOF cho bài toán giá; LightGBM cho xác suất gỡ tin.</li>
+    </ol>
+  </div>
+</section>
+
+<section>
+  <h2>4. Loại 2: Bán lẻ / sàn (ĐMX, Tiki)</h2>
+  <p><b>Đặc điểm dữ liệu:</b> cùng một offer được quan sát lặp lại, nên mỗi offer có chuỗi giá riêng. Giá đổi theo bậc (khuyến mãi, flash sale), không dao động liên tục. Tiki có số đã bán cộng dồn ở 65,5% sản phẩm.</p>
+
+  <h3>4.1 Speed: phát hiện đổi giá</h3>
+  <p>ĐMX có 151 offer với ≥ 6 quan sát, tổng 2.769 quan sát. Có 50 lần đổi giá ở 39 offer; mức đổi trung vị 10,6%.</p>
+  <div class="tw"><table class="narrow">
+    <tr><th>Phương pháp</th><th>Recall</th><th>Cảnh báo sai / 1.000 quan sát</th><th>Độ trễ (số quan sát)</th><th>µs/quan sát</th></tr>
+    <tr class="win"><td>S1 Luật <code>giá ≠ giá trước</code></td><td class="r">1,00</td><td class="r">0</td><td class="r">0</td><td class="r">0,04</td></tr>
+    <tr><td>S3 Page-Hinkley (δ = 0,005, λ = 0,05)</td><td class="r">0,74</td><td class="r">0,36</td><td class="r">0,46</td><td class="r">0,31</td></tr>
+    <tr><td>S2 CUSUM hai phía (k = 0,01, h = 0,05)</td><td class="r">0,72</td><td class="r">0</td><td class="r">0</td><td class="r">0,39</td></tr>
+  </table></div>
+  <p>Giá bán lẻ không có nhiễu: mỗi lần đổi là một bậc chính xác. Các thuật toán phát hiện điểm đổi thống kê như CUSUM và Page-Hinkley được thiết kế cho chuỗi có nhiễu, nên ở đây chúng chỉ bỏ sót những lần đổi nhỏ (dưới ngưỡng h) mà không đem lại lợi ích nào.</p>
+
+  <h3>4.2 Batch: giá bất thường theo lịch sử từng offer</h3>
+  <p>151 chuỗi ĐMX có ≥ 12 quan sát. Mỗi chuỗi được chèn 1 spike giả (×0,6 hoặc ×1,5), lặp 10 seed. Các lần đổi giá thật (flash sale) không được gắn nhãn, nên nếu bị gắn cờ thì tính là false positive.</p>
+  <div class="tw"><table>
+    <tr><th>Phương pháp</th><th>Precision</th><th>Recall</th><th>F1</th><th>Chuỗi chấm được</th></tr>
+    <tr class="win"><td>B2 |giá / rolling median − 1| &gt; 15% (cửa sổ 12)</td><td class="r">0,753</td><td class="r">0,997</td><td class="r">0,858</td><td class="r">100%</td></tr>
+    <tr><td>B3 Hampel (cửa sổ 7, 3σ, sàn MAD = 1% median)</td><td class="r">0,660</td><td class="r">1,000</td><td class="r">0,795</td><td class="r">100%</td></tr>
+    <tr><td>B1b <b>Luật hiện tại</b> trong <code>batch_layer/marketplace_anomaly.py</code>: MAD trước, IQR khi MAD = 0, bỏ qua khi cả hai bằng 0</td><td class="r">0,311</td><td class="r">0,046</td><td class="r">0,080</td><td class="r">3,4%</td></tr>
+    <tr><td>B1 Chỉ rolling MAD z-score</td><td class="r">0,600</td><td class="r">0,006</td><td class="r">0,012</td><td class="r">0,6%</td></tr>
+  </table></div>
+  <ul>
+    <li><b>Luật hiện tại của batch layer gần như không chấm được giá bán lẻ.</b> Trong cửa sổ lịch sử, giá phần lớn là hằng số, nên MAD = 0 và IQR = 0. Kết quả là 96,6% quan sát nhận trạng thái <code>INSUFFICIENT_DISPERSION</code>. Đây là lỗi thật cần sửa trong hệ thống.</li>
+    <li>B2 và B3 chấm được mọi chuỗi. Khoảng 25–34% số cờ là các lần đổi giá thật (flash sale), không phải spike. Muốn tách hai loại thì kết hợp với luật S1: giá đổi rồi giữ nguyên là đổi giá, giá đổi rồi quay về ngay là spike.</li>
+  </ul>
+
+  <h3>4.3 Batch: tín hiệu nhu cầu (Tiki)</h3>
+  <div class="tw"><table class="narrow">
+    <tr><th>Giữa hai lượt quét (7.671–7.677 sản phẩm có mặt ở cả hai lượt)</th><th>Lượt 1 → 2</th><th>Lượt 2 → 3</th></tr>
+    <tr><td>Sản phẩm có số đã bán tăng / sản phẩm có trường số đã bán</td><td class="r">24 / 5.037 (0,48%)</td><td class="r">19 / 5.043 (0,38%)</td></tr>
+    <tr><td>Tổng số đơn vị bán thêm</td><td class="r">105</td><td class="r">145</td></tr>
+    <tr><td>Sản phẩm đổi giá</td><td class="r">62 (0,81%)</td><td class="r">159 (2,07%)</td></tr>
+  </table></div>
+  <p>Mỗi vài giờ, dưới 0,5% sản phẩm có tín hiệu bán. Dữ liệu này đủ cho tổng hợp theo ngày, nhưng muốn dự báo nhu cầu theo từng sản phẩm thì cần nhiều tuần. Chưa có mô hình dự báo nào được đánh giá, vì chưa có chuỗi đủ dài.</p>
+
+  <div class="box">
+    <p><b>Xếp hạng cho bán lẻ:</b></p>
+    <ol>
+      <li><b>Speed, chọn:</b> phát hiện đổi giá bằng luật <code>giá ≠ giá trước</code>. Recall 1,00, không cảnh báo sai, 0,04 µs/quan sát. Đây là luật đang có trong speed layer, giữ nguyên.</li>
+      <li><b>Batch, chọn:</b> giá bất thường theo lịch sử offer bằng % lệch so với rolling median. F1 0,858, chấm được 100% chuỗi. Dùng thay luật MAD → IQR hiện tại (chỉ chấm được 3,4%).</li>
+      <li><b>Batch, thứ 2:</b> tổng hợp nhu cầu theo ngày từ Δ số đã bán. Tín hiệu thưa; dự báo cần nhiều tuần dữ liệu.</li>
+      <li><b>Không chọn:</b> CUSUM, Page-Hinkley cho chuỗi giá không nhiễu.</li>
+    </ol>
+  </div>
+</section>
+
+<section>
+  <h2>5. Loại 3: So giá chéo (Websosanh + nhà bán lẻ)</h2>
+  <p><b>Đặc điểm dữ liệu:</b> một sản phẩm có mặt ở nhiều shop dưới tên khác nhau. Trước khi so giá, phải biết hai URL ở hai site có cùng một cấu hình hay không.</p>
+
+  <h3>5.1 Batch: ghép sản phẩm giữa site (laptop)</h3>
+  <p><b>Nhãn silver:</b> hai URL khớp nhau khi có chung một mã part number duy nhất trong mỗi catalog (ví dụ <code>eb027w</code> trong <code>x1404ma-eb027w</code>).
+    <ul>
+      <li>Đã đọc tay 50/50 cặp dương ngẫu nhiên: tất cả đều đúng cùng cấu hình.</li>
+      <li>229 sản phẩm FPT có mã nên được chấm điểm; 61,7% laptop FPT có mã.</li>
+      <li>Đo hai kịch bản: (A) tên đầy đủ; (B) che mã cấu hình nhưng giữ mã dòng máy như <code>x1404ma</code>, mô phỏng nguồn không ghi mã.</li>
+    </ul>
+  </p>
+  <div class="tw"><table>
+    <tr><th>Phương pháp</th><th>FPT → CellphoneS (465), đầy đủ</th><th>FPT → CellphoneS, che mã</th><th>FPT → Websosanh (7.556), đầy đủ</th><th>FPT → Websosanh, che mã</th><th>Thời gian (→ Websosanh)</th></tr>
+    <tr class="win"><td>Blocking TF-IDF top 10 + Logistic Regression (8 đặc trưng độ giống)</td><td class="r">F1 0,970</td><td class="r">F1 0,340</td><td class="r">F1 0,968</td><td class="r">F1 0,391</td><td class="r">0,81 s</td></tr>
+    <tr><td>TF-IDF ký tự 3–5-gram, top 1 + ngưỡng</td><td class="r">0,962</td><td class="r">0,313</td><td class="r">0,960</td><td class="r">0,380</td><td class="r">0,70 s</td></tr>
+    <tr><td>rapidfuzz <code>token_set_ratio</code>, top 1</td><td class="r">0,962</td><td class="r">0,274</td><td class="r">0,936</td><td class="r">0,353</td><td class="r">3,20 s</td></tr>
+    <tr><td>TF-IDF theo từ</td><td class="r">0,927</td><td class="r">0,316</td><td class="r">0,951</td><td class="r">0,374</td><td class="r">0,08 s</td></tr>
+  </table></div>
+  <ul>
+    <li><b>Khi có mã:</b> F1 đạt 0,93–0,97. Chưa thể coi đây là chất lượng độc lập, vì nhãn cũng được tạo từ chính mã đó. Kết quả chỉ xác nhận rằng có mã thì ghép được.</li>
+    <li><b>Khi che mã:</b> F1 chỉ còn 0,27–0,39, vì các cấu hình cùng dòng máy (eb027w, eb028w, eb029w) chỉ khác nhau ở mã. <b>Độ giống tên không thay được mã sản phẩm.</b> Với nguồn không có mã, phải tách thuộc tính (CPU, RAM, ROM) từ trang sản phẩm rồi mới ghép.</li>
+    <li>Blocking top 10 bằng TF-IDF giữ được 91,4–100% cặp đúng. Logistic Regression tốt nhất, nhưng chỉ hơn TF-IDF top 1 khoảng 0,01–0,03 F1.</li>
+  </ul>
+
+  <h3>5.2 Speed: so giá mới với dải giá thị trường</h3>
+  <div class="tw"><table class="narrow">
+    <tr><th>197 cặp laptop, mỗi lượt đều tải được 197/197 ở cả hai bên</th><th>Giá trị</th></tr>
+    <tr><td>Giá FPT / lowPrice Websosanh: p10 · trung vị · p90</td><td class="r">1,010 · 1,107 · 1,455</td></tr>
+    <tr><td>Giá FPT nằm trong [lowPrice, highPrice] · thấp hơn lowPrice</td><td class="r">99,0% · 1,0%</td></tr>
+    <tr><td>Giá FPT cao hơn lowPrice trên 10%</td><td class="r">52,3%</td></tr>
+    <tr><td>highPrice / lowPrice (trung vị) · số nơi bán (trung vị)</td><td class="r">1,41 · 23</td></tr>
+    <tr><td>Thay đổi sau khoảng 4 giờ: giá FPT · lowPrice · số nơi bán</td><td class="r">0 · 0 · 2 / 197</td></tr>
+  </table></div>
+  <p>Giá laptop gần như không đổi trong ngày, nên cảnh báo theo thời gian thực có ít việc để làm. Phép so dải giá nên chạy trong batch hằng ngày, sau bước ghép sản phẩm.</p>
+
+  <div class="box">
+    <p><b>Xếp hạng cho so giá chéo:</b></p>
+    <ol>
+      <li><b>Batch, chọn:</b> ghép sản phẩm theo mã part number, sau đó blocking TF-IDF + Logistic Regression, rồi so giá với dải [lowPrice, highPrice] mỗi ngày. F1 0,97 khi có mã.</li>
+      <li><b>Speed:</b> kiểm tra giá so với dải, kích hoạt ở khoảng 1% số giá. Chi phí chỉ là một phép so sánh, nhưng giá ít khi đổi nên giá trị thấp.</li>
+      <li><b>Không chọn:</b> ghép chỉ dựa trên độ giống tên (F1 ≤ 0,39).</li>
+    </ol>
+  </div>
+</section>
+
+<section>
+  <h2>6. Chi phí batch theo quy mô</h2>
+  <p>Dữ liệu được lấy mẫu lại từ tin Chợ Tốt thật, giá jitter ±3%. Đo một lần trên máy dev.</p>
+  <div class="tw"><table class="narrow">
+    <tr><th>Phương pháp</th><th>10k</th><th>100k</th><th>1M</th></tr>
+    <tr class="win"><td>Robust z (MAD) theo nhóm, pandas</td><td class="r">0,003 s</td><td class="r">0,015 s</td><td class="r">0,153 s</td></tr>
+    <tr class="win"><td>Robust z (MAD) theo nhóm, PySpark local[4] (<code>percentile_approx</code>)</td><td class="r">1,32 s</td><td class="r">0,86 s</td><td class="r">2,36 s</td></tr>
+    <tr><td>ECOD</td><td class="r">0,25 s</td><td class="r">0,14 s</td><td class="r">1,72 s</td></tr>
+    <tr><td>Isolation Forest (200 cây, mọi core)</td><td class="r">0,32 s</td><td class="r">1,02 s</td><td class="r">8,27 s</td></tr>
+    <tr><td>LOF (k = 20)</td><td class="r">0,06 s</td><td class="r">1,06 s</td><td class="r">47,97 s</td></tr>
+  </table></div>
+  <p class="sub">PySpark có chi phí lập lịch job cố định, nhưng đây là đường code thật của batch layer. LOF tăng gần bậc hai theo số dòng; vì dữ liệu lấy mẫu lại có nhiều bản gần trùng nhau, con số này nhiều khả năng là cận dưới.</p>
+</section>
+
+<section>
+  <h2>7. Lần chạy 22/10: dashboard Kibana và Superset, ML trên Tiki</h2>
+  <p><b>Thu thập:</b> khoảng 3 giờ trong ngày 22/10, gộp với dữ liệu 17/10. Có ba đoạn: 13:55–15:59, 16:10–16:47 và 16:47–17:03 UTC. Hai lần Claude Code dừng tiến trình thu thập vì máy thiếu RAM; nguyên nhân là EpicWebHelper (Epic Games launcher) chiếm khoảng 16 GB. Từ đoạn thứ hai, ĐMX được đọc bằng parser JSON-LD mới, mỗi trang 10 sản phẩm (mục 7.2).</p>
+  <p><b>Stack hiển thị</b> là project riêng <code>mp-mlbench</code>, không đụng <code>mp-live</code>, chỉ gồm Redis, Postgres, Elasticsearch, Kibana và Superset. Script: <code>scripts/mlbench_publish.py</code>; tổng kết số dòng đã đẩy lên: <code>results-20261022/publish.json</code>.</p>
+  <div class="tw"><table>
+    <tr><th>Nơi hiển thị</th><th>Nội dung</th><th>Số dòng</th></tr>
+    <tr><td><b>Kibana</b> <code>localhost:5605</code>, dashboard "ML bench — speed layer (sự kiện)", 11 panel</td><td>Chợ Tốt: tin mới kèm robust z, độ phủ mốc chuẩn, tin bị gắn cờ, tin bị gỡ · Bán lẻ: sự kiện đổi giá, CUSUM có bắt được không · So giá chéo: vị trí giá so với dải · Crawl: HTTP status, độ trễ</td><td>1.944 tin · 72 tin bị gỡ · 495 lần đổi giá · 788 lần kiểm tra dải · 11.127 request</td></tr>
+    <tr><td><b>Superset</b> <code>localhost:8094</code> (admin/admin), dashboard "ML bench — batch layer", 11 chart, cả 11 đã kiểm tra trả dữ liệu</td><td>Bảng xếp hạng phương pháp · AUC Chợ Tốt · AUC Tiki · tỷ lệ chuỗi chấm được theo luật · đường Kaplan-Meier · mốc giá Chợ Tốt · tin bị gắn cờ · offer bán lẻ bất thường (spike hay level shift) · điểm ML Tiki · nhu cầu Tiki · chênh lệch giá chéo</td><td>9 bảng trong schema <code>mlbench</code></td></tr>
+  </table></div>
+
+  <h3>7.1 ML trên Tiki: giá bất thường theo danh mục</h3>
+  <p>11.680 sản phẩm thuộc các danh mục lá có ≥ 8 sản phẩm. Mỗi lần chạy chèn 350 giá giả (×0,2 … ×5), lặp 10 seed. Đặc trưng: log(giá / median danh mục), mức giảm giá, log số review, rating, log số đã bán.</p>
+  <div class="tw"><table class="narrow">
+    <tr><th>Phương pháp</th><th>ROC-AUC</th><th>Average precision</th></tr>
+    <tr class="win"><td>Isolation Forest (200 cây)</td><td class="r">0,945 ± 0,008</td><td class="r">0,351 ± 0,041</td></tr>
+    <tr><td>ECOD</td><td class="r">0,920 ± 0,003</td><td class="r">0,194 ± 0,011</td></tr>
+    <tr class="win"><td>Luật: robust z trong danh mục, cộng điểm phạt khi giá &gt; giá gốc</td><td class="r">0,860 ± 0,017</td><td class="r">0,524 ± 0,040</td></tr>
+    <tr><td>Luật: chỉ robust z trong danh mục</td><td class="r">0,724 ± 0,016</td><td class="r">0,093 ± 0,008</td></tr>
+    <tr><td>Isolation Forest, bỏ đặc trưng mức giảm giá</td><td class="r">0,629 ± 0,014</td><td class="r">0,047 ± 0,004</td></tr>
+  </table></div>
+  <ul>
+    <li><b>Lợi thế của ML đến từ một đặc trưng:</b> giá không khớp với giá gạch (<code>original_price</code>). Bỏ đặc trưng này thì Isolation Forest còn kém hơn luật (AUC 0,63). Thêm đúng tín hiệu đó vào luật thì AUC của luật tăng từ 0,72 lên 0,86.</li>
+    <li><b>Hai cách đều có chỗ mạnh riêng:</b> Isolation Forest xếp hạng tổng thể tốt nhất (AUC 0,94); luật có precision cao nhất ở nhóm đứng đầu (AP 0,52). Đề xuất: Isolation Forest để xếp hạng trong batch, luật "giá &gt; giá gốc" làm cảnh báo cứng.</li>
+    <li>Giới hạn: bất thường là chèn giả. Mình chỉ nhân <code>price</code> mà giữ nguyên <code>original_price</code>; một lỗi nhập giá thật cũng thường tạo ra độ lệch này, nhưng chưa có nhãn thật để xác nhận.</li>
+  </ul>
+
+  <h3>7.2 Số cập nhật khi gộp dữ liệu hai ngày</h3>
+  <ul>
+    <li><b>Chợ Tốt, giá bất thường</b> (4.765 tin, chỉ thống kê): robust z AUC 0,930, IQR 0,925.
+      <ul>
+        <li>Độ phủ mốc chuẩn cho tin mới tăng lên 18,5% trên cả luồng và 36,8% ở 1/3 cuối, so với 12,6% ngày 17/10. Mốc chuẩn dày lên khi tích luỹ nhiều ngày.</li>
+      </ul>
+    </li>
+    <li><b>Chợ Tốt, survival</b> (1.557 tin, 68 tin bị gỡ):
+      <ul>
+        <li>Cox PH có C-index 0,782 ± 0,070; Cox chỉ dùng tỷ lệ giá đạt 0,653.</li>
+        <li>Ba biến có ý nghĩa: tin cửa hàng (HR 0,575, p = 0,0001); tỷ lệ giá so với median (HR 0,90, p = 0,033, giá càng cao thì tin bị gỡ càng chậm); số tin đã bán của người bán (HR 0,94, p = 0,041).</li>
+        <li>Một số tin mới thấy hôm nay có <code>list_time</code> từ nhiều ngày trước, tức tin cũ được đẩy lên đầu. Vì vậy thời gian theo dõi dài nhất là 124 giờ.</li>
+        <li>Không chạy LightGBM, đúng như lựa chọn chỉ dùng thống kê cho Chợ Tốt.</li>
+      </ul>
+    </li>
+    <li><b>So giá chéo:</b> 394 cặp so sánh qua hai ngày. 7 giá FPT và 8 lowPrice Websosanh đã đổi; 98,7% giá FPT nằm trong dải [lowPrice, highPrice].</li>
+    <li><b>ĐMX, parser bị hỏng:</b> mọi trang ĐMX hôm nay đều trả HTTP 200 (khoảng 540 KB) nhưng 0 sản phẩm. ĐMX đã bỏ các thuộc tính <code>data-id</code> / <code>data-price</code>; giá giờ nằm trong JSON nhúng (<code>"price":11590000</code>). Dữ liệu ĐMX của đoạn đầu (13:55–15:59) bị mất, vì chỉ lưu kết quả đã parse. Parser đã được sửa để đọc JSON-LD <code>ItemList</code>; mã sản phẩm lấy từ đường dẫn ảnh, trùng với <code>data-id</code> cũ. Từ 16:10 dữ liệu ĐMX có trở lại: 3.005 quan sát, 68 lần đổi giá khi tính cả ngày 17/10. Index <code>mlbench-crawl</code> có đánh dấu <code>empty_page=yes</code> cho các trang này, nên dashboard sức khoẻ crawl thấy được lỗi. Đây là ví dụ thật cho việc cần kiểm tra "status 200 nhưng 0 item" ở mục 6 báo cáo nguồn.</li>
+  </ul>
+</section>
+
+<section>
+  <h2>8. Hạn chế</h2>
+  <div class="why">
+    <ul>
+      <li><b>Cửa sổ ngắn:</b> khoảng 5 giờ dữ liệu thực, chiều tối thứ Bảy, có một khoảng trống vì máy ngủ. Survival và dự báo nhu cầu cần 3–5 ngày.</li>
+      <li><b>Nhãn:</b> nhãn của anomaly Chợ Tốt do Claude gán từ tiêu đề. Nhãn ghép sản phẩm là silver label từ mã part number. Chưa có người kiểm tra độc lập.</li>
+      <li><b>Speed:</b> độ trễ đo trong tiến trình Python, chưa gồm Redis và Kafka.</li>
+      <li><b>Tuân thủ:</b> robots.txt của Chợ Tốt có <code>Content-Signal: ai-train=no</code> cho <code>User-agent: *</code>. Các phương pháp thống kê (median/MAD, IQR, Kaplan-Meier) không phải huấn luyện mô hình AI. Cox, LightGBM hay Isolation Forest trên dữ liệu Chợ Tốt thì có thể bị xem là trái tín hiệu này, nên cần hỏi thầy. Lựa chọn ở mục 3 chỉ dùng phương pháp thống kê.</li>
+    </ul>
+  </div>
+  <p class="sub">File kết quả: <code>results/chotot_anomaly_bench.json</code>, <code>chotot_audit_labelled.json</code>, <code>chotot_survival_bench.json</code>, <code>retail_bench.json</code>, <code>entity_bench.json</code>, <code>cross_site_bench.json</code>, <code>scale_bench.json</code>. Dữ liệu thô ở <code>raw/</code>, chỉ dùng nội bộ và không đưa lên repo public.</p>
+</section>
+
+</main>
+</body>
+</html>

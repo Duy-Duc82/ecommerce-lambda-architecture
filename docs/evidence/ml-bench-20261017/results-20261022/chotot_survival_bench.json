@@ -1,0 +1,108 @@
+{
+ "stream": {
+  "listings": 1978,
+  "mua-ban-dien-thoai": {
+   "polls": 165,
+   "new_per_hour": 6.2,
+   "saturated_share": 0.012
+  },
+  "mua-ban-laptop": {
+   "polls": 165,
+   "new_per_hour": 1.7,
+   "saturated_share": 0.0
+  },
+  "mua-ban-do-dien-tu": {
+   "polls": 165,
+   "new_per_hour": 7.4,
+   "saturated_share": 0.0
+  }
+ },
+ "cohort": {
+  "listings": 1673,
+  "events": 72,
+  "censored": 1601,
+  "followup_hours_median": 2.16,
+  "followup_hours_max": 125.2
+ },
+ "kaplan_meier": {
+  "S(1h)": 0.987,
+  "S(2h)": 0.976,
+  "S(3h)": 0.967,
+  "S(4h)": 0.926,
+  "S(6h)": 0.914,
+  "S(12h)": 0.905,
+  "S(24h)": 0.905,
+  "median_hours": null
+ },
+ "kaplan_meier_by_cat": {
+  "mua-ban-dien-thoai": {
+   "S(1h)": 0.985,
+   "S(2h)": 0.972,
+   "S(3h)": 0.958,
+   "S(4h)": 0.904,
+   "S(6h)": 0.895,
+   "S(12h)": 0.895,
+   "S(24h)": 0.895,
+   "n": 686,
+   "events": 38
+  },
+  "mua-ban-do-dien-tu": {
+   "S(1h)": 0.985,
+   "S(2h)": 0.98,
+   "S(3h)": 0.974,
+   "S(4h)": 0.936,
+   "S(6h)": 0.914,
+   "S(12h)": 0.891,
+   "S(24h)": 0.891,
+   "n": 768,
+   "events": 29
+  },
+  "mua-ban-laptop": {
+   "S(1h)": 0.995,
+   "S(2h)": 0.973,
+   "S(3h)": 0.973,
+   "S(4h)": 0.973,
+   "S(6h)": 0.973,
+   "S(12h)": 0.973,
+   "S(24h)": 0.973,
+   "n": 219,
+   "events": 5
+  }
+ },
+ "cox_cv_concordance": {
+  "cox_all_features": {
+   "mean": 0.765,
+   "sd": 0.059
+  },
+  "cox_price_ratio_only": {
+   "mean": 0.642,
+   "sd": 0.071
+  }
+ },
+ "cox_hazard_ratios": {
+  "log_price_ratio": 0.905,
+  "dealer": 0.599,
+  "used": 0.948,
+  "imgs": 0.964,
+  "log_sold_ads": 0.949,
+  "f_defect": 1.287,
+  "f_installment": 0.757,
+  "f_buying": 0.694,
+  "f_like_new": 0.944,
+  "cat_mua-ban-laptop": 0.852,
+  "cat_mua-ban-do-dien-tu": 0.925
+ },
+ "cox_p_values": {
+  "log_price_ratio": 0.0373,
+  "dealer": 0.0001,
+  "used": 0.7998,
+  "imgs": 0.3515,
+  "log_sold_ads": 0.0594,
+  "f_defect": 0.3748,
+  "f_installment": 0.6304,
+  "f_buying": 0.8491,
+  "f_like_new": 0.7453,
+  "cat_mua-ban-laptop": 0.4165,
+  "cat_mua-ban-do-dien-tu": 0.5514
+ }
+}

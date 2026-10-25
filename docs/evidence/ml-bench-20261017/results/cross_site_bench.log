@@ -1,0 +1,48 @@
+{
+ "pass_0": {
+  "pairs": 197,
+  "fpt_ok": 197,
+  "wss_ok": 197,
+  "both_priced": 197,
+  "fpt_over_wss_low": {
+   "p10": 1.01,
+   "median": 1.107,
+   "p90": 1.455
+  },
+  "fpt_inside_band_share": 0.99,
+  "fpt_more_than_10pct_above_low": 0.523,
+  "fpt_below_low": 0.01,
+  "wss_high_over_low_median": 1.413,
+  "wss_offer_count_median": 23.0,
+  "fetch_secs_median": {
+   "fpt": 0.69,
+   "wss": 0.43
+  }
+ },
+ "pass_1": {
+  "pairs": 197,
+  "fpt_ok": 197,
+  "wss_ok": 197,
+  "both_priced": 197,
+  "fpt_over_wss_low": {
+   "p10": 1.01,
+   "median": 1.107,
+   "p90": 1.455
+  },
+  "fpt_inside_band_share": 0.99,
+  "fpt_more_than_10pct_above_low": 0.523,
+  "fpt_below_low": 0.01,
+  "wss_high_over_low_median": 1.413,
+  "wss_offer_count_median": 23.0,
+  "fetch_secs_median": {
+   "fpt": 0.91,
+   "wss": 0.43
+  }
+ },
+ "moved_between_passes": {
+  "fpt": 0,
+  "wss_low": 0,
+  "wss_count": 2,
+  "compared": 197
+ }
+}

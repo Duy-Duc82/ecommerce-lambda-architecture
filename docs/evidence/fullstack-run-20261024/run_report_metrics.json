@@ -1,0 +1,337 @@
+{
+ "window_utc": [
+  "2026-10-23T18:09:00Z",
+  "2026-10-24T02:10:00Z"
+ ],
+ "window_vn": [
+  "2026-10-24 01:09",
+  "2026-10-24 09:10"
+ ],
+ "crawl": {
+  "attempts": 4718,
+  "succeeded": 4718,
+  "http_status": {
+   "200": 4718
+  },
+  "error_kinds": {},
+  "distinct_targets": 4718,
+  "parsed_offers_total": 140116,
+  "rejected_total": 0,
+  "parsed_per_page": {
+   "p50": 40.0,
+   "p95": 40.0,
+   "p99": 40.0,
+   "max": 40.0,
+   "n": 4718
+  },
+  "raw_mb_total": 2141.4,
+  "raw_kb_per_page": {
+   "p50": 462.19,
+   "p95": 671.59,
+   "p99": 795.56,
+   "max": 1508.53,
+   "n": 4718
+  },
+  "attempt_latency_ms": {
+   "p50": 4815.0,
+   "p95": 6506.15,
+   "p99": 6928.98,
+   "max": 8270.0,
+   "n": 4718
+  },
+  "pages_per_hour": 588.5,
+  "distinct_categories": 299,
+  "revisit_minutes": {
+   "p50": 30.53,
+   "p95": 30.94,
+   "p99": 31.06,
+   "max": 31.51,
+   "n": 4419
+  },
+  "gap_between_requests_s": {
+   "p50": 5.01,
+   "p95": 10.78,
+   "p99": 11.71,
+   "max": 198.76,
+   "n": 4717
+  }
+ },
+ "kafka_publish_ms": {
+  "p50": 27.62,
+  "p95": 37.04,
+  "p99": 37.04,
+  "max": 37.04,
+  "n": 15
+ },
+ "changes": {
+  "COUNTER_CHANGED": 356,
+  "LARGE_PRICE_DROP": 10,
+  "NEW_OFFER": 15,
+  "OFFER_STALE": 8,
+  "PRICE_CHANGED": 205,
+  "RATING_CHANGED": 31
+ },
+ "speed": {
+  "batches": 5772,
+  "failed": 0,
+  "input_rows": 140149,
+  "change_rows": 625,
+  "es_rows": 140774,
+  "redis_rows": 140774,
+  "invalid_rows": 0,
+  "late_rows": 0,
+  "duration_ms": {
+   "p50": 24.0,
+   "p95": 40.0,
+   "p99": 50.0,
+   "max": 1025.0,
+   "n": 5772
+  },
+  "duration_ms_nonempty": {
+   "p50": 28.0,
+   "p95": 41.0,
+   "p99": 51.0,
+   "max": 1025.0,
+   "n": 4537
+  },
+  "trigger_interval_s": {
+   "p50": 5.0,
+   "p95": 5.93,
+   "p99": 6.78,
+   "max": 7.58,
+   "n": 5771
+  },
+  "crawl_done_to_es_s": {
+   "p50": 3.24,
+   "p95": 5.59,
+   "p99": 6.21,
+   "max": 7.73,
+   "n": 4718
+  }
+ },
+ "kafka_publish_ms_sample": {
+  "p50": 27.62,
+  "p95": 37.04,
+  "p99": 37.04,
+  "max": 37.04,
+  "n": 15
+ },
+ "silver": {
+  "kafka_to_silver_ms_sample": {
+   "p50": 171.45,
+   "p95": 269.01,
+   "p99": 275.9,
+   "max": 276.8,
+   "n": 40
+  },
+  "consumer_lag": "0",
+  "kafka_observations_total": "176015"
+ },
+ "batch": {
+  "runs": [
+   {
+    "run_id": "mp-20261023T1700Z",
+    "status": "SUCCEEDED",
+    "quality": "PASS",
+    "as_of": "2026-10-23 17:00:00+00",
+    "started": "2026-10-23 18:08:18.025331+00",
+    "silver_rows": 4073,
+    "gold_rows": 32705,
+    "mandatory_failures": 0,
+    "duration_min": 1.3,
+    "as_of_to_published_min": 69.6
+   },
+   {
+    "run_id": "mp-20261023T1800Z",
+    "status": "SUCCEEDED",
+    "quality": "PASS",
+    "as_of": "2026-10-23 18:00:00+00",
+    "started": "2026-10-23 18:20:25.857186+00",
+    "silver_rows": 21393,
+    "gold_rows": 69918,
+    "mandatory_failures": 0,
+    "duration_min": 1.0,
+    "as_of_to_published_min": 21.4
+   },
+   {
+    "run_id": "mp-20261023T1900Z",
+    "status": "SUCCEEDED",
+    "quality": "PASS",
+    "as_of": "2026-10-23 19:00:00+00",
+    "started": "2026-10-23 19:23:01.588153+00",
+    "silver_rows": 37854,
+    "gold_rows": 69958,
+    "mandatory_failures": 0,
+    "duration_min": 1.6,
+    "as_of_to_published_min": 24.6
+   },
+   {
+    "run_id": "mp-20261023T2000Z",
+    "status": "SUCCEEDED",
+    "quality": "PASS",
+    "as_of": "2026-10-23 20:00:00+00",
+    "started": "2026-10-23 20:23:07.223424+00",
+    "silver_rows": 54877,
+    "gold_rows": 69966,
+    "mandatory_failures": 0,
+    "duration_min": 2.2,
+    "as_of_to_published_min": 25.3
+   },
+   {
+    "run_id": "mp-20261023T2100Z",
+    "status": "SUCCEEDED",
+    "quality": "PASS",
+    "as_of": "2026-10-23 21:00:00+00",
+    "started": "2026-10-23 21:23:06.868835+00",
+    "silver_rows": 72120,
+    "gold_rows": 69982,
+    "mandatory_failures": 0,
+    "duration_min": 2.7,
+    "as_of_to_published_min": 25.8
+   },
+   {
+    "run_id": "mp-20261023T2200Z",
+    "status": "SUCCEEDED",
+    "quality": "PASS",
+    "as_of": "2026-10-23 22:00:00+00",
+    "started": "2026-10-23 22:23:02.161438+00",
+    "silver_rows": 89389,
+    "gold_rows": 69982,
+    "mandatory_failures": 0,
+    "duration_min": 3.5,
+    "as_of_to_published_min": 26.5
+   },
+   {
+    "run_id": "mp-20261023T2300Z",
+    "status": "SUCCEEDED",
+    "quality": "PASS",
+    "as_of": "2026-10-23 23:00:00+00",
+    "started": "2026-10-23 23:33:33.412178+00",
+    "silver_rows": 106797,
+    "gold_rows": 69982,
+    "mandatory_failures": 0,
+    "duration_min": 3.6,
+    "as_of_to_published_min": 37.2
+   },
+   {
+    "run_id": "mp-20261024T0000Z",
+    "status": "SUCCEEDED",
+    "quality": "PASS",
+    "as_of": "2026-10-24 00:00:00+00",
+    "started": "2026-10-24 00:22:18.151062+00",
+    "silver_rows": 124275,
+    "gold_rows": 69982,
+    "mandatory_failures": 0,
+    "duration_min": 3.8,
+    "as_of_to_published_min": 26.1
+   },
+   {
+    "run_id": "mp-20261024T0100Z",
+    "status": "SUCCEEDED",
+    "quality": "PASS",
+    "as_of": "2026-10-24 01:00:00+00",
+    "started": "2026-10-24 01:22:26.123282+00",
+    "silver_rows": 141890,
+    "gold_rows": 121618,
+    "mandatory_failures": 0,
+    "duration_min": 4.3,
+    "as_of_to_published_min": 26.7
+   },
+   {
+    "run_id": "mp-20261024T0200Z",
+    "status": "SUCCEEDED",
+    "quality": "PASS",
+    "as_of": "2026-10-24 02:00:00+00",
+    "started": "2026-10-24 02:20:20.492264+00",
+    "silver_rows": 159455,
+    "gold_rows": 121737,
+    "mandatory_failures": 0,
+    "duration_min": 5.1,
+    "as_of_to_published_min": 25.4
+   }
+  ],
+  "interval_s": 3600,
+  "lag_s": 1200
+ },
+ "gold": {
+  "tables": {
+   "marketplace_category_price_daily": 1266,
+   "marketplace_counter_delta_daily": 51126,
+   "marketplace_crawl_reliability_daily": 2,
+   "marketplace_offer_change_daily": 17042,
+   "marketplace_offer_current": 8530,
+   "marketplace_offer_freshness": 8530,
+   "marketplace_offer_price_history_daily": 17042,
+   "marketplace_price_anomaly_daily": 17042,
+   "marketplace_seller_current": 1155,
+   "marketplace_source_coverage_daily": 2
+  },
+  "offers": "8530",
+  "sellers": "1155",
+  "categories": "633",
+  "newest_observation_vn": "2026-10-24 08:59"
+ },
+ "storage": {
+  "minio": "4.3G\t/data",
+  "minio_buckets": "2.8G\t/data/ecommerce-bronze\n97M\t/data/ecommerce-gold\n1.4G\t/data/ecommerce-silver",
+  "es_indices": "marketplace-changes-v1        9558 13.9mb\nmarketplace-crawl-attempts-v1 5911  7.3mb\nmarketplace-dlq-v1               0   249b\nmarketplace-offers-current-v1 8534 19.7mb\nmarketplace-source-health-v1     1 20.6kb\nmarketplace-speed-batches-v1  7179    1mb",
+  "postgres": "77 MB"
+ },
+ "logs": {
+  "lines": {
+   "batch": 248,
+   "crawl": 898,
+   "ingest": 139839,
+   "observability": 5325,
+   "serving": 2324,
+   "speed": 16749,
+   "storage": 958
+  },
+  "by_level": [
+   [
+    "batch",
+    "error",
+    21
+   ],
+   [
+    "batch",
+    "warn",
+    49
+   ],
+   [
+    "observability",
+    "error",
+    1
+   ],
+   [
+    "observability",
+    "warn",
+    1
+   ],
+   [
+    "serving",
+    "error",
+    30
+   ],
+   [
+    "serving",
+    "warn",
+    1
+   ],
+   [
+    "storage",
+    "error",
+    81
+   ],
+   [
+    "storage",
+    "warn",
+    1
+   ]
+  ]
+ },
+ "resources": {
+  "docker_stats": "th-batch-scheduler 0.09% 3.656GiB / 13.65GiB\nth-crawl-worker 0.11% 48.48MiB / 13.65GiB\nth-elasticsearch 1.53% 1.555GiB / 13.65GiB\nth-es-projector 0.15% 67.48MiB / 13.65GiB\nth-grafana 0.69% 77.21MiB / 13.65GiB\nth-kafka 0.97% 885.4MiB / 13.65GiB\nth-kibana 1.20% 524.6MiB / 13.65GiB\nth-loki 0.45% 132.8MiB / 13.65GiB\nth-minio 0.01% 2.281GiB / 13.65GiB\nth-postgres-dw 0.01% 178MiB / 13.65GiB\nth-promtail 0.29% 44.54MiB / 13.65GiB\nth-redis 2.13% 39.98MiB / 13.65GiB\nth-silver-sink 0.23% 24.93MiB / 13.65GiB\nth-speed 0.12% 1.373GiB / 13.65GiB\nth-superset 0.02% 246.2MiB / 13.65GiB",
+  "docker_vm": "14657224704 8"
+ }
+}

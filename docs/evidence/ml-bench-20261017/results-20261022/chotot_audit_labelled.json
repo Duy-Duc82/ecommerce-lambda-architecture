@@ -1,0 +1,1342 @@
+{
+ "labeller": "Claude, from title text and price/group-median, 2026-10-17",
+ "label_meaning": {
+  "W": "listing gắn sai model/nhóm hoặc bán nhiều máy",
+  "D": "giá thấp có lý do ghi trong tiêu đề (hỏng, vỡ, xác, linh kiện)",
+  "F": "giá không phải giá bán thật (trả góp, nợ xấu)",
+  "S": "giá lệch mạnh, không có lý do trong tiêu đề (nghi mồi / nhập sai)",
+  "N": "không bất thường về giá"
+ },
+ "per_method": {
+  "M1_iqr_fence": {
+   "top": 25,
+   "abnormal_share": 0.96,
+   "wrong_group_W": 10,
+   "defect_D": 1,
+   "financing_F": 2,
+   "unexplained_S": 11,
+   "normal_N": 1
+  },
+  "M2_mad_robust_z": {
+   "top": 25,
+   "abnormal_share": 0.96,
+   "wrong_group_W": 8,
+   "defect_D": 4,
+   "financing_F": 3,
+   "unexplained_S": 9,
+   "normal_N": 1
+  },
+  "M3_isolation_forest": {
+   "top": 25,
+   "abnormal_share": 0.6,
+   "wrong_group_W": 0,
+   "defect_D": 11,
+   "financing_F": 3,
+   "unexplained_S": 1,
+   "normal_N": 10
+  },
+  "M4_lof": {
+   "top": 25,
+   "abnormal_share": 0.2,
+   "wrong_group_W": 2,
+   "defect_D": 0,
+   "financing_F": 3,
+   "unexplained_S": 0,
+   "normal_N": 20
+  },
+  "M5_ecod": {
+   "top": 25,
+   "abnormal_share": 0.72,
+   "wrong_group_W": 2,
+   "defect_D": 12,
+   "financing_F": 4,
+   "unexplained_S": 0,
+   "normal_N": 7
+  }
+ },
+ "candidates": [
+  {
+   "list_id": 135055092,
+   "subject": "xiaomi 18 pro max 1tb màu đỏ new seal 100%",
+   "price": 45500000,
+   "group": "11T Pro | *",
+   "group_median": 3499999,
+   "dealer": 1,
+   "cond_used": 1,
+   "methods": [
+    "M1_iqr_fence",
+    "M2_mad_robust_z"
+   ],
+   "label": "W",
+   "ratio": 13.0
+  },
+  {
+   "list_id": 135139274,
+   "subject": "oppo a7 pro 5g đủ màu",
+   "price": 11500000,
+   "group": "A7 | *",
+   "group_median": 624499,
+   "dealer": 0,
+   "cond_used": 0,
+   "methods": [
+    "M1_iqr_fence",
+    "M2_mad_robust_z",
+    "M5_ecod"
+   ],
+   "label": "W",
+   "ratio": 18.41
+  },
+  {
+   "list_id": 135055159,
+   "subject": "xiaomi 18 pro max nđịa 12-256gb xanh fullbox 99%",
+   "price": 27200000,
+   "group": "11T Pro | 256 GB",
+   "group_median": 3499999,
+   "dealer": 1,
+   "cond_used": 1,
+   "methods": [
+    "M1_iqr_fence",
+    "M2_mad_robust_z"
+   ],
+   "label": "W",
+   "ratio": 7.77
+  },
+  {
+   "list_id": 134972486,
+   "subject": "samsung galaxy s8 64gb đen",
+   "price": 1600000,
+   "group": "Galaxy S8 | 64 GB",
+   "group_median": 790000,
+   "dealer": 1,
+   "cond_used": 1,
+   "methods": [
+    "M1_iqr_fence"
+   ],
+   "label": "S",
+   "ratio": 2.03
+  },
+  {
+   "list_id": 135189342,
+   "subject": "samsung s8 64gb ",
+   "price": 1400000,
+   "group": "Galaxy S8 | 64 GB",
+   "group_median": 790000,
+   "dealer": 1,
+   "cond_used": 1,
+   "methods": [
+    "M1_iqr_fence"
+   ],
+   "label": "S",
+   "ratio": 1.77
+  },
+  {
+   "list_id": 134964576,
+   "subject": "xiaomi redmi note 17 4g 6gb/256gb xanh ngọc",
+   "price": 5990000,
+   "group": "Redmi Note 7 | *",
+   "group_median": 750000,
+   "dealer": 0,
+   "cond_used": 0,
+   "methods": [
+    "M1_iqr_fence",
+    "M5_ecod"
+   ],
+   "label": "W",
+   "ratio": 7.99
+  },
+  {
+   "list_id": 135228444,
+   "subject": "samsung galaxy s8 đen",
+   "price": 450000,
+   "group": "Galaxy S8 | *",
+   "group_median": 790000,
+   "dealer": 1,
+   "cond_used": 1,
+   "methods": [
+    "M1_iqr_fence",
+    "M2_mad_robust_z"
+   ],
+   "label": "S",
+   "ratio": 0.57
+  },
+  {
+   "list_id": 135237704,
+   "subject": "xiaomi 17t 5g 12gb/512gb trắng ngọc trai,tgdđ ",
+   "price": 11399000,
+   "group": "11T | *",
+   "group_median": 2824889,
+   "dealer": 1,
+   "cond_used": 1,
+   "methods": [
+    "M1_iqr_fence"
+   ],
+   "label": "W",
+   "ratio": 4.04
+  },
+  {
+   "list_id": 133641874,
+   "subject": "xiaomi redmi a7 pro 4gb 128gb xám",
+   "price": 2100000,
+   "group": "Redmi 7 | *",
+   "group_median": 750000,
+   "dealer": 0,
+   "cond_used": 1,
+   "methods": [
+    "M1_iqr_fence"
+   ],
+   "label": "W",
+   "ratio": 2.8
+  },
+  {
+   "list_id": 135234297,
+   "subject": "samsung galaxy s9 hồng",
+   "price": 789000,
+   "group": "Galaxy S9 | *",
+   "group_median": 1190000,
+   "dealer": 1,
+   "cond_used": 1,
+   "methods": [
+    "M1_iqr_fence",
+    "M2_mad_robust_z"
+   ],
+   "label": "S",
+   "ratio": 0.66
+  },
+  {
+   "list_id": 135232969,
+   "subject": "samsung galaxy s8/s9 đen",
+   "price": 500000,
+   "group": "Galaxy S8 | *",
+   "group_median": 790000,
+   "dealer": 0,
+   "cond_used": 1,
+   "methods": [
+    "M1_iqr_fence",
+    "M2_mad_robust_z"
+   ],
+   "label": "S",
+   "ratio": 0.63
+  },
+  {
+   "list_id": 134240521,
+   "subject": "iphone 5 16gb ios 6.1 fullbox",
+   "price": 2990000,
+   "group": "iPhone 5 | 16 GB",
+   "group_median": 442718,
+   "dealer": 1,
+   "cond_used": 1,
+   "methods": [
+    "M1_iqr_fence"
+   ],
+   "label": "S",
+   "ratio": 6.75
+  },
+  {
+   "list_id": 134142134,
+   "subject": "redmi note 15 pro plus ram 12g/512g cấu hình khủng",
+   "price": 6550000,
+   "group": "Redmi Note 11 Pro Plus | *",
+   "group_median": 2669925,
+   "dealer": 1,
+   "cond_used": 0,
+   "methods": [
+    "M1_iqr_fence"
+   ],
+   "label": "W",
+   "ratio": 2.45
+  },
+  {
+   "list_id": 134869663,
+   "subject": "nợ xấu đưa8900 nhận 15pmax256 có sim k zin tặng",
+   "price": 19900000,
+   "group": "iPhone 13 Pro | 256 GB",
+   "group_median": 7999999,
+   "dealer": 1,
+   "cond_used": 1,
+   "methods": [
+    "M1_iqr_fence"
+   ],
+   "label": "F",
+   "ratio": 2.49
+  },
+  {
+   "list_id": 133646051,
+   "subject": "samsung a5 đen nghe gọi chạy app cơ bản tốt",
+   "price": 849000,
+   "group": "Galaxy A5 | None",
+   "group_median": 350000,
+   "dealer": 1,
+   "cond_used": 1,
+   "methods": [
+    "M1_iqr_fence"
+   ],
+   "label": "S",
+   "ratio": 2.43
+  },
+  {
+   "list_id": 135227973,
+   "subject": "samsung galaxy s8 đen nứt, xấu",
+   "price": 550000,
+   "group": "Galaxy S8 | *",
+   "group_median": 790000,
+   "dealer": 1,
+   "cond_used": 0,
+   "methods": [
+    "M1_iqr_fence",
+    "M2_mad_robust_z"
+   ],
+   "label": "D",
+   "ratio": 0.7
+  },
+  {
+   "list_id": 133897676,
+   "subject": "oppo find x9 pro white 512gb oppo care 4/2028",
+   "price": 21990000,
+   "group": "Find X9s Pro | *",
+   "group_median": 16524981,
+   "dealer": 1,
+   "cond_used": 0,
+   "methods": [
+    "M1_iqr_fence",
+    "M2_mad_robust_z"
+   ],
+   "label": "W",
+   "ratio": 1.33
+  },
+  {
+   "list_id": 135011492,
+   "subject": "⚡ cần máy xịn? góp tay đôi – nợ xấu -lệ mỹ lo!",
+   "price": 68000333,
+   "group": "iPhone 17 Pro | 256 GB",
+   "group_median": 26300000,
+   "dealer": 1,
+   "cond_used": 1,
+   "methods": [
+    "M1_iqr_fence",
+    "M2_mad_robust_z",
+    "M3_isolation_forest",
+    "M5_ecod"
+   ],
+   "label": "F",
+   "ratio": 2.59
+  },
+  {
+   "list_id": 134291277,
+   "subject": "redmi note 15 pro plus 12/256gb bh 6th có góp",
+   "price": 6450000,
+   "group": "Redmi Note 11 Pro Plus | 256 GB",
+   "group_median": 2500318,
+   "dealer": 1,
+   "cond_used": 1,
+   "methods": [
+    "M1_iqr_fence"
+   ],
+   "label": "W",
+   "ratio": 2.58
+  },
+  {
+   "list_id": 135299643,
+   "subject": "samsung galaxy z flip 7 đỏ carol",
+   "price": 20000000,
+   "group": "Galaxy Z Flip 7 | 256 GB",
+   "group_median": 12549900,
+   "dealer": 0,
+   "cond_used": 1,
+   "methods": [
+    "M1_iqr_fence"
+   ],
+   "label": "S",
+   "ratio": 1.59
+  },
+  {
+   "list_id": 135228033,
+   "subject": "samsung galaxy s8 bạc",
+   "price": 590000,
+   "group": "Galaxy S8 | *",
+   "group_median": 790000,
+   "dealer": 1,
+   "cond_used": 1,
+   "methods": [
+    "M1_iqr_fence"
+   ],
+   "label": "N",
+   "ratio": 0.75
+  },
+  {
+   "list_id": 135134009,
+   "subject": "oppo find x8-bản 16/512g-màu gold-c.hãng vn",
+   "price": 14399000,
+   "group": "Find X8 | 256 GB",
+   "group_median": 9699999,
+   "dealer": 1,
+   "cond_used": 1,
+   "methods": [
+    "M1_iqr_fence",
+    "M2_mad_robust_z"
+   ],
+   "label": "W",
+   "ratio": 1.48
+  },
+  {
+   "list_id": 135285563,
+   "subject": "oppo a38 128gb đen 4gb like new",
+   "price": 3500000,
+   "group": "A38 | 128 GB",
+   "group_median": 1799999,
+   "dealer": 0,
+   "cond_used": 1,
+   "methods": [
+    "M1_iqr_fence"
+   ],
+   "label": "S",
+   "ratio": 1.94
+  },
+  {
+   "list_id": 133852913,
+   "subject": "xiaomi mi mix 4 xanh nhạt",
+   "price": 9999999,
+   "group": "Mi Mix 4 | *",
+   "group_median": 3098386,
+   "dealer": 0,
+   "cond_used": 1,
+   "methods": [
+    "M1_iqr_fence"
+   ],
+   "label": "S",
+   "ratio": 3.23
+  },
+  {
+   "list_id": 133993007,
+   "subject": "[new 95%] xiaomi redmi note 11 pro+ 5g 256gb",
+   "price": 5500000,
+   "group": "Redmi Note 11 Pro Plus | 256 GB",
+   "group_median": 2500318,
+   "dealer": 0,
+   "cond_used": 1,
+   "methods": [
+    "M1_iqr_fence"
+   ],
+   "label": "S",
+   "ratio": 2.2
+  },
+  {
+   "list_id": 135199557,
+   "subject": "vivo y03t máy zin đẹpfull chức năng",
+   "price": 1450000,
+   "group": "Galaxy Note 8 | 64 GB",
+   "group_median": 890000,
+   "dealer": 1,
+   "cond_used": 1,
+   "methods": [
+    "M2_mad_robust_z"
+   ],
+   "label": "W",
+   "ratio": 1.63
+  },
+  {
+   "list_id": 135273328,
+   "subject": "samsung galaxy note 8 64gb vàng",
+   "price": 1368000,
+   "group": "Galaxy Note 8 | 64 GB",
+   "group_median": 890000,
+   "dealer": 1,
+   "cond_used": 1,
+   "methods": [
+    "M2_mad_robust_z"
+   ],
+   "label": "S",
+   "ratio": 1.54
+  },
+  {
+   "list_id": 133908009,
+   "subject": "xiaomi civi 1 đen hư màn hình",
+   "price": 100000,
+   "group": "Civi | *",
+   "group_median": 2700000,
+   "dealer": 0,
+   "cond_used": 0,
+   "methods": [
+    "M2_mad_robust_z",
+    "M3_isolation_forest",
+    "M5_ecod"
+   ],
+   "label": "D",
+   "ratio": 0.04
+  },
+  {
+   "list_id": 135311639,
+   "subject": "ip 6plus bảng 16 , pin 100",
+   "price": 390000,
+   "group": "iPhone 16 Plus | *",
+   "group_median": 14542764,
+   "dealer": 1,
+   "cond_used": 1,
+   "methods": [
+    "M2_mad_robust_z",
+    "M4_lof"
+   ],
+   "label": "W",
+   "ratio": 0.03
+  },
+  {
+   "list_id": 135306638,
+   "subject": "loa thoại apple iphone x đã sử dụng",
+   "price": 40000,
+   "group": "iPhone X | *",
+   "group_median": 1724818,
+   "dealer": 0,
+   "cond_used": 1,
+   "methods": [
+    "M2_mad_robust_z",
+    "M5_ecod"
+   ],
+   "label": "D",
+   "ratio": 0.02
+  },
+  {
+   "list_id": 135273229,
+   "subject": " note 8 màn lk  2 sim chữa cháy hay gl",
+   "price": 700000,
+   "group": "Galaxy Note 8 | 64 GB",
+   "group_median": 890000,
+   "dealer": 0,
+   "cond_used": 1,
+   "methods": [
+    "M2_mad_robust_z"
+   ],
+   "label": "N",
+   "ratio": 0.79
+  },
+  {
+   "list_id": 135256946,
+   "subject": "thanh lý 3 máy cỏ giá tốt cho ai cần",
+   "price": 800000,
+   "group": "Redmi Note 11 | 128 GB",
+   "group_median": 1549999,
+   "dealer": 1,
+   "cond_used": 1,
+   "methods": [
+    "M2_mad_robust_z"
+   ],
+   "label": "W",
+   "ratio": 0.52
+  },
+  {
+   "list_id": 135302331,
+   "subject": "samsung galaxy a17 5g 8gb/128gb đen _ hỗ trợ góp",
+   "price": 2340000,
+   "group": "Galaxy A17 | 128 GB",
+   "group_median": 4990000,
+   "dealer": 0,
+   "cond_used": 0,
+   "methods": [
+    "M2_mad_robust_z",
+    "M5_ecod"
+   ],
+   "label": "F",
+   "ratio": 0.47
+  },
+  {
+   "list_id": 135295799,
+   "subject": "redmi note 11 4/128gb màn thay",
+   "price": 890000,
+   "group": "Redmi Note 11 | 128 GB",
+   "group_median": 1549999,
+   "dealer": 1,
+   "cond_used": 1,
+   "methods": [
+    "M2_mad_robust_z"
+   ],
+   "label": "D",
+   "ratio": 0.57
+  },
+  {
+   "list_id": 135306739,
+   "subject": "apple iphone 14 plus xanh tím",
+   "price": 1990000,
+   "group": "iPhone 14 Plus | *",
+   "group_median": 7499999,
+   "dealer": 1,
+   "cond_used": 1,
+   "methods": [
+    "M2_mad_robust_z"
+   ],
+   "label": "S",
+   "ratio": 0.27
+  },
+  {
+   "list_id": 132145061,
+   "subject": "điện thoại oppo reno 15f -5g- bán trả góp tại nhà",
+   "price": 1500000,
+   "group": "Reno15 F | 256 GB",
+   "group_median": 7899999,
+   "dealer": 1,
+   "cond_used": 0,
+   "methods": [
+    "M2_mad_robust_z",
+    "M3_isolation_forest",
+    "M4_lof",
+    "M5_ecod"
+   ],
+   "label": "F",
+   "ratio": 0.19
+  },
+  {
+   "list_id": 135308151,
+   "subject": "apple iphone 12 mini trắng",
+   "price": 1700000,
+   "group": "iPhone 12 Mini | 64 GB",
+   "group_median": 3598610,
+   "dealer": 0,
+   "cond_used": 1,
+   "methods": [
+    "M2_mad_robust_z"
+   ],
+   "label": "S",
+   "ratio": 0.47
+  },
+  {
+   "list_id": 135113111,
+   "subject": "xiaomi redmi k50 128gb xanh 8gb+4gb",
+   "price": 1400000,
+   "group": "Redmi K50 | *",
+   "group_median": 3319864,
+   "dealer": 1,
+   "cond_used": 1,
+   "methods": [
+    "M2_mad_robust_z"
+   ],
+   "label": "S",
+   "ratio": 0.42
+  },
+  {
+   "list_id": 135309027,
+   "subject": "apple iphone 16 pro trắng",
+   "price": 7000000,
+   "group": "iPhone 16 Pro | *",
+   "group_median": 17346469,
+   "dealer": 1,
+   "cond_used": 1,
+   "methods": [
+    "M2_mad_robust_z"
+   ],
+   "label": "S",
+   "ratio": 0.4
+  },
+  {
+   "list_id": 135309309,
+   "subject": "samsung z fold 6 256gb xanh zin áp full",
+   "price": 8500000,
+   "group": "Z Fold 6 | 256 GB",
+   "group_median": 14799999,
+   "dealer": 0,
+   "cond_used": 1,
+   "methods": [
+    "M2_mad_robust_z"
+   ],
+   "label": "S",
+   "ratio": 0.57
+  },
+  {
+   "list_id": 135304265,
+   "subject": "16 plus 128gb vn xanh mới nguyên seal-góp-thu mua",
+   "price": 21800000,
+   "group": "iPhone 16 Plus | 128 GB",
+   "group_median": 14290000,
+   "dealer": 1,
+   "cond_used": 0,
+   "methods": [
+    "M3_isolation_forest",
+    "M5_ecod"
+   ],
+   "label": "F",
+   "ratio": 1.53
+  },
+  {
+   "list_id": 134733572,
+   "subject": "iphone 18 pro max new seal ✓bh 12t ✓góp 0% ✓thu cũ",
+   "price": 38290000,
+   "group": "iPhone 18 Pro Max | 256 GB",
+   "group_median": 39499999,
+   "dealer": 1,
+   "cond_used": 0,
+   "methods": [
+    "M3_isolation_forest",
+    "M5_ecod"
+   ],
+   "label": "N",
+   "ratio": 0.97
+  },
+  {
+   "list_id": 119945045,
+   "subject": "15 pro max 256gb 512gb vn ll 99%-góp 0đ-thu mua",
+   "price": 18800000,
+   "group": "iPhone 15 Pro Max | 256 GB",
+   "group_median": 16500000,
+   "dealer": 1,
+   "cond_used": 1,
+   "methods": [
+    "M3_isolation_forest",
+    "M5_ecod"
+   ],
+   "label": "N",
+   "ratio": 1.14
+  },
+  {
+   "list_id": 134888218,
+   "subject": "15 plus 128gb 256gb vn/a p100% 99%-góp0đ-thu mua",
+   "price": 14000000,
+   "group": "iPhone 15 Plus | *",
+   "group_median": 11699572,
+   "dealer": 1,
+   "cond_used": 1,
+   "methods": [
+    "M3_isolation_forest",
+    "M5_ecod"
+   ],
+   "label": "N",
+   "ratio": 1.2
+  },
+  {
+   "list_id": 134044515,
+   "subject": "oppo cph1723 vàng hồng hỏng",
+   "price": 199000,
+   "group": "1201 | *",
+   "group_median": 1889999,
+   "dealer": 0,
+   "cond_used": 0,
+   "methods": [
+    "M3_isolation_forest",
+    "M5_ecod"
+   ],
+   "label": "D",
+   "ratio": 0.11
+  },
+  {
+   "list_id": 134738135,
+   "subject": "iphone 16 128gb 256gb trắng 99%-góp 0đ-thu mua",
+   "price": 14800000,
+   "group": "iPhone 16 | *",
+   "group_median": 13649908,
+   "dealer": 1,
+   "cond_used": 1,
+   "methods": [
+    "M3_isolation_forest",
+    "M5_ecod"
+   ],
+   "label": "N",
+   "ratio": 1.08
+  },
+  {
+   "list_id": 133567513,
+   "subject": "17 pro 256gb 512gb p100% 4/27 99%-góp-thu mua",
+   "price": 26800000,
+   "group": "iPhone 17 Pro | 256 GB",
+   "group_median": 26300000,
+   "dealer": 1,
+   "cond_used": 1,
+   "methods": [
+    "M3_isolation_forest",
+    "M5_ecod"
+   ],
+   "label": "N",
+   "ratio": 1.02
+  },
+  {
+   "list_id": 128761779,
+   "subject": "ip 14 qte zin đẹp🔥giá chuẩn-thu cũ-góp lúa",
+   "price": 7990000,
+   "group": "iPhone 14 | 128 GB",
+   "group_median": 7990000,
+   "dealer": 1,
+   "cond_used": 1,
+   "methods": [
+    "M3_isolation_forest",
+    "M5_ecod"
+   ],
+   "label": "N",
+   "ratio": 1.0
+  },
+  {
+   "list_id": 135163498,
+   "subject": "samsung z flip4 hỏng màn hình trong",
+   "price": 800000,
+   "group": "Galaxy Z Flip4 | *",
+   "group_median": 3646916,
+   "dealer": 0,
+   "cond_used": 0,
+   "methods": [
+    "M3_isolation_forest",
+    "M5_ecod"
+   ],
+   "label": "D",
+   "ratio": 0.22
+  },
+  {
+   "list_id": 134877418,
+   "subject": "xiaomi mi 10t pro 5g hư màn hình",
+   "price": 1000000,
+   "group": "Mi 10T Pro 5G | 256 GB",
+   "group_median": 2399999,
+   "dealer": 0,
+   "cond_used": 0,
+   "methods": [
+    "M3_isolation_forest",
+    "M5_ecod"
+   ],
+   "label": "D",
+   "ratio": 0.42
+  },
+  {
+   "list_id": 134165924,
+   "subject": "oppo a7 xanh hư màn, chai pin",
+   "price": 200000,
+   "group": "A7 | *",
+   "group_median": 624499,
+   "dealer": 0,
+   "cond_used": 0,
+   "methods": [
+    "M3_isolation_forest",
+    "M5_ecod"
+   ],
+   "label": "D",
+   "ratio": 0.32
+  },
+  {
+   "list_id": 134029648,
+   "subject": "xiaomi redmi note 7 màn mực, treo logo, nứt lưng",
+   "price": 350000,
+   "group": "Redmi Note 7 | *",
+   "group_median": 750000,
+   "dealer": 0,
+   "cond_used": 0,
+   "methods": [
+    "M3_isolation_forest",
+    "M5_ecod"
+   ],
+   "label": "D",
+   "ratio": 0.47
+  },
+  {
+   "list_id": 120007140,
+   "subject": "🔥oppo new keng giải trí tiktok fb zl youtube🔥",
+   "price": 1150000,
+   "group": "A3 | 128 GB",
+   "group_median": 2399999,
+   "dealer": 1,
+   "cond_used": 0,
+   "methods": [
+    "M3_isolation_forest"
+   ],
+   "label": "S",
+   "ratio": 0.48
+  },
+  {
+   "list_id": 135297803,
+   "subject": "apple iphone 13 pro thép sọc màn hình",
+   "price": 6700000,
+   "group": "iPhone 13 Pro | 128 GB",
+   "group_median": 7499999,
+   "dealer": 0,
+   "cond_used": 0,
+   "methods": [
+    "M3_isolation_forest"
+   ],
+   "label": "N",
+   "ratio": 0.89
+  },
+  {
+   "list_id": 135160150,
+   "subject": "apple iphone 17 air 256gb trắng mã vn như mới",
+   "price": 20990000,
+   "group": "iPhone Air | 256 GB",
+   "group_median": 19000000,
+   "dealer": 1,
+   "cond_used": 0,
+   "methods": [
+    "M3_isolation_forest"
+   ],
+   "label": "N",
+   "ratio": 1.1
+  },
+  {
+   "list_id": 132217545,
+   "subject": "bán xác samsung s8plus 2 sim zin hỏng màn",
+   "price": 600000,
+   "group": "Galaxy S8 Plus | None",
+   "group_median": 599999,
+   "dealer": 1,
+   "cond_used": 0,
+   "methods": [
+    "M3_isolation_forest"
+   ],
+   "label": "N",
+   "ratio": 1.0
+  },
+  {
+   "list_id": 134657119,
+   "subject": "bán xác zfold 3 ram12/512 bản việt zin hỏng màn",
+   "price": 2000000,
+   "group": "Galaxy Z Fold | *",
+   "group_median": 26716324,
+   "dealer": 1,
+   "cond_used": 1,
+   "methods": [
+    "M3_isolation_forest",
+    "M5_ecod"
+   ],
+   "label": "D",
+   "ratio": 0.07
+  },
+  {
+   "list_id": 135306691,
+   "subject": "samsung s21+ 5g 8gb/128gb cũ sọc",
+   "price": 1400000,
+   "group": "Galaxy S21 Plus | 128 GB",
+   "group_median": 3800000,
+   "dealer": 0,
+   "cond_used": 1,
+   "methods": [
+    "M3_isolation_forest",
+    "M5_ecod"
+   ],
+   "label": "D",
+   "ratio": 0.37
+  },
+  {
+   "list_id": 135276498,
+   "subject": "oppo a7 bị mất pin vỡ màn nhẹ cảm ứng bình thường",
+   "price": 1000000,
+   "group": "A7 | 64 GB",
+   "group_median": 750000,
+   "dealer": 0,
+   "cond_used": 0,
+   "methods": [
+    "M3_isolation_forest"
+   ],
+   "label": "N",
+   "ratio": 1.33
+  },
+  {
+   "list_id": 134081693,
+   "subject": "samsung galaxy s10 lite xanh hỏng màn",
+   "price": 200000,
+   "group": "Galaxy S10 Lite | *",
+   "group_median": 1549999,
+   "dealer": 0,
+   "cond_used": 1,
+   "methods": [
+    "M3_isolation_forest"
+   ],
+   "label": "D",
+   "ratio": 0.13
+  },
+  {
+   "list_id": 135304040,
+   "subject": "zflip 4 - tháo màn nghịch xong hỏng màn",
+   "price": 650000,
+   "group": "Galaxy Z Flip4 | 256 GB",
+   "group_median": 3490000,
+   "dealer": 0,
+   "cond_used": 1,
+   "methods": [
+    "M3_isolation_forest"
+   ],
+   "label": "D",
+   "ratio": 0.19
+  },
+  {
+   "list_id": 135304201,
+   "subject": "apple iphone 6s hồng màn vỡ, lưng xấu, pin phồng",
+   "price": 200000,
+   "group": "iPhone 6S | None",
+   "group_median": 458257,
+   "dealer": 0,
+   "cond_used": 0,
+   "methods": [
+    "M3_isolation_forest"
+   ],
+   "label": "D",
+   "ratio": 0.44
+  },
+  {
+   "list_id": 135309119,
+   "subject": "apple iphone xs 64gb bạc lỗi face id",
+   "price": 2000000,
+   "group": "iPhone XS | 64 GB",
+   "group_median": 1999999,
+   "dealer": 1,
+   "cond_used": 1,
+   "methods": [
+    "M4_lof"
+   ],
+   "label": "N",
+   "ratio": 1.0
+  },
+  {
+   "list_id": 120424040,
+   "subject": "14pm128gb nợ xấu o trả trước",
+   "price": 12990000,
+   "group": "iPhone 14 Pro Max | 128 GB",
+   "group_median": 12990000,
+   "dealer": 1,
+   "cond_used": 1,
+   "methods": [
+    "M4_lof"
+   ],
+   "label": "N",
+   "ratio": 1.0
+  },
+  {
+   "list_id": 129905421,
+   "subject": "samsung galaxy z flip 7/fe đủ màu-góp0%-bao nợ xấu",
+   "price": 8600000,
+   "group": "Galaxy Z Flip 7 | 256 GB",
+   "group_median": 12549900,
+   "dealer": 1,
+   "cond_used": 0,
+   "methods": [
+    "M4_lof"
+   ],
+   "label": "F",
+   "ratio": 0.69
+  },
+  {
+   "list_id": 134616108,
+   "subject": "oppo reno16 f 5g trắng mới",
+   "price": 11000000,
+   "group": "Reno16 F 5G | *",
+   "group_median": 10569981,
+   "dealer": 0,
+   "cond_used": 0,
+   "methods": [
+    "M4_lof"
+   ],
+   "label": "N",
+   "ratio": 1.04
+  },
+  {
+   "list_id": 125261808,
+   "subject": "15pm256gb nợ xấu o  trả trước",
+   "price": 17500000,
+   "group": "iPhone 15 Pro Max | 256 GB",
+   "group_median": 16500000,
+   "dealer": 1,
+   "cond_used": 1,
+   "methods": [
+    "M4_lof"
+   ],
+   "label": "N",
+   "ratio": 1.06
+  },
+  {
+   "list_id": 133238718,
+   "subject": "iphone 15 đủ likenew/newseal góp 0% - bao nợ xấu",
+   "price": 8800000,
+   "group": "iPhone 15 | *",
+   "group_median": 10619957,
+   "dealer": 1,
+   "cond_used": 1,
+   "methods": [
+    "M4_lof"
+   ],
+   "label": "N",
+   "ratio": 0.83
+  },
+  {
+   "list_id": 134833202,
+   "subject": "12mini 64gb quốc tế , icloud sạch",
+   "price": 3499999,
+   "group": "iPhone 12 Mini | 64 GB",
+   "group_median": 3598610,
+   "dealer": 1,
+   "cond_used": 1,
+   "methods": [
+    "M4_lof"
+   ],
+   "label": "N",
+   "ratio": 0.97
+  },
+  {
+   "list_id": 128762383,
+   "subject": "iphone 16e qt tuyển chọn pin 100 hiếm🔥góp",
+   "price": 8990000,
+   "group": "IPhone 16e | 128 GB",
+   "group_median": 8888888,
+   "dealer": 1,
+   "cond_used": 1,
+   "methods": [
+    "M4_lof"
+   ],
+   "label": "N",
+   "ratio": 1.01
+  },
+  {
+   "list_id": 135032210,
+   "subject": "2 máy oppo find n3 hồng hư màn trong",
+   "price": 2500000,
+   "group": "1201 | *",
+   "group_median": 1889999,
+   "dealer": 1,
+   "cond_used": 1,
+   "methods": [
+    "M4_lof"
+   ],
+   "label": "W",
+   "ratio": 1.32
+  },
+  {
+   "list_id": 128996532,
+   "subject": "16pm 256g nợ  xấu gop o trả trước🍎",
+   "price": 22900000,
+   "group": "iPhone 16 Pro Max | 256 GB",
+   "group_median": 21249941,
+   "dealer": 1,
+   "cond_used": 1,
+   "methods": [
+    "M4_lof"
+   ],
+   "label": "N",
+   "ratio": 1.08
+  },
+  {
+   "list_id": 129675439,
+   "subject": "iphone 13 pro đủ màu - góp 0% - bao nợ xấu",
+   "price": 6390000,
+   "group": "iPhone 13 Pro | 128 GB",
+   "group_median": 7499999,
+   "dealer": 1,
+   "cond_used": 1,
+   "methods": [
+    "M4_lof"
+   ],
+   "label": "N",
+   "ratio": 0.85
+  },
+  {
+   "list_id": 135307277,
+   "subject": "iphone 18 pro 256gb đen việt nam như mới",
+   "price": 34800000,
+   "group": "iPhone 18 Pro | 256 GB",
+   "group_median": 35400000,
+   "dealer": 0,
+   "cond_used": 1,
+   "methods": [
+    "M4_lof"
+   ],
+   "label": "N",
+   "ratio": 0.98
+  },
+  {
+   "list_id": 129825951,
+   "subject": "iphone 11 pro đủ màu - góp 0% - bao nợ xấu",
+   "price": 3990000,
+   "group": "iPhone 11 Pro | *",
+   "group_median": 3899999,
+   "dealer": 1,
+   "cond_used": 0,
+   "methods": [
+    "M4_lof"
+   ],
+   "label": "N",
+   "ratio": 1.02
+  },
+  {
+   "list_id": 115298440,
+   "subject": "13 128g qt nợ xấu o trả trướcp",
+   "price": 7490000,
+   "group": "iPhone 13 | 128 GB",
+   "group_median": 6799999,
+   "dealer": 1,
+   "cond_used": 1,
+   "methods": [
+    "M4_lof"
+   ],
+   "label": "N",
+   "ratio": 1.1
+  },
+  {
+   "list_id": 134546258,
+   "subject": "samsung galaxy a04e 4gb/128gb",
+   "price": 1200000,
+   "group": "Galaxy A04e | *",
+   "group_median": 900000,
+   "dealer": 0,
+   "cond_used": 0,
+   "methods": [
+    "M4_lof"
+   ],
+   "label": "N",
+   "ratio": 1.33
+  },
+  {
+   "list_id": 129905557,
+   "subject": "samsung galaxy z flip3 đủ màu - góp 0% -bao nợ xấu",
+   "price": 2990000,
+   "group": "Galaxy Z Flip3 | *",
+   "group_median": 1500000,
+   "dealer": 1,
+   "cond_used": 0,
+   "methods": [
+    "M4_lof"
+   ],
+   "label": "F",
+   "ratio": 1.99
+  },
+  {
+   "list_id": 130532311,
+   "subject": "iphone xr newseal 100% lock - góp 0% - bao nợ xấu",
+   "price": 2999000,
+   "group": "iPhone XR | 64 GB",
+   "group_median": 2399999,
+   "dealer": 1,
+   "cond_used": 0,
+   "methods": [
+    "M4_lof"
+   ],
+   "label": "N",
+   "ratio": 1.25
+  },
+  {
+   "list_id": 134783939,
+   "subject": "xiaomi mix 4 256gb xám",
+   "price": 4399000,
+   "group": "Mi Mix 4 | 256 GB",
+   "group_median": 2990000,
+   "dealer": 0,
+   "cond_used": 0,
+   "methods": [
+    "M4_lof"
+   ],
+   "label": "N",
+   "ratio": 1.47
+  },
+  {
+   "list_id": 135305941,
+   "subject": "apple iphone 7 32gb bạc like new",
+   "price": 600000,
+   "group": "iPhone 7 | 32 GB",
+   "group_median": 599999,
+   "dealer": 0,
+   "cond_used": 1,
+   "methods": [
+    "M4_lof"
+   ],
+   "label": "N",
+   "ratio": 1.0
+  },
+  {
+   "list_id": 135294751,
+   "subject": "samsung z fold 4 12gb/256gb like new",
+   "price": 5500000,
+   "group": "Galaxy Z Fold4 | 256 GB",
+   "group_median": 5499999,
+   "dealer": 0,
+   "cond_used": 1,
+   "methods": [
+    "M4_lof"
+   ],
+   "label": "N",
+   "ratio": 1.0
+  },
+  {
+   "list_id": 135306274,
+   "subject": "oppo find x8 12/256b | đẹp 99% nét | shipgopgl",
+   "price": 9700000,
+   "group": "Find X8 | 256 GB",
+   "group_median": 9699999,
+   "dealer": 1,
+   "cond_used": 1,
+   "methods": [
+    "M4_lof"
+   ],
+   "label": "N",
+   "ratio": 1.0
+  },
+  {
+   "list_id": 135007136,
+   "subject": "redmi k50 12gb/256gb xanh có trả góp",
+   "price": 3350000,
+   "group": "Redmi K50 | 256 GB",
+   "group_median": 3319864,
+   "dealer": 1,
+   "cond_used": 1,
+   "methods": [
+    "M4_lof"
+   ],
+   "label": "N",
+   "ratio": 1.01
+  },
+  {
+   "list_id": 135280895,
+   "subject": "thanh lý samsung note 10 plus 256gb đa sắc hàn",
+   "price": 2850000,
+   "group": "Galaxy Note 10 Plus | 256 GB",
+   "group_median": 3599999,
+   "dealer": 0,
+   "cond_used": 0,
+   "methods": [
+    "M4_lof"
+   ],
+   "label": "N",
+   "ratio": 0.79
+  },
+  {
+   "list_id": 135140176,
+   "subject": "cụm oppo reno4",
+   "price": 300000,
+   "group": "Reno4 | *",
+   "group_median": 1649999,
+   "dealer": 0,
+   "cond_used": 0,
+   "methods": [
+    "M5_ecod"
+   ],
+   "label": "D",
+   "ratio": 0.18
+  },
+  {
+   "list_id": 133972285,
+   "subject": "xác điện thoại không dùng được ",
+   "price": 600000,
+   "group": "Galaxy J2 Prime | None",
+   "group_median": 293938,
+   "dealer": 0,
+   "cond_used": 1,
+   "methods": [
+    "M5_ecod"
+   ],
+   "label": "D",
+   "ratio": 2.04
+  },
+  {
+   "list_id": 135094084,
+   "subject": "oppo find x8s 16gb/512gb keng (gl/thu mua)",
+   "price": 10500000,
+   "group": "Find X8s | *",
+   "group_median": 10774274,
+   "dealer": 1,
+   "cond_used": 1,
+   "methods": [
+    "M5_ecod"
+   ],
+   "label": "N",
+   "ratio": 0.97
+  },
+  {
+   "list_id": 135222909,
+   "subject": "samsung z flip 4 tím màn hình sọc",
+   "price": 1500000,
+   "group": "Galaxy Z Flip4 | *",
+   "group_median": 3646916,
+   "dealer": 0,
+   "cond_used": 0,
+   "methods": [
+    "M5_ecod"
+   ],
+   "label": "D",
+   "ratio": 0.41
+  }
+ ],
+ "label_rule": "W read by hand from the title (another model, or several phones). Otherwise N when 0.7 <= price/group median <= 1.5; else D if the title states a defect or a part, F if it is a financing ad, S if no reason is given."
+}

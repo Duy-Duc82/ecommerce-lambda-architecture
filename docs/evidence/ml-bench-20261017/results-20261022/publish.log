@@ -1,0 +1,83 @@
+{
+ "es": {
+  "mlbench-chotot-listings": 1944,
+  "mlbench-chotot-lifecycle": 72,
+  "mlbench-price-changes": 495,
+  "mlbench-band-check": 788,
+  "mlbench-crawl": 11127
+ },
+ "kibana_objects": 8,
+ "postgres_rows": {
+  "method_metrics": 55,
+  "chotot_baseline": 213,
+  "chotot_flagged": 30,
+  "survival_km": 3285,
+  "retail_offer_anomaly": 246,
+  "retail_rule_coverage": 6,
+  "tiki_offer_scores": 215,
+  "tiki_demand": 8,
+  "cross_site_gap": 788
+ },
+ "tiki_ml": {
+  "products": 11686,
+  "injected_per_run": 350,
+  "metrics": {
+   "rule_robust_z_in_category": {
+    "auc": [
+     0.7352,
+     0.0192
+    ],
+    "ap": [
+     0.0956,
+     0.0086
+    ]
+   },
+   "rule_z_plus_price_above_original": {
+    "auc": [
+     0.8602,
+     0.0152
+    ],
+    "ap": [
+     0.5245,
+     0.0358
+    ]
+   },
+   "isolation_forest": {
+    "auc": [
+     0.9454,
+     0.0079
+    ],
+    "ap": [
+     0.3508,
+     0.0409
+    ]
+   },
+   "isolation_forest_no_discount": {
+    "auc": [
+     0.6383,
+     0.0151
+    ],
+    "ap": [
+     0.0482,
+     0.004
+    ]
+   },
+   "ecod": {
+    "auc": [
+     0.9226,
+     0.0025
+    ],
+    "ap": [
+     0.1983,
+     0.0093
+    ]
+   }
+  }
+ },
+ "superset": {
+  "url": "http://localhost:8094/superset/dashboard/mlbench-batch-view/",
+  "charts": 11,
+  "problems": []
+ },
+ "kibana_url": "http://localhost:5605/app/dashboards#/view/mlbench-speed-view"
+}

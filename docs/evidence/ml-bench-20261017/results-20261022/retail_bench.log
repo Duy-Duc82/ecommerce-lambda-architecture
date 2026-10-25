@@ -1,0 +1,238 @@
+{
+ "dmx": {
+  "products": 268,
+  "max_len": 35,
+  "change_detection": {
+   "series": 156,
+   "observations": 3005,
+   "change_events": 68,
+   "series_with_change": 45,
+   "rel_change_abs_median": 0.0978,
+   "methods": {
+    "S1_rule_neq_last": {
+     "recall": 1.0,
+     "false_alarms": 0,
+     "false_alarm_per_1000_obs": 0.0,
+     "mean_delay_obs": 0.0,
+     "latency_us_per_obs": 0.04
+    },
+    "S2_cusum": {
+     "recall": 0.676,
+     "false_alarms": 0,
+     "false_alarm_per_1000_obs": 0.0,
+     "mean_delay_obs": 0.0,
+     "latency_us_per_obs": 0.33
+    },
+    "S3_page_hinkley": {
+     "recall": 0.735,
+     "false_alarms": 1,
+     "false_alarm_per_1000_obs": 0.33,
+     "mean_delay_obs": 0.46,
+     "latency_us_per_obs": 0.3
+    }
+   }
+  },
+  "spike_detection": {
+   "series": 151,
+   "methods": {
+    "B1_rolling_mad_z": {
+     "precision": {
+      "mean": 0.6,
+      "sd": 0.49
+     },
+     "recall": {
+      "mean": 0.006,
+      "sd": 0.006
+     },
+     "f1": {
+      "mean": 0.012,
+      "sd": 0.012
+     },
+     "scorable_share": {
+      "mean": 0.007,
+      "sd": 0.001
+     }
+    },
+    "B1b_current_rule_mad_then_iqr": {
+     "precision": {
+      "mean": 0.277,
+      "sd": 0.074
+     },
+     "recall": {
+      "mean": 0.051,
+      "sd": 0.015
+     },
+     "f1": {
+      "mean": 0.086,
+      "sd": 0.025
+     },
+     "scorable_share": {
+      "mean": 0.051,
+      "sd": 0.002
+     }
+    },
+    "B2_rolling_median_pct": {
+     "precision": {
+      "mean": 0.751,
+      "sd": 0.006
+     },
+     "recall": {
+      "mean": 0.996,
+      "sd": 0.004
+     },
+     "f1": {
+      "mean": 0.856,
+      "sd": 0.004
+     },
+     "scorable_share": {
+      "mean": 1.0,
+      "sd": 0.0
+     }
+    },
+    "B3_hampel": {
+     "precision": {
+      "mean": 0.582,
+      "sd": 0.007
+     },
+     "recall": {
+      "mean": 0.999,
+      "sd": 0.002
+     },
+     "f1": {
+      "mean": 0.736,
+      "sd": 0.006
+     },
+     "scorable_share": {
+      "mean": 1.0,
+      "sd": 0.0
+     }
+    }
+   }
+  }
+ },
+ "tiki": {
+  "products": 12952,
+  "max_len": 9,
+  "change_detection": {
+   "series": 12834,
+   "observations": 43533,
+   "change_events": 401,
+   "series_with_change": 306,
+   "rel_change_abs_median": 0.0493,
+   "methods": {
+    "S1_rule_neq_last": {
+     "recall": 1.0,
+     "false_alarms": 0,
+     "false_alarm_per_1000_obs": 0.0,
+     "mean_delay_obs": 0.0,
+     "latency_us_per_obs": 0.07
+    },
+    "S2_cusum": {
+     "recall": 0.451,
+     "false_alarms": 0,
+     "false_alarm_per_1000_obs": 0.0,
+     "mean_delay_obs": 0.17,
+     "latency_us_per_obs": 0.33
+    },
+    "S3_page_hinkley": {
+     "recall": 0.324,
+     "false_alarms": 1,
+     "false_alarm_per_1000_obs": 0.02,
+     "mean_delay_obs": 0.56,
+     "latency_us_per_obs": 0.4
+    }
+   }
+  },
+  "demand_density": [
+   {
+    "from_ts": 0,
+    "to_ts": 1,
+    "products_with_sold": 5037,
+    "sold_up": 24,
+    "share_up": 0.0048,
+    "units": 105,
+    "products_in_both": 7671,
+    "price_changed": 62,
+    "price_changed_share": 0.0081
+   },
+   {
+    "from_ts": 1,
+    "to_ts": 2,
+    "products_with_sold": 5043,
+    "sold_up": 19,
+    "share_up": 0.0038,
+    "units": 145,
+    "products_in_both": 7677,
+    "price_changed": 159,
+    "price_changed_share": 0.0207
+   },
+   {
+    "from_ts": 2,
+    "to_ts": 3,
+    "products_with_sold": 1870,
+    "sold_up": 116,
+    "share_up": 0.062,
+    "units": 625,
+    "products_in_both": 2668,
+    "price_changed": 71,
+    "price_changed_share": 0.0266
+   },
+   {
+    "from_ts": 3,
+    "to_ts": 4,
+    "products_with_sold": 5136,
+    "sold_up": 2,
+    "share_up": 0.0004,
+    "units": 377,
+    "products_in_both": 7831,
+    "price_changed": 8,
+    "price_changed_share": 0.001
+   },
+   {
+    "from_ts": 4,
+    "to_ts": 5,
+    "products_with_sold": 1051,
+    "sold_up": 1,
+    "share_up": 0.001,
+    "units": 3,
+    "products_in_both": 1399,
+    "price_changed": 2,
+    "price_changed_share": 0.0014
+   },
+   {
+    "from_ts": 5,
+    "to_ts": 6,
+    "products_with_sold": 1052,
+    "sold_up": 1,
+    "share_up": 0.001,
+    "units": 9,
+    "products_in_both": 1400,
+    "price_changed": 7,
+    "price_changed_share": 0.005
+   },
+   {
+    "from_ts": 6,
+    "to_ts": 7,
+    "products_with_sold": 491,
+    "sold_up": 3,
+    "share_up": 0.0061,
+    "units": 23,
+    "products_in_both": 647,
+    "price_changed": 5,
+    "price_changed_share": 0.0077
+   },
+   {
+    "from_ts": 7,
+    "to_ts": 8,
+    "products_with_sold": 491,
+    "sold_up": 0,
+    "share_up": 0.0,
+    "units": 0,
+    "products_in_both": 647,
+    "price_changed": 0,
+    "price_changed_share": 0.0
+   }
+  ],
+  "has_sold_share": 0.646
+ }
+}

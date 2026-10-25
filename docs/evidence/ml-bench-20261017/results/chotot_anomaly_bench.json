@@ -1,0 +1,230 @@
+{
+ "listings": 3188,
+ "invalid_price_le_1000": 5,
+ "usable": 3183,
+ "groups_ge_8": 296,
+ "rows_in_groups_ge_8": 3183,
+ "synthetic": {
+  "M1_iqr_fence": {
+   "auc": {
+    "mean": 0.9261,
+    "sd": 0.0103
+   },
+   "ap": {
+    "mean": 0.4038,
+    "sd": 0.034
+   },
+   "precision": {
+    "mean": 0.2895,
+    "sd": 0.0098
+   },
+   "recall": {
+    "mean": 0.7105,
+    "sd": 0.0246
+   },
+   "f1": {
+    "mean": 0.4114,
+    "sd": 0.0133
+   },
+   "fit_seconds": {
+    "mean": 0.0021,
+    "sd": 0.0002
+   }
+  },
+  "M2_mad_robust_z": {
+   "auc": {
+    "mean": 0.9255,
+    "sd": 0.0096
+   },
+   "ap": {
+    "mean": 0.3584,
+    "sd": 0.0204
+   },
+   "precision": {
+    "mean": 0.2882,
+    "sd": 0.0109
+   },
+   "recall": {
+    "mean": 0.6505,
+    "sd": 0.0355
+   },
+   "f1": {
+    "mean": 0.3993,
+    "sd": 0.0164
+   },
+   "fit_seconds": {
+    "mean": 0.0021,
+    "sd": 0.0002
+   }
+  },
+  "M3_isolation_forest": {
+   "auc": {
+    "mean": 0.7639,
+    "sd": 0.019
+   },
+   "ap": {
+    "mean": 0.073,
+    "sd": 0.0088
+   },
+   "precision": {
+    "mean": 0.0702,
+    "sd": 0.0081
+   },
+   "recall": {
+    "mean": 0.5221,
+    "sd": 0.0637
+   },
+   "f1": {
+    "mean": 0.1238,
+    "sd": 0.0143
+   },
+   "fit_seconds": {
+    "mean": 0.224,
+    "sd": 0.0379
+   }
+  },
+  "M4_lof": {
+   "auc": {
+    "mean": 0.8523,
+    "sd": 0.0181
+   },
+   "ap": {
+    "mean": 0.1126,
+    "sd": 0.0078
+   },
+   "precision": {
+    "mean": 0.1036,
+    "sd": 0.0055
+   },
+   "recall": {
+    "mean": 0.7895,
+    "sd": 0.0447
+   },
+   "f1": {
+    "mean": 0.1831,
+    "sd": 0.0097
+   },
+   "fit_seconds": {
+    "mean": 0.028,
+    "sd": 0.001
+   }
+  },
+  "M5_ecod": {
+   "auc": {
+    "mean": 0.8322,
+    "sd": 0.0135
+   },
+   "ap": {
+    "mean": 0.1088,
+    "sd": 0.0105
+   },
+   "precision": {
+    "mean": 0.1263,
+    "sd": 0.0158
+   },
+   "recall": {
+    "mean": 0.2126,
+    "sd": 0.0265
+   },
+   "f1": {
+    "mean": 0.1584,
+    "sd": 0.0198
+   },
+   "fit_seconds": {
+    "mean": 0.0297,
+    "sd": 0.0804
+   }
+  }
+ },
+ "timings": {},
+ "speed": {
+  "new_listings": 262,
+  "with_baseline": 17,
+  "coverage": 0.065,
+  "coverage_by_level": {
+   "none": 0.935,
+   "model+capacity": 0.046,
+   "model": 0.019
+  },
+  "flagged": 5,
+  "latency_us": {
+   "rule_mad_z": {
+    "p50": 0.1,
+    "p99": 1.8
+   },
+   "rule_iqr": {
+    "p50": 0.1,
+    "p99": 6.7
+   },
+   "isolation_forest_1row": {
+    "p50": 6629.5,
+    "p99": 7522.7
+   },
+   "ecod_1row": {
+    "p50": 2464.4,
+    "p99": 2890.7
+   }
+  },
+  "flagged_examples": [
+   {
+    "list_id": 135312592,
+    "subject": "oppo a53 128gb xanh lỗi loạn cảm ứng",
+    "price": 450000,
+    "group": "A53 | 128 GB",
+    "z": 11.66,
+    "flagged": true
+   },
+   {
+    "list_id": 135313239,
+    "subject": "xiaomi redmi 4gb/64gb xanh snapdragon 680",
+    "price": 500000,
+    "group": "Redmi Note 11 | *",
+    "z": 7.03,
+    "flagged": true
+   },
+   {
+    "list_id": 126021136,
+    "subject": "oneplus 13 fullbox snap 8 elite pin 6000 trả góp",
+    "price": 11500000,
+    "group": "13 | 256 GB",
+    "z": 4.39,
+    "flagged": true
+   },
+   {
+    "list_id": 135316394,
+    "subject": "iphone 14 pro max 128gb trắng đã thay màn",
+    "price": 6000000,
+    "group": "iPhone 14 Pro Max | 128 GB",
+    "z": 4.14,
+    "flagged": true
+   },
+   {
+    "list_id": 135316403,
+    "subject": "iphone 13 pro max 128gb đã sử dụng",
+    "price": 10000,
+    "group": "iPhone 13 Pro Max | 128 GB",
+    "z": 40.9,
+    "flagged": true
+   }
+  ],
+  "coverage_accumulated_baseline": 0.126,
+  "coverage_accumulated_by_level": {
+   "none": 0.874,
+   "model": 0.073,
+   "model+capacity": 0.053
+  },
+  "coverage_accumulated_last_third": 0.284
+ },
+ "injected_per_run": 95,
+ "real_flag_rate": {
+  "M1_iqr_fence": 0.0578,
+  "M2_mad_robust_z": 0.0556,
+  "M3_isolation_forest": 0.2246,
+  "M4_lof": 0.2133,
+  "M5_ecod": 0.0503
+ },
+ "baseline_level_share": {
+  "model+capacity": 0.751,
+  "model": 0.249
+ }
+}

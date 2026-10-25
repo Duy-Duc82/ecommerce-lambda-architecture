@@ -1,0 +1,72 @@
+{
+ "listings": 4801,
+ "invalid_price_le_1000": 6,
+ "usable": 4795,
+ "groups_ge_8": 345,
+ "rows_in_groups_ge_8": 4795,
+ "synthetic": {
+  "M1_iqr_fence": {
+   "auc": {
+    "mean": 0.9309,
+    "sd": 0.0091
+   },
+   "ap": {
+    "mean": 0.4595,
+    "sd": 0.0264
+   },
+   "precision": {
+    "mean": 0.2876,
+    "sd": 0.0107
+   },
+   "recall": {
+    "mean": 0.7049,
+    "sd": 0.0281
+   },
+   "f1": {
+    "mean": 0.4085,
+    "sd": 0.0149
+   },
+   "fit_seconds": {
+    "mean": 0.0031,
+    "sd": 0.0002
+   }
+  },
+  "M2_mad_robust_z": {
+   "auc": {
+    "mean": 0.9347,
+    "sd": 0.0082
+   },
+   "ap": {
+    "mean": 0.3765,
+    "sd": 0.0264
+   },
+   "precision": {
+    "mean": 0.32,
+    "sd": 0.0156
+   },
+   "recall": {
+    "mean": 0.6874,
+    "sd": 0.0276
+   },
+   "f1": {
+    "mean": 0.4366,
+    "sd": 0.0196
+   },
+   "fit_seconds": {
+    "mean": 0.0031,
+    "sd": 0.0002
+   }
+  }
+ },
+ "timings": {},
+ "injected_per_run": 143,
+ "real_flag_rate": {
+  "M1_iqr_fence": 0.0596,
+  "M2_mad_robust_z": 0.0484
+ },
+ "baseline_level_share": {
+  "model+capacity": 0.831,
+  "model": 0.169
+ }
+}
+{"new_listings": 390, "with_baseline": 23, "coverage": 0.059, "coverage_by_level": {"none": 0.941, "model+capacity": 0.044, "model": 0.015}, "flagged": 5, "latency_us": {"rule_mad_z": {"p50": 0.1, "p99": 1.2}, "rule_iqr": {"p50": 0.1, "p99": 1.2}}, "coverage_accumulated_baseline": 0.172, "coverage_accumulated_by_level": {"none": 0.828, "model": 0.09, "model+capacity": 0.082}, "coverage_accumulated_last_third": 0.277}

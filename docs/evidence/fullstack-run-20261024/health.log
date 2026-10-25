@@ -1,0 +1,168 @@
+== 2026-10-23T18:38:50Z (VN 01:38)
+crawl/10m=74 speedbatches/3m=36 changes/10m=12 dlq/30m=0
+batch: mp-20261023T1800Z SUCCEEDED q=PASS gold=69918
+batch: mp-20261023T1700Z SUCCEEDED q=PASS gold=32705
+FAILED|1 LEASED|6 READY|293 SUCCEEDED|1029 
+errors/30m {'superset': '30', 'postgres-dw': '21'}
+host RAM free 7.2 GB
+th-superset 272.3MiB / 13.65GiB;th-batch-scheduler 2.009GiB / 13.65GiB;th-speed 1.658GiB / 13.65GiB;th-kafka 805.6MiB / 13.65GiB;th-elasticsearch 1.945GiB / 13.65GiB;
+== 2026-10-23T19:07:34Z (VN 02:07)
+crawl/10m=98 speedbatches/3m=31 changes/10m=13 dlq/30m=0
+batch: mp-20261023T1800Z SUCCEEDED q=PASS gold=69918
+batch: mp-20261023T1700Z SUCCEEDED q=PASS gold=32705
+FAILED|1 READY|299 SUCCEEDED|1328 
+errors/30m {}
+host RAM free 7.1 GB
+th-superset 271MiB / 13.65GiB;th-batch-scheduler 2.018GiB / 13.65GiB;th-speed 1.771GiB / 13.65GiB;th-kafka 1.008GiB / 13.65GiB;th-elasticsearch 1.969GiB / 13.65GiB;
+== 2026-10-23T19:37:03Z (VN 02:37)
+crawl/10m=101 speedbatches/3m=30 changes/10m=14 dlq/30m=0
+batch: mp-20261023T1900Z SUCCEEDED q=PASS gold=69958
+batch: mp-20261023T1800Z SUCCEEDED q=PASS gold=69918
+batch: mp-20261023T1700Z SUCCEEDED q=PASS gold=32705
+FAILED|1 LEASED|3 READY|296 SUCCEEDED|1620 
+errors/30m {'postgres-dw': '10'}
+host RAM free 7.2 GB
+th-superset 269.1MiB / 13.65GiB;th-batch-scheduler 2.024GiB / 13.65GiB;th-speed 1.669GiB / 13.65GiB;th-kafka 1.04GiB / 13.65GiB;th-elasticsearch 1.978GiB / 13.65GiB;
+== 2026-10-23T20:06:33Z (VN 03:06)
+crawl/10m=100 speedbatches/3m=30 changes/10m=21 dlq/30m=0
+batch: mp-20261023T1900Z SUCCEEDED q=PASS gold=69958
+batch: mp-20261023T1800Z SUCCEEDED q=PASS gold=69918
+batch: mp-20261023T1700Z SUCCEEDED q=PASS gold=32705
+FAILED|1 LEASED|7 READY|292 SUCCEEDED|1905 
+errors/30m {}
+host RAM free 7.1 GB
+th-superset 266.4MiB / 13.65GiB;th-batch-scheduler 2.016GiB / 13.65GiB;th-speed 1.674GiB / 13.65GiB;th-kafka 1.077GiB / 13.65GiB;th-elasticsearch 1.982GiB / 13.65GiB;
+== 2026-10-23T20:35:59Z (VN 03:35)
+crawl/10m=100 speedbatches/3m=31 changes/10m=20 dlq/30m=0
+batch: mp-20261023T2000Z SUCCEEDED q=PASS gold=69966
+batch: mp-20261023T1900Z SUCCEEDED q=PASS gold=69958
+batch: mp-20261023T1800Z SUCCEEDED q=PASS gold=69918
+FAILED|1 LEASED|4 READY|295 SUCCEEDED|2189 
+errors/30m {'postgres-dw': '10'}
+host RAM free 7.1 GB
+th-superset 267.3MiB / 13.65GiB;th-batch-scheduler 2.012GiB / 13.65GiB;th-speed 1.675GiB / 13.65GiB;th-kafka 1.101GiB / 13.65GiB;th-elasticsearch 1.98GiB / 13.65GiB;
+== 2026-10-23T21:05:29Z (VN 04:05)
+crawl/10m=97 speedbatches/3m=31 changes/10m=22 dlq/30m=0
+batch: mp-20261023T2000Z SUCCEEDED q=PASS gold=69966
+batch: mp-20261023T1900Z SUCCEEDED q=PASS gold=69958
+batch: mp-20261023T1800Z SUCCEEDED q=PASS gold=69918
+FAILED|1 LEASED|2 READY|297 SUCCEEDED|2475 
+errors/30m {}
+host RAM free 7.1 GB
+th-superset 266.2MiB / 13.65GiB;th-batch-scheduler 2.008GiB / 13.65GiB;th-speed 1.678GiB / 13.65GiB;th-kafka 1.122GiB / 13.65GiB;th-elasticsearch 1.983GiB / 13.65GiB;
+== 2026-10-23T21:34:53Z (VN 04:34)
+crawl/10m=98 speedbatches/3m=32 changes/10m=22 dlq/30m=0
+batch: mp-20261023T2100Z SUCCEEDED q=PASS gold=69982
+batch: mp-20261023T2000Z SUCCEEDED q=PASS gold=69966
+batch: mp-20261023T1900Z SUCCEEDED q=PASS gold=69958
+FAILED|1 LEASED|6 READY|293 SUCCEEDED|2761 
+errors/30m {'postgres-dw': '10'}
+host RAM free 6.7 GB
+th-superset 261.3MiB / 13.65GiB;th-batch-scheduler 2.013GiB / 13.65GiB;th-speed 1.685GiB / 13.65GiB;th-kafka 1.131GiB / 13.65GiB;th-elasticsearch 1.975GiB / 13.65GiB;
+== 2026-10-23T22:04:18Z (VN 05:04)
+crawl/10m=98 speedbatches/3m=33 changes/10m=18 dlq/30m=0
+batch: mp-20261023T2100Z SUCCEEDED q=PASS gold=69982
+batch: mp-20261023T2000Z SUCCEEDED q=PASS gold=69966
+batch: mp-20261023T1900Z SUCCEEDED q=PASS gold=69958
+FAILED|1 LEASED|5 READY|294 SUCCEEDED|3048 
+errors/30m {}
+host RAM free 6.7 GB
+th-superset 260.7MiB / 13.65GiB;th-batch-scheduler 2.007GiB / 13.65GiB;th-speed 1.681GiB / 13.65GiB;th-kafka 1.146GiB / 13.65GiB;th-elasticsearch 1.977GiB / 13.65GiB;
+== 2026-10-23T22:33:45Z (VN 05:33)
+crawl/10m=97 speedbatches/3m=34 changes/10m=17 dlq/30m=0
+batch: mp-20261023T2200Z SUCCEEDED q=PASS gold=69982
+batch: mp-20261023T2100Z SUCCEEDED q=PASS gold=69982
+batch: mp-20261023T2000Z SUCCEEDED q=PASS gold=69966
+FAILED|1 LEASED|5 READY|294 SUCCEEDED|3336 
+errors/30m {'postgres-dw': '10'}
+host RAM free 6.8 GB
+th-superset 257.3MiB / 13.65GiB;th-batch-scheduler 2.014GiB / 13.65GiB;th-speed 1.682GiB / 13.65GiB;th-kafka 1.229GiB / 13.65GiB;th-elasticsearch 1.963GiB / 13.65GiB;
+== 2026-10-23T23:03:10Z (VN 06:03)
+crawl/10m=97 speedbatches/3m=34 changes/10m=13 dlq/30m=0
+batch: mp-20261023T2200Z SUCCEEDED q=PASS gold=69982
+batch: mp-20261023T2100Z SUCCEEDED q=PASS gold=69982
+batch: mp-20261023T2000Z SUCCEEDED q=PASS gold=69966
+FAILED|1 LEASED|6 READY|293 SUCCEEDED|3623 
+errors/30m {}
+host RAM free 6.8 GB
+th-superset 257.1MiB / 13.65GiB;th-batch-scheduler 2.009GiB / 13.65GiB;th-speed 1.685GiB / 13.65GiB;th-kafka 1.172GiB / 13.65GiB;th-elasticsearch 1.963GiB / 13.65GiB;
+== 2026-10-23T23:32:33Z (VN 06:32)
+crawl/10m=95 speedbatches/3m=35 changes/10m=6 dlq/30m=0
+batch: mp-20261023T2300Z FAILED q=- gold=-
+batch: mp-20261023T2200Z SUCCEEDED q=PASS gold=69982
+batch: mp-20261023T2100Z SUCCEEDED q=PASS gold=69982
+PROBLEM batch: mp-20261023T2300Z FAILED An error occurred while calling o22774.collectToPython.
+: org.apache.spark.SparkException: Job 6 cancelled because SparkContext was shut down
+	at org.apache.spark.scheduler.DAGScheduler.$anonfun$cleanUpAfterSchedulerStop$1(DAGScheduler.scala:1301)
+	at org.apache.spark.scheduler.DAGScheduler.$anonfun$cleanUpAfterSchedulerStop$1$adapted(DAGScheduler.scala:1299)
+	at scala.collection.mutable.HashSet$Node.foreach(HashSet.scala:450)
+	at scala.collection.mutable.HashSet.foreach(HashSet.scala:376)
+	at org.apache.spark.scheduler.DAGScheduler.cleanUpAfterSchedulerStop(DAGScheduler.scala:1299)
+	at org.apache.spark.scheduler.DAGSchedulerEventProcessLoop.onStop(DAGScheduler.scala:3234)
+	at org.apache.spark.util.EventLoop.stop(EventLoop.scala:85)
+	at org.apache.spark.scheduler.DAGScheduler.$anonfun$stop$3(DAGScheduler.scala:3120)
+	at org.apache.spark.util.Utils$.tryLogNonFatalError(Utils.scala:1300)
+	at org.apache.spark.scheduler.DAGScheduler.stop(DAGScheduler.scala:3120)
+	at org.apache.spark.SparkContext.$anonfun$stop$12(SparkContext.scala:2346)
+	at org.apache.spark.util.Utils$.tryLogNonFatalError(Utils.scala:1300)
+	at org.apache.spark.SparkContext.stop(SparkContext.scala:2346)
+	at org.apache.spark.SparkContext.stop(SparkContext.scala:2297)
+	at org.apache.spark.SparkContext.$anonfun$new$36(SparkContext.scala:704)
+	at org.apache.spark.util.SparkShutdownHook.run(ShutdownHookManager.scala:231)
+	at org.apache.spark.util.SparkShutdownHookManager.$anonfun$runAll$2(ShutdownHookManager.scala:205)
+	at scala.runtime.java8.JFunction0$mcV$sp.apply(JFunction0$mcV$sp.scala:18)
+	at org.apache.spark.util.Utils$.logUncaughtExceptions(Utils.scala:1937)
+	at org.apache.spark.util.SparkShutdownHookManager.$anonfun$runAll$1(ShutdownHookManager.scala:205)
+	at scala.runtime.java8.JFunction0$mcV$sp.apply(JFunction0$mcV$sp.scala:18)
+	at scala.util.Try$.apply(Try.scala:217)
+	at org.apache.spark.util.SparkShutdownHookManager.runAll(ShutdownHookManager.scala:205)
+	at org.apache.spark.util.SparkShutdownHookM
+FAILED|1 LEASED|5 READY|294 SUCCEEDED|3911 
+errors/30m {'batch-scheduler': '21'}
+host RAM free 8.6 GB
+th-superset 252.1MiB / 13.65GiB;th-batch-scheduler 175.5MiB / 13.65GiB;th-speed 1.682GiB / 13.65GiB;th-kafka 1.163GiB / 13.65GiB;th-elasticsearch 1.953GiB / 13.65GiB;
+== 2026-10-24T00:06:46Z (VN 07:06)
+crawl/10m=92 speedbatches/3m=31 changes/10m=15 dlq/30m=0
+batch: mp-20261023T2300Z SUCCEEDED q=PASS gold=69982
+batch: mp-20261023T2200Z SUCCEEDED q=PASS gold=69982
+batch: mp-20261023T2100Z SUCCEEDED q=PASS gold=69982
+FAILED|1 LEASED|2 READY|297 SUCCEEDED|4247 
+errors/30m {'postgres-dw': '10'}
+host RAM free 6.6 GB
+th-batch-scheduler 2.635GiB / 13.65GiB;th-superset 235.7MiB / 13.65GiB;th-speed 1.618GiB / 13.65GiB;th-kafka 1.091GiB / 13.65GiB;th-elasticsearch 1.919GiB / 13.65GiB;
+== 2026-10-24T00:36:13Z (VN 07:36)
+crawl/10m=92 speedbatches/3m=31 changes/10m=6 dlq/30m=0
+batch: mp-20261024T0000Z SUCCEEDED q=PASS gold=69982
+batch: mp-20261023T2300Z SUCCEEDED q=PASS gold=69982
+batch: mp-20261023T2200Z SUCCEEDED q=PASS gold=69982
+FAILED|1 LEASED|1 READY|298 SUCCEEDED|4536 
+errors/30m {'postgres-dw': '10'}
+host RAM free 6.7 GB
+th-batch-scheduler 3.362GiB / 13.65GiB;th-superset 228MiB / 13.65GiB;th-speed 1.57GiB / 13.65GiB;th-kafka 1.062GiB / 13.65GiB;th-elasticsearch 1.913GiB / 13.65GiB;
+== 2026-10-24T01:05:41Z (VN 08:05)
+crawl/10m=95 speedbatches/3m=35 changes/10m=27 dlq/30m=0
+batch: mp-20261024T0000Z SUCCEEDED q=PASS gold=69982
+batch: mp-20261023T2300Z SUCCEEDED q=PASS gold=69982
+batch: mp-20261023T2200Z SUCCEEDED q=PASS gold=69982
+FAILED|1 LEASED|2 READY|297 SUCCEEDED|4826 
+errors/30m {}
+host RAM free 6.7 GB
+th-batch-scheduler 3.328GiB / 13.65GiB;th-superset 212MiB / 13.65GiB;th-speed 1.536GiB / 13.65GiB;th-kafka 1.04GiB / 13.65GiB;th-elasticsearch 1.824GiB / 13.65GiB;
+== 2026-10-24T01:35:07Z (VN 08:35)
+crawl/10m=92 speedbatches/3m=31 changes/10m=30 dlq/30m=0
+batch: mp-20261024T0100Z SUCCEEDED q=PASS gold=121618
+batch: mp-20261024T0000Z SUCCEEDED q=PASS gold=69982
+batch: mp-20261023T2300Z SUCCEEDED q=PASS gold=69982
+FAILED|1 LEASED|3 READY|296 SUCCEEDED|5115 
+errors/30m {'postgres-dw': '10'}
+host RAM free 6.6 GB
+th-batch-scheduler 3.707GiB / 13.65GiB;th-superset 192.2MiB / 13.65GiB;th-speed 1.524GiB / 13.65GiB;th-kafka 918.7MiB / 13.65GiB;th-elasticsearch 1.628GiB / 13.65GiB;
+== 2026-10-24T02:10:24Z (VN 09:10)
+crawl/10m=94 speedbatches/3m=33 changes/10m=20 dlq/30m=0
+batch: mp-20261024T0100Z SUCCEEDED q=PASS gold=121618
+batch: mp-20261024T0000Z SUCCEEDED q=PASS gold=69982
+batch: mp-20261023T2300Z SUCCEEDED q=PASS gold=69982
+FAILED|1 LEASED|2 READY|297 SUCCEEDED|5461 
+errors/30m {}
+host RAM free 6.6 GB
+th-batch-scheduler 3.665GiB / 13.65GiB;th-superset 180.8MiB / 13.65GiB;th-speed 1.524GiB / 13.65GiB;th-kafka 892.8MiB / 13.65GiB;th-elasticsearch 1.549GiB / 13.65GiB;

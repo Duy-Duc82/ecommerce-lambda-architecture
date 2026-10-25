@@ -1,0 +1,123 @@
+erDiagram
+    DIM_DATE ||--o{ FACT_OFFER_OBSERVATION : observed_on
+    DIM_MARKETPLACE ||--o{ FACT_OFFER_OBSERVATION : listed_on
+    DIM_OFFER ||--o{ FACT_OFFER_OBSERVATION : sighting_of
+    DIM_SELLER ||--o{ FACT_OFFER_OBSERVATION : sold_by
+    DIM_CATEGORY ||--o{ FACT_OFFER_OBSERVATION : classified_as
+
+    DIM_DATE ||--o{ FACT_OFFER_DAILY : day
+    DIM_OFFER ||--o{ FACT_OFFER_DAILY : offer
+    DIM_SELLER ||--o{ FACT_OFFER_DAILY : seller
+    DIM_CATEGORY ||--o{ FACT_OFFER_DAILY : category
+    DIM_MARKETPLACE ||--o{ FACT_OFFER_DAILY : marketplace
+
+    DIM_DATE ||--o{ FACT_COUNTER_DELTA_DAILY : day
+    DIM_OFFER ||--o{ FACT_COUNTER_DELTA_DAILY : offer
+
+    DIM_DATE ||--o{ FACT_CRAWL_ATTEMPT : requested_on
+    DIM_MARKETPLACE ||--o{ FACT_CRAWL_ATTEMPT : source
+    DIM_CATEGORY ||--o{ FACT_CRAWL_ATTEMPT : target_page
+
+    DIM_DATE {
+        int date_key PK "yyyymmdd"
+        date full_date UK
+        smallint day_of_week
+        smallint month
+        smallint quarter
+        smallint year
+        boolean is_weekend
+    }
+    DIM_MARKETPLACE {
+        smallint marketplace_key PK
+        string marketplace_code UK "tiki"
+        string marketplace_id
+        string country "VN"
+    }
+    DIM_OFFER {
+        bigint offer_key PK
+        string offer_id UK "deterministic id"
+        string platform_listing_id
+        string product_title
+        string brand
+        string source_url
+        string currency
+        timestamp valid_from "SCD2"
+        timestamp valid_to "SCD2"
+        boolean is_current
+    }
+    DIM_SELLER {
+        bigint seller_key PK
+        string seller_id UK
+        timestamp first_seen_at
+        timestamp last_seen_at
+    }
+    DIM_CATEGORY {
+        int category_key PK
+        string category_path UK "1/2/1789/1795"
+        string leaf_category_id
+        string parent_path
+        smallint depth
+        string category_slug "from frontier target"
+    }
+    FACT_OFFER_OBSERVATION {
+        string observation_id PK "degenerate"
+        int date_key FK
+        smallint marketplace_key FK
+        bigint offer_key FK
+        bigint seller_key FK
+        int category_key FK
+        timestamp observed_at
+        decimal current_price
+        decimal list_price
+        decimal discount_percent
+        decimal rating_value
+        bigint rating_count
+        bigint review_count
+        bigint sold_count
+        bigint ranking_position
+        string availability
+        string crawl_run_id "lineage"
+        string raw_uri "lineage"
+    }
+    FACT_OFFER_DAILY {
+        int date_key PK
+        bigint offer_key PK
+        string currency PK
+        smallint marketplace_key FK
+        bigint seller_key FK
+        int category_key FK
+        decimal first_price
+        decimal last_price
+        decimal min_price
+        decimal max_price
+        decimal avg_price
+        bigint observation_count
+        bigint price_change_count
+        bigint price_drop_count
+        bigint price_increase_count
+        string anomaly_status
+        double robust_score
+    }
+    FACT_COUNTER_DELTA_DAILY {
+        int date_key PK
+        bigint offer_key PK
+        string counter_name PK
+        bigint first_value
+        bigint last_value
+        bigint valid_delta_sum
+        double velocity_proxy_per_hour
+        boolean counter_reset_or_invalid
+    }
+    FACT_CRAWL_ATTEMPT {
+        string attempt_id PK
+        int date_key FK
+        smallint marketplace_key FK
+        int category_key FK
+        string status
+        int http_status
+        bigint latency_ms
+        bigint raw_bytes
+        bigint parsed_count
+        bigint rejected_count
+        string raw_uri "lineage"
+    }

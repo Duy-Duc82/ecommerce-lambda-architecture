@@ -1,0 +1,340 @@
+{
+ "note": "Silver labels: two URLs match when they share a manufacturer part-number token that is unique inside\neach catalog (e.g. \"eb027w\" in \"...x1404ma-eb027w\"). Methods are scored twice: on the full name, and with\nthat per-configuration code masked (family codes such as x1404ma stay), as for sources without codes.",
+ "fptshop_to_cellphones__full": {
+  "left": 371,
+  "right": 465,
+  "scored_left": 229,
+  "with_match": 118,
+  "blocking_recall_at_10": 1.0,
+  "part_number_coverage_left": 0.617,
+  "methods": {
+   "tfidf_char_3_5": {
+    "precision": 0.966,
+    "recall": 0.958,
+    "f1": 0.962,
+    "tp": 113,
+    "fp": 4,
+    "fn": 5,
+    "seconds": 0.075
+   },
+   "tfidf_word": {
+    "precision": 0.939,
+    "recall": 0.915,
+    "f1": 0.927,
+    "tp": 108,
+    "fp": 7,
+    "fn": 10,
+    "seconds": 0.009
+   },
+   "rapidfuzz_token_set": {
+    "precision": 0.95,
+    "recall": 0.975,
+    "f1": 0.962,
+    "tp": 115,
+    "fp": 6,
+    "fn": 3,
+    "seconds": 0.243
+   },
+   "block_tfidf_top10_logreg": {
+    "precision": 0.974,
+    "recall": 0.966,
+    "f1": 0.97,
+    "tp": 114,
+    "fp": 3,
+    "fn": 4,
+    "seconds": 0.169
+   }
+  },
+  "examples": [
+   {
+    "left": "asus-tuf-gaming-a14-fa401uh-rg001w-r7-260",
+    "right": "laptop-asus-tuf-gaming-a14-fa401uh-rg001w.html"
+   },
+   {
+    "left": "asus-vivobook-16-x1607ca-mb387w-ultra-5-225h",
+    "right": "laptop-asus-vivobook-16-x1607ca-mb387w.html"
+   },
+   {
+    "left": "asus-tuf-gaming-a15-fa506ncg-hn390w-r7-155",
+    "right": "laptop-asus-tuf-gaming-a15-fa506ncg-hn390w.html"
+   },
+   {
+    "left": "hp-14-ep1012tu-core-5-120u-d72cppa",
+    "right": "laptop-hp-14-ep1012tu-d72cppa.html"
+   },
+   {
+    "left": "lenovo-ideapad-5-2-in-1-14iph11-u7-355-83ug0027vn",
+    "right": "laptop-lenovo-ideapad-5-2-in-1-14iph11-83ug0027vn.html"
+   },
+   {
+    "left": "asus-vivobook-14-x1404ma-eb027w-core-3-304",
+    "right": "laptop-asus-vivobook-14-x1404ma-eb027w.html"
+   },
+   {
+    "left": "lenovo-yoga-7-2-in-1-14iph11-u5-322-83tc002kvn",
+    "right": "laptop-lenovo-yoga-7-2-in-1-14iph11-83tc002kvn.html"
+   }
+  ]
+ },
+ "fptshop_to_cellphones__masked_config_code": {
+  "left": 371,
+  "right": 465,
+  "scored_left": 229,
+  "with_match": 118,
+  "blocking_recall_at_10": 0.975,
+  "part_number_coverage_left": 0.617,
+  "methods": {
+   "tfidf_char_3_5": {
+    "precision": 0.28,
+    "recall": 0.356,
+    "f1": 0.313,
+    "tp": 42,
+    "fp": 108,
+    "fn": 76,
+    "seconds": 0.038
+   },
+   "tfidf_word": {
+    "precision": 0.296,
+    "recall": 0.339,
+    "f1": 0.316,
+    "tp": 40,
+    "fp": 95,
+    "fn": 78,
+    "seconds": 0.008
+   },
+   "rapidfuzz_token_set": {
+    "precision": 0.227,
+    "recall": 0.347,
+    "f1": 0.274,
+    "tp": 41,
+    "fp": 140,
+    "fn": 77,
+    "seconds": 0.118
+   },
+   "block_tfidf_top10_logreg": {
+    "precision": 0.288,
+    "recall": 0.415,
+    "f1": 0.34,
+    "tp": 49,
+    "fp": 121,
+    "fn": 69,
+    "seconds": 0.126
+   }
+  },
+  "examples": [
+   {
+    "left": "asus-tuf-gaming-a14-fa401uh-rg001w-r7-260",
+    "right": "laptop-asus-tuf-gaming-a14-fa401uh-rg001w.html"
+   },
+   {
+    "left": "asus-vivobook-16-x1607ca-mb387w-ultra-5-225h",
+    "right": "laptop-asus-vivobook-16-x1607ca-mb387w.html"
+   },
+   {
+    "left": "asus-tuf-gaming-a15-fa506ncg-hn390w-r7-155",
+    "right": "laptop-asus-tuf-gaming-a15-fa506ncg-hn390w.html"
+   },
+   {
+    "left": "hp-14-ep1012tu-core-5-120u-d72cppa",
+    "right": "laptop-hp-14-ep1012tu-d72cppa.html"
+   },
+   {
+    "left": "lenovo-ideapad-5-2-in-1-14iph11-u7-355-83ug0027vn",
+    "right": "laptop-lenovo-ideapad-5-2-in-1-14iph11-83ug0027vn.html"
+   },
+   {
+    "left": "asus-vivobook-14-x1404ma-eb027w-core-3-304",
+    "right": "laptop-asus-vivobook-14-x1404ma-eb027w.html"
+   },
+   {
+    "left": "lenovo-yoga-7-2-in-1-14iph11-u5-322-83tc002kvn",
+    "right": "laptop-lenovo-yoga-7-2-in-1-14iph11-83tc002kvn.html"
+   }
+  ]
+ },
+ "fptshop_to_websosanh__full": {
+  "left": 371,
+  "right": 7556,
+  "scored_left": 229,
+  "with_match": 197,
+  "blocking_recall_at_10": 1.0,
+  "part_number_coverage_left": 0.617,
+  "methods": {
+   "tfidf_char_3_5": {
+    "precision": 0.941,
+    "recall": 0.98,
+    "f1": 0.96,
+    "tp": 193,
+    "fp": 12,
+    "fn": 4,
+    "seconds": 0.7
+   },
+   "tfidf_word": {
+    "precision": 0.919,
+    "recall": 0.985,
+    "f1": 0.951,
+    "tp": 194,
+    "fp": 17,
+    "fn": 3,
+    "seconds": 0.083
+   },
+   "rapidfuzz_token_set": {
+    "precision": 0.905,
+    "recall": 0.97,
+    "f1": 0.936,
+    "tp": 191,
+    "fp": 20,
+    "fn": 6,
+    "seconds": 3.198
+   },
+   "block_tfidf_top10_logreg": {
+    "precision": 0.947,
+    "recall": 0.99,
+    "f1": 0.968,
+    "tp": 195,
+    "fp": 11,
+    "fn": 2,
+    "seconds": 0.807
+   }
+  },
+  "examples": [
+   {
+    "left": "asus-tuf-gaming-a14-fa401uh-rg001w-r7-260",
+    "right": "laptop-asus-tuf-gaming-a14-fa401uh-rg001w-amd-ryzen-7"
+   },
+   {
+    "left": "asus-vivobook-16-x1607ca-mb387w-ultra-5-225h",
+    "right": "laptop-asus-vivobook-16-x1607ca-mb387w-intel-core-ultra-5"
+   },
+   {
+    "left": "gigabyte-gaming-a16-cvhi3vn893sh-i7-13620h",
+    "right": "laptop-gigabyte-gaming-a16-cvhi3vn893sh-intel-core-i7-13620h-16gb"
+   },
+   {
+    "left": "asus-vivobook-x1404va-eb509w-i3-1315u",
+    "right": "laptop-asus-vivobook-14-x1404va-eb509w-intel-core-i3-1315u-8gb"
+   },
+   {
+    "left": "asus-tuf-gaming-a15-fa506ncg-hn390w-r7-155",
+    "right": "laptop-asus-tuf-gaming-a15-fa506ncg-hn390w-amd-ryzen-7"
+   },
+   {
+    "left": "hp-14-ep1012tu-core-5-120u-d72cppa",
+    "right": "laptop-hp-14-ep1012tu-d72cppa-intel-core-5-120u-16gb-ram"
+   },
+   {
+    "left": "lenovo-ideapad-5-2-in-1-14iph11-u7-355-83ug0027vn",
+    "right": "laptop-lenovo-ideapad-5-2-in-1-14iph11-83ug0027vn-intel-core"
+   },
+   {
+    "left": "lenovo-gaming-loq-15irx10-i7-13650hx-16gb-83je00pevn",
+    "right": "laptop-lenovo-loq-15irx10-83je00pevn-intel-core-i7-13650hx-ram"
+   },
+   {
+    "left": "asus-vivobook-14-x1404ma-eb027w-core-3-304",
+    "right": "laptop-asus-vivobook-14-x1404ma-eb027w-intel-core-3-304-8gb"
+   },
+   {
+    "left": "lenovo-yoga-7-2-in-1-14iph11-u5-322-83tc002kvn",
+    "right": "laptop-lenovo-yoga-7-2in1-14iph11-83tc002kvn-intel-core"
+   },
+   {
+    "left": "asus-vivobook-s14-m3407ha-sf480w-r5-220",
+    "right": "laptop-asus-vivobook-s14-m3407ha-sf480w-amd-ryzen-5-220"
+   }
+  ]
+ },
+ "fptshop_to_websosanh__masked_config_code": {
+  "left": 371,
+  "right": 7556,
+  "scored_left": 229,
+  "with_match": 197,
+  "blocking_recall_at_10": 0.914,
+  "part_number_coverage_left": 0.617,
+  "methods": {
+   "tfidf_char_3_5": {
+    "precision": 0.396,
+    "recall": 0.365,
+    "f1": 0.38,
+    "tp": 72,
+    "fp": 110,
+    "fn": 125,
+    "seconds": 0.502
+   },
+   "tfidf_word": {
+    "precision": 0.368,
+    "recall": 0.381,
+    "f1": 0.374,
+    "tp": 75,
+    "fp": 129,
+    "fn": 122,
+    "seconds": 0.072
+   },
+   "rapidfuzz_token_set": {
+    "precision": 0.341,
+    "recall": 0.365,
+    "f1": 0.353,
+    "tp": 72,
+    "fp": 139,
+    "fn": 125,
+    "seconds": 2.523
+   },
+   "block_tfidf_top10_logreg": {
+    "precision": 0.382,
+    "recall": 0.401,
+    "f1": 0.391,
+    "tp": 79,
+    "fp": 128,
+    "fn": 118,
+    "seconds": 0.606
+   }
+  },
+  "examples": [
+   {
+    "left": "asus-tuf-gaming-a14-fa401uh-rg001w-r7-260",
+    "right": "laptop-asus-tuf-gaming-a14-fa401uh-rg001w-amd-ryzen-7"
+   },
+   {
+    "left": "asus-vivobook-16-x1607ca-mb387w-ultra-5-225h",
+    "right": "laptop-asus-vivobook-16-x1607ca-mb387w-intel-core-ultra-5"
+   },
+   {
+    "left": "gigabyte-gaming-a16-cvhi3vn893sh-i7-13620h",
+    "right": "laptop-gigabyte-gaming-a16-cvhi3vn893sh-intel-core-i7-13620h-16gb"
+   },
+   {
+    "left": "asus-vivobook-x1404va-eb509w-i3-1315u",
+    "right": "laptop-asus-vivobook-14-x1404va-eb509w-intel-core-i3-1315u-8gb"
+   },
+   {
+    "left": "asus-tuf-gaming-a15-fa506ncg-hn390w-r7-155",
+    "right": "laptop-asus-tuf-gaming-a15-fa506ncg-hn390w-amd-ryzen-7"
+   },
+   {
+    "left": "hp-14-ep1012tu-core-5-120u-d72cppa",
+    "right": "laptop-hp-14-ep1012tu-d72cppa-intel-core-5-120u-16gb-ram"
+   },
+   {
+    "left": "lenovo-ideapad-5-2-in-1-14iph11-u7-355-83ug0027vn",
+    "right": "laptop-lenovo-ideapad-5-2-in-1-14iph11-83ug0027vn-intel-core"
+   },
+   {
+    "left": "lenovo-gaming-loq-15irx10-i7-13650hx-16gb-83je00pevn",
+    "right": "laptop-lenovo-loq-15irx10-83je00pevn-intel-core-i7-13650hx-ram"
+   },
+   {
+    "left": "asus-vivobook-14-x1404ma-eb027w-core-3-304",
+    "right": "laptop-asus-vivobook-14-x1404ma-eb027w-intel-core-3-304-8gb"
+   },
+   {
+    "left": "lenovo-yoga-7-2-in-1-14iph11-u5-322-83tc002kvn",
+    "right": "laptop-lenovo-yoga-7-2in1-14iph11-83tc002kvn-intel-core"
+   },
+   {
+    "left": "asus-vivobook-s14-m3407ha-sf480w-r5-220",
+    "right": "laptop-asus-vivobook-s14-m3407ha-sf480w-amd-ryzen-5-220"
+   }
+  ]
+ },
+ "silver_label_manual_check": "50/50 random positive pairs (25 per site) read by hand: all the same configuration"
+}

@@ -1,0 +1,105 @@
+{
+ "stream": {
+  "listings": 1271,
+  "mua-ban-dien-thoai": {
+   "polls": 105,
+   "new_per_hour": 74.0,
+   "saturated_share": 0.01
+  },
+  "mua-ban-laptop": {
+   "polls": 105,
+   "new_per_hour": 19.9,
+   "saturated_share": 0.0
+  },
+  "mua-ban-do-dien-tu": {
+   "polls": 105,
+   "new_per_hour": 81.0,
+   "saturated_share": 0.0
+  }
+ },
+ "cohort": {
+  "listings": 1110,
+  "events": 48,
+  "censored": 1062,
+  "followup_hours_median": 2.8,
+  "followup_hours_max": 7.21
+ },
+ "kaplan_meier": {
+  "S(1h)": 0.996,
+  "S(2h)": 0.988,
+  "S(3h)": 0.979,
+  "S(4h)": 0.936,
+  "S(6h)": 0.923,
+  "median_hours": null
+ },
+ "kaplan_meier_by_cat": {
+  "mua-ban-dien-thoai": {
+   "S(1h)": 0.994,
+   "S(2h)": 0.986,
+   "S(3h)": 0.972,
+   "S(4h)": 0.916,
+   "S(6h)": 0.906,
+   "n": 473,
+   "events": 27
+  },
+  "mua-ban-do-dien-tu": {
+   "S(1h)": 0.998,
+   "S(2h)": 0.993,
+   "S(3h)": 0.987,
+   "S(4h)": 0.946,
+   "S(6h)": 0.923,
+   "n": 488,
+   "events": 18
+  },
+  "mua-ban-laptop": {
+   "S(1h)": 1.0,
+   "S(2h)": 0.977,
+   "S(3h)": 0.977,
+   "S(4h)": 0.977,
+   "S(6h)": 0.977,
+   "n": 149,
+   "events": 3
+  }
+ },
+ "cox_cv_concordance": {
+  "cox_all_features": {
+   "mean": 0.706,
+   "sd": 0.099
+  },
+  "cox_price_ratio_only": {
+   "mean": 0.587,
+   "sd": 0.073
+  }
+ },
+ "cox_hazard_ratios": {
+  "log_price_ratio": 0.929,
+  "dealer": 0.565,
+  "used": 0.965,
+  "imgs": 1.004,
+  "log_sold_ads": 0.951,
+  "f_defect": 1.04,
+  "f_installment": 0.749,
+  "f_buying": 0.736,
+  "f_like_new": 0.959,
+  "cat_mua-ban-laptop": 0.834,
+  "cat_mua-ban-do-dien-tu": 0.922
+ },
+ "cox_p_values": {
+  "log_price_ratio": 0.209,
+  "dealer": 0.0006,
+  "used": 0.8954,
+  "imgs": 0.9322,
+  "log_sold_ads": 0.1425,
+  "f_defect": 0.9123,
+  "f_installment": 0.6641,
+  "f_buying": 0.8761,
+  "f_like_new": 0.8373,
+  "cat_mua-ban-laptop": 0.4468,
+  "cat_mua-ban-do-dien-tu": 0.6149
+ },
+ "lgbm_removed_within_3h": {
+  "n": 552,
+  "positives": 19,
+  "cv_auc": 0.557
+ }
+}

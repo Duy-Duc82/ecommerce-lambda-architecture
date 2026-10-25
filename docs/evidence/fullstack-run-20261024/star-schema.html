@@ -1,0 +1,319 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Mô hình dữ liệu marketplace</title>
+<style>
+:root{--bg:#f5f6f4;--card:#fff;--fg:#1c2321;--muted:#5b6764;--line:#dbe0dd;--accent:#1f6f62}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#141917;--card:#1c2321;--fg:#e4ebe8;--muted:#9aa8a4;--line:#2e3835;--accent:#6cc4b2}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.6 "Segoe UI",system-ui,sans-serif;padding:32px 16px 64px}
+main{max-width:1400px;margin:0 auto;display:flex;flex-direction:column;gap:28px}
+h1{margin:0;font-size:1.9rem} h2{margin:0 0 10px;font-size:1.35rem;border-bottom:2px solid var(--line);padding-bottom:6px}
+.sub{color:var(--muted)} .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px;overflow-x:auto}
+code{font-family:Consolas,monospace;font-size:.88em}
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>Mô hình dữ liệu marketplace</h1>
+    <p class="sub">Mã Mermaid giống hệt <code>star-schema.md</code> trong cùng thư mục. Sơ đồ 1 là mô hình hiện có trong <code>batch_layer/marketplace_marts.py</code>; sơ đồ 2 là star schema đề xuất, chưa có trong code. Thư viện mermaid được tải từ cdn.jsdelivr.net, nên cần có mạng.</p>
+  </header>
+  <section><h2>1. Hiện tại: 10 mart Gold nối với nhau bằng natural key</h2><div class="card"><pre class="mermaid" id="d1"></pre></div></section>
+  <section><h2>2. Đề xuất: star schema (5 dim, 4 fact)</h2><div class="card"><pre class="mermaid" id="d2"></pre></div></section>
+</main>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10.9.1/dist/mermaid.min.js"></script>
+<script>
+const d1 = `erDiagram
+    SILVER_OFFER_OBSERVATION ||--o{ MARKETPLACE_OFFER_CURRENT : "latest per offer_id"
+    SILVER_OFFER_OBSERVATION ||--o{ MARKETPLACE_OFFER_PRICE_HISTORY_DAILY : "per offer, day, currency"
+    SILVER_OFFER_OBSERVATION ||--o{ MARKETPLACE_OFFER_CHANGE_DAILY : "per offer, day, currency"
+    SILVER_OFFER_OBSERVATION ||--o{ MARKETPLACE_PRICE_ANOMALY_DAILY : "per offer, day, currency"
+    SILVER_OFFER_OBSERVATION ||--o{ MARKETPLACE_COUNTER_DELTA_DAILY : "per offer, day, counter"
+    SILVER_OFFER_OBSERVATION ||--o{ MARKETPLACE_CATEGORY_PRICE_DAILY : "per category, day"
+    SILVER_OFFER_OBSERVATION ||--o{ MARKETPLACE_SELLER_CURRENT : "per seller"
+    MARKETPLACE_OFFER_CURRENT ||--|| MARKETPLACE_OFFER_FRESHNESS : offer_id
+    MARKETPLACE_OFFER_CURRENT ||--o{ MARKETPLACE_OFFER_PRICE_HISTORY_DAILY : offer_id
+    MARKETPLACE_OFFER_CURRENT ||--o{ MARKETPLACE_OFFER_CHANGE_DAILY : offer_id
+    MARKETPLACE_OFFER_CURRENT ||--o{ MARKETPLACE_PRICE_ANOMALY_DAILY : offer_id
+    MARKETPLACE_OFFER_CURRENT ||--o{ MARKETPLACE_COUNTER_DELTA_DAILY : offer_id
+    MARKETPLACE_SELLER_CURRENT ||--o{ MARKETPLACE_OFFER_CURRENT : seller_id
+    MARKETPLACE_CATEGORY_PRICE_DAILY }o--o{ MARKETPLACE_OFFER_CURRENT : category_path
+    AUDIT_CRAWL_REQUEST_ATTEMPT ||--o{ MARKETPLACE_CRAWL_RELIABILITY_DAILY : "per marketplace, day"
+    AUDIT_CRAWL_REQUEST_ATTEMPT ||--o{ MARKETPLACE_SOURCE_COVERAGE_DAILY : "per marketplace, day"
+
+    SILVER_OFFER_OBSERVATION {
+        string observation_id PK
+        string offer_id
+        string marketplace
+        string platform_listing_id
+        string seller_id
+        string category_path
+        timestamp observed_at
+        decimal current_price
+        decimal list_price
+        decimal discount_percent
+        decimal rating_value
+        bigint rating_count
+        bigint review_count
+        bigint sold_count
+        string availability
+        bigint ranking_position
+        string crawl_run_id
+        string raw_uri
+    }
+    MARKETPLACE_OFFER_CURRENT {
+        string offer_id PK
+        string marketplace
+        string platform_listing_id
+        string seller_id
+        string product_title
+        string brand
+        string category_path
+        string currency
+        timestamp first_seen_at
+        timestamp last_seen_at
+        decimal current_price
+        decimal list_price
+        bigint sold_count
+        string availability
+        string raw_uri
+    }
+    MARKETPLACE_SELLER_CURRENT {
+        string seller_id PK
+        string marketplace PK
+        timestamp first_seen_at
+        timestamp last_seen_at
+        bigint observed_offer_count
+    }
+    MARKETPLACE_OFFER_PRICE_HISTORY_DAILY {
+        string marketplace PK
+        string offer_id PK
+        date observed_date PK
+        string currency PK
+        decimal first_price
+        decimal last_price
+        decimal min_price
+        decimal max_price
+        decimal avg_price
+        bigint observation_count
+        bigint distinct_price_count
+    }
+    MARKETPLACE_OFFER_CHANGE_DAILY {
+        string marketplace PK
+        string offer_id PK
+        date observed_date PK
+        string currency PK
+        bigint price_change_count
+        bigint price_drop_count
+        bigint price_increase_count
+        decimal max_price_drop
+        bigint counter_change_count
+        bigint availability_change_count
+    }
+    MARKETPLACE_PRICE_ANOMALY_DAILY {
+        string marketplace PK
+        string offer_id PK
+        date observed_date PK
+        string currency PK
+        decimal evaluated_price
+        decimal baseline_median
+        decimal baseline_mad
+        double robust_score
+        string anomaly_status
+        string anomaly_reason
+    }
+    MARKETPLACE_COUNTER_DELTA_DAILY {
+        string marketplace PK
+        string offer_id PK
+        date observed_date PK
+        string counter_name PK
+        bigint first_value
+        bigint last_value
+        bigint valid_delta_sum
+        double velocity_proxy_per_hour
+        boolean counter_reset_or_invalid
+    }
+    MARKETPLACE_OFFER_FRESHNESS {
+        string offer_id PK
+        timestamp as_of
+        timestamp last_observed_at
+        bigint age_seconds
+        string freshness_status
+    }
+    MARKETPLACE_CATEGORY_PRICE_DAILY {
+        string marketplace PK
+        string category_path PK
+        date observed_date PK
+        string currency PK
+        bigint observed_offer_count
+        decimal median_price
+        decimal p25_price
+        decimal p75_price
+    }
+    MARKETPLACE_SOURCE_COVERAGE_DAILY {
+        string marketplace PK
+        date observed_date PK
+        bigint observed_offer_count
+        bigint fresh_offer_count
+        double coverage_rate
+        double rejection_rate
+    }
+    MARKETPLACE_CRAWL_RELIABILITY_DAILY {
+        string marketplace PK
+        date request_date PK
+        bigint request_count
+        bigint succeeded_count
+        double success_rate
+        double p95_latency_ms
+        bigint rate_limited_count
+    }
+    AUDIT_CRAWL_REQUEST_ATTEMPT {
+        string attempt_id PK
+        string crawl_run_id
+        string task_id
+        timestamp started_at
+        timestamp completed_at
+        string status
+        int http_status
+        bigint latency_ms
+        bigint raw_bytes
+        bigint parsed_count
+        string raw_uri
+    }
+`;
+const d2 = `erDiagram
+    DIM_DATE ||--o{ FACT_OFFER_OBSERVATION : observed_on
+    DIM_MARKETPLACE ||--o{ FACT_OFFER_OBSERVATION : listed_on
+    DIM_OFFER ||--o{ FACT_OFFER_OBSERVATION : sighting_of
+    DIM_SELLER ||--o{ FACT_OFFER_OBSERVATION : sold_by
+    DIM_CATEGORY ||--o{ FACT_OFFER_OBSERVATION : classified_as
+
+    DIM_DATE ||--o{ FACT_OFFER_DAILY : day
+    DIM_OFFER ||--o{ FACT_OFFER_DAILY : offer
+    DIM_SELLER ||--o{ FACT_OFFER_DAILY : seller
+    DIM_CATEGORY ||--o{ FACT_OFFER_DAILY : category
+    DIM_MARKETPLACE ||--o{ FACT_OFFER_DAILY : marketplace
+
+    DIM_DATE ||--o{ FACT_COUNTER_DELTA_DAILY : day
+    DIM_OFFER ||--o{ FACT_COUNTER_DELTA_DAILY : offer
+
+    DIM_DATE ||--o{ FACT_CRAWL_ATTEMPT : requested_on
+    DIM_MARKETPLACE ||--o{ FACT_CRAWL_ATTEMPT : source
+    DIM_CATEGORY ||--o{ FACT_CRAWL_ATTEMPT : target_page
+
+    DIM_DATE {
+        int date_key PK "yyyymmdd"
+        date full_date UK
+        smallint day_of_week
+        smallint month
+        smallint quarter
+        smallint year
+        boolean is_weekend
+    }
+    DIM_MARKETPLACE {
+        smallint marketplace_key PK
+        string marketplace_code UK "tiki"
+        string marketplace_id
+        string country "VN"
+    }
+    DIM_OFFER {
+        bigint offer_key PK
+        string offer_id UK "deterministic id"
+        string platform_listing_id
+        string product_title
+        string brand
+        string source_url
+        string currency
+        timestamp valid_from "SCD2"
+        timestamp valid_to "SCD2"
+        boolean is_current
+    }
+    DIM_SELLER {
+        bigint seller_key PK
+        string seller_id UK
+        timestamp first_seen_at
+        timestamp last_seen_at
+    }
+    DIM_CATEGORY {
+        int category_key PK
+        string category_path UK "1/2/1789/1795"
+        string leaf_category_id
+        string parent_path
+        smallint depth
+        string category_slug "from frontier target"
+    }
+    FACT_OFFER_OBSERVATION {
+        string observation_id PK "degenerate"
+        int date_key FK
+        smallint marketplace_key FK
+        bigint offer_key FK
+        bigint seller_key FK
+        int category_key FK
+        timestamp observed_at
+        decimal current_price
+        decimal list_price
+        decimal discount_percent
+        decimal rating_value
+        bigint rating_count
+        bigint review_count
+        bigint sold_count
+        bigint ranking_position
+        string availability
+        string crawl_run_id "lineage"
+        string raw_uri "lineage"
+    }
+    FACT_OFFER_DAILY {
+        int date_key PK
+        bigint offer_key PK
+        string currency PK
+        smallint marketplace_key FK
+        bigint seller_key FK
+        int category_key FK
+        decimal first_price
+        decimal last_price
+        decimal min_price
+        decimal max_price
+        decimal avg_price
+        bigint observation_count
+        bigint price_change_count
+        bigint price_drop_count
+        bigint price_increase_count
+        string anomaly_status
+        double robust_score
+    }
+    FACT_COUNTER_DELTA_DAILY {
+        int date_key PK
+        bigint offer_key PK
+        string counter_name PK
+        bigint first_value
+        bigint last_value
+        bigint valid_delta_sum
+        double velocity_proxy_per_hour
+        boolean counter_reset_or_invalid
+    }
+    FACT_CRAWL_ATTEMPT {
+        string attempt_id PK
+        int date_key FK
+        smallint marketplace_key FK
+        int category_key FK
+        string status
+        int http_status
+        bigint latency_ms
+        bigint raw_bytes
+        bigint parsed_count
+        bigint rejected_count
+        string raw_uri "lineage"
+    }
+`;
+document.getElementById("d1").textContent = d1;
+document.getElementById("d2").textContent = d2;
+const dark = matchMedia("(prefers-color-scheme: dark)").matches;
+mermaid.initialize({
+        startOnLoad: true, theme: dark ? "dark" : "default", er: {
+        useMaxWidth: false } });
+</script>
+</body>
+</html>

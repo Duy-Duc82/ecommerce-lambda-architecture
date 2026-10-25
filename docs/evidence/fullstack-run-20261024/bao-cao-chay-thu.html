@@ -1,0 +1,274 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Chạy thử full stack</title>
+<style>
+:root{
+  --bg:#f5f6f4; --card:#ffffff; --fg:#1c2321; --muted:#5b6764; --line:#dbe0dd; --accent:#1f6f62; --accent-soft:#e2efeb;
+  --ok:#1f7a45; --ok-bg:#e2f3e7; --bad:#b3261e; --bad-bg:#fbe4e2; --warn:#946000; --warn-bg:#fbefd6;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:17px/1.65 "Segoe UI",system-ui,Roboto,sans-serif;padding:36px 16px 72px}
+main{max-width:1080px;margin:0 auto;display:flex;flex-direction:column;gap:40px}
+h1{font-size:2.05rem;margin:0 0 6px;line-height:1.2}
+h2{font-size:1.45rem;margin:0 0 16px;padding-bottom:8px;border-bottom:2px solid var(--line)}
+h3{font-size:1.12rem;margin:20px 0 10px}
+p{margin:0}
+section{display:flex;flex-direction:column;gap:12px}
+.sub{color:var(--muted)}
+code{font-family:Consolas,"Cascadia Mono",ui-monospace,monospace;font-size:.86em;background:var(--accent-soft);padding:1px 5px;border-radius:4px;overflow-wrap:anywhere}
+.tw{overflow-x:auto;background:var(--card);border:1px solid var(--line);border-radius:12px}
+table{border-collapse:collapse;width:100%;min-width:780px}
+table.narrow{min-width:540px}
+th,td{padding:10px 13px;text-align:left;vertical-align:top;border-bottom:1px solid var(--line);font-size:.92rem}
+th{background:#eef1ef;font-size:.83rem;color:var(--muted)}
+tr:last-child td{border-bottom:0}
+tr.tier td{background:#f3f6f4;font-weight:700;color:var(--accent)}
+td.r{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:14px}
+.kpi{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px 18px}
+.kpi b{display:block;font-size:1.55rem;color:var(--accent);line-height:1.2;font-variant-numeric:tabular-nums}
+.kpi span{color:var(--muted);font-size:.88rem}
+.chip{display:inline-block;font-size:.8rem;font-weight:700;padding:3px 10px;border-radius:999px;white-space:nowrap}
+.ok{color:var(--ok);background:var(--ok-bg)} .bad{color:var(--bad);background:var(--bad-bg)} .warn{color:var(--warn);background:var(--warn-bg)}
+.box{background:var(--accent-soft);border-radius:12px;padding:20px 22px;display:flex;flex-direction:column;gap:10px}
+.box code{background:#fff}
+.why{background:var(--card);border-left:4px solid var(--warn);border-radius:0 12px 12px 0;padding:16px 20px;display:flex;flex-direction:column;gap:8px}
+ul,ol{margin:0;padding-left:1.3em;display:flex;flex-direction:column;gap:7px}
+pre{margin:0;background:#1e2524;color:#dbe7e3;border-radius:8px;padding:14px 16px;overflow-x:auto;font:13.5px/1.55 Consolas,"Cascadia Mono",ui-monospace,monospace}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#141917; --card:#1c2321; --fg:#e4ebe8; --muted:#9aa8a4; --line:#2e3835; --accent:#6cc4b2; --accent-soft:#1f302c;
+  --ok:#7fd49c; --ok-bg:#1d3326; --bad:#f2a49d; --bad-bg:#3a2220; --warn:#e8c26a; --warn-bg:#3a3020;}
+  :root:not([data-theme="light"]) th, :root:not([data-theme="light"]) tr.tier td{background:#232b29}
+  :root:not([data-theme="light"]) .box code{background:var(--card)}}
+</style>
+</head>
+<body>
+<main>
+
+<header>
+  <h1>Báo cáo chạy thử full stack Lambda trong 8 giờ</h1>
+  <p class="sub">Cửa sổ đo: 24/10/2026, 01:09–09:10 giờ VN (23/10 18:09 – 24/10 02:10 UTC) · Project Docker <code>mp-tikihtml</code>, branch <code>phase-9-tiki-category-html</code> (commit <code>b5644f4</code>) · Máy dev Windows 11, máy ảo Docker 13,65 GB RAM, 8 CPU · Số liệu gốc: <code>run_report_metrics.json</code>, <code>health.log</code> trong cùng thư mục</p>
+</header>
+
+<section>
+  <h2>1. Kết luận</h2>
+  <div class="kpis">
+    <div class="kpi"><b>8 giờ 1 phút</b><span>chạy liên tục; trong 481 phút không có khoảng trống crawl nào từ 5 phút trở lên</span></div>
+    <div class="kpi"><b>4.718 / 4.718</b><span>lượt crawl trang danh mục thành công (HTTP 200), 0 lần bị chặn</span></div>
+    <div class="kpi"><b>140.116</b><span>quan sát sản phẩm, gồm 8.530 offer của 1.155 người bán</span></div>
+    <div class="kpi"><b>3,2 s</b><span>trung vị từ lúc crawl xong tới lúc có trong Elasticsearch (p95: 5,6 s)</span></div>
+    <div class="kpi"><b>5.772 / 0</b><span>micro-batch của speed / số batch lỗi</span></div>
+    <div class="kpi"><b>11 / 11</b><span>lượt batch mỗi giờ SUCCEEDED, quality PASS (tính cả T0300Z phủ hết cửa sổ)</span></div>
+    <div class="kpi"><b>26,0 phút</b><span>từ lúc cửa sổ batch đóng tới lúc Gold được publish (trung vị)</span></div>
+    <div class="kpi"><b>4,3 GB</b><span>dữ liệu trên MinIO sau khi chạy (Bronze 2,8 GB, Silver 1,4 GB, Gold 97 MB)</span></div>
+  </div>
+  <div class="box">
+    <p>Cả ba layer chạy ổn định trên một máy dev trong 8 giờ, với dữ liệu thật của Tiki:</p>
+    <ul>
+      <li><b>Speed layer</b> đưa thay đổi lên Kibana trong vài giây.</li>
+      <li><b>Batch layer</b> dựng lại Gold mỗi giờ và qua mọi quality check bắt buộc.</li>
+      <li><b>Grafana</b> gom log của tất cả container theo từng layer.</li>
+    </ul>
+    <p>Có <b>một sự cố</b>: lượt batch 06:26 hết heap của Spark. Mình đã tăng heap, và scheduler tự chạy lại run đó lúc 06:33 (mục 9). Crawl và speed không bị ảnh hưởng.</p>
+  </div>
+</section>
+
+<section>
+  <h2>2. Quy mô</h2>
+  <div class="tw"><table class="narrow">
+    <tr><th>Hạng mục</th><th>Giá trị trong cửa sổ 8 giờ</th></tr>
+    <tr class="tier"><td colspan="2">Nguồn</td></tr>
+    <tr><td>Sàn</td><td>Tiki (<code>tiki.vn</code>)</td></tr>
+    <tr><td>Danh mục được theo dõi</td><td>300: 60 danh mục cố định từ <code>env/tiki_html_categories.json</code> và 240 danh mục chọn ngẫu nhiên từ <code>sitemap_categories_1.xml</code>. 299 danh mục đã được crawl trong cửa sổ.</td></tr>
+    <tr><td>Chu kỳ</td><td>Quét lại mỗi danh mục sau 30 phút (tier ACTIVE); đo thật: trung vị 30,5 phút, p95 30,9 phút</td></tr>
+    <tr class="tier"><td colspan="2">Crawl</td></tr>
+    <tr><td>Số trang tải</td><td class="r">4.718 (588,5 trang/giờ, khoảng 9,8 trang/phút)</td></tr>
+    <tr><td>Trạng thái HTTP</td><td class="r">200: 4.718 · 403/429/5xx: 0</td></tr>
+    <tr><td>Sản phẩm thường mỗi trang</td><td class="r">40 (đã bỏ sản phẩm quảng cáo)</td></tr>
+    <tr><td>Dữ liệu thô (HTML)</td><td class="r">2,14 GB; trung vị 462 KB/trang, p95 672 KB</td></tr>
+    <tr class="tier"><td colspan="2">Luồng dữ liệu</td></tr>
+    <tr><td>Bản ghi Kafka <code>marketplace.observations.v1</code> (3 partition), cả lượt chạy</td><td class="r">176.015</td></tr>
+    <tr><td>Dòng speed layer xử lý trong cửa sổ</td><td class="r">140.149 vào → 140.774 ghi ES, 140.774 ghi Redis; 0 dòng sai, 0 dòng trễ</td></tr>
+    <tr><td>Silver (trong ngày UTC, tới lượt batch cuối)</td><td class="r">159.455 dòng</td></tr>
+    <tr><td>Gold: tổng 10 bảng mart trong <code>cache.*</code></td><td class="r">121.737 dòng · 8.530 offer · 1.155 người bán · 633 đường dẫn danh mục</td></tr>
+    <tr><td>DLQ</td><td class="r">0</td></tr>
+  </table></div>
+</section>
+
+<section>
+  <h2>3. Sàn được crawl và lý do chỉ có Tiki</h2>
+  <ul>
+    <li><b>Chỉ có Tiki.</b> Đây là nguồn duy nhất đã có adapter trong pipeline Lambda: <code>TikiCategoryHtmlCrawler</code>, <code>adapter_version=tiki-category-html-v1</code>.</li>
+    <li><b>Các nguồn khác chưa có adapter</b> trong <code>crawler/sites/</code>, nên chưa chạy qua Kafka / Spark / Gold. Đó là Chợ Tốt, ĐMX, FPT, Websosanh, Phong Vũ (đã khảo sát trong <code>bao-cao-nguon-du-lieu.html</code>). Riêng ĐMX đã đổi markup từ 22/10; parser của script khảo sát đã được sửa để đọc JSON-LD (mục 7.2 của <code>bao-cao-bai-toan-ml.html</code>).</li>
+  </ul>
+</section>
+
+<section>
+  <h2>4. Phương pháp crawl</h2>
+  <div class="tw"><table class="narrow">
+    <tr><th>Bước</th><th>Cách làm</th></tr>
+    <tr><td>Lên lịch</td><td>Frontier lưu trong Postgres <code>audit.crawl_frontier</code>, mỗi trang danh mục là một task. Worker lấy (lease) tối đa 10 task mỗi lượt, poll 5 giây một lần. Sau khi crawl xong, task được hẹn lại sau <code>CRAWL_ACTIVE_CADENCE_MINUTES=30</code>.</td></tr>
+    <tr><td>Tải trang</td><td>HTTP GET thường tới <code>https://tiki.vn/&lt;slug&gt;/c&lt;id&gt;</code>, chỉ trang 1, vì Tiki không phân trang được qua URL. Không gọi API nội bộ, không dùng proxy, không dùng trình duyệt. Mỗi request cách nhau <code>CRAWL_REQUEST_DELAY_SECONDS=3.5</code> giây; đo thật trung vị 5,0 giây.</td></tr>
+    <tr><td>Parse</td><td>Đọc JSON trong <code>&lt;script id="__NEXT_DATA__"&gt;</code>, lấy danh sách sản phẩm ở <code>props.initialState.catalog.data</code> và bỏ các mục có trường <code>advertisement</code>. Trang không có <code>__NEXT_DATA__</code> (trang thử thách) bị tính là lỗi parse để thử lại sau.</td></tr>
+    <tr><td>Bronze</td><td>Body HTML gốc ghi lên MinIO <code>s3a://ecommerce-bronze/marketplace/raw/marketplace=tiki/observed_date=…/hour=…/crawl_run_id=…/raw_artifact_id=…/body.bin</code>, kèm SHA-256 để kiểm toán và parse lại.</td></tr>
+    <tr><td>Publish</td><td>Mỗi sản phẩm thành một observation theo contract chung (giá, giá gốc, rating, bộ đếm công khai, người bán, danh mục), gửi lên Kafka <code>marketplace.observations.v1</code>. Mọi lượt crawl được ghi vào <code>audit.crawl_request_attempt</code> và <code>audit.crawl_run</code>.</td></tr>
+    <tr><td>Tuân thủ</td><td>Trang danh mục được phép với <code>User-agent: *</code>. Tải khoảng 10 request/phút, so với ngưỡng 60 request/phút đo được ngày 12/10 không bị chặn. Trong cửa sổ có 0 trang thử thách.</td></tr>
+  </table></div>
+  <p class="sub">Danh mục <code>quan-ao-da-banh-nam/c24200</code> có 1 lỗi parse vĩnh viễn: trang trả HTTP 200 nhưng không có sản phẩm thường nào. Lỗi này xảy ra trước cửa sổ đo.</p>
+</section>
+
+<section>
+  <h2>5. Đầu ra của từng layer</h2>
+  <div class="tw"><table>
+    <tr><th>Layer</th><th>Thành phần</th><th>Đầu ra</th><th>Nơi xem</th></tr>
+    <tr><td>Crawl</td><td><code>crawl-worker</code></td><td>Bronze trên MinIO, Kafka observations, <code>audit.crawl_*</code></td><td>Kibana "Source health", Grafana (layer crawl)</td></tr>
+    <tr><td>Ingest</td><td><code>silver-sink</code></td><td>Silver trên MinIO, DLQ trên Kafka</td><td>Grafana (layer ingest)</td></tr>
+    <tr><td><b>Speed</b></td><td><code>speed</code> (Spark Structured Streaming, trigger 5 s)</td><td>ES <code>marketplace-changes-v1</code>, <code>marketplace-offers-current-v1</code>, <code>marketplace-speed-batches-v1</code>; Redis (trạng thái offer); Kafka <code>marketplace.changes.v1</code></td><td><b>Kibana</b> http://localhost:5602: "Marketplace — realtime changes", "Marketplace — source health and freshness" (giờ VN, tự làm mới 5 s)</td></tr>
+    <tr><td><b>Batch</b></td><td><code>batch-scheduler</code> (Spark batch, mỗi giờ, lag 20 phút)</td><td>Gold trên MinIO, 10 mart trong Postgres <code>cache.marketplace_*</code>, <code>audit.marketplace_batch_run</code>, <code>audit.marketplace_quality_result</code></td><td><b>Superset</b> http://localhost:8089/superset/dashboard/marketplace-batch-gold/ (13 chart)</td></tr>
+    <tr><td>Giám sát</td><td>Promtail → Loki → Grafana</td><td>Log của mọi container, gắn nhãn <code>layer</code>, <code>service</code>, <code>level</code></td><td><b>Grafana</b> http://localhost:3001/d/lambda-logs (16 panel)</td></tr>
+  </table></div>
+</section>
+
+<section>
+  <h2>6. Độ trễ của từng layer</h2>
+  <div class="tw"><table>
+    <tr><th>Chặng</th><th>Cách đo</th><th>p50</th><th>p95</th><th>Max</th><th>n</th></tr><tr><td colspan="6" class="sub">Batch chỉ có 10 lượt chạy nên không có p95; xem từng run ở bảng dưới.</td></tr>
+    <tr class="tier"><td colspan="6">Crawl</td></tr>
+    <tr><td>Một lượt crawl: chờ giãn cách, tải, parse, ghi Bronze, publish</td><td><code>latency_ms</code> trong <code>crawl-attempts</code></td><td class="r">4,82 s</td><td class="r">6,51 s</td><td class="r">8,27 s</td><td class="r">4.718</td></tr>
+    <tr><td>Khoảng cách giữa hai request liên tiếp</td><td>Hiệu <code>started_at</code></td><td class="r">5,01 s</td><td class="r">10,8 s</td><td class="r">199 s</td><td class="r">4.717</td></tr>
+    <tr><td>Từ quan sát tới khi publish lên Kafka</td><td><code>produced_at − observed_at</code> của sự kiện <code>NEW_OFFER</code></td><td class="r">28 ms</td><td class="r">37 ms</td><td class="r">37 ms</td><td class="r">15</td></tr>
+    <tr class="tier"><td colspan="6">Ingest</td></tr>
+    <tr><td>Từ Kafka tới Silver</td><td>Thời điểm log <code>silver_record</code> trên Loki trừ <code>CreateTime</code> của đúng bản ghi Kafka ở offset đó</td><td class="r">171 ms</td><td class="r">269 ms</td><td class="r">277 ms</td><td class="r">40</td></tr>
+    <tr><td>Lag của consumer Silver</td><td><code>kafka-consumer-groups --describe</code></td><td colspan="4">0 bản ghi trên cả 3 partition</td></tr>
+    <tr class="tier"><td colspan="6">Speed</td></tr>
+    <tr><td>Khoảng cách giữa hai micro-batch</td><td>Hiệu <code>started_at</code></td><td class="r">5,00 s</td><td class="r">5,93 s</td><td class="r">7,58 s</td><td class="r">5.771</td></tr>
+    <tr><td>Thời gian xử lý một micro-batch có dữ liệu</td><td><code>duration_ms</code></td><td class="r">28 ms</td><td class="r">41 ms</td><td class="r">1,03 s</td><td class="r">4.537</td></tr>
+    <tr><td><b>Từ lúc crawl xong tới lúc có trong Elasticsearch</b></td><td>Từ <code>completed_at</code> của lượt crawl tới <code>completed_at</code> của micro-batch có dữ liệu đầu tiên sau đó</td><td class="r"><b>3,24 s</b></td><td class="r">5,59 s</td><td class="r">7,73 s</td><td class="r">4.718</td></tr>
+    <tr><td>Hiển thị trên Kibana</td><td>Dashboard tự làm mới</td><td colspan="4">mỗi 5 s, nên người xem thấy dữ liệu sau khoảng 3–13 s kể từ lúc crawl xong</td></tr>
+    <tr class="tier"><td colspan="6">Batch</td></tr>
+    <tr><td>Thời gian một lượt batch</td><td>Từ lúc run bắt đầu tới log <code>batch_tick</code></td><td class="r">3,1 phút</td><td class="r">—</td><td class="r">5,1 phút</td><td class="r">10</td></tr>
+    <tr><td><b>Từ lúc cửa sổ đóng (<code>as_of</code>) tới lúc Gold được publish</b></td><td>Từ <code>as_of</code> tới log <code>batch_tick</code></td><td class="r"><b>26,0 phút</b></td><td class="r">—</td><td class="r">69,6 phút</td><td class="r">10</td></tr>
+    <tr><td>Độ cũ tối đa của dữ liệu trên Superset</td><td>Cửa sổ 60 phút + lag 20 phút + thời gian chạy</td><td colspan="4">khoảng 85 phút; Superset làm mới dashboard mỗi 300 s</td></tr>
+  </table></div>
+  <div class="tw"><table class="narrow">
+    <tr><th>Run</th><th>Silver vào</th><th>Gold ra</th><th>Thời gian chạy</th><th><code>as_of</code> → publish</th><th>Kết quả</th></tr>
+    <tr><td><code>mp-20261023T1700Z</code></td><td class="r">4.073</td><td class="r">32.705</td><td class="r">1,3 phút</td><td class="r">69,6 phút*</td><td><span class="chip ok">PASS</span></td></tr>
+    <tr><td><code>mp-20261023T1800Z</code></td><td class="r">21.393</td><td class="r">69.918</td><td class="r">1,0 phút</td><td class="r">21,4 phút</td><td><span class="chip ok">PASS</span></td></tr>
+    <tr><td><code>mp-20261023T1900Z</code></td><td class="r">37.854</td><td class="r">69.958</td><td class="r">1,6 phút</td><td class="r">24,6 phút</td><td><span class="chip ok">PASS</span></td></tr>
+    <tr><td><code>mp-20261023T2000Z</code></td><td class="r">54.877</td><td class="r">69.966</td><td class="r">2,2 phút</td><td class="r">25,3 phút</td><td><span class="chip ok">PASS</span></td></tr>
+    <tr><td><code>mp-20261023T2100Z</code></td><td class="r">72.120</td><td class="r">69.982</td><td class="r">2,7 phút</td><td class="r">25,8 phút</td><td><span class="chip ok">PASS</span></td></tr>
+    <tr><td><code>mp-20261023T2200Z</code></td><td class="r">89.389</td><td class="r">69.982</td><td class="r">3,5 phút</td><td class="r">26,5 phút</td><td><span class="chip ok">PASS</span></td></tr>
+    <tr><td><code>mp-20261023T2300Z</code></td><td class="r">106.797</td><td class="r">69.982</td><td class="r">3,6 phút</td><td class="r">37,2 phút**</td><td><span class="chip ok">PASS</span> sau khi resume</td></tr>
+    <tr><td><code>mp-20261024T0000Z</code></td><td class="r">124.275</td><td class="r">69.982</td><td class="r">3,8 phút</td><td class="r">26,1 phút</td><td><span class="chip ok">PASS</span></td></tr>
+    <tr><td><code>mp-20261024T0100Z</code></td><td class="r">141.890</td><td class="r">121.618</td><td class="r">4,3 phút</td><td class="r">26,7 phút</td><td><span class="chip ok">PASS</span></td></tr>
+    <tr><td><code>mp-20261024T0200Z</code></td><td class="r">159.455</td><td class="r">121.737</td><td class="r">5,1 phút</td><td class="r">25,4 phút</td><td><span class="chip ok">PASS</span></td></tr>
+    <tr><td><code>mp-20261024T0300Z</code> (sau cửa sổ, phủ tới 09:59)</td><td class="r">177.016</td><td class="r">121.799</td><td class="r">—</td><td class="r">—</td><td><span class="chip ok">PASS</span></td></tr>
+  </table></div>
+  <ul>
+    <li>* Run đầu tiên chạy lúc stack vừa khởi động (01:08), khi cửa sổ 00:00–01:00 đã đóng từ trước, nên khoảng cách tới lúc publish dài hơn.</li>
+    <li>** Lượt đầu bị lỗi hết heap lúc 06:26; lượt resume lúc 06:33 thì thành công.</li>
+    <li><b>Thời gian batch tăng tuyến tính theo lượng Silver,</b> từ 1,0 lên 5,1 phút. Mỗi lượt xử lý lại toàn bộ Silver của ngày UTC hiện tại. Nếu ngoại suy cho 24 giờ (khoảng 0,5 triệu dòng Silver) thì một lượt mất khoảng 15 phút, vẫn ngắn hơn chu kỳ 60 phút.</li>
+    <li>Gold giữ khoảng 70.000 dòng trong cùng một ngày UTC, vì các mart gộp theo ngày; số dòng tăng lên 121.618 khi có ngày UTC mới, 24/10 (từ 07:00 giờ VN).</li>
+  </ul>
+</section>
+
+<section>
+  <h2>7. Kết quả dữ liệu</h2>
+  <div class="tw"><table class="narrow">
+    <tr><th>Sự kiện thay đổi trong cửa sổ (speed)</th><th>Số lượng</th></tr>
+    <tr><td><code>COUNTER_CHANGED</code> (bộ đếm công khai, ví dụ số đã bán)</td><td class="r">356</td></tr>
+    <tr><td><code>PRICE_CHANGED</code></td><td class="r">205</td></tr>
+    <tr><td><code>RATING_CHANGED</code></td><td class="r">31</td></tr>
+    <tr><td><code>NEW_OFFER</code> (offer mới xuất hiện sau lượt đầu)</td><td class="r">15</td></tr>
+    <tr><td><code>LARGE_PRICE_DROP</code></td><td class="r">10</td></tr>
+    <tr><td><code>OFFER_STALE</code></td><td class="r">8</td></tr>
+  </table></div>
+  <div class="tw"><table class="narrow">
+    <tr><th>Mart Gold (<code>cache.*</code>, sau run <code>T0200Z</code>)</th><th>Số dòng</th></tr>
+    <tr><td><code>marketplace_counter_delta_daily</code></td><td class="r">51.126</td></tr>
+    <tr><td><code>marketplace_offer_change_daily</code>, <code>offer_price_history_daily</code>, <code>price_anomaly_daily</code></td><td class="r">17.042 mỗi bảng</td></tr>
+    <tr><td><code>marketplace_offer_current</code>, <code>offer_freshness</code></td><td class="r">8.530 mỗi bảng</td></tr>
+    <tr><td><code>marketplace_category_price_daily</code></td><td class="r">1.266</td></tr>
+    <tr><td><code>marketplace_seller_current</code></td><td class="r">1.155</td></tr>
+    <tr><td><code>marketplace_source_coverage_daily</code>, <code>crawl_reliability_daily</code></td><td class="r">2 mỗi bảng (23/10 và 24/10)</td></tr>
+  </table></div>
+  <ul>
+    <li><b>Độ phủ nguồn:</b> 23/10 đạt 1,000 (quan sát được 8.524 offer); 24/10 đạt 0,997. <b>Độ tin cậy crawl</b> (tính cả ngày, kể cả trước cửa sổ): 23/10 có 4.184 request, 1 lỗi; 24/10 có 1.178 request, 0 lỗi.</li>
+    <li>Dữ liệu mới nhất trên Gold: <b>09:59 giờ VN</b> (run <code>T0300Z</code>, chạy 10:20, PASS), nên Superset phủ hết cửa sổ 01:09–09:10.</li>
+    <li><code>price_anomaly_daily</code> toàn bộ là <code>INSUFFICIENT_HISTORY</code>: luật cần lịch sử nhiều ngày của từng offer, 8 giờ chưa đủ.</li>
+  </ul>
+</section>
+
+<section>
+  <h2>8. Lưu trữ và tài nguyên</h2>
+  <div class="tw"><table class="narrow">
+    <tr><th>Thành phần</th><th>Dung lượng / bộ nhớ</th></tr>
+    <tr><td>MinIO</td><td>4,3 GB: Bronze 2,8 GB, Silver 1,4 GB, Gold 97 MB. Bronze tăng khoảng 2,1 GB mỗi 8 giờ, tức khoảng 6,4 GB/ngày với 300 danh mục.</td></tr>
+    <tr><td>Elasticsearch</td><td><code>changes</code> 13,9 MB · <code>offers-current</code> 19,3 MB · <code>crawl-attempts</code> 6,3 MB · <code>speed-batches</code> 1,1 MB</td></tr>
+    <tr><td>Postgres</td><td>77 MB</td></tr>
+    <tr><td>RAM các container (cuối lượt)</td><td><code>batch-scheduler</code> 3,66 GB · <code>minio</code> 2,30 GB · <code>elasticsearch</code> 1,56 GB · <code>speed</code> 1,38 GB · <code>kafka</code> 0,88 GB · <code>kibana</code> 0,53 GB · <code>superset</code> 0,25 GB · Loki + Promtail + Grafana 0,25 GB</td></tr>
+    <tr><td>CPU</td><td>Container <code>speed</code> chiếm khoảng 98% của 1 core, vì trigger 5 s; các container khác dưới 3%.</td></tr>
+    <tr><td>Máy</td><td>Máy ảo Docker 13,65 GB (theo <code>.wslconfig</code>); Windows còn trống 6,6–8,6 GB trong suốt lượt chạy.</td></tr>
+  </table></div>
+</section>
+
+<section>
+  <h2>9. Giám sát log và sự cố</h2>
+  <p><b>Grafana "Lambda pipeline — log theo layer"</b> có các panel: số dòng log mỗi phút theo layer, số lỗi mỗi 5 phút theo layer, tổng lỗi trong khoảng thời gian đang chọn, bảng chỉ lỗi/cảnh báo, và mỗi layer một khung log riêng. Có thể lọc theo <code>service</code> và tìm bằng regex. Promtail xác định mức log từ các dấu hiệu rõ ràng: <code>level=error</code>, <code>[ERROR]</code>, các từ ERROR/FATAL viết hoa, <code>Traceback</code>, <code>XxxError:</code>.</p>
+  <div class="tw"><table class="narrow">
+    <tr><th>Layer</th><th>Dòng log trong 8 giờ</th><th>Dòng mức error</th></tr>
+    <tr><td>ingest</td><td class="r">139.839</td><td class="r">0</td></tr>
+    <tr><td>speed</td><td class="r">16.749</td><td class="r">0</td></tr>
+    <tr><td>serving</td><td class="r">2.324</td><td class="r">30 (Superset refresh dataset legacy lúc 01:12, do script dựng dashboard)</td></tr>
+    <tr><td>storage</td><td class="r">958</td><td class="r">81 (Postgres báo <code>relation "staging.mp_…" does not exist</code> ở bước kiểm tra bảng staging của batch; từ 09:16 những dòng này được gắn nhãn <code>expected</code>)</td></tr>
+    <tr><td>crawl</td><td class="r">898</td><td class="r">0</td></tr>
+    <tr><td>batch</td><td class="r">248</td><td class="r">21 (lỗi hết heap lúc 06:26)</td></tr>
+  </table></div>
+  <div class="tw"><table>
+    <tr><th>Thời điểm (VN)</th><th>Sự cố</th><th>Phát hiện</th><th>Xử lý</th><th>Ảnh hưởng</th></tr>
+    <tr><td>01:12–01:16</td><td>Promtail khởi động lại liên tục: trong YAML, <code>\b</code> bị đổi thành ký tự điều khiển</td><td>Script kiểm tra sức khoẻ</td><td>Viết lại pipeline stage bằng heredoc nguyên văn</td><td>Không mất log: Promtail đọc bù từ vị trí đã lưu</td></tr>
+    <tr><td>06:26–06:33</td><td>Batch <code>T2300Z</code>: <code>java.lang.OutOfMemoryError: Java heap space</code> khi cache dữ liệu</td><td>Kiểm tra sức khoẻ 06:32; nguyên nhân đọc trên Grafana/Loki</td><td>Batch không đặt <code>spark.driver.memory</code> nên dùng heap mặc định 1 GB. Thêm <code>PYSPARK_SUBMIT_ARGS="--driver-memory 3g pyspark-shell"</code> rồi tạo lại batch-scheduler; scheduler tự resume run</td><td>Gold trễ thêm khoảng 11 phút; crawl và speed không đổi</td></tr>
+    <tr><td>09:12–09:16 (sau cửa sổ)</td><td>Promtail không parse được selector của stage <code>match</code> mới</td><td>Kiểm tra sau khi sửa</td><td>Dùng selector không có ký tự escape</td><td>Không mất log: Loki vẫn có đủ log của mọi phút 09:08–09:21</td></tr>
+  </table></div>
+</section>
+
+<section>
+  <h2>10. Hạn chế</h2>
+  <div class="why">
+    <ul>
+      <li><b>Chỉ một sàn (Tiki), chỉ trang 1</b> của mỗi danh mục. Số offer bị giới hạn ở khoảng 40 × số danh mục.</li>
+      <li><b>Mỗi lượt batch dựng lại cả ngày,</b> nên thời gian chạy tăng theo lượng Silver. Nếu chạy dài ngày cần chuyển sang xử lý incremental.</li>
+      <li><b>Phát hiện giá bất thường trong batch</b> cần nhiều ngày dữ liệu; luật MAD → IQR hiện tại không chấm được chuỗi giá đổi theo bậc (xem <code>bao-cao-bai-toan-ml.html</code>, mục 4.2).</li>
+      <li><b>Độ trễ publish lên Kafka</b> chỉ đo được trên 15 sự kiện <code>NEW_OFFER</code>, vì đó là loại sự kiện duy nhất mang đủ <code>observed_at</code> và <code>produced_at</code>. Độ trễ Kafka → Silver đo trên mẫu 40 bản ghi.</li>
+      <li><b>Chạy trên laptop:</b> phải giữ máy thức và có đủ RAM. Trước khi tạo <code>.wslconfig</code>, có hai lần tiến trình bị dừng vì một ứng dụng khác (EpicWebHelper) chiếm khoảng 16 GB.</li>
+      <li><b>Cấu hình của lượt chạy chưa nằm trong repo.</b> Các file <code>stream.override.yml</code>, <code>observability/</code>, <code>run-fullstack.sh</code> đang ở worktree tạm.</li>
+    </ul>
+  </div>
+</section>
+
+<section>
+  <h2>11. Xem dữ liệu gốc</h2>
+  <ul>
+    <li><b>MinIO Console</b> http://localhost:9011 (<code>minioadmin</code> / <code>minioadmin</code>): <code>ecommerce-bronze/marketplace/raw/…/body.bin</code> (HTML gốc) + <code>metadata.json</code>; <code>ecommerce-silver/marketplace/offer_observations/…/observation_id=….json</code> (mỗi quan sát một file); <code>ecommerce-gold</code>.</li>
+    <li>Mẫu đã lấy ra: <code>samples/bronze_body.html</code>, <code>samples/bronze_metadata.json</code>, <code>samples/silver_observation.json</code> (chỉ dùng nội bộ, không commit).</li>
+    <li>Truy ngược: <code>raw_uri</code> trong <code>audit.crawl_request_attempt</code>, index <code>marketplace-crawl-attempts-*</code> và từng quan sát Silver.</li>
+  </ul>
+</section>
+
+<section>
+  <h2>12. Cách chạy lại</h2>
+<pre># từ worktree branch phase-9-tiki-category-html (xuống dòng LF)
+sh run-fullstack.sh up -d --build loki promtail grafana
+sh run-fullstack.sh up -d
+docker compose --profile ops run --rm ops python -m ops migrate
+docker compose --profile ops run --rm ops python -m ops seed --marketplace tiki --tier ACTIVE --category &lt;slug/cID&gt; ...
+python observability/build_superset_batch_dashboard.py http://localhost:8089
+sh observability/healthcheck.sh          # kiểm tra sức khoẻ, in dòng PROBLEM nếu có vấn đề</pre>
+</section>
+
+</main>
+</body>
+</html>

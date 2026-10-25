@@ -1,0 +1,172 @@
+{
+ "dmx": {
+  "products": 264,
+  "max_len": 29,
+  "change_detection": {
+   "series": 151,
+   "observations": 2769,
+   "change_events": 50,
+   "series_with_change": 39,
+   "rel_change_abs_median": 0.1064,
+   "methods": {
+    "S1_rule_neq_last": {
+     "recall": 1.0,
+     "false_alarms": 0,
+     "false_alarm_per_1000_obs": 0.0,
+     "mean_delay_obs": 0.0,
+     "latency_us_per_obs": 0.04
+    },
+    "S2_cusum": {
+     "recall": 0.72,
+     "false_alarms": 0,
+     "false_alarm_per_1000_obs": 0.0,
+     "mean_delay_obs": 0.0,
+     "latency_us_per_obs": 0.39
+    },
+    "S3_page_hinkley": {
+     "recall": 0.74,
+     "false_alarms": 1,
+     "false_alarm_per_1000_obs": 0.36,
+     "mean_delay_obs": 0.46,
+     "latency_us_per_obs": 0.31
+    }
+   }
+  },
+  "spike_detection": {
+   "series": 151,
+   "methods": {
+    "B1_rolling_mad_z": {
+     "precision": {
+      "mean": 0.6,
+      "sd": 0.49
+     },
+     "recall": {
+      "mean": 0.006,
+      "sd": 0.006
+     },
+     "f1": {
+      "mean": 0.012,
+      "sd": 0.012
+     },
+     "scorable_share": {
+      "mean": 0.006,
+      "sd": 0.001
+     }
+    },
+    "B1b_current_rule_mad_then_iqr": {
+     "precision": {
+      "mean": 0.311,
+      "sd": 0.07
+     },
+     "recall": {
+      "mean": 0.046,
+      "sd": 0.01
+     },
+     "f1": {
+      "mean": 0.08,
+      "sd": 0.018
+     },
+     "scorable_share": {
+      "mean": 0.034,
+      "sd": 0.001
+     }
+    },
+    "B2_rolling_median_pct": {
+     "precision": {
+      "mean": 0.753,
+      "sd": 0.004
+     },
+     "recall": {
+      "mean": 0.997,
+      "sd": 0.004
+     },
+     "f1": {
+      "mean": 0.858,
+      "sd": 0.002
+     },
+     "scorable_share": {
+      "mean": 1.0,
+      "sd": 0.0
+     }
+    },
+    "B3_hampel": {
+     "precision": {
+      "mean": 0.66,
+      "sd": 0.007
+     },
+     "recall": {
+      "mean": 1.0,
+      "sd": 0.0
+     },
+     "f1": {
+      "mean": 0.795,
+      "sd": 0.005
+     },
+     "scorable_share": {
+      "mean": 1.0,
+      "sd": 0.0
+     }
+    }
+   }
+  }
+ },
+ "tiki": {
+  "products": 7744,
+  "max_len": 3,
+  "change_detection": {
+   "series": 7656,
+   "observations": 15312,
+   "change_events": 221,
+   "series_with_change": 194,
+   "rel_change_abs_median": 0.0341,
+   "methods": {
+    "S1_rule_neq_last": {
+     "recall": 1.0,
+     "false_alarms": 0,
+     "false_alarm_per_1000_obs": 0.0,
+     "mean_delay_obs": 0.0,
+     "latency_us_per_obs": 0.1
+    },
+    "S2_cusum": {
+     "recall": 0.362,
+     "false_alarms": 0,
+     "false_alarm_per_1000_obs": 0.0,
+     "mean_delay_obs": 0.03,
+     "latency_us_per_obs": 0.35
+    },
+    "S3_page_hinkley": {
+     "recall": 0.158,
+     "false_alarms": 0,
+     "false_alarm_per_1000_obs": 0.0,
+     "mean_delay_obs": 0.11,
+     "latency_us_per_obs": 0.45
+    }
+   }
+  },
+  "demand_density": [
+   {
+    "from_ts": 0,
+    "to_ts": 1,
+    "products_with_sold": 5037,
+    "sold_up": 24,
+    "share_up": 0.0048,
+    "units": 105,
+    "products_in_both": 7671,
+    "price_changed": 62,
+    "price_changed_share": 0.0081
+   },
+   {
+    "from_ts": 1,
+    "to_ts": 2,
+    "products_with_sold": 5043,
+    "sold_up": 19,
+    "share_up": 0.0038,
+    "units": 145,
+    "products_in_both": 7677,
+    "price_changed": 159,
+    "price_changed_share": 0.0207
+   }
+  ],
+  "has_sold_share": 0.655
+ }
+}
