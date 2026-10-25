@@ -300,7 +300,7 @@
   },
   {
    "type": "row",
-   "title": "Ingest (silver-sink): Kafka → Silver",
+   "title": "Ingest (kafka-init): tạo topic Kafka",
    "id": 7,
    "collapsed": false,
    "gridPos": {

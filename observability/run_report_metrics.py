@@ -104,6 +104,7 @@ for a in att:
 m["speed"]["crawl_done_to_es_s"] = pct(e2e)
 
 # ---- Kafka -> Silver: sample silver_record log lines, compare with the Kafka record timestamp ----------------
+# (historical: the silver-sink service was retired after the 2026-10-24 run)
 q = requests.get(f"{LOKI}/loki/api/v1/query_range", params={"query": '{service="silver-sink"} |= "silver_record"', "limit": 40,
                                                             "start": int(ts("2026-10-24T01:00:00Z").timestamp() * 1e9),
                                                             "end": int(ts("2026-10-24T01:05:00Z").timestamp() * 1e9)}, timeout=60).json()

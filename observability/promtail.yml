@@ -25,7 +25,7 @@ scrape_configs:
         replacement: ${COMPOSE_PROJECT_NAME}
       # one Lambda layer per service
       - {source_labels: [service], regex: "crawl-worker|stub-source", target_label: layer, replacement: crawl}
-      - {source_labels: [service], regex: "silver-sink|kafka-init", target_label: layer, replacement: ingest}
+      - {source_labels: [service], regex: "kafka-init", target_label: layer, replacement: ingest}
       - {source_labels: [service], regex: "speed", target_label: layer, replacement: speed}
       - {source_labels: [service], regex: "batch-scheduler|batch-once", target_label: layer, replacement: batch}
       - {source_labels: [service], regex: "es-projector|kibana|kibana-marketplace-setup|superset|superset-init", target_label: layer, replacement: serving}

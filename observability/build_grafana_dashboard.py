@@ -6,7 +6,7 @@ DS = {"type": "loki", "uid": "loki"}
 SEL = 'project="mp-tikihtml"'
 ERR = ""  # errors are selected by the level label Promtail sets
 LAYERS = [("crawl", "Crawl (crawl-worker): tải trang, ghi bronze, publish Kafka"),
-          ("ingest", "Ingest (silver-sink): Kafka → Silver"),
+          ("ingest", "Ingest (kafka-init): tạo topic Kafka"),
           ("speed", "Speed (Spark Structured Streaming): Kafka → ES / Redis"),
           ("batch", "Batch (scheduler + Spark batch): Silver → Gold → quality → Postgres"),
           ("serving", "Serving (es-projector, Kibana, Superset)"),
