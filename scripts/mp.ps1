@@ -9,7 +9,7 @@
 #   .\scripts\mp.ps1 down [-Volumes]
 #   .\scripts\mp.ps1 status
 #   .\scripts\mp.ps1 migrate
-#   .\scripts\mp.ps1 seed --category 1846 --pages 2
+#   .\scripts\mp.ps1 seed --source tiki --category laptop-may-vi-tinh-linh-kien/c1846
 #   .\scripts\mp.ps1 smoke [-TimeoutSeconds 900]
 #   .\scripts\mp.ps1 validate [-Json path]
 #   .\scripts\mp.ps1 drill d1..d11|all              (after a passing smoke)
@@ -153,7 +153,7 @@ function Invoke-Smoke {
     #    are process variables: they are restored in `finally`, or a later
     #    command in the same shell would inherit them.
     $smokeEnv = [ordered]@{
-        TIKI_LISTING_URL = "http://stub-source:8000/api/personalish/v1/blocks/listings"
+        TIKI_BASE_URL = "http://stub-source:8000"
         CRAWL_ACTIVE_CADENCE_MINUTES = "1"
         MARKETPLACE_QUALITY_RECONCILIATION_SETTLE_SECONDS = "60"
     }
@@ -195,7 +195,7 @@ function Invoke-Smoke {
         return $code
     } finally {
         # The smoke's categories are made up: never leave them due, or a later
-        # `mp up` with the real TIKI_LISTING_URL would crawl the live site.
+        # `mp up` with the real TIKI_BASE_URL would crawl the live site.
         if ($seeded) {
             & docker @($Compose + @("--profile", "crawl", "stop", "crawl-worker")) | Write-Host
             if ((Invoke-Ops @("park-smoke")) -ne 0) {

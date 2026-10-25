@@ -11,7 +11,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from ecomdata.ops import es_projector as p
+from ecomdata.serving import es_projector as p
 
 NOW = datetime(2026, 10, 4, 12, 0, tzinfo=UTC)
 OVERLAP = 900
@@ -385,7 +385,7 @@ def test_the_projector_module_answers_help():
     import subprocess
     import sys
 
-    result = subprocess.run([sys.executable, "-m", "ecomdata.ops.es_projector", "--help"],
+    result = subprocess.run([sys.executable, "-m", "ecomdata.serving.es_projector", "--help"],
                             capture_output=True, text=True, timeout=120)
 
     assert result.returncode == 0

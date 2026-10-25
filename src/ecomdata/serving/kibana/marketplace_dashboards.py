@@ -4,7 +4,7 @@ Two dashboards:
 
 * **Marketplace — realtime changes**, which fills the empty shell Phase 5 left;
 * **Marketplace — source health and freshness**, the Brief section 17
-  operational view, built on the four indices ``ops/es_projector.py`` writes.
+  operational view, built on the four indices ``serving/es_projector.py`` writes.
 
 A Lens panel is a few hundred lines of JSON, and thirteen of them hand-edited
 would drift from each other on the first change. So the objects are built here

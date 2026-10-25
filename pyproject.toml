@@ -107,5 +107,38 @@ name = "ecomdata never imports legacy"
 type = "forbidden"
 source_modules = ["ecomdata"]
 forbidden_modules = ["legacy"]
-# Removed in R3 together with SiteCrawler's old crawl() path.
-ignore_imports = ["ecomdata.ingestion.site_crawler -> legacy"]
+
+[[tool.importlinter.contracts]]
+name = "ecomdata layers"
+type = "layers"
+layers = [
+    "ecomdata.ops | ecomdata.serving",
+    "ecomdata.ingestion | ecomdata.processing",
+    "ecomdata.infra",
+    "ecomdata.settings",
+    "ecomdata.domain",
+]
+
+[[tool.importlinter.contracts]]
+name = "domain is pure"
+type = "forbidden"
+source_modules = ["ecomdata.domain"]
+forbidden_modules = [
+    "pyspark",
+    "requests",
+    "psycopg2",
+    "kafka",
+    "minio",
+    "boto3",
+    "playwright",
+    "redis",
+    "elasticsearch",
+    "ecomdata.settings",
+    "ecomdata.infra",
+]
+allow_indirect_imports = true
+
+[[tool.importlinter.contracts]]
+name = "ingestion and processing are independent"
+type = "independence"
+modules = ["ecomdata.ingestion", "ecomdata.processing"]

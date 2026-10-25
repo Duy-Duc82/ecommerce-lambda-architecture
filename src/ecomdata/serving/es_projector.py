@@ -43,8 +43,8 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any, Protocol
 
-from ecomdata.ops.bootstrap import connection_factory as _connection_factory
-from ecomdata.ops.bootstrap import settings as _settings
+from ecomdata.serving.bootstrap import connection_factory as _connection_factory
+from ecomdata.serving.bootstrap import settings as _settings
 
 # ---------------------------------------------------------------------------
 # Sources
@@ -479,11 +479,6 @@ def main(argv: list[str] | None = None) -> int:
         sources=sources, bulk=elasticsearch_bulk(es), overlap_seconds=_settings().service.project_overlap_seconds
     )
     rebuild = args.rebuild
-    # Phase 9 plan section 6.3: the projector already wakes every interval on
-    # every stack, live included, so it takes the day's storage snapshot.
-    from ecomdata.ops.storage import DailySnapshot, run_snapshot
-
-    daily = DailySnapshot(run_snapshot)
     try:
         while True:
             try:
@@ -498,17 +493,6 @@ def main(argv: list[str] | None = None) -> int:
                 print(
                     json.dumps(
                         {"event": "projection_failed", "error": f"{type(error).__name__}: {error}"[:500]},
-                        sort_keys=True,
-                    ),
-                    flush=True,
-                )
-            try:
-                if not args.once:
-                    daily.maybe(datetime.now(UTC))
-            except Exception as error:
-                print(
-                    json.dumps(
-                        {"event": "storage_snapshot_failed", "error": f"{type(error).__name__}: {error}"[:500]},
                         sort_keys=True,
                     ),
                     flush=True,

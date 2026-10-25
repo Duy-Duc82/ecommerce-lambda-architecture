@@ -142,19 +142,6 @@ def test_one_unreadable_store_does_not_cost_the_others_their_rows():
     assert report["failed"] == {"kafka": "ConnectionError: kafka down"}
 
 
-def test_the_daily_snapshot_runs_once_per_utc_date_and_retries_a_total_failure():
-    calls = []
-    outcomes = iter([{"measured": 0}, {"measured": 3}, {"measured": 3}])
-    daily = storage.DailySnapshot(lambda now: calls.append(now) or next(outcomes))
-
-    daily.maybe(NOW)  # nothing measured: retried
-    daily.maybe(NOW.replace(minute=31))
-    daily.maybe(NOW.replace(minute=59))  # same date: skipped
-    daily.maybe(datetime(2026, 10, 5, 0, 1, tzinfo=UTC))  # a new date: taken
-
-    assert [c.minute for c in calls] == [30, 31, 1]
-
-
 # -- P2-04: the growth report (plan section 10, test 11) --
 
 

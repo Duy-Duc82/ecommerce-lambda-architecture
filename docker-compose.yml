@@ -148,16 +148,15 @@ services:
     profiles: ["crawl", "demo", "bench"]
     container_name: ${MP_CONTAINER_PREFIX:-}crawl-worker
     restart: unless-stopped
-    # CRAWL_SITE picks the adapter: "tiki" (listing API) or "tiki-html"
-    # (public category page, __NEXT_DATA__). Both publish marketplace "tiki".
-    command: ["python", "-m", "ecomdata.ingestion.service", "--site", "${CRAWL_SITE:-tiki}"]
+    # CRAWL_SOURCES names the sources this worker crawls (comma-separated).
+    command: ["python", "-m", "ecomdata.ingestion.service", "--sources", "${CRAWL_SOURCES:-tiki}"]
     environment:
       <<: *marketplace-env
       # A drill starts a second worker under another ID; two workers sharing
       # one would complete each other's leases.
       CRAWL_SERVICE_WORKER_ID: ${CRAWL_SERVICE_WORKER_ID:-crawl-worker}
       # Overridable so a smoke or drill can point the crawler at a stub.
-      TIKI_LISTING_URL: ${TIKI_LISTING_URL:-https://tiki.vn/api/personalish/v1/blocks/listings}
+      TIKI_BASE_URL: ${TIKI_BASE_URL:-}
       # The smoke recrawls its ACTIVE tasks every minute instead of every hour.
       CRAWL_ACTIVE_CADENCE_MINUTES: ${CRAWL_ACTIVE_CADENCE_MINUTES:-60}
       # The drills shorten these; the defaults match config/settings.py.
@@ -287,7 +286,7 @@ services:
     profiles: ["ops", "demo"]
     container_name: ${MP_CONTAINER_PREFIX:-}es-projector
     restart: unless-stopped
-    command: ["python", "-m", "ecomdata.ops.es_projector"]
+    command: ["python", "-m", "ecomdata.serving.es_projector"]
     environment:
       <<: *marketplace-env
       SERVICE_HEARTBEAT_FILE: /tmp/heartbeat
@@ -310,17 +309,16 @@ services:
       elasticsearch:
         condition: service_healthy
 
-  # Offline stand-in for the Tiki listing API (plan section 8). The smoke and
-  # the drills set TIKI_LISTING_URL to http://stub-source:8000/...
+  # Offline stand-in for the Tiki category pages. The smoke and the drills set
+  # TIKI_BASE_URL to http://stub-source:8000.
   stub-source:
     <<: *marketplace-python
     profiles: ["smoke", "demo", "bench"]
     container_name: ${MP_CONTAINER_PREFIX:-}stub-source
     restart: unless-stopped
-    # Phase 9 plan section 7: a benchmark widens the stub. The defaults are
-    # the Phase 8 smoke's universe; an empty STUB_ROWS_PER_PAGE serves the
-    # fixture once per page.
-    command: ["sh", "-c", "exec python -m ecomdata.ops.stub_source --port 8000 --last-page ${STUB_LAST_PAGE:-2} $${STUB_ROWS_PER_PAGE:+--rows-per-page $$STUB_ROWS_PER_PAGE}"]
+    # A benchmark widens the stub; an empty STUB_ROWS_PER_PAGE serves the
+    # fixture once per category page.
+    command: ["sh", "-c", "exec python -m services.stub_source --port 8000 $${STUB_ROWS_PER_PAGE:+--rows-per-page $$STUB_ROWS_PER_PAGE}"]
     environment:
       STUB_ROWS_PER_PAGE: ${STUB_ROWS_PER_PAGE:-}
     healthcheck:

@@ -190,7 +190,7 @@ REDIS_MARKETPLACE_OFFER_TTL_SECONDS = int(os.getenv("REDIS_MARKETPLACE_OFFER_TTL
 REDIS_MARKETPLACE_RECENT_CHANGES_MAX = int(os.getenv("REDIS_MARKETPLACE_RECENT_CHANGES_MAX", "5000"))
 MARKETPLACE_SPEED_QUERY_NAME = os.getenv("MARKETPLACE_SPEED_QUERY_NAME", "marketplace-speed-v1")
 
-# Phase 8 WP8. Four operational indices, written by ops/es_projector.py, and
+# Phase 8 WP8. Four operational indices, written by serving/es_projector.py, and
 # read by the Kibana source-health dashboard. They hold operational state
 # only: no raw body, no cookie, no header — the same rule as the audit tables.
 ES_INDEX_MARKETPLACE_SOURCE_HEALTH = os.getenv("ES_INDEX_MARKETPLACE_SOURCE_HEALTH", "marketplace-source-health-v1")

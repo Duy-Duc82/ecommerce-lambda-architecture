@@ -532,21 +532,18 @@ def parquet_rows_at(uri: str) -> int | None:
 
 
 def reparse_sample(uris: Sequence[str]) -> dict:
-    """Reparse the sampled artifacts against restored Silver, and summarise."""
-    from ecomdata.ingestion.reparse import RawArtifactRef, reparse_batch, summarise
-    from ecomdata.ingestion.sources.tiki.api import TikiCrawler
-    adapters = {"tiki": TikiCrawler}
+    """Re-extract the sampled artifacts and compare them with Bronze/records, and summarise."""
+    from ecomdata.domain.sources import SOURCES
+    from ecomdata.ingestion.raw_store import RawArtifactRef
+    from ecomdata.ingestion.reparse import reparse_batch, summarise
+
+    def extractor_for(code: str):
+        extractor = SOURCES.extractor(code)
+        return extractor() if isinstance(extractor, type) else extractor
+
     refs = [RawArtifactRef.from_uri(uri) for uri in uris]
-    outcomes = reparse_batch(
-        refs,
-        # Parse-only: no categories, no robots fetch, so a restore check never
-        # reaches the marketplace.
-        adapter_for=lambda code: adapters[code](categories=[], fetch_robots=False),
-        reader=_object_store().get,
-        clock=lambda: datetime.now(UTC),
-        silver_reader=_object_store().get,
-        silver_dataset=_settings().batch.silver_dataset,
-    )
+    # Parse-only: nothing is fetched, so a restore check never reaches the marketplace.
+    outcomes = reparse_batch(refs, spec_for=SOURCES.get, extractor_for=extractor_for, reader=_object_store().get)
     return summarise(outcomes, reported_at=datetime.now(UTC))
 
 

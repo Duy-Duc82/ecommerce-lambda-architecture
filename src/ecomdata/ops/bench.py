@@ -639,16 +639,15 @@ CRAWLED_SQL = (
 def run_crawl(stack: Stack, *, delay: float, categories: int, pages: int, rows_per_page: int) -> dict[str, Any]:
     stack.env.update(
         {
-            "STUB_LAST_PAGE": str(pages),
             "STUB_ROWS_PER_PAGE": str(rows_per_page),
             "CRAWL_REQUEST_DELAY_SECONDS": str(delay),
             "CRAWL_ACTIVE_CADENCE_MINUTES": "60",
-            "TIKI_LISTING_URL": "http://stub-source:8000/api/personalish/v1/blocks/listings",
+            "TIKI_BASE_URL": "http://stub-source:8000",
         }
     )
     stack.fresh("stub-source")
-    targets = [str(9100 + i) for i in range(categories)]
-    args = ["seed", "--tier", "ACTIVE", "--pages", str(pages)]
+    targets = [f"stub-category/c{9100 + i}" for i in range(categories)]
+    args = ["seed", "--source", "tiki", "--tier", "ACTIVE", "--pages", str(pages)]
     for target in targets:
         args += ["--category", target]
     stack.ops(*args)
@@ -803,7 +802,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--seconds", type=int, default=300, help="per speed rate step")
     parser.add_argument("--delays", type=float, nargs="+", default=[2.0, 0.0])
     parser.add_argument("--categories", type=int, default=6)
-    parser.add_argument("--pages", type=int, default=20)
+    # Tiki category pages are not paginated: only page 1 exists.
+    parser.add_argument("--pages", type=int, default=1)
     parser.add_argument("--rows-per-page", type=int, default=40)
     parser.add_argument("--keep", action="store_true", help="leave the last project up for inspection")
     args = parser.parse_args(argv)

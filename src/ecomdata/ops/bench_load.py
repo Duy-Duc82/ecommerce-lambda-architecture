@@ -49,8 +49,10 @@ from ecomdata.domain.observations import (
     create_offer_observation,
 )
 from ecomdata.ops.bootstrap import producer as _producer
-from ecomdata.ops.stub_source import FIXTURE, PRICE_STEPS
 
+# The stub source's frozen fixture and its price table (tests keep the two in step).
+FIXTURE = Path(__file__).resolve().parents[3] / "services" / "stub_source" / "fixture.json"
+PRICE_STEPS = (100, 95, 60, 100)
 MARKETPLACE = "tiki"
 MARKETPLACE_ID = "marketplace-tiki"
 ADAPTER_VERSION = "bench-load.v1"
@@ -77,7 +79,7 @@ class LoadSpec:
 
 
 def _titles(path: Path = FIXTURE) -> list[tuple[str, int]]:
-    rows = json.loads(path.read_text(encoding="utf-8"))["data"]
+    rows = json.loads(path.read_text(encoding="utf-8"))["rows"]
     usable = [(str(r["name"]), int(r["price"])) for r in rows
               if isinstance(r.get("id"), int) and isinstance(r.get("price"), int) and r["price"] > 0 and r.get("name")]
     if not usable:

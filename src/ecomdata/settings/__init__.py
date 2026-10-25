@@ -19,6 +19,8 @@ from dataclasses import dataclass, field, fields
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
+from ecomdata.domain.sources import SOURCES
+
 REPO_ROOT = Path(__file__).resolve().parents[3]
 
 # Nearest AWS/GCP region to Vietnam: a crawl load of many small objects pays
@@ -248,8 +250,6 @@ class CrawlSettings:
     # Where a source's pages are fetched from, when not its public site: the
     # stub source of the smoke and the drills (<CODE>_BASE_URL).
     base_url_overrides: Mapping[str, str] = field(default_factory=dict)
-    # The Tiki listing API endpoint of the pre-ELT adapter (TIKI_LISTING_URL).
-    tiki_listing_url: str = "https://tiki.vn/api/personalish/v1/blocks/listings"
     # Browser fetcher (Playwright).
     browser_timeout_seconds: float = 45.0
     browser_settle_seconds: float = 3.0
@@ -279,9 +279,7 @@ def _crawl(env: _Env) -> CrawlSettings:
     for tier in cadence:
         cadence[tier] = env.integer(f"CRAWL_{tier}_CADENCE_MINUTES", cadence[tier])
     categories = {
-        # The nine API categories probed live 2026-08-16.
-        "tiki": env.items("TIKI_CATEGORIES", "1846,8322,1882,1520,931,915,4384,1789,17166"),
-        "lazada": env.items("LAZADA_CATEGORIES", ""),
+        spec.code: env.items(f"{spec.code.upper()}_CATEGORIES", ",".join(spec.default_targets)) for spec in SOURCES
     }
     return CrawlSettings(
         request_delay_seconds=env.number("CRAWL_REQUEST_DELAY_SECONDS", defaults.request_delay_seconds),
@@ -292,11 +290,10 @@ def _crawl(env: _Env) -> CrawlSettings:
         max_pages=env.integer("CRAWL_MAX_PAGES", defaults.max_pages),
         default_categories={code: items for code, items in categories.items() if items},
         base_url_overrides={
-            code: url
-            for code, url in (("tiki", env.text("TIKI_BASE_URL", "")), ("lazada", env.text("LAZADA_BASE_URL", "")))
-            if url.strip()
+            spec.code: env.text(f"{spec.code.upper()}_BASE_URL", "").strip()
+            for spec in SOURCES
+            if env.text(f"{spec.code.upper()}_BASE_URL", "").strip()
         },
-        tiki_listing_url=env.text("TIKI_LISTING_URL", defaults.tiki_listing_url),
         browser_timeout_seconds=env.number("CRAWL_BROWSER_TIMEOUT_SECONDS", defaults.browser_timeout_seconds),
         browser_settle_seconds=env.number("CRAWL_BROWSER_SETTLE_SECONDS", defaults.browser_settle_seconds),
         cadence_minutes=cadence,

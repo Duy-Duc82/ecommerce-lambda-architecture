@@ -5,7 +5,7 @@ profile, and on the host with ``LOCAL=true``. Every step is idempotent:
 
 1. wait for Elasticsearch and Kibana;
 2. ``PUT`` each index template — a template applies only to indices created
-   after it, so this must happen before anything writes (``ops/es_projector.py``
+   after it, so this must happen before anything writes (``serving/es_projector.py``
    installs them too, for the same reason);
 3. create the four projector indices if absent, so a panel over an index
    nothing has written to yet is an empty chart and not an error;

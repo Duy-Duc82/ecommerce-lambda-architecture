@@ -40,7 +40,7 @@ CLIENTS = {
     "REDIS_PORT": ("REDIS_HOST_PORT", "{}"),
     "ES_HOST": ("ES_HOST_PORT", "http://localhost:{}"),
 }
-STUB_URL = "http://stub-source:8000/api/personalish/v1/blocks/listings"
+STUB_URL = "http://stub-source:8000"
 
 
 def _env_file(name: str) -> dict[str, str]:
@@ -86,7 +86,7 @@ def test_an_isolated_stack_names_its_own_project_and_prefix(name):
 
 @pytest.mark.parametrize("name", ISOLATED)
 def test_an_isolated_stack_crawls_the_stub_never_the_live_site(name):
-    assert _env_file(name)["TIKI_LISTING_URL"] == STUB_URL
+    assert _env_file(name)["TIKI_BASE_URL"] == STUB_URL
 
 
 @pytest.mark.parametrize("name", ISOLATED)
@@ -121,7 +121,7 @@ def test_the_live_stack_keeps_the_default_names_and_crawls_the_live_site():
 
     assert env["COMPOSE_PROJECT_NAME"] == "mp-live"
     assert env.get("MP_CONTAINER_PREFIX", "") == ""
-    assert env["TIKI_LISTING_URL"].startswith("https://tiki.vn/")
+    assert env["TIKI_BASE_URL"].startswith("https://tiki.vn")
 
 
 def test_mp_refuses_the_commands_that_would_act_on_the_live_stack():

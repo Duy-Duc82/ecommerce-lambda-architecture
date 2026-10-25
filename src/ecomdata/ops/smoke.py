@@ -28,8 +28,9 @@ from typing import Any
 from ecomdata.ops.bootstrap import object_store as _object_store
 from ecomdata.ops.bootstrap import settings as _settings
 
-SMOKE_CATEGORIES = ("9001", "9002", "9003")
-SMOKE_PAGES = 2
+SMOKE_CATEGORIES = ("stub-a/c9001", "stub-b/c9002", "stub-c/c9003")
+# Tiki category pages are not paginated: only page 1 exists.
+SMOKE_PAGES = 1
 SUCCEEDED_ATTEMPTS = ("SUCCEEDED", "PARTIAL")
 
 
@@ -51,7 +52,7 @@ def park(connection_factory) -> int:
     """Disable every pending smoke task; return how many.
 
     The smoke's categories are made up, and each success schedules the next
-    crawl. Left pending, a later `mp up` with the real TIKI_LISTING_URL would
+    crawl. Left pending, a later `mp up` with the real TIKI_BASE_URL would
     send them to the live marketplace, and their runs would feed Silver and
     Gold. mp.ps1 parks them whenever a smoke ends, passed or failed.
     """

@@ -208,25 +208,6 @@ def live_collectors() -> dict[str, Callable[[], list[Measure]]]:
     return {"minio": minio, "postgres": postgres, "elasticsearch": elasticsearch, "kafka": kafka}
 
 
-class DailySnapshot:
-    """At most one snapshot attempt per UTC date per process; the table's key
-    makes a second one on the same date (after a restart) write nothing."""
-
-    def __init__(self, take: Callable[[datetime], dict[str, Any]]) -> None:
-        self.take = take
-        self.last: date | None = None
-
-    def maybe(self, now: datetime) -> dict[str, Any] | None:
-        today = now.astimezone(UTC).date()
-        if self.last == today:
-            return None
-        report = self.take(now)
-        # A snapshot every store failed is retried on the next pass.
-        if report.get("measured"):
-            self.last = today
-        return report
-
-
 def run_snapshot(now: datetime | None = None) -> dict[str, Any]:
 
     report = take_snapshot(live_collectors(), _connection_factory(), now=now or datetime.now(UTC))

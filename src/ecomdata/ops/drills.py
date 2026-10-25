@@ -42,11 +42,11 @@ from ecomdata.ops.bootstrap import settings as _settings
 ROOT = Path(__file__).resolve().parents[3]
 RECORDS = ROOT / "data" / "ops" / "drills"
 COMPOSE = ["docker", "compose", "-f", str(ROOT / "docker-compose.yml")]
-STUB_URL = "http://stub-source:8000/api/personalish/v1/blocks/listings"
+STUB_URL = "http://stub-source:8000"
 # The crawler under drill: the stub, a one-minute cadence, and short retry,
 # circuit and lease timings so a drill observes them in minutes, not hours.
 CRAWL_ENV = {
-    "TIKI_LISTING_URL": STUB_URL,
+    "TIKI_BASE_URL": STUB_URL,
     "CRAWL_ACTIVE_CADENCE_MINUTES": "1",
     "CRAWL_RETRY_BASE_SECONDS": "2",
     "CRAWL_RETRY_MAX_SECONDS": "10",
@@ -1128,10 +1128,10 @@ def _raw_artifact_ref(raw_uri: str):
     """The reference `ecomdata.ingestion.reparse` addresses, read back off a stored URI.
 
     One place knows the Bronze layout, and it is the module that writes it:
-    ``RawArtifactRef.from_uri`` is the inverse of ``RawArtifactRef.body_path``.
+    ``RawArtifactRef.from_uri`` is the inverse of ``RawArtifactRef.base``.
     This wrapper exists only to turn its refusal into a drill failure.
     """
-    from ecomdata.ingestion.reparse import RawArtifactRef
+    from ecomdata.ingestion.raw_store import RawArtifactRef
 
     try:
         return RawArtifactRef.from_uri(raw_uri)

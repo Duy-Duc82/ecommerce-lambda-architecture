@@ -64,7 +64,7 @@ The constraints that shaped everything:
    ├→ Elasticsearch  changes · current offers       marketplace_scheduler.py (daily, lag 30 min)
    └→ Redis  rt:offer · rt:changes · rt:source        → Silver ─(as_of)→ Gold run (10 datasets)
                   │                                    → 17 quality rules (13 mandatory)
-       ops/es_projector.py                             → publish PostgreSQL cache (one transaction)
+       serving/es_projector.py                             → publish PostgreSQL cache (one transaction)
        (audit, DLQ → ES)                               → promote gold/current.json (compare-and-swap)
                   │                                               │
  SERVING       Kibana  (seconds old,                    Superset  (one validated version,
@@ -199,7 +199,7 @@ pointer is refused unless backfill is explicit.
 | MinIO Gold | **authoritative** | every run, its manifest, and `current.json` (the last good version) |
 | PostgreSQL `cache` | BI serving | exactly the version `current.json` names: 10 marts |
 | PostgreSQL `audit` | operational record | frontier, crawl runs and attempts, batch runs, quality results, speed batches |
-| Elasticsearch | recent operational and realtime state | changes, current offers, plus source health, crawl attempts, speed batches and DLQ (from `ops/es_projector.py`) |
+| Elasticsearch | recent operational and realtime state | changes, current offers, plus source health, crawl attempts, speed batches and DLQ (from `serving/es_projector.py`) |
 | Redis | latest realtime state | `rt:offer:<id>`, `rt:changes:recent`, `rt:source:<m>:last_observation` |
 
 Superset reads only `cache` (validated, as of the last good run). Kibana reads

@@ -14,6 +14,7 @@ from pyspark.sql import DataFrame, SparkSession
 from pyspark.sql import functions as F
 
 from ecomdata.domain.datasets import MART_NAMES, dataset
+from ecomdata.domain.validation import aware_utc
 from ecomdata.processing.schemas import MARKETPLACE_OBSERVATION_WIRE_SCHEMA
 
 RUN_ID_RE = re.compile(r"[a-zA-Z0-9_-]{1,64}\Z")
@@ -214,12 +215,6 @@ def flatten_marketplace_observations(wire: DataFrame) -> DataFrame:
     return result.drop("observation_offer_id", "observation_raw_uri", "observation_crawl_run_id")
 
 
-def _require_aware(as_of: datetime) -> datetime:
-    if as_of.tzinfo is None or as_of.utcoffset() is None:
-        raise ValueError("as_of must be timezone-aware")
-    return as_of.astimezone(UTC)
-
-
 def observations_as_of(flat: DataFrame, as_of: datetime) -> DataFrame:
     """Silver as it stood at ``as_of``: nothing observed after it, inclusive.
 
@@ -227,7 +222,7 @@ def observations_as_of(flat: DataFrame, as_of: datetime) -> DataFrame:
     after as_of leaks into a rerun or a backfill, so the same context stops
     producing the same Gold and an older window can never pass its gates.
     """
-    cutoff = F.lit(_require_aware(as_of)).cast("timestamp")
+    cutoff = F.lit(aware_utc(as_of, "as_of")).cast("timestamp")
     return flat.filter(F.col("observed_at") <= cutoff)
 
 
@@ -238,7 +233,7 @@ def crawl_audit_as_of(attempts: DataFrame, runs: DataFrame, as_of: datetime) -> 
     reported nothing yet. A crawl run exists once it started, finished or not;
     whether it had settled is check 8's question, not this cut's.
     """
-    cutoff = F.lit(_require_aware(as_of)).cast("timestamp")
+    cutoff = F.lit(aware_utc(as_of, "as_of")).cast("timestamp")
     return attempts.filter(F.col("completed_at") <= cutoff), runs.filter(F.col("started_at") <= cutoff)
 
 
