@@ -1,2 +1,0 @@
-[console_scripts]
-ecomdata-ops = ecomdata.ops.cli:main
