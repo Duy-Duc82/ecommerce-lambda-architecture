@@ -8,7 +8,7 @@ import pytest
 from tests.paths import REPO_ROOT
 
 ROOT = REPO_ROOT
-COMPOSE = (ROOT / "docker-compose.yml").read_text(encoding="utf-8")
+COMPOSE = (ROOT / "compose" / "docker-compose.yml").read_text(encoding="utf-8")
 
 
 def _profiles() -> dict[str, list[str]]:
@@ -22,7 +22,7 @@ def _profiles() -> dict[str, list[str]]:
     return found
 
 
-DEMO = ("stub-source", "crawl-worker", "speed", "batch-scheduler", "es-projector", "kibana",
+DEMO = ("stub-source", "crawl-worker", "speed", "es-projector", "kibana",
         "kibana-marketplace-setup", "superset", "superset-init")
 BENCH = ("stub-source", "crawl-worker", "speed", "batch-once")
 

@@ -11,10 +11,21 @@ import pytest
 
 from tests.paths import REPO_ROOT
 
-COMPOSE = REPO_ROOT / "docker-compose.yml"
+COMPOSE = REPO_ROOT / "compose" / "docker-compose.yml"
+NL = chr(10)
 
 # Started by `up` and expected to stay up: a dependency outage must not end them.
-LONG_RUNNING = ("crawl-worker", "speed", "batch-scheduler", "stub-source", "es-projector")
+LONG_RUNNING = (
+    "crawl-worker",
+    "crawl-worker-lazada",
+    "speed",
+    "batch-scheduler",
+    "stub-source",
+    "es-projector",
+    "airflow-api-server",
+    "airflow-scheduler",
+    "airflow-dag-processor",
+)
 # `run --rm` tools and init containers. Docker restarts nothing started by
 # `run`, but an inherited policy would still be wrong, and `restart: "no"`
 # says so. The Kibana importer must not loop either: it is idempotent, but a
@@ -25,7 +36,7 @@ LONG_RUNNING = ("crawl-worker", "speed", "batch-scheduler", "stub-source", "es-p
 # come back to nothing and collection would stop silently. Drills only ever
 # `stop` these, which `unless-stopped` honours.
 CORE = ("kafka", "minio", "redis", "postgres-dw", "elasticsearch")
-ONE_SHOT = ("batch-once", "ops", "kibana-marketplace-setup")
+ONE_SHOT = ("batch-once", "ops", "kibana-marketplace-setup", "airflow-init")
 
 
 def _service_blocks() -> dict[str, list[str]]:
@@ -70,3 +81,45 @@ def test_a_long_running_service_restarts_unless_it_was_stopped(service):
 @pytest.mark.parametrize("service", ONE_SHOT)
 def test_a_one_shot_service_is_never_restarted(service):
     assert _restart_policy(_service_blocks()[service]) == "no"
+
+
+def test_there_is_no_silver_sink_service_any_more():
+    assert "silver-sink" not in _service_blocks()
+
+
+def test_the_lazada_worker_runs_one_browser_with_the_room_chromium_needs():
+    text = NL.join(_service_blocks()["crawl-worker-lazada"])
+
+    assert "ecommerce/crawler-browser:1" in text
+    assert "ipc: host" in text and "shm_size: 1gb" in text and "init: true" in text
+    assert '"--sources", "lazada"' in text
+
+
+def test_the_workers_run_the_images_this_refactor_built():
+    text = COMPOSE.read_text(encoding="utf-8")
+
+    assert "ecommerce/marketplace-python:2" in text
+    assert "ecommerce/spark-marketplace:4.0.1-r2" in text
+    assert "ecommerce/airflow:3.3.2-r1" in text
+    for old in ("ecommerce/marketplace-python:1", "ecommerce/spark-marketplace:4.0.1" + NL):
+        assert old not in text
+
+
+def test_airflow_tasks_reach_the_docker_socket_and_its_metadata_is_on_postgres_dw():
+    text = COMPOSE.read_text(encoding="utf-8")
+
+    assert "/var/run/docker.sock:/var/run/docker.sock" in text
+    assert "@postgres-dw:5432/airflow" in text
+    assert "AIRFLOW__CORE__EXECUTOR: LocalExecutor" in text
+
+
+def test_the_old_scheduler_loop_is_only_on_the_legacy_profile():
+    text = NL.join(_service_blocks()["batch-scheduler"])
+
+    assert 'profiles: ["legacy-scheduler"]' in text
+
+
+def test_the_speed_and_batch_images_set_their_own_driver_memory_through_the_settings():
+    text = COMPOSE.read_text(encoding="utf-8")
+
+    assert text.count("SPARK_DRIVER_MEMORY: ${SPARK_DRIVER_MEMORY:-3g}") >= 3
