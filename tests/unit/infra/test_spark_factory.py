@@ -80,3 +80,62 @@ def test_settings_default_driver_memory_is_three_gigabytes():
     assert load_settings({}).spark.driver_memory == "3g"
     with pytest.raises(ValueError, match="SPARK_DRIVER_MEMORY"):
         load_settings({"SPARK_DRIVER_MEMORY": " "})
+
+
+# --- Delta Lake and the Databricks runtime -------------------------------------------------------
+def test_the_default_table_format_is_parquet_and_adds_no_delta_option():
+    settings = load_settings({})
+
+    assert settings.storage.table_format == "parquet"
+    assert "spark.sql.extensions" not in factory_for({}).config()
+
+
+def test_delta_adds_the_extension_and_the_catalog_to_a_session_this_project_builds():
+    conf = factory_for({"DATA_LAKE_TABLE_FORMAT": "delta"}).config()
+
+    assert conf["spark.sql.extensions"] == "io.delta.sql.DeltaSparkSessionExtension"
+    assert conf["spark.sql.catalog.spark_catalog"] == "org.apache.spark.sql.delta.catalog.DeltaCatalog"
+
+
+def test_an_unknown_table_format_or_runtime_is_refused():
+    from ecomdata.settings import SettingsError
+
+    with pytest.raises(SettingsError, match="DATA_LAKE_TABLE_FORMAT"):
+        load_settings({"DATA_LAKE_TABLE_FORMAT": "iceberg"})
+    with pytest.raises(SettingsError, match="SPARK_RUNTIME"):
+        load_settings({"SPARK_RUNTIME": "emr"})
+
+
+def test_on_databricks_the_factory_sets_nothing_and_takes_the_platform_session(monkeypatch):
+    import pyspark.sql
+
+    class Builder:
+        def __init__(self):
+            self.touched = []
+
+        def master(self, url):
+            self.touched.append("master")
+            return self
+
+        def config(self, key, value):
+            self.touched.append(key)
+            return self
+
+        def getOrCreate(self):
+            return "platform-session"
+
+    builder = Builder()
+    monkeypatch.setattr(pyspark.sql, "SparkSession", SimpleNamespace(builder=builder))
+    storage = load_settings({"DATA_LAKE_PROFILE": "s3", "DATA_LAKE_TABLE_FORMAT": "delta"}).storage
+    factory = SparkSessionFactory.for_storage(
+        storage, app_name="x", master="local[1]", driver_memory="3g", packages="a:b:1", runtime="databricks"
+    )
+
+    assert factory.config() == {}
+    assert factory.create() == "platform-session"
+    assert builder.touched == []
+
+
+def test_the_spark_runtime_comes_from_the_environment():
+    assert load_settings({}).spark.runtime == "local"
+    assert load_settings({"SPARK_RUNTIME": "Databricks"}).spark.runtime == "databricks"

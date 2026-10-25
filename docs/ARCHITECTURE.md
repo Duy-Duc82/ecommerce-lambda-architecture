@@ -156,7 +156,7 @@ python -m ecomdata.processing.batch run --run-id <id> --as-of <ISO> --stage <tê
 
 | Thành phần | Vị trí |
 |---|---|
-| Image | `docker/python` (`ecommerce/marketplace-python:2`), `docker/spark` (`ecommerce/spark-marketplace:4.0.1-r2`), `docker/crawler-browser` (`ecommerce/crawler-browser:1`, nền Playwright `v1.55.0-noble`), `docker/airflow` (`ecommerce/airflow:3.3.2-r1`) |
+| Image | `docker/python` (`ecommerce/marketplace-python:2`), `docker/spark` (`ecommerce/spark-marketplace:4.0.1-r3`), `docker/crawler-browser` (`ecommerce/crawler-browser:1`, nền Playwright `v1.55.0-noble`), `docker/airflow` (`ecommerce/airflow:3.3.2-r1`) |
 | Compose | `compose/docker-compose.yml` (lõi và profile `crawl`, `crawl-browser`, `speed`, `batch`, `orchestration`, `legacy-scheduler`, `serve`, `ops`, `smoke`), `compose/docker-compose.legacy.yml`, `compose/docker-compose.observability.yml`; `docker-compose.yml` ở gốc include file chính |
 | Môi trường | `env/base.env` + `env/ports.<stack>.env` + `env/<stack>.env`; mỗi stack có project, prefix container và port riêng (`tests/unit/ops/test_compose_isolation.py`) |
 | Phiên bản | `constraints.txt` là nơi duy nhất pin phiên bản chính xác; `pyproject.toml` giữ khoảng phiên bản |

@@ -36,7 +36,12 @@ class FakeWriter:
         self.partitions = columns
         return self
 
-    def parquet(self, uri):
+    def format(self, table_format):
+        self.table_format = table_format
+        return self
+
+    def save(self, uri):
+        assert self.table_format == "parquet"
         self.log.append((self.name, uri, self.mode_value, self.partitions))
 
 

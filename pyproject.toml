@@ -50,7 +50,9 @@ legacy = [
 ]
 
 [project.scripts]
-ecomdata-ops = "ecomdata.ops.cli:main"
+ecomdata-ops = "ecomdata.ops.__main__:main"
+# The batch stages as a console script: what a Databricks python_wheel_task names as its entry point.
+ecomdata-batch = "ecomdata.processing.batch.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

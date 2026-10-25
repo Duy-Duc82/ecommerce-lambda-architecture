@@ -1,4 +1,4 @@
-# Batch stages and the speed query. Tag: ecommerce/spark-marketplace:4.0.1-r2.
+# Batch stages and the speed query. Tag: ecommerce/spark-marketplace:4.0.1-r3.
 # Spark 4.0.1 matches the jars below; pyspark itself comes from /opt/spark/python.
 # The legacy Kaggle image (legacy/kaggle/docker/spark-warehouse, 3.5.1) is separate.
 FROM apache/spark:4.0.1
@@ -12,6 +12,9 @@ USER root
 # - hadoop-aws 3.4.1: <hadoop.version> in the same pom.
 # - AWS SDK v2 bundle 2.24.6: the version hadoop-aws 3.4.1 was built against.
 # - postgresql 42.7.5: the JDBC driver the end-to-end runs used.
+# - delta-spark and delta-storage 4.0.1: Delta Lake for Spark 4.0
+#   (DATA_LAKE_TABLE_FORMAT=delta). The session extension and catalog are set by
+#   SparkSessionFactory, not here.
 ARG MAVEN=https://repo1.maven.org/maven2
 RUN set -eux; cd /opt/spark/jars; \
     for jar in \
@@ -21,7 +24,9 @@ RUN set -eux; cd /opt/spark/jars; \
       org/apache/commons/commons-pool2/2.12.0/commons-pool2-2.12.0.jar \
       org/apache/hadoop/hadoop-aws/3.4.1/hadoop-aws-3.4.1.jar \
       software/amazon/awssdk/bundle/2.24.6/bundle-2.24.6.jar \
-      org/postgresql/postgresql/42.7.5/postgresql-42.7.5.jar; \
+      org/postgresql/postgresql/42.7.5/postgresql-42.7.5.jar \
+      io/delta/delta-spark_2.13/4.0.1/delta-spark_2.13-4.0.1.jar \
+      io/delta/delta-storage/4.0.1/delta-storage-4.0.1.jar; \
     do curl -fsSLO "$MAVEN/$jar"; done
 
 # Python 3.12, which the package requires (the base image's python3 is 3.10 on

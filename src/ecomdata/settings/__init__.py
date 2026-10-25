@@ -27,6 +27,10 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 # the round trip on every request.
 DEFAULT_REGION = "ap-southeast-1"
 STORAGE_PROFILES = ("local", "minio", "s3", "r2", "b2")
+# How Silver and Gold tables are stored. Delta is what Databricks reads natively.
+TABLE_FORMATS = ("parquet", "delta")
+# Where the Spark jobs run: a session this project builds, or one the platform provides.
+SPARK_RUNTIMES = ("local", "databricks")
 ZONES = ("bronze", "silver", "gold")
 
 
@@ -108,6 +112,7 @@ class StorageSettings:
     region: str | None = None
     access_key: str = ""
     secret_key: str = ""
+    table_format: str = "parquet"
 
     @property
     def is_local(self) -> bool:
@@ -134,6 +139,13 @@ class StorageSettings:
         return self.endpoint_url().split("://", 1)[1].rstrip("/")
 
 
+def _spark_runtime(env: _Env) -> str:
+    runtime = env.text("SPARK_RUNTIME", "local").strip().lower()
+    if runtime not in SPARK_RUNTIMES:
+        raise SettingsError(f"unknown SPARK_RUNTIME {runtime!r} (expected one of {', '.join(SPARK_RUNTIMES)})")
+    return runtime
+
+
 def _storage(env: _Env) -> StorageSettings:
     # DATA_LAKE_MODE predates profiles and is still set by older env files, so
     # it decides when no profile is named.
@@ -142,7 +154,11 @@ def _storage(env: _Env) -> StorageSettings:
     )
     if profile not in STORAGE_PROFILES:
         raise SettingsError(f"unknown DATA_LAKE_PROFILE {profile!r} (expected one of {', '.join(STORAGE_PROFILES)})")
+    table_format = env.text("DATA_LAKE_TABLE_FORMAT", "parquet").strip().lower()
+    if table_format not in TABLE_FORMATS:
+        raise SettingsError(f"unknown DATA_LAKE_TABLE_FORMAT {table_format!r} (expected one of {', '.join(TABLE_FORMATS)})")
     common = {
+        "table_format": table_format,
         "local_root": Path(env.text("DATA_LAKE_LOCAL_ROOT", str(REPO_ROOT / "data" / "lakehouse"))),
         "bucket_bronze": env.text("MINIO_BUCKET_BRONZE", "ecommerce-bronze"),
         "bucket_silver": env.text("MINIO_BUCKET_SILVER", "ecommerce-silver"),
@@ -313,6 +329,8 @@ def _crawl(env: _Env) -> CrawlSettings:
 # ---------------------------------------------------------------- processing
 @dataclass(frozen=True)
 class SparkSettings:
+    # "databricks": the platform provides the session; the factory sets nothing on it.
+    runtime: str = "local"
     master: str | None = None
     # Set explicitly so a job never runs on Spark's 1g default (the 8 h run of
     # 2026-10-24 needed 3g for the batch).
@@ -401,7 +419,7 @@ class ServiceSettings:
 @dataclass(frozen=True)
 class AirflowSettings:
     # Image every DockerOperator task runs, and the network it joins.
-    spark_image: str = "ecommerce/spark-marketplace:4.0.1-r2"
+    spark_image: str = "ecommerce/spark-marketplace:4.0.1-r3"
     python_image: str = "ecommerce/marketplace-python:2"
     docker_network: str = "mp-refactor_default"
     docker_url: str = "unix://var/run/docker.sock"
@@ -466,6 +484,7 @@ def _read(env: _Env) -> Settings:
         ),
         crawl=_crawl(env),
         spark=SparkSettings(
+            runtime=_spark_runtime(env),
             master=env.text("SPARK_MASTER", "").strip() or None,
             driver_memory=env.text("SPARK_DRIVER_MEMORY", "3g"),
             batch_shuffle_partitions=env.integer("MARKETPLACE_BATCH_SHUFFLE_PARTITIONS", 8),

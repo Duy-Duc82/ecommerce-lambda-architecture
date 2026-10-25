@@ -75,7 +75,7 @@ x-spark-marketplace: &spark-marketplace
   build:
     context: ..
     dockerfile: docker/spark/Dockerfile
-  image: ecommerce/spark-marketplace:4.0.1-r2
+  image: ecommerce/spark-marketplace:4.0.1-r3
   # Spark may write scratch files into its working directory; /app is read-only.
   working_dir: /tmp
   volumes:
@@ -105,7 +105,7 @@ x-airflow: &airflow
     AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_ALL_ADMINS: "true"
     AIRFLOW__SCHEDULER__DAG_DIR_LIST_INTERVAL: "30"
     # What the DAGs hand to their task containers.
-    AIRFLOW_SPARK_IMAGE: ${AIRFLOW_SPARK_IMAGE:-ecommerce/spark-marketplace:4.0.1-r2}
+    AIRFLOW_SPARK_IMAGE: ${AIRFLOW_SPARK_IMAGE:-ecommerce/spark-marketplace:4.0.1-r3}
     AIRFLOW_PYTHON_IMAGE: ${AIRFLOW_PYTHON_IMAGE:-ecommerce/marketplace-python:2}
     AIRFLOW_DOCKER_NETWORK: ${COMPOSE_PROJECT_NAME:-mp}_bigdata
     AIRFLOW_DOCKER_URL: unix://var/run/docker.sock

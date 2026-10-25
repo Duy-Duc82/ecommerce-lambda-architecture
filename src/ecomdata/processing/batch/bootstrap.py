@@ -21,6 +21,7 @@ def spark_factory(settings: Settings, app_name: str | None = None):
         shuffle_partitions=settings.spark.batch_shuffle_partitions,
         driver_memory=settings.spark.driver_memory,
         master=settings.spark.master,
+        runtime=settings.spark.runtime,
     )
 
 
@@ -88,6 +89,7 @@ def batch_dependencies(settings: Settings, *, publish_cache: bool = True):
         records_uri=store.uri("bronze", settings.batch.records_dataset),
         silver_root_uri=default_uris(settings)[0],
         silver_schemas=silver_schemas(),
+        table_format=settings.storage.table_format,
     )
     return BatchDependencies(
         audit=MarketplaceBatchAudit(factory) if publish_cache else MemoryAudit(),

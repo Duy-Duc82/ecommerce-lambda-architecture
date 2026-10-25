@@ -1,4 +1,4 @@
-"""The Spark implementation of the lake port: Bronze records in, Silver and Gold out, all as Parquet.
+"""The Spark implementation of the lake port: Bronze records in, Silver and Gold out, as Parquet or Delta (``table_format``).
 
 Datasets live under ``<silver root>/<name>/`` and
 ``<gold root>/runs/run_id=<run>/<mart>/``. Writing a dataset replaces it (for a
@@ -29,7 +29,11 @@ class SparkLakeIO:
         records_uri: str,
         silver_root_uri: str,
         silver_schemas: Mapping[str, StructType] | None = None,
+        table_format: str = "parquet",
     ) -> None:
+        if table_format not in ("parquet", "delta"):
+            raise ValueError(f"table_format must be parquet or delta, not {table_format!r}")
+        self.table_format = table_format
         self._spark_provider = spark_provider
         self.records_uri = records_uri.rstrip("/")
         self.silver_root_uri = silver_root_uri.rstrip("/")
@@ -53,7 +57,7 @@ class SparkLakeIO:
         writer = frame.write.mode("overwrite")
         if partition_by:
             writer = writer.option("partitionOverwriteMode", "dynamic").partitionBy(*partition_by)
-        writer.parquet(uri)
+        writer.format(self.table_format).save(uri)
         return uri
 
     def read_silver(self, name: str) -> DataFrame:
@@ -61,7 +65,7 @@ class SparkLakeIO:
         schema = self.silver_schemas.get(name)
         if schema is not None:
             reader = reader.schema(schema)
-        return reader.parquet(self.silver_uri(name))
+        return reader.format(self.table_format).load(self.silver_uri(name))
 
     def write_gold(self, context: MarketplaceBatchContext, name: str, frame: DataFrame) -> GoldWriteResult:
         uri = context.gold_dataset_uri(name)
@@ -71,11 +75,11 @@ class SparkLakeIO:
         partitions = dataset(name).partition_columns
         if partitions:
             writer = writer.partitionBy(*partitions)
-        writer.parquet(uri)
+        writer.format(self.table_format).save(uri)
         return GoldWriteResult(name, uri, frame.count())
 
     def read_gold(self, context: MarketplaceBatchContext, name: str) -> DataFrame:
-        return self.spark.read.parquet(context.gold_dataset_uri(name))
+        return self.spark.read.format(self.table_format).load(context.gold_dataset_uri(name))
 
 
 def read_crawl_audit(spark: SparkSession, jdbc_url: str, properties: Mapping[str, str]) -> tuple[DataFrame, DataFrame]:

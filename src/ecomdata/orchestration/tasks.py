@@ -63,7 +63,7 @@ def docker_settings(environ: Mapping[str, str] | None = None) -> dict[str, Any]:
 
 
 def spark_image(environ: Mapping[str, str] | None = None) -> str:
-    return (os.environ if environ is None else environ).get("AIRFLOW_SPARK_IMAGE", "ecommerce/spark-marketplace:4.0.1-r2")
+    return (os.environ if environ is None else environ).get("AIRFLOW_SPARK_IMAGE", "ecommerce/spark-marketplace:4.0.1-r3")
 
 
 def python_image(environ: Mapping[str, str] | None = None) -> str:

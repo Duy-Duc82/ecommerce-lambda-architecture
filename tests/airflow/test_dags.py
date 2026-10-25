@@ -17,7 +17,7 @@ DAGS = Path(__file__).resolve().parents[2] / "src" / "ecomdata" / "orchestration
 
 @pytest.fixture(scope="module")
 def bag():
-    os.environ.setdefault("AIRFLOW_SPARK_IMAGE", "ecommerce/spark-marketplace:4.0.1-r2")
+    os.environ.setdefault("AIRFLOW_SPARK_IMAGE", "ecommerce/spark-marketplace:4.0.1-r3")
     from airflow.models.dagbag import DagBag
 
     return DagBag(dag_folder=str(DAGS), include_examples=False)
