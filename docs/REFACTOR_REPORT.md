@@ -45,3 +45,84 @@ Mỗi phase có một mục: việc đã làm, số test, các quyết định n
 - `ruff`: bộ `E,F,I,B,UP`, `line-length=120`. Autofix + `ruff format` cho 61 file có câu lệnh ghép (`if x: y`, `;`), phần còn lại sửa tay (biến vòng lặp trong lambda của drill, `pytest.raises(Exception)` → lỗi cụ thể, `raise ... from None`). **Ngoại lệ ghi lại:** `E501` (độ dài dòng do formatter quyết định, không tách tay chuỗi SQL dài), `UP042` (giữ `class X(str, Enum)`: `StrEnum` đổi kết quả `str()`/`format()` của member, mà text của member đi vào wire và SQL); `E402` chỉ trong `tests/**`.
 - `lint-imports`: contract đầu tiên "ecomdata không import legacy", tạm bỏ qua 1 import của `SiteCrawler.crawl()` cũ (xoá ở R3).
 - **Số test:** 1244 passed, 0 skipped, 11 deselected (bằng mốc R0). `ruff check src tests`: sạch. `lint-imports`: 1 kept, 0 broken.
+
+## R2. `domain/`, `settings/`, `infra/`, luật import, bug (a)–(d)
+
+Commit: `dd3ba4e`, `a3a0f61`, `3b7fe08`, `3d61209`, `099de8b`, `8542b9d`, `3eeff99` (và `e49b43c` cho test kiến trúc).
+
+- **`domain/validation.py`** (`dd3ba4e`): một bộ helper (`require_text`, `aware_utc`, `non_bool_int`, `sha256_hex`, ...) thay cho khoảng 9 bản `_require_text`/`_utc`. `acquisition.py`, `observations.py`, `identity.py`, `change_rules.py` và `ingestion/{audit,frontier,raw_store,scheduling,worker}.py` dùng chung. Test: `tests/unit/domain/test_validation.py`.
+- **`domain/sources.py`** (`a3a0f61`): `SourceSpec` + `SourceRegistry` (`SOURCES`, `TIKI`, `LAZADA`). Thay 6 registry lặp (plan mục 1.2). `counter_semantics`, `seed`, `batch/dimensions` đọc từ đây. Test: `tests/unit/domain/test_sources.py`.
+- **`domain/ordering.py`, `domain/batch_run.py`** (`3b7fe08`): quy tắc thứ tự `(observed_at, fetched_at, observation_id)` và state machine `BatchRunStatus` với bảng chuyển trạng thái. Test: `tests/unit/domain/test_ordering_and_batch_run.py`. **Chưa có mart nào dùng `ordering.py`** (việc của R6).
+- **`infra/`** (`099de8b`): `spark.py` (một `SparkSession` factory), `postgres.py` (`ConnectionFactory`, một `jdbc_url()`), `kafka.py` (một producer factory), `http.py` (`HttpClient`, `RobotsPolicy` cache theo host, `Throttle` theo host), `object_store.py` (có gzip). Test: `tests/unit/infra/`.
+- **`settings/`** (`8542b9d`): dataclass frozen, `load_settings(env)`, không `load_dotenv` hay validate lúc import. `domain/topics.py` là hằng số.
+- **Composition root** (`3eeff99`): `ingestion/bootstrap.py`, `ops/bootstrap.py`, `processing/batch/bootstrap.py`, `serving/bootstrap.py` đọc settings một lần và inject factory.
+- **Bug** (mỗi bug một test hồi quy):
+  - (a) Silver path hard-code: `test_the_silver_path_follows_the_configured_dataset` (`test_marketplace_silver_sink.py`);
+  - (b) robots.txt tải lại mỗi task: `test_robots_are_fetched_once_per_host_and_cached` (`test_http.py`), `test_robots_are_downloaded_once_for_every_page_a_worker_acquires` (`test_fetchers_and_runtime.py`);
+  - (c) `request_url()` ngoài `try`: `test_a_target_the_adapter_cannot_turn_into_a_url_is_a_failed_report` (`test_marketplace_acquisition.py`);
+  - (d) `except Exception: raise` biến mất cùng `tiki.py` ở R3.
+- **Luật import** (`e49b43c`): `lint-imports` có 4 contract (`ecomdata` không import `legacy`; layers; `domain` thuần; `ingestion` và `processing` độc lập). `tests/architecture/`: `test_import_rules.py` (settings chỉ ở composition root), `test_single_definitions.py`, `test_site_literals.py` (literal `tiki`/`lazada` chỉ ở chỗ cho phép).
+- Legacy Kaggle đọc settings và storage profile đóng băng riêng (`3d61209`).
+
+## R3. Ingestion ELT (Tiki)
+
+Commit: `cad93e4`, `ac98f8f`, `e49b43c`.
+
+- `domain/acquisition.py` viết lại quanh `FetchBundle`/`FetchPart`/`ExtractedPage`; `domain/records.py` có `SourceRecord` (`marketplace-record.v1`), `build_records`, `record_to_wire`/`record_from_wire`, `record_json`.
+- `ingestion/fetchers/{base,http}.py` (Strategy), `ingestion/sources/tiki/{extractor,discovery}.py` (extractor chỉ tìm mảng dòng trong `__NEXT_DATA__` và tách `page_context`; discovery đọc sitemap nêu trong robots.txt), `ingestion/pipeline.py` (Template Method), `ingestion/runtime.py` (runtime theo worker), `ingestion/raw_store.py` (v2: `part-<n>.bin.gz` + `metadata.json`, đọc được v1), `ingestion/record_store.py` (Bronze/records JSONL.gz), `ingestion/publisher.py` (Kafka `marketplace.records.v1`), `ingestion/reparse.py` (đọc raw v1/v2, extract lại, so record).
+- Xoá `SiteCrawler` và các phương thức legacy (`site_crawler.py`, `sources/tiki/api.py`, `sources/tiki/html.py`); các test của chúng được viết lại thành `test_crawler_contracts.py`, `test_source_records.py`, `test_fetchers_and_runtime.py`, `test_raw_store.py`, `test_record_store.py`, `test_tiki_source.py`, `test_marketplace_reparse.py`, `test_marketplace_acquisition.py`.
+- **Test bỏ có chủ đích** (code mà chúng kiểm đã bị xoá; hành vi tương ứng có test mới ở trên): `tests/unit/ingestion/test_crawler.py`, `test_tiki_category_html.py`, `test_tiki_contract.py`, `tests/unit/ops/test_stub_source_ids.py` (adapter API cũ của Tiki và stub cũ).
+- Stub nguồn chuyển sang `services/stub_source/` (`server.py`, `fixture.json` riêng, phục vụ trang category Tiki).
+- **Quyết định:** quảng cáo không bị lọc ở extractor; được đánh dấu ở Silver (`is_advertisement`) và mart chỉ đọc hàng organic (`inputs.organic_only`).
+- **Chưa làm (thuộc R7):** `ingestion/silver_sink.py` và `silver_service.py` vẫn còn và vẫn đọc `marketplace.observations.v1`; service `silver-sink` trong compose chưa bỏ.
+
+## R4. Lazada
+
+Commit: `fed2b3d`.
+
+- `infra/browser.py` (`BrowserSession`, Playwright, một lần cho mỗi worker), `ingestion/fetchers/browser.py` (`BrowserFetcher`: bắt response khớp `capture_patterns`, chờ `wait_for`, phát hiện trang chặn bằng regex của spec → `FetchBlockedError`), `ingestion/sources/lazada/{extractor,discovery}.py` (`mods.listItems` và `page_context`; discovery từ `env/sources/lazada_categories.json`, 20 category).
+- Fixture ≤ 5 sản phẩm: `tests/fixtures/sources/lazada/{category_page.html,listing_xhr.json}`.
+- Test: `test_browser_session.py`, `test_browser_fetcher.py` (page giả, không cần mạng), `test_lazada_source.py`; một test `integration` thật (`tests/integration/test_lazada_live.py`, bị bỏ chọn mặc định, **chưa chạy** vì cấm crawl trong session này).
+- **Chưa làm:** image `docker/crawler-browser` (R8).
+
+## R5. Processing: normalize, stage `silver`, quarantine, drift, parity
+
+Commit: `0accc39` (normalize), `93f8f64`, `7545432`, `421fda5`, `6983f6a`.
+
+Session trước bị dừng giữa chừng, để lại khoảng 48 file chưa commit, gồm R5 và cả bản nháp R6 (runner, 4 stage còn lại, memory/wire/cli, bootstrap viết lại, repositories, scheduler) và R8 (tách compose, Dockerfile mới, env ghép lớp, Airflow). Phần nháp R6/R8 **chưa có test** và làm hỏng các test cũ (xoá `warehouse.py`), nên không đưa vào R5: đã cất nguyên trạng ở nhánh `wip/r6-r8-draft` (commit `4fc95a4`). Chỉ phần R5 được giữ lại.
+
+- `processing/normalize/common.py`, `normalize/sources/{tiki,lazada}.py`: `PAYLOAD_SCHEMA` (Tiki 133 trường lá, Lazada 55), `to_wide`, `to_offer_observation`, `split_quarantine`, `payload_drift`.
+  - Sửa so với `0accc39` (`7545432`): `observation_id` của hàng quảng cáo có thêm `"ad"` và `record_index`, nên một quảng cáo lặp listing organic cùng response không đụng id với hàng organic; listing organic lặp trên một trang vào quarantine với lý do `duplicate_listing_on_page` (hệ cũ giữ hàng đầu và đếm phần còn lại là `duplicate_count`).
+- `processing/batch/stages/base.py` (`Stage`, `StageContext`, `RunOptions`, `Outcome`), `ports.py` (Protocol), `context.py` (`MarketplaceBatchContext` chuyển từ `warehouse.py`, thêm `gold_run_uri`; `warehouse.py` re-export tên cũ), `lake.py` (`SparkLakeIO`), `inputs.py` (`organic_only`, `observations_as_of`, ...).
+- `stages/silver.py` (`SilverStage`): đọc Bronze records của `[silver_since, as_of]`; bỏ bản sao trùng `record_id` (đếm vào summary); ghi `offer_observations_v2` (partition `source_code`, `observed_date`), `quarantine`, `<source>_listing_wide`, `page_context`, và `silver/_runs/run_id=<id>/silver.json`.
+  - Summary có `quarantine_by_reason`, `payload_drift` (key, số lần), `duplicates_before_dedup` = `{record_id, observation_id, identical_content}`. `observation_id` và `identical_content` được đếm trên hàng hợp lệ **trước** mọi dedup (`duplicate_counts`); khi so nội dung bỏ `record_id` và `raw_artifact_id`. Không hàng nào bị bỏ vì `observation_id` trùng: R6 cho check `observation_id_unique` đọc số này.
+- **AC7 (parity)**: `tests/spark/test_silver_stage.py`. Đường cũ được dựng lại từ ánh xạ đã đóng băng của `TikiCrawler._event_from_row` (lấy từ `3eeff99`) với factory của `domain/observations.py`, rồi `canonical_json`, `flatten_marketplace_observations`, `deduplicate_marketplace_observations`. Đường mới: Bronze records → `SilverStage` → `organic_only`. Cả hai chạy qua `build_marketplace_marts`.
+  - Kết quả: cả 10 mart khớp từng dòng trên mọi cột; bảng observation khớp trên mọi cột cũ. Không có chỗ lệch nào cần ghi.
+  - Phạm vi: fixture Tiki (4 hàng organic + 1 quảng cáo). Hai đường dùng cùng frame audit nên các mart phụ thuộc audit khớp theo định nghĩa.
+- **Giới hạn môi trường:** Spark trên host không có filesystem, nên test dùng `LakeIO` và `ObjectStore` in-memory (`MemoryLake`, `MemoryStore` trong test). `SparkLakeIO` (Parquet, `partitionOverwriteMode=dynamic`) **chưa chạy thật**; cần chạy trong stack Docker (R9).
+- Tiện thể: `git rm --cached src/ecomdata.egg-info` (đang bị track nhầm).
+
+## Số test hiện tại
+
+Chạy ở worktree sạch tại commit `6983f6a` (`PYTHONPATH=src`, `pytest -q -p no:cacheprovider -rs`): 1474 passed, 1 skipped, 11 deselected (11 drill), 1839 s (máy đang chạy song song một session khác). 1 skipped: `tests/integration/test_lazada_live.py`, `importorskip("playwright.sync_api")` vì `.venv` chưa cài Playwright (extra `browser`); test này chạm mạng nên không được chạy. Ruff sạch, `lint-imports` 4 kept. Mốc R0: 1244 passed, 0 skipped.
+
+Test đã bỏ có chủ đích từ R0 đến R5: xem R3 (4 file test của adapter Tiki cũ và stub cũ).
+
+## Bảng nghiệm thu AC1–AC14 (tại commit `6983f6a`)
+
+| AC | Trạng thái | Bằng chứng / lệnh kiểm |
+|---|---|---|
+| AC1 Đóng gói | **pass** | `pip install -e ".[dev,spark]"` (R1). `git grep -n "sys.path.insert" -- src tests services` không ra gì. `git ls-files \| grep -c "\.pyc$"` = 0. `src/ecomdata.egg-info` đã `git rm --cached` (`6983f6a`). |
+| AC2 Luật phụ thuộc | **pass** | `lint-imports`: 4 contract kept. `pytest tests/architecture`: `test_import_rules.py`, `test_single_definitions.py`, `test_site_literals.py`. |
+| AC3 Lint | **pass** | `python -m ruff check src tests services`: All checks passed. Ngoại lệ: `E501`, `UP042`, `E402` trong `tests/**` (R1). |
+| AC4 Suite xanh | **pass tại `6983f6a`** (số ở trên); **partial** so với plan: chưa có test cho các module R6–R9 vì chưa có. | `python -m pytest -q -p no:cacheprovider -rs` |
+| AC5 Một chỗ cấu hình | **partial** | Đạt: `SourceRegistry` (`domain/sources.py`), Spark factory (`infra/spark.py`), `jdbc_url` (`infra/postgres.py`), Kafka producer factory (`infra/kafka.py`), helper validate (`domain/validation.py`). Chưa đạt: ordering (`domain/ordering.py` chưa được `marts.py` và `speed/stream.py` dùng). Kiểm: `tests/architecture/test_single_definitions.py`, `git grep -n "orderBy(F.col(\"observed_at\")" src`. |
+| AC6 ELT không mất dữ liệu | **pass (mức test, fixture)** | `tests/unit/domain/test_source_records.py`, `tests/unit/ingestion/test_{tiki_source,lazada_source,raw_store,record_store,marketplace_reparse}.py`; quarantine đếm đủ hàng ở Silver: `tests/spark/test_silver_stage.py`. Chưa kiểm trên dữ liệu crawl thật. |
+| AC7 Parity | **pass (Tiki)** | `pytest tests/spark/test_silver_stage.py -k "marts_of_the_new_path or observation_rows_agree"`: 10 mart và các cột cũ khớp từng dòng, không có chỗ lệch. |
+| AC8 Batch theo stage | **not started** (chỉ có `SilverStage`; bản nháp ở `wip/r6-r8-draft`) | `pytest tests/spark/test_batch_stages.py` (chưa có ở `6983f6a`); `git grep from_settings -- src/ecomdata/processing/batch/stages` |
+| AC9 Sửa bug | **pass** | (a) `test_the_silver_path_follows_the_configured_dataset`; (b) `test_robots_are_fetched_once_per_host_and_cached`, `test_robots_are_downloaded_once_for_every_page_a_worker_acquires`; (c) `test_a_target_the_adapter_cannot_turn_into_a_url_is_a_failed_report`; (d) `git grep -n "except Exception:" -A1 src/ecomdata/ingestion/sources` không còn `raise` trần. |
+| AC10 Lazada | **partial** | Đạt: `test_lazada_source.py` (extractor), `test_browser_fetcher.py` (XHR, trang chặn, đóng session), `test_browser_session.py`. Chưa chạy: `tests/integration/test_lazada_live.py` (chạm mạng; `pytest -m integration tests/integration`). |
+| AC11 Image và compose | **not started** | Bản nháp ở `wip/r6-r8-draft`. Kiểm: `docker image inspect` 3 tag cũ so `docs/evidence/refactor-20261024/baseline/images_before.txt`. |
+| AC12 E2E `mp-refactor` | **not started** | Cần R6–R8. |
+| AC13 Tài liệu | **not started** | `docs/ARCHITECTURE.md` vẫn bản cũ; chưa có `docs/adr/`, `docs/archive/`. Đã có: `REFACTOR_REPORT.md`, `HANDOFF_REFACTOR.md`. |
+| AC14 Git | **partial** | `git log --format=%an refactor/architecture ^phase-10-dimensional-model` chỉ có tên người dùng; `git log --format=%B ... \| grep -ci co-authored` = 0; không push. Chưa so `docker ps -a` và `docker volume ls` trước/sau với baseline (session này không chạm Docker). |
