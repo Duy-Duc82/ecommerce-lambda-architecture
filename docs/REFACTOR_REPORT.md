@@ -115,14 +115,14 @@ Test đã bỏ có chủ đích từ R0 đến R5: xem R3 (4 file test của ada
 | AC1 Đóng gói | **pass** | `pip install -e ".[dev,spark]"` (R1). `git grep -n "sys.path.insert" -- src tests services` không ra gì. `git ls-files \| grep -c "\.pyc$"` = 0. `src/ecomdata.egg-info` đã `git rm --cached` (`6983f6a`). |
 | AC2 Luật phụ thuộc | **pass** | `lint-imports`: 4 contract kept. `pytest tests/architecture`: `test_import_rules.py`, `test_single_definitions.py`, `test_site_literals.py`. |
 | AC3 Lint | **pass** | `python -m ruff check src tests services`: All checks passed. Ngoại lệ: `E501`, `UP042`, `E402` trong `tests/**` (R1). |
-| AC4 Suite xanh | **pass tại `6d2d072`**: 1455 passed, 2 skipped, 11 deselected (drill), 30 phút. Test cho R6/R7 có; R8/R9 chưa có. | `python -m pytest -q -p no:cacheprovider -rs` |
+| AC4 Suite xanh | **pass tại R8**: 1504 passed, 2 skipped, 11 deselected (drill), 30 phút. Test cho R6/R7 có; R8/R9 chưa có. | `python -m pytest -q -p no:cacheprovider -rs` |
 | AC5 Một chỗ cấu hình | **pass** | `SourceRegistry`, Spark factory, `jdbc_url`, Kafka producer factory, `domain/validation.py`, và `domain/ordering.py` (`marts.py` dùng `ORDER_COLUMNS`, `speed/stream.py` dùng `order_key`). `percentile_accuracy` lấy từ `context`. Kiểm: `tests/architecture/test_single_definitions.py`. |
 | AC6 ELT không mất dữ liệu | **pass (mức test, fixture)** | `tests/unit/domain/test_source_records.py`, `tests/unit/ingestion/test_{tiki_source,lazada_source,raw_store,record_store,marketplace_reparse}.py`; quarantine đếm đủ hàng ở Silver: `tests/spark/test_silver_stage.py`. Chưa kiểm trên dữ liệu crawl thật. |
 | AC7 Parity | **pass (Tiki)** | `pytest tests/spark/test_silver_stage.py -k "marts_of_the_new_path or observation_rows_agree"`: 10 mart và các cột cũ khớp từng dòng, không có chỗ lệch. |
 | AC8 Batch theo stage | **pass (mức test, in-memory)** | `tests/unit/processing/test_batch_runner.py` (chuyển trạng thái, no-op, `--force`, lock); `tests/spark/test_batch_stages.py`: `--all` và từng stage cho cùng Gold, manifest, audit; `observation_id` trùng thì quality FAIL. `git grep from_settings -- src/ecomdata/processing/batch/stages` rỗng. Chưa chạy trên Parquet/MinIO thật (R9). |
 | AC9 Sửa bug | **pass** | (a) `test_the_silver_path_follows_the_configured_dataset`; (b) `test_robots_are_fetched_once_per_host_and_cached`, `test_robots_are_downloaded_once_for_every_page_a_worker_acquires`; (c) `test_a_target_the_adapter_cannot_turn_into_a_url_is_a_failed_report`; (d) `git grep -n "except Exception:" -A1 src/ecomdata/ingestion/sources` không còn `raise` trần. |
 | AC10 Lazada | **partial** | Đạt: `test_lazada_source.py` (extractor), `test_browser_fetcher.py` (XHR, trang chặn, đóng session), `test_browser_session.py`. Chưa chạy: `tests/integration/test_lazada_live.py` (chạm mạng; `pytest -m integration tests/integration`). |
-| AC11 Image và compose | **not started** | Bản nháp ở `wip/r6-r8-draft`. Kiểm: `docker image inspect` 3 tag cũ so `docs/evidence/refactor-20261024/baseline/images_before.txt`. |
+| AC11 Image và compose | **pass (mức cấu hình và build)** | Image mới: `ecommerce/marketplace-python:2`, `ecommerce/spark-marketplace:4.0.1-r2`, `ecommerce/crawler-browser:1`, `ecommerce/airflow:3.3.2-r1`; ba tag cũ giữ nguyên id so `images_before.txt`. `docker compose --env-file env/base.env --env-file env/ports.<stack>.env --env-file env/<stack>.env config -q` sạch với 4 stack. `pytest tests/unit/ops/test_compose_isolation.py test_compose_services.py`: 99 passed. Airflow lên được trên `mp-refactor` (3 DAG parse, socket Docker truy cập được); chưa chạy một DAG thật (cần stack lõi, R9). |
 | AC12 E2E `mp-refactor` | **not started** | Cần R6–R8. |
 | AC13 Tài liệu | **not started** | `docs/ARCHITECTURE.md` vẫn bản cũ; chưa có `docs/adr/`, `docs/archive/`. Đã có: `REFACTOR_REPORT.md`, `HANDOFF_REFACTOR.md`. |
 | AC14 Git | **partial** | `git log --format=%an refactor/architecture ^phase-10-dimensional-model` chỉ có tên người dùng; `git log --format=%B ... \| grep -ci co-authored` = 0; không push. Chưa so `docker ps -a` và `docker volume ls` trước/sau với baseline (session này không chạm Docker). |
@@ -150,3 +150,16 @@ Nguồn: bản nháp `wip/r6-r7-draft` squash vào `refactor/architecture`, sử
 - **Chưa làm:** `build_offer_change_daily` chưa gọi `domain/change_rules.py` (luật đó là Python theo từng offer, mart là Spark; cần quyết định thiết kế). `collect()` còn ở `marts.py` (max date, danh sách marketplace) và `inputs.py` (kiểm xung đột `observation_id`).
 - `docs/ARCHITECTURE.md` do bản nháp viết lại; chưa rà, thuộc R9.
 - Tiếp theo: R8 (Dockerfile, compose tách lớp, image Airflow), R9 (E2E `mp-refactor`).
+
+## R8. Hạ tầng (2026-10-25)
+
+Nguồn: lấy từng file từ `wip/r6-r8-draft` (compose, docker, env, `mp.ps1`, `constraints.txt`), không merge nguyên; bỏ hết phần còn `silver-sink`.
+
+- Image: build lại `marketplace-python:2`, `spark-marketplace:4.0.1-r2`; build mới `airflow:3.3.2-r1`. Không build đè tag cũ.
+- `docker/airflow/Dockerfile`: image Airflow từ chối `pip` chạy bằng root, nên `COPY --chown=airflow`, không đổi user; không cài lại `python-dotenv` (Airflow có sẵn bản mới hơn bản `constraints.txt` ghim).
+- Compose: service Airflow chạy `user: "50000:0"` và `PYTHONPATH` rỗng. Chạy bằng root làm module `airflow` biến mất (nằm ở user-site của `airflow`), còn `PYTHONPATH` của `marketplace-env` che module của Airflow.
+- `scripts/mp.ps1` gọi `python -m ecomdata.processing.batch run --all` thay cho `batch.warehouse`; smoke không còn `silver-sink`, `batch-scheduler` chạy theo profile `legacy-scheduler`.
+- Test: `test_compose_isolation.py` tính cả file legacy (cổng Spark), nhận ghim `@sha256:` không phải là secret, nhận `profiles:` có thụt lề tuỳ ý; `test_demo.py` đọc `compose/docker-compose.yml`.
+- `DEMO_RUNBOOK.md`, `RUNBOOK.md` theo tên Dockerfile mới; `SPARK_DRIVER_MEMORY` thay cho `stream.override.yml`.
+- Suite: 1504 passed, 2 skipped, 11 deselected; `ruff` sạch; `lint-imports` 4 kept.
+- **Hoãn:** gộp `Stack`, `wait_until`, `refuse_live` của `ops/bench.py`, `bench_load.py`, `drills.py` vào `ops/stackctl.py`. Các bản khác ngữ nghĩa (kiểu exception, giá trị trả về), và drill cần stack Docker đầy đủ nên không kiểm được ở R8. Làm cùng R9 khi có stack chạy.

@@ -2,15 +2,16 @@
 
 Ngày 2026-10-25. Plan: `docs/PLAN_REFACTOR_ARCHITECTURE.md`. Nhật ký: `docs/REFACTOR_REPORT.md` (có bảng AC1–AC14 hiện tại).
 
-## 0. BẮT ĐẦU Ở ĐÂY (cập nhật 2026-10-25 tối)
+## 0. BẮT ĐẦU Ở ĐÂY (cập nhật 2026-10-25 tối, sau R8)
 
-**R6 và R7 đã xong** trên `refactor/architecture` (HEAD `6d2d072`): suite 1455 passed, `ruff` sạch, `lint-imports` 4 kept. Chi tiết ở `docs/REFACTOR_REPORT.md`, mục "R6/R7". Nhánh `wip/r6-r7-draft` đã được thay thế, có thể xoá.
+**R6, R7, R8 đã xong** trên `refactor/architecture`: suite 1504 passed, `ruff` sạch, `lint-imports` 4 kept. Chi tiết ở `docs/REFACTOR_REPORT.md` (mục R6/R7, R8). Các nhánh `wip/*` đã được thay thế, có thể xoá.
 
-**Việc tiếp theo:** R8 (mục 4.3), rồi R9 (mục 4.4). Tham khảo `wip/r6-r8-draft` cho `compose/*`, `docker/*`, `env/*`; không merge nguyên.
+**Việc tiếp theo: R9** (mục 4.4): E2E trên `mp-refactor` (crawl thật Tiki và Lazada, DAG Airflow chạy thật ít nhất 2 lần, speed), bằng chứng, `ARCHITECTURE.md`, ADR, `docs/archive/`. Image đã build; lệnh lên stack: `.\scripts\mp.ps1 up -EnvFile env/refactor.env -With crawl,speed,batch,serve` rồi profile `orchestration`. Hiện không có container nào chạy.
 
-**Còn nợ từ R6:** `build_offer_change_daily` chưa gọi `domain/change_rules.py` (cần quyết định thiết kế); `docs/ARCHITECTURE.md` là bản nháp chưa rà.
+**Còn nợ:** `build_offer_change_daily` chưa gọi `domain/change_rules.py`; gộp `Stack`/`wait_until`/`refuse_live` vào `ops/stackctl.py` (hoãn); `docs/ARCHITECTURE.md` là bản nháp chưa rà; AC8 chưa chạy trên Parquet/MinIO thật (R9 là lần đầu `SparkLakeIO` chạy thật). Shopee chờ AppID Affiliate của người dùng.
 
-**Lưu ý môi trường:** file trong repo dùng CRLF; sửa bằng script phải giữ CRLF. Phần dưới của mục này là ghi chép cũ (16:40), giữ để tra cứu.
+**Lưu ý môi trường:** file trong repo dùng CRLF; sửa bằng script phải giữ CRLF. Trong Git Bash, chuỗi có `
+` trong heredoc python bị đổi; dùng `Edit` hoặc `chr(92)`.
 
 ### (cũ) 16:40
 
