@@ -13,7 +13,7 @@ Stack dùng cho buổi demo với giáo viên: crawl HTML Tiki, Kafka, Silver, s
 
 ## Bật, dừng, kiểm tra
 
-Chạy từ thư mục gốc của repo (Git Bash). Lệnh dùng `env/tiki-html.env` + `stream.override.yml` + `observability/docker-compose.logging.yml`:
+Chạy từ thư mục gốc của repo (Git Bash). Lệnh dùng `env/base.env` + `env/ports.tiki-html.env` + `env/tiki-html.env` + `compose/docker-compose.observability.yml` (qua `run-fullstack.sh`):
 
 ```sh
 sh run-fullstack.sh up -d --build loki promtail grafana   # giám sát log trước
@@ -35,12 +35,12 @@ docker compose --profile ops run --rm ops python -m ops seed --marketplace tiki 
 
 ## Cấu hình riêng của demo
 
-`stream.override.yml` và `run-fullstack.sh` chỉ dùng cho demo, không thay đổi mặc định của repo:
+`run-fullstack.sh` chỉ dùng cho demo, không thay đổi mặc định của repo:
 
 - `CRAWL_REQUEST_DELAY_SECONDS=3.5`: crawl khoảng 10 trang/phút, đều theo thời gian.
 - `MARKETPLACE_STREAM_TRIGGER=5 seconds`: dữ liệu vào Elasticsearch khoảng 3 giây sau khi crawl xong (trung vị).
 - Batch mỗi giờ (`MARKETPLACE_BATCH_INTERVAL_SECONDS=3600`, lag 1200 s).
-- `PYSPARK_SUBMIT_ARGS="--driver-memory 3g pyspark-shell"`: với heap mặc định 1 GB, batch bị OOM ngày 24/10.
+- `SPARK_DRIVER_MEMORY=3g` (trong `env/base.env`, đọc bởi `infra/spark.py`): với heap mặc định 1 GB, batch bị OOM ngày 24/10. Bản vá `stream.override.yml` đã gộp vào cấu hình chính.
 - 300 danh mục: 60 danh mục trong `env/tiki_html_categories.json` và 240 danh mục chọn ngẫu nhiên từ sitemap (đã seed sẵn trong frontier của volume).
 
 ## Dựng lại dashboard

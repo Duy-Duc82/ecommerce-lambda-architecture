@@ -527,7 +527,7 @@ also why `pg_dump` runs inside the ops container rather than from the host: a
 session lock belongs to the session that took it.
 
 `pg_dump` and `pg_restore` are **pinned to major 18** in
-`docker/marketplace-python/Dockerfile`, matching the pinned `postgres:18.3`.
+`docker/python/Dockerfile`, matching the pinned `postgres:18.3`.
 pg_dump refuses a server newer than itself, and Debian's own client is 17.
 Change the two pins together.
 
@@ -632,5 +632,5 @@ Elasticsearch and Kibana are on 8.18.1 rather than 8.18.0 because the 8.18.0
 image on the development machine was pulled while the disk was full and
 stayed corrupt across re-pulls (`PROGRESS.md` §13.4).
 
-The jar versions in `docker/spark-marketplace/Dockerfile` and their sources
+The jar versions in `docker/spark/Dockerfile` and their sources
 are listed in that file.
