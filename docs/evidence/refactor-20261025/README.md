@@ -31,7 +31,7 @@ Nguồn số liệu: `audit.crawl_request_attempt` join `audit.crawl_frontier`, 
 Giải thích hai điểm:
 
 - **Tiki, 93 lỗi:** tất cả có thông báo "Tiki category page has no products", HTTP 200, trong khoảng 14:40–14:57. Đó là category rỗng trong đợt sweep 4.237 category, không phải bị chặn. Extractor đang phân loại trang rỗng là `PARSE_ERROR`; nên có một loại riêng (ghi vào nợ kỹ thuật).
-- **Lazada, 11 lỗi:** thông báo "none of the 0 captured responses holds mods.listItems", mỗi lần chờ ≈ 49 s (timeout 45 s), tất cả trong 14:23–14:33. Khoảng này trùng lúc máy thiếu RAM (batch Spark chạy cùng speed và Chromium; hệ thống đã tắt hai lệnh nền vì thiếu bộ nhớ). Sau 14:33 các trang đều thành công, nên khả năng cao là Chromium chậm do thiếu RAM. **Không có bằng chứng nào cho thấy bị chặn** (không captcha, không HTTP 4xx, circuit không mở), nhưng tôi không chứng minh được nguyên nhân; còn là giả thuyết.
+- **Lazada, 11 lỗi:** thông báo "none of the 0 captured responses holds mods.listItems", mỗi lần chờ ≈ 49 s (timeout 45 s), tất cả trong 14:23–14:33, rồi hết. Không có dấu hiệu bị chặn (không captcha, không HTTP 4xx, circuit không mở). **Nguyên nhân chưa rõ.** Giả thuyết ban đầu "VM Docker thiếu RAM làm Chromium chậm" bị số đo bác bỏ: PSI bộ nhớ của VM chỉ có 1,5 s tích luỹ trong 10 giờ, `oom_kill` = 0, không container nào `OOMKilled` (xem mục "Áp lực bộ nhớ"). Còn mở: tranh chấp CPU với lần build image và các task Airflow lúc đó, hoặc phía Lazada phục vụ khác đi trong khoảng đó.
 
 ## Bảng 2: batch, quality, serving
 
@@ -62,7 +62,7 @@ Speed: Kafka `marketplace.records.v1` ~43.000 message; `marketplace.records.v1.d
 - Chưa kiểm hồi phục (backup/restore) và các drill D1–D11 trên stack này.
 - `marketplace_maintenance` chưa chạy lần nào (đã parse); chưa thử xoá thật.
 - Dashboard Superset chụp trong cùng stack; phần lệnh `superset-init` in `Column sync skipped` và `No such option: -c` ở một bước phụ, chưa tìm nguyên nhân (dashboard vẫn dựng và có dữ liệu).
-- Chưa đo tải RAM có hệ thống. Khi speed, Chromium và batch Spark chạy cùng lúc trên máy 14,6 GB đã xảy ra thiếu bộ nhớ; nên không chạy batch cùng speed trên máy này (rủi ro K4 của plan).
+- Áp lực bộ nhớ nằm ở **máy chủ Windows**, không phải trong VM Docker; xem mục "Áp lực bộ nhớ". Cần đặt giới hạn rõ hơn trước khi chạy dài.
 - Tiki sweep 4.237 category vẫn còn dở khi dừng (1.352 trang thành công). Đợt crawl dùng để kiểm kiến trúc, không phải để thu đủ dữ liệu.
 
 ## Ảnh chụp
@@ -75,3 +75,20 @@ Speed: Kafka `marketplace.records.v1` ~43.000 message; `marketplace.records.v1.d
 ## Docker trước và sau (AC14)
 
 Không container hay volume nào có từ trước bị xoá; image `ecommerce/marketplace-python:1`, `ecommerce/spark-marketplace:4.0.1`, `ecommerce/spark-warehouse:3.5.1` giữ nguyên id (`23e5681cec3c`, `b81bc0fcbec7`, `dadc7cdab282`). Phần thêm mới chỉ thuộc project `mp-refactor` (container `rf-*`, volume `mp-refactor_*` và vài volume ẩn danh của chúng).
+
+## Áp lực bộ nhớ (kiểm sau khi hệ thống tắt hai lệnh nền)
+
+Hệ thống tắt hai shell nền vì máy "sắp hết RAM". Số đo sau đó:
+
+| Phép đo | Giá trị | Ý nghĩa |
+|---|---|---|
+| RAM máy chủ | 31,1 GB tổng, 7,0 GB trống; commit 42,7 / 50,2 GB (85%) | máy chủ chật, không phải VM |
+| `.wslconfig` | `memory=14GB`, `swap=8GB`, `autoMemoryReclaim=gradual` | VM được giữ tối đa 14 GB RAM thật của máy chủ |
+| VM Docker, PSI memory (uptime 10,2 giờ) | `some` 1,5 s, `full` 1,3 s tích luỹ; `oom_kill` 0; swap-out 52 nghìn trang (~200 MB) | VM gần như không bị ép bộ nhớ |
+| Container | không cái nào `OOMKilled`, `RestartCount` 0 | không bị giết vì OOM |
+| Tổng RSS container lúc 14:14 (chưa kể task batch) | ~11 GB (speed 2,8; ES 1,9; Kafka 1,1; Airflow scheduler 0,7; Lazada 0,55; còn lại ~4) | ngay trước khi một task batch Spark (driver 3 GB) khởi động |
+| Tiến trình máy chủ khi kiểm | `vmmemWSL` 3,7 GB (stack đã dừng), pytest + JVM Spark 2 GB, 4 tiến trình `claude.exe` ~1,2 GB, hơn 6 tiến trình Chrome ~3,5 GB, Defender 0,45 GB | phần còn lại của máy chủ |
+
+Giải thích hợp lý nhất (suy luận từ các số trên, chưa đo trực tiếp lúc xảy ra): stack chạy đủ speed (JVM 3 GB), ES, Kafka, Airflow, Chromium cộng thêm task batch Spark (driver 3 GB) kéo VM lên sát mức trần 14 GB, và bộ nhớ đệm trang của Linux (MinIO, ES, Kafka ghi liên tục) cũng nằm trong 14 GB đó. `vmmemWSL` giữ phần đó, nên bộ nhớ trống của máy chủ giảm cùng lúc Chrome, các phiên Claude và JVM của pytest chiếm chỗ. VM không hề thiếu bộ nhớ; máy chủ mới là bên chật. Bằng chứng thiếu: không có số đo theo thời gian của `vmmemWSL` và bộ nhớ trống trong lúc chạy.
+
+Việc nên làm cho lần chạy dài sau: ghi `vmmemWSL` và bộ nhớ trống theo phút trong lúc chạy; không chạy pytest toàn bộ (JVM Spark trên máy chủ) cùng lúc với stack; hạ `SPARK_DRIVER_MEMORY` cho task batch xuống 2g nếu dữ liệu cho phép; cân nhắc `autoMemoryReclaim=dropcache` hoặc hạ `memory=` trong `.wslconfig` (thay đổi này cần khởi động lại WSL, tôi chưa làm).
