@@ -101,7 +101,7 @@ def test_every_record_carries_the_lineage_of_its_artifact():
 
 
 def test_personal_data_is_dropped_from_the_context_and_named():
-    context = {"mods": {"filter": {}}, "userId": "12345", "anonUid": "abc", "seoInfo": {"t": 1}}
+    context = {"mods": {"filter": {}}, "mainInfo": {"userId": "12345", "anonUid": "abc", "page": "1"}, "seoInfo": {"t": 1}}
     request = ListingPageRequest("lazada", "marketplace-lazada", "laptop", 1)
     built = build_records(
         LAZADA,
@@ -111,8 +111,9 @@ def test_personal_data_is_dropped_from_the_context_and_named():
         page_context=context,
     )
 
-    assert built[0].payload == {"mods": {"filter": {}}, "seoInfo": {"t": 1}}
-    assert built[0].dropped_fields == ("anonUid", "userId")
+    assert built[0].payload == {"mods": {"filter": {}}, "mainInfo": {"page": "1"}, "seoInfo": {"t": 1}}
+    assert built[0].dropped_fields == ("mainInfo.anonUid", "mainInfo.userId")
+    assert context["mainInfo"]["userId"] == "12345"  # the source object is untouched
     assert built[1].dropped_fields == ()
 
 
@@ -122,6 +123,16 @@ def test_drop_fields_does_not_mutate_its_input():
     kept, dropped = drop_fields(original, ["b", "c"])
 
     assert (kept, dropped) == ({"a": 1}, ("b",)) and original == {"a": 1, "b": 2}
+
+
+def test_drop_fields_follows_dotted_paths_and_ignores_paths_that_are_absent():
+    original = {"a": {"b": {"c": 1, "d": 2}, "e": 3}, "f": [1]}
+
+    kept, dropped = drop_fields(original, ["a.b.c", "a.x.y", "f.z", "g"])
+
+    assert kept == {"a": {"b": {"d": 2}, "e": 3}, "f": [1]}
+    assert dropped == ("a.b.c",)
+    assert original == {"a": {"b": {"c": 1, "d": 2}, "e": 3}, "f": [1]}
 
 
 def test_a_record_survives_the_wire_unchanged():

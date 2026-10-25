@@ -230,7 +230,7 @@ LAZADA = SourceSpec(
     counters=(("review_count", True),),
     extractor_version="1",
     # The anonymous visitor identifiers Lazada echoes into the page state.
-    pii_context_fields=("userId", "anonUid"),
+    pii_context_fields=("mainInfo.userId", "mainInfo.anonUid"),
     capture_patterns=(r"[?&]ajax=true",),
     blocked_patterns=(r"/_____tmd_____/punish", r"punish\?x5secdata", r"baxia-punish", r"captcha", r"slide to verify"),
 )

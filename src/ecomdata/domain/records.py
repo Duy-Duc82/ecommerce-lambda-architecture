@@ -33,11 +33,31 @@ def make_record_id(raw_artifact_id: str, record_kind: RecordKind | str, record_i
 
 
 def drop_fields(payload: Mapping[str, Any], names: Iterable[str]) -> tuple[dict[str, Any], tuple[str, ...]]:
-    """``payload`` without the top-level keys in ``names``, and which of them were present."""
-    wanted = set(names)
-    kept = {key: value for key, value in payload.items() if key not in wanted}
-    dropped = tuple(sorted(key for key in payload if key in wanted))
-    return kept, dropped
+    """``payload`` without the keys named in ``names``, and which of them were present.
+
+    A name is a top-level key, or a dotted path into nested objects
+    (``mainInfo.userId``). The input is never modified: only the objects along a
+    dropped path are copied.
+    """
+    kept = dict(payload)
+    dropped = []
+    for name in sorted(set(names)):
+        path = name.split(".")
+        parents = []
+        node: Any = kept
+        for key in path[:-1]:
+            child = node.get(key) if isinstance(node, dict) else None
+            if not isinstance(child, Mapping):
+                node = None
+                break
+            copy = dict(child)
+            node[key] = copy
+            parents.append(copy)
+            node = copy
+        if isinstance(node, dict) and path[-1] in node:
+            del node[path[-1]]
+            dropped.append(name)
+    return kept, tuple(dropped)
 
 
 @dataclass(frozen=True)
