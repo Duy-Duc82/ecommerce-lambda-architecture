@@ -150,7 +150,7 @@ python -m ecomdata.processing.batch run --run-id <id> --as-of <ISO> --stage <tê
 2. `processing/normalize/sources/<site>.py`: `PAYLOAD_SCHEMA` khai báo đủ các trường đã thấy, `to_wide`, `to_offer_observation`.
 3. Một `SourceSpec` trong `domain/sources.py` (id, URL gốc, loại fetcher `http`/`browser`/`api`, extractor, normalizer, tiền tệ, counter, discovery, danh sách PII, mức politeness tối thiểu) và đăng ký vào `SOURCES`.
 4. Fixture nhỏ (tối đa 5 sản phẩm, đã cắt bớt, không PII) trong `tests/fixtures/sources/<site>/`; test extractor, normalizer, và một dòng trong test parity.
-5. Danh sách category cấu hình (`env/sources/<site>_categories.json`) nếu chưa có discovery; không cần sửa `ops`, `batch`, `speed`.
+5. Danh sách category cấu hình (`ingestion/sources/<site>/categories.json`, nằm trong package để image đã cài tìm thấy) nếu chưa có discovery; không cần sửa `ops`, `batch`, `speed`.
 
 ## 7. Hạ tầng
 
