@@ -10,8 +10,7 @@ Ngày 2026-10-25. Plan: `docs/PLAN_REFACTOR_ARCHITECTURE.md`. Nhật ký: `docs/
 
 **Còn nợ:** `build_offer_change_daily` chưa gọi `domain/change_rules.py`; gộp `Stack`/`wait_until`/`refuse_live` vào `ops/stackctl.py` (hoãn); `docs/ARCHITECTURE.md` là bản nháp chưa rà; AC8 chưa chạy trên Parquet/MinIO thật (R9 là lần đầu `SparkLakeIO` chạy thật). Shopee chờ AppID Affiliate của người dùng.
 
-**Lưu ý môi trường:** file trong repo dùng CRLF; sửa bằng script phải giữ CRLF. Trong Git Bash, chuỗi có `
-` trong heredoc python bị đổi; dùng `Edit` hoặc `chr(92)`.
+**Lưu ý môi trường:** file trong repo dùng CRLF; sửa bằng script phải giữ CRLF. Trong Git Bash, chuỗi có dấu gạch chéo ngược theo sau là n trong heredoc python bị đổi thành xuống dòng; dùng `Edit` hoặc `chr(92)`.
 
 ### (cũ) 16:40
 
