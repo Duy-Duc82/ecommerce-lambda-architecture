@@ -16,7 +16,27 @@ Ngày 2026-10-25. Plan: `docs/PLAN_REFACTOR_ARCHITECTURE.md`. Nhật ký: `docs/
 | `lint-imports` | 4 contract kept, 0 broken |
 | Bản nháp R6/R8 | nhánh `wip/r6-r8-draft`, commit `4fc95a4`, **chưa test** (mục 5.1) |
 
-**Cảnh báo trước khi làm gì:** khi session này chạy, hai tiến trình `claude -p --model sonnet` khác (khởi động 14:31 và 14:47 ngày 25/10; một trong hai là chính session này) cũng đang ghi vào `C:\code\data-refactor`. Từ khoảng 14:53 đến 15:05 có người tạo `tests/spark/{legacy_path,lake_support,test_batch_inputs,test_batch_stages}.py`, sửa `stages/silver.py`, `lake.py`, `inputs.py`, `bootstrap.py`, `repositories.py`, `scheduler.py`, và stage việc xoá `warehouse.py` cùng `test_marketplace_warehouse.py` (R6 đang làm dở). Session này không động vào các thay đổi đó (chỉ commit đường dẫn của mình). Việc đầu tiên: `git status`, `git log --oneline -10`, `Get-CimInstance Win32_Process | ? Name -match 'claude'` để biết còn session nào đang chạy; chỉ một session ghi vào worktree một lúc.
+**Cập nhật lúc 15:45 ngày 25/10:**
+
+- Mọi session nền đã dừng. Không còn tiến trình `claude -p` hay vòng lặp chạy lại nào.
+- Phần R6/R7 dở dang (chưa kiểm) mà session chạy song song để lại đã được commit nguyên trạng vào nhánh **`wip/r6-r7-draft`** (`1abef01`). Nhánh này gồm:
+  - `processing/batch/{runner,cli,__main__,memory}.py`;
+  - `stages/{marts,quality,promote,publish}.py`;
+  - `orchestration/` (3 DAG và `tasks.py`);
+  - `processing/speed/normalizer.py`, `processing/normalize/wire.py`;
+  - `ops/{bronze,retention}.py`;
+  - `docs/adr/0001–0006`;
+  - các test `tests/spark/test_batch_*`, `tests/airflow/`, `tests/unit/orchestration/`.
+
+  Bản nháp này **chưa chạy suite**, và đã xoá `warehouse.py` cùng `test_marketplace_warehouse.py`.
+- Bản nháp cũ hơn (R6/R8) nằm ở `wip/r6-r8-draft` (`4fc95a4`).
+- `refactor/architecture` hiện **sạch**, dừng ở `f529d45`, đúng trạng thái R5 trong mục này.
+- Cách tiếp tục R6:
+  1. `git diff refactor/architecture wip/r6-r7-draft --stat`;
+  2. lấy lại từng phần bằng `git checkout wip/r6-r7-draft -- <file>`, hoặc `git cherry-pick -n 1abef01`;
+  3. chạy suite;
+  4. commit theo từng phần.
+- Luôn chỉ cho **một** session ghi vào worktree tại một thời điểm.
 
 ## 2. Bản đồ `src/ecomdata/`
 
