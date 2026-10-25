@@ -26,8 +26,8 @@ from urllib.parse import quote
 from ecomdata.domain.datasets import GOLD_DATASET, MARTS
 
 if TYPE_CHECKING:
+    from ecomdata.processing.batch.context import GoldWriteResult, MarketplaceBatchContext
     from ecomdata.processing.batch.quality import QualityDecision
-    from ecomdata.processing.batch.warehouse import GoldWriteResult, MarketplaceBatchContext
 
 GOLD_ZONE = "gold"
 MANIFEST_SCHEMA_VERSION = "marketplace-gold-manifest.v1"
@@ -105,7 +105,7 @@ def build_gold_manifest(
         )
         for name in sorted(writes)
     )
-    gold_run_uri = _run_root(context)
+    gold_run_uri = context.gold_run_uri
     return GoldManifest(
         manifest_schema_version=MANIFEST_SCHEMA_VERSION,
         run_id=context.run_id,
@@ -129,11 +129,6 @@ def build_gold_manifest(
         },
         previous_run_id=previous_run_id,
     )
-
-
-def _run_root(context: MarketplaceBatchContext) -> str:
-    root = context.gold_root_uri.rstrip("/")
-    return f"{root}/runs/run_id={quote(context.run_id, safe='')}"
 
 
 def _instant(value: datetime) -> str:

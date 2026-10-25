@@ -12,7 +12,7 @@ from ecomdata.domain.counter_semantics import counter_semantic
 from ecomdata.processing.batch.anomaly import build_price_anomaly_daily
 
 if TYPE_CHECKING:
-    from ecomdata.processing.batch.warehouse import MarketplaceBatchContext
+    from ecomdata.processing.batch.context import MarketplaceBatchContext
 
 MONEY = "decimal(38,6)"
 UNKNOWN_CATEGORY = "__UNKNOWN__"
