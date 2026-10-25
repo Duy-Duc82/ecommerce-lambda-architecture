@@ -2880,7 +2880,7 @@ mở lại.
 có latency đã hiệu chỉnh, rồi thay các cột latency của §27.2. Stack phải chạy
 trên host có đủ RAM.
 
-## 34. 2026-10-25 — Refactor kiến trúc (`refactor/architecture`): R0–R8 xong
+## 34. 2026-10-25 — Refactor kiến trúc (`refactor/architecture`): R0–R9 xong
 
 Plan: `docs/PLAN_REFACTOR_ARCHITECTURE.md`. Nhật ký và bảng AC1–AC14: `docs/REFACTOR_REPORT.md`. Bàn giao: `docs/HANDOFF_REFACTOR.md`.
 
@@ -2890,9 +2890,9 @@ Plan: `docs/PLAN_REFACTOR_ARCHITECTURE.md`. Nhật ký và bảng AC1–AC14: `d
 | R6 | xong | Batch theo stage (`silver`, `marts`, `quality`, `publish`, `promote`), `runner.py` và CLI `python -m ecomdata.processing.batch`; `warehouse.py` đã xoá; ordering dùng chung (`domain/ordering.py`). |
 | R7 | xong | Speed đọc `marketplace.records.v1` qua normalizer chung; `silver-sink` đã gỡ. |
 | R8 | xong | Dockerfile mới (python, spark, crawler-browser, airflow), compose tách lớp, env theo lớp, `mp-refactor`; Airflow lên được, 3 DAG parse. Hoãn: gộp `Stack` của ops. |
-| R9 | chưa | E2E trên `mp-refactor`, `ARCHITECTURE.md`, ADR, bằng chứng. 3 DAG Airflow và ADR 0001–0006 đã có. |
+| R9 | xong | E2E thật trên `mp-refactor` (Tiki + Lazada, 84 phút crawl, 2 DAG run, speed ~70 phút, Superset 13 chart); `ARCHITECTURE.md`, 6 ADR, README, `docs/archive/`. Bằng chứng: `docs/evidence/refactor-20261025/`. |
 
-**Kiểm tại R8:** 1504 passed, 2 skipped, 11 deselected (drill); `ruff` sạch; `lint-imports` 4 kept.
+**Kiểm tại R9:** 1505 passed, 2 skipped, 11 deselected (drill); `ruff` sạch; `lint-imports` 4 kept.
 
 **Còn nợ:** `build_offer_change_daily` chưa dùng `domain/change_rules.py`; `docs/ARCHITECTURE.md` là bản nháp chưa rà; AC8 chưa chạy trên Parquet/MinIO thật; Shopee chờ AppID Affiliate của người dùng.
 

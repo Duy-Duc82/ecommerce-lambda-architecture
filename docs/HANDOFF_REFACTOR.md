@@ -2,15 +2,19 @@
 
 Ngày 2026-10-25. Plan: `docs/PLAN_REFACTOR_ARCHITECTURE.md`. Nhật ký: `docs/REFACTOR_REPORT.md` (có bảng AC1–AC14 hiện tại).
 
-## 0. BẮT ĐẦU Ở ĐÂY (cập nhật 2026-10-25 tối, sau R8)
+## 0. BẮT ĐẦU Ở ĐÂY (cập nhật 2026-10-25 đêm, sau R9)
 
-**R6, R7, R8 đã xong** trên `refactor/architecture`: suite 1504 passed, `ruff` sạch, `lint-imports` 4 kept. Chi tiết ở `docs/REFACTOR_REPORT.md` (mục R6/R7, R8). Các nhánh `wip/*` đã được thay thế, có thể xoá.
+**R0–R9 đã xong** trên `refactor/architecture` (45 commit, chưa push, chưa PR). AC1–AC14 đều pass, bảng ở `docs/REFACTOR_REPORT.md`; bằng chứng E2E ở `docs/evidence/refactor-20261025/`. Suite: 1505 passed, `ruff` sạch, `lint-imports` 4 kept. Stack `mp-refactor` đã `stop`; không còn container chạy.
 
-**Việc tiếp theo: R9** (mục 4.4): E2E trên `mp-refactor` (crawl thật Tiki và Lazada, DAG Airflow chạy thật ít nhất 2 lần, speed), bằng chứng, `ARCHITECTURE.md`, ADR, `docs/archive/`. Image đã build; lệnh lên stack: `.\scripts\mp.ps1 up -EnvFile env/refactor.env -With crawl,speed,batch,serve` rồi profile `orchestration`. Hiện không có container nào chạy.
+**Việc tiếp theo, do người dùng quyết:**
+1. Đưa nhánh về `develop` (PR, hoặc merge). Chưa làm vì cần quyết định của người dùng.
+2. Chạy lại smoke offline (`mp.ps1 smoke -EnvFile env/bench.env`) và drill D1–D11 sau refactor; chưa chạy.
+3. Nợ kỹ thuật: `build_offer_change_daily` chưa gọi `domain/change_rules.py`; gộp `Stack`/`wait_until`/`refuse_live` vào `ops/stackctl.py`; loại lỗi riêng cho trang category rỗng (hiện là `PARSE_ERROR`); nguyên nhân 11 lỗi Lazada lúc 14:23–14:33.
+4. Phase 10 (star schema) trên nền kiến trúc mới, và các điều chỉnh của giáo viên hướng dẫn (xem memory `advisor-direction-20261024`).
+5. Shopee: chờ người dùng đăng ký AppID và Secret của Shopee Affiliate (ADR-0006).
+6. Trước khi chạy dài: ghi `vmmemWSL` và RAM trống theo thời gian, đừng chạy full pytest cùng lúc với stack (mục "Áp lực bộ nhớ" trong evidence).
 
-**Còn nợ:** `build_offer_change_daily` chưa gọi `domain/change_rules.py`; gộp `Stack`/`wait_until`/`refuse_live` vào `ops/stackctl.py` (hoãn); `docs/ARCHITECTURE.md` là bản nháp chưa rà; AC8 chưa chạy trên Parquet/MinIO thật (R9 là lần đầu `SparkLakeIO` chạy thật). Shopee chờ AppID Affiliate của người dùng.
-
-**Lưu ý môi trường:** file trong repo dùng CRLF; sửa bằng script phải giữ CRLF. Trong Git Bash, chuỗi có dấu gạch chéo ngược theo sau là n trong heredoc python bị đổi thành xuống dòng; dùng `Edit` hoặc `chr(92)`.
+**Lưu ý môi trường:** file trong repo dùng CRLF, sửa bằng script phải giữ CRLF; `*.sh` luôn LF (`.gitattributes`). Trong Git Bash, chuỗi có dấu gạch chéo ngược theo sau là n trong heredoc python bị đổi thành xuống dòng; dùng `Edit` hoặc `chr(92)`. Đường dẫn `/tmp` của Git Bash không phải của Docker/Windows; dùng thư mục scratchpad khi `docker cp`.
 
 ### (cũ) 16:40
 
