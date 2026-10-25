@@ -27,6 +27,7 @@ from typing import Any
 
 from ecomdata.ops.bootstrap import object_store as _object_store
 from ecomdata.ops.bootstrap import settings as _settings
+from ecomdata.ops.bronze import listing_rows
 
 SMOKE_CATEGORIES = ("stub-a/c9001", "stub-b/c9002", "stub-c/c9003")
 # Tiki category pages are not paginated: only page 1 exists.
@@ -106,18 +107,16 @@ def crawl_condition(src, *, targets, since) -> Condition:
     return Condition("each_task_succeeded_twice", all(n >= 2 for n in counts.values()), sorted(counts.values()))
 
 
-def silver_condition(src, *, targets, since) -> Condition:
+def records_condition(src, *, targets, since) -> Condition:
+    """Bronze/records holds one listing-row record for every row the crawl audit says was parsed."""
     parsed = dict(
         src.query(f"SELECT a.crawl_run_id, sum(a.parsed_count) {_SMOKE_ATTEMPTS} GROUP BY 1", (list(targets), since))
     )
     expected = sum(int(n) for n in parsed.values())
-    found = 0
-    for uri in src.list_objects(_object_store().uri("silver", _settings().batch.silver_dataset)):
-        payload = src.read_object(uri)
-        if payload is not None and json.loads(payload).get("crawl_run_id") in parsed:
-            found += 1
+    root = _object_store().uri("bronze", _settings().batch.records_dataset)
+    found = sum(1 for record in listing_rows(src, root) if record.get("crawl_run_id") in parsed)
     return Condition(
-        "silver_holds_parsed_observations", expected > 0 and found == expected, {"expected": expected, "found": found}
+        "bronze_holds_parsed_records", expected > 0 and found == expected, {"expected": expected, "found": found}
     )
 
 
@@ -148,7 +147,7 @@ def wait(
     while True:
         conditions = [
             crawl_condition(src, targets=targets, since=since),
-            silver_condition(src, targets=targets, since=since),
+            records_condition(src, targets=targets, since=since),
             speed_condition(src, since=since),
         ]
         log(
@@ -177,17 +176,16 @@ def wait_for_quiet(
     sleep: Callable[[float], None] = time.sleep,
     monotonic: Callable[[], float] = time.monotonic,
 ) -> bool:
-    """With the crawler stopped, wait until the Silver sink has consumed everything.
+    """With the crawler stopped, wait until no crawl task is still leased.
 
-    The quiet period of plan 9.2: validate's lag check is only meaningful once
-    nothing new is being published.
+    The quiet period of plan 9.2: validate's reconciliation is only meaningful once
+    nothing new is being written to Bronze.
     """
-    from ecomdata.domain.topics import MARKETPLACE_OBSERVATIONS
     deadline = monotonic() + timeout_seconds
     while True:
-        lag = src.consumer_lag(_settings().kafka.silver_consumer_group, MARKETPLACE_OBSERVATIONS.name)
-        log(json.dumps({"event": "smoke_quiet", "silver_lag": lag}))
-        if lag == 0:
+        ((leased,),) = src.query("SELECT count(*) FROM audit.crawl_frontier WHERE status = 'LEASED'")
+        log(json.dumps({"event": "smoke_quiet", "leased_tasks": leased}))
+        if leased == 0:
             return True
         if monotonic() >= deadline:
             return False

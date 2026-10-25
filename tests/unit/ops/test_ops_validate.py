@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import gzip
 import json
 import subprocess
 from datetime import UTC, datetime, timedelta
@@ -12,16 +13,17 @@ from ecomdata.ops import validate as v
 
 AS_OF = datetime(2026, 10, 2, 7, tzinfo=UTC)
 LIMITS = v.Limits(reconciliation_lookback_seconds=172800, reconciliation_settle_seconds=900, offer_ttl_seconds=86400)
-SILVER = "file:///lake/silver/marketplace/offer_observations"
+RECORDS = "file:///lake/bronze/marketplace/records"
 
 
-def _silver_event(run_id, observed_at, observation_id):
-    return json.dumps(
-        {
-            "crawl_run_id": run_id,
-            "payload": {"observation": {"observation_id": observation_id, "observed_at": observed_at.isoformat()}},
-        }
-    ).encode()
+def _records_file(run_id, fetched_at, *record_ids):
+    """One Bronze/records file: a listing row per id and a page context."""
+    lines = [
+        json.dumps({"record_kind": "listing_row", "crawl_run_id": run_id, "fetched_at": fetched_at.isoformat(), "record_id": r})
+        for r in record_ids
+    ]
+    lines.append(json.dumps({"record_kind": "page_context", "crawl_run_id": run_id, "fetched_at": fetched_at.isoformat()}))
+    return gzip.compress("\n".join(lines).encode())
 
 
 class FakeSources:
@@ -35,14 +37,10 @@ class FakeSources:
         self.run_completed = {"run-1": AS_OF - timedelta(hours=1)}
         day = (AS_OF - timedelta(hours=2)).date().isoformat()
         self.silver = {
-            f"{SILVER}/marketplace=tiki/observed_date={day}/observation_id=o1.json": _silver_event(
-                "run-1", AS_OF - timedelta(hours=2), "o1"
-            ),
-            f"{SILVER}/marketplace=tiki/observed_date={day}/observation_id=o2.json": _silver_event(
-                "run-1", AS_OF - timedelta(hours=2), "o2"
+            f"{RECORDS}/source=tiki/observed_date={day}/hour=05/raw_artifact_id=a1.jsonl.gz": _records_file(
+                "run-1", AS_OF - timedelta(hours=2), "r1", "r2"
             ),
         }
-        self.lag = 0
         self.stages = ["DECODE", "CONTRACT_VALIDATION"]
         self.speed = [(7, "SUCCEEDED")]
         self.es = {
@@ -131,8 +129,7 @@ def test_a_healthy_stack_passes_every_check():
 
 BREAKS = {
     "bronze_present": lambda s: s.raw.update({"s3a://ecommerce-bronze/raw/a.bin": False}),
-    "kafka_to_silver_lag": lambda s: setattr(s, "lag", 3),
-    "silver_reconciles_with_audit": lambda s: s.attempt_parsed.update({"run-1": 3}),
+    "records_reconcile_with_audit": lambda s: s.attempt_parsed.update({"run-1": 3}),
     "dlq_only_bad_records": lambda s: s.stages.append("SILVER_WRITE"),
     "speed_last_batch_succeeded": lambda s: setattr(s, "speed", [(8, "FAILED")]),
     "es_changes_unique": lambda s: s.es["marketplace-changes-v1"].append({"event_id": "e1"}),
@@ -172,17 +169,17 @@ def test_reconciliation_ignores_runs_outside_the_settled_window():
     sources.run_completed["run-1"] = AS_OF - timedelta(seconds=60)
     sources.attempt_parsed["run-1"] = 99
 
-    assert by_name(v.validate(sources, LIMITS))["silver_reconciles_with_audit"].status == v.PASS
+    assert by_name(v.validate(sources, LIMITS))["records_reconcile_with_audit"].status == v.PASS
 
 
-def test_silver_rows_without_audit_are_a_mismatch():
+def test_stored_rows_without_audit_are_a_mismatch():
     sources = FakeSources()
     day = (AS_OF - timedelta(hours=3)).date().isoformat()
-    sources.silver[f"{SILVER}/marketplace=tiki/observed_date={day}/observation_id=o9.json"] = _silver_event(
-        "run-unknown", AS_OF - timedelta(hours=3), "o9"
+    sources.silver[f"{RECORDS}/source=tiki/observed_date={day}/hour=04/raw_artifact_id=a9.jsonl.gz"] = _records_file(
+        "run-unknown", AS_OF - timedelta(hours=3), "r9"
     )
 
-    result = by_name(v.validate(sources, LIMITS))["silver_reconciles_with_audit"]
+    result = by_name(v.validate(sources, LIMITS))["records_reconcile_with_audit"]
 
     assert result.status == v.FAIL
     assert result.observed["mismatched"][0]["crawl_run_id"] == "run-unknown"
@@ -199,9 +196,9 @@ def test_an_expired_offer_is_not_expected_in_redis():
 
 def test_a_check_that_raises_fails_with_its_error():
     sources = FakeSources()
-    sources.consumer_lag = lambda group, topic: (_ for _ in ()).throw(ConnectionError("broker down"))
+    sources.dlq_stages = lambda: (_ for _ in ()).throw(ConnectionError("broker down"))
 
-    result = by_name(v.validate(sources, LIMITS))["kafka_to_silver_lag"]
+    result = by_name(v.validate(sources, LIMITS))["dlq_only_bad_records"]
 
     assert result.status == v.FAIL
     assert "broker down" in result.observed
@@ -274,7 +271,7 @@ def test_the_smoke_waits_until_every_condition_holds():
     assert smoke.wait(
         SmokeSources(), targets=["t1", "t2"], timeout_seconds=60, since=SINCE, log=lines.append, sleep=lambda s: None
     )
-    assert json.loads(lines[-1])["conditions"]["silver_holds_parsed_observations"]["observed"] == {
+    assert json.loads(lines[-1])["conditions"]["bronze_holds_parsed_records"]["observed"] == {
         "expected": 2,
         "found": 2,
     }
@@ -318,17 +315,17 @@ def test_the_batch_plan_names_a_minute_aligned_scheduled_run(capsys):
     assert plan["as_of"].endswith(":00Z")
 
 
-def test_the_quiet_wait_returns_once_the_sink_has_caught_up():
+def test_the_quiet_wait_returns_once_no_task_is_leased():
     sources = FakeSources()
-    lags = iter([3, 1, 0])
-    sources.consumer_lag = lambda group, topic: next(lags)
+    leased = iter([3, 1, 0])
+    sources.query = lambda sql, params=(): [(next(leased),)]
 
     assert smoke.wait_for_quiet(sources, timeout_seconds=60, log=lambda line: None, sleep=lambda s: None)
 
 
 def test_the_quiet_wait_gives_up_after_its_timeout():
     sources = FakeSources()
-    sources.consumer_lag = lambda group, topic: 5
+    sources.query = lambda sql, params=(): [(5,)]
     clock = iter(range(0, 1000, 30))
 
     assert not smoke.wait_for_quiet(
@@ -706,10 +703,10 @@ def test_a_query_that_never_goes_quiet_fails_with_how_long_it_waited(monkeypatch
 # ---------------------------------------------------------------------------
 # The WP7 half of the harness: D7-D10, offline.
 # ---------------------------------------------------------------------------
-def test_the_drills_cover_d1_to_d11():
+def test_the_drills_cover_d1_to_d11_without_the_retired_d3():
     from ecomdata.ops import drills
 
-    assert sorted(drills.DRILLS, key=lambda name: int(name[1:])) == [f"d{n}" for n in range(1, 12)]
+    assert sorted(drills.DRILLS, key=lambda name: int(name[1:])) == [f"d{n}" for n in range(1, 12) if n != 3]
 
 
 def test_d11_runs_last_because_it_is_the_one_that_takes_the_stack_down():

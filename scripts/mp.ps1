@@ -141,7 +141,7 @@ function Get-OpsOutput([string[]]$Arguments) {
 
 function Invoke-Batch([string]$RunId, [string]$Instant, [string[]]$Extra) {
     $batch = $Compose + @("--profile", "batch", "run", "--rm", "--no-deps", "batch-once",
-        "python3", "-m", "ecomdata.processing.batch.warehouse", "--run-id", $RunId, "--as-of", $Instant)
+        "python3", "-m", "ecomdata.processing.batch", "run", "--all", "--run-id", $RunId, "--as-of", $Instant)
     & docker @($batch + $Extra) | Write-Host
     return $LASTEXITCODE
 }
@@ -166,7 +166,7 @@ function Invoke-Smoke {
     try {
         New-Item -ItemType Directory -Force -Path (Join-Path $ProjectRoot "data\ops") | Out-Null
         Invoke-Docker ($Compose + (Get-ProfileArgs @("smoke", "crawl", "ingest", "speed", "batch", "ops")) +
-            @("up", "-d", "--build", "stub-source", "crawl-worker", "silver-sink", "speed", "batch-scheduler"))
+            @("up", "-d", "--build", "stub-source", "crawl-worker", "speed", "batch-scheduler"))
         # 2. Migrate, then seed the fixed smoke universe (re-enabling parked tasks).
         if ((Invoke-Ops @("migrate")) -ne 0) { Write-Host "SMOKE FAILED: migrate" -ForegroundColor Red; return 1 }
         $seeded = $true
@@ -248,7 +248,7 @@ function Invoke-Restore([string]$Id, [string]$Target) {
         # under a new run id, over the restored Silver and audit.
         $runId = "$($plan.pointer_run_id)-restorecheck"
         $batch = $restoreCompose + @("--profile", "batch", "run", "--rm", "--no-deps", "batch-once",
-            "python3", "-m", "ecomdata.processing.batch.warehouse", "--run-id", $runId, "--as-of", $plan.as_of, "--quality-only")
+            "python3", "-m", "ecomdata.processing.batch", "run", "--all", "--run-id", $runId, "--as-of", $plan.as_of, "--quality-only")
         & docker @($batch) | Write-Host
         if ($LASTEXITCODE -ne 0) {
             Write-Host "RESTORE FAILED: the quality-only batch $runId did not succeed" -ForegroundColor Red

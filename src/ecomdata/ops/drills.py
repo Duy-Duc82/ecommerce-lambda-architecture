@@ -55,7 +55,7 @@ CRAWL_ENV = {
     "CRAWL_SERVICE_WORKER_ID": "drill-a",
 }
 BATCH_SETTLE_SECONDS = 60
-SERVICES = ("stub-source", "silver-sink", "speed", "batch-scheduler")
+SERVICES = ("stub-source", "speed", "batch-scheduler")
 # The live collection stack (Phase 9 plan section 4, decision D1). A drill
 # injects faults and stub traffic, and either would contaminate the audit the
 # reliability evaluation reads, so no drill ever runs against it.
@@ -351,7 +351,7 @@ class Stack:
         from ecomdata.ops.smoke import wait_for_quiet
 
         if not wait_for_quiet(self.src, timeout_seconds=timeout, log=lambda line: None):
-            raise DrillFailed("the Silver sink did not catch up")
+            raise DrillFailed("a crawl task is still leased")
 
     def speed_batches_since(self, since: datetime) -> list[tuple]:
         return self.query(
@@ -432,7 +432,9 @@ class Stack:
             "batch-once",
             "python3",
             "-m",
-            "ecomdata.processing.batch.warehouse",
+            "ecomdata.processing.batch",
+            "run",
+            "--all",
             "--run-id",
             run_id,
             "--as-of",
@@ -810,44 +812,8 @@ def d2_kafka_down_during_crawl(stack: Stack, rec: Record) -> None:
     code, run_id = stack.batch_after_last_crawl()
     ((status,),) = stack.query("SELECT status FROM audit.marketplace_batch_run WHERE run_id = %s", (run_id,))
     rec.step("verify", batch=run_id, exit_code=code, status=status)
-    if code != 0 or status != "SUCCEEDED":
+    if code != 0 or status != "PROMOTED":
         raise DrillFailed(f"batch {run_id} after partial publishes: exit {code}, {status} (check 8 must reconcile)")
-
-
-def d3_minio_down_during_sink(stack: Stack, rec: Record) -> None:
-    """MinIO stops while the sink has work: no commit, lag grows, no DLQ; then it catches up."""
-    from ecomdata.domain.topics import MARKETPLACE_OBSERVATIONS
-    from ecomdata.ops.smoke import silver_condition, smoke_targets
-    lag_of = lambda: stack.src.consumer_lag(_settings().kafka.silver_consumer_group, MARKETPLACE_OBSERVATIONS.name)  # noqa: E731
-    dlq_before = len(stack.src.dlq_stages())
-    stack.stop("silver-sink")
-    since = stack.db_now()
-    stack.start_crawler()
-    wait_until(lambda: stack.every_target_succeeded_since(since), timeout=300, what="one crawl of every target")
-    stack.stop_crawler()
-    stack.stop("minio")
-    rec.step("inject", stopped="minio")
-    stack.up("silver-sink")
-    lag = wait_until(lambda: ((n := lag_of()) > 0, n), timeout=60, what="a backlog for the sink")
-    time.sleep(60)
-    lag_later = lag_of()
-    dlq_faulted = len(stack.src.dlq_stages())
-    rec.step("observe", lag=lag, lag_after_60s=lag_later, dlq_before=dlq_before, dlq_while_faulted=dlq_faulted)
-    if lag_later < lag:
-        raise DrillFailed(f"the sink committed while MinIO was down: lag {lag} -> {lag_later}")
-    if dlq_faulted != dlq_before:
-        raise DrillFailed(f"a storage outage reached the DLQ: {dlq_before} -> {dlq_faulted}")
-    stack.run(COMPOSE + ["up", "-d", "minio"])
-    stack.wait_healthy("minio")
-    rec.step("recover", started="minio")
-    stack.quiet()
-    silver = silver_condition(stack.src, targets=smoke_targets(), since=since)
-    dlq_after = len(stack.src.dlq_stages())
-    rec.step("verify", silver=silver.observed, dlq_after=dlq_after)
-    if not silver.met:
-        raise DrillFailed(f"Silver does not hold every acknowledged observation: {silver.observed}")
-    if dlq_after != dlq_before:
-        raise DrillFailed(f"DLQ changed: {dlq_before} -> {dlq_after}")
 
 
 def _crawl_once(stack: Stack) -> datetime:
@@ -1514,7 +1480,9 @@ def d11_backup_and_restore(stack: Stack, rec: Record) -> None:
             "batch-once",
             "python3",
             "-m",
-            "ecomdata.processing.batch.warehouse",
+            "ecomdata.processing.batch",
+            "run",
+            "--all",
             "--run-id",
             run_id,
             "--as-of",
@@ -1578,7 +1546,6 @@ def d11_backup_and_restore(stack: Stack, rec: Record) -> None:
 DRILLS: dict[str, Callable[[Stack, Record], None]] = {
     "d1": d1_source_errors,
     "d2": d2_kafka_down_during_crawl,
-    "d3": d3_minio_down_during_sink,
     "d4": d4_sinks_down_during_speed,
     "d5": d5_speed_restart,
     "d6": d6_expired_lease,

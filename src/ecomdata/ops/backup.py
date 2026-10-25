@@ -421,15 +421,11 @@ def check_reparse_sample(db: Database, *, sample_size: int, reparse: Callable[[l
 #
 #   es_changes_unique          0 documents, because nothing has streamed yet;
 #   redis_offer_state_present  no offer state, for the same reason;
-#   kafka_to_silver_lag        the broker is new, so the Silver consumer group
-#                              has never existed and asking for its offsets
-#                              raises GroupCoordinatorNotAvailableError. Seen
-#                              for real on 2026-10-04.
 #
 # Tolerating these is plan 12.3 step 4 — "ES and Redis start empty and refill
 # from new crawls" — read honestly. Tolerating anything else would hide a real
-# defect, so the list is exactly these three and the restore fails on a fourth.
-RESTORED_STACK_EXPECTED_EMPTY = ("es_changes_unique", "kafka_to_silver_lag", "redis_offer_state_present")
+# defect, so the list is exactly these two and the restore fails on a fourth.
+RESTORED_STACK_EXPECTED_EMPTY = ("es_changes_unique", "redis_offer_state_present")
 
 
 def judge_restored_validate(results: Sequence[Any]) -> tuple[bool, list[str], list[str]]:

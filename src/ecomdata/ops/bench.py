@@ -21,12 +21,8 @@ Scenarios:
 - ``crawl``: the crawler against the stub, at the deployed politeness delay
   and again at 0. Only the first describes the crawler as deployed; the
   second is its parse-and-publish capacity against a local source.
-- ``ingest``: N observations sent at full speed; Silver records per second
-  until the sink's lag is 0, and Silver write latency from object
-  ``LastModified`` (one-second resolution) minus ``produced_at``.
 - ``speed``: fixed send rates for a fixed time each; Spark's progress, batch
   durations and the per-batch latency the speed audit records.
-- ``batch``: the batch over the Silver ``ingest`` leaves, at each size.
 
 ``resources`` is not a scenario of its own: ``docker stats`` is sampled every
 five seconds alongside each run, and summarised per container.
@@ -51,16 +47,14 @@ from pathlib import Path
 from typing import Any
 
 from ecomdata.ops.bootstrap import connection_factory as _connection_factory
-from ecomdata.ops.bootstrap import object_store as _object_store
 from ecomdata.ops.bootstrap import producer as _producer
-from ecomdata.ops.bootstrap import settings as _settings
 
 ROOT = Path(__file__).resolve().parents[3]
 RESULTS = ROOT / "data" / "ops" / "bench"
 COMPOSE = ["docker", "compose", "-f", str(ROOT / "docker-compose.yml")]
 LIVE_PROJECT = "mp-live"
 DATASET = "replayed_fixture"
-SCENARIOS = ("crawl", "ingest", "speed", "batch")
+SCENARIOS = ("crawl", "speed")
 CORE = ("kafka", "minio", "redis", "postgres-dw", "elasticsearch")
 
 
@@ -140,27 +134,6 @@ def clock_fields(start_offset: float, end_offset: float, *, step_threshold: floa
         "clock_offset_start_ms": round(start_offset * 1000, 1),
         "clock_offset_end_ms": round(end_offset * 1000, 1),
         "clock_step_suspected": abs(end_offset - start_offset) > step_threshold,
-    }
-
-
-def silver_latency_metrics(
-    samples: list[tuple[datetime, datetime]], *, clock_offset_seconds: float = 0.0
-) -> dict[str, Any]:
-    """``(LastModified, produced_at)`` pairs, in milliseconds. LastModified has
-    one-second resolution, so these are accurate to a second at best.
-
-    LastModified is MinIO's, so the Docker VM's clock, while the bench stamps
-    ``produced_at`` on the host; ``clock_offset_seconds`` (VM minus host) is
-    subtracted to put both on the host's clock."""
-    values = [
-        (written - produced).total_seconds() * 1000 - clock_offset_seconds * 1000 for written, produced in samples
-    ]
-    return {
-        "silver_latency_p50_ms": percentile(values, 0.50),
-        "silver_latency_p95_ms": percentile(values, 0.95),
-        "silver_latency_max_ms": max(values) if values else None,
-        "silver_latency_samples": len(values),
-        "silver_latency_resolution_ms": 1000,
     }
 
 
@@ -465,94 +438,6 @@ def _send_load(*, seed: int, count: int, offers: int, rate: float, cadence_secon
     return sent, time.monotonic() - began
 
 
-def _silver_lag() -> int:
-    from ecomdata.domain.topics import MARKETPLACE_OBSERVATIONS
-    from ecomdata.ops.validate import LiveSources
-    return LiveSources().consumer_lag(_settings().kafka.silver_consumer_group, MARKETPLACE_OBSERVATIONS.name)
-
-
-def _silver_latency_sample(limit: int = 300) -> list[tuple[datetime, datetime]]:
-    client = _object_store().client
-    objects = sorted(
-        client.list_objects(_settings().storage.bucket_silver, prefix=_settings().batch.silver_dataset.strip("/") + "/", recursive=True),
-        key=lambda o: o.object_name,
-    )
-    step = max(1, len(objects) // limit)
-    pairs = []
-    for obj in objects[::step][:limit]:
-        response = client.get_object(_settings().storage.bucket_silver, obj.object_name)
-        try:
-            produced = datetime.fromisoformat(json.loads(response.read())["produced_at"].replace("Z", "+00:00"))
-        finally:
-            response.close()
-            response.release_conn()
-        pairs.append((obj.last_modified, produced))
-    return pairs
-
-
-def run_ingest(stack: Stack, *, count: int, seed: int) -> dict[str, Any]:
-    stack.fresh("silver-sink")
-    offset_start = stack.clock_offset()
-    began = time.monotonic()
-    sent, send_seconds = _send_load(seed=seed, count=count, offers=1000, rate=0)
-    wait_until(lambda: _silver_lag() == 0, timeout=3600, what="the Silver sink to drain", poll=1)
-    total = time.monotonic() - began
-    clock = clock_fields(offset_start, stack.clock_offset())
-    return {
-        "sent": sent,
-        "send_seconds": round(send_seconds, 3),
-        "total_seconds": round(total, 3),
-        "produce_per_second": sent / send_seconds,
-        "silver_records_per_second": sent / total,
-        **silver_latency_metrics(_silver_latency_sample(), clock_offset_seconds=clock["clock_offset_ms"] / 1000),
-        **clock,
-    }
-
-
-def run_batch(stack: Stack, *, count: int, seed: int) -> dict[str, Any]:
-    ingest = run_ingest(stack, count=count, seed=seed)
-    as_of = stack.db_now().astimezone(UTC).replace(microsecond=0)
-    run_id = f"bench-{count}-{as_of:%Y%m%dT%H%M%SZ}"
-    _run(
-        COMPOSE
-        + [
-            "--profile",
-            "batch",
-            "run",
-            "--rm",
-            "--no-deps",
-            "batch-once",
-            "python3",
-            "-m",
-            "ecomdata.processing.batch.warehouse",
-            "--run-id",
-            run_id,
-            "--as-of",
-            as_of.isoformat(),
-        ],
-        env=stack.env,
-        check=False,
-        timeout=7200,
-    )
-    rows = stack.query(
-        "SELECT status, quality_status, started_at, completed_at, silver_rows, gold_rows, dataset_counts "
-        "FROM audit.marketplace_batch_run WHERE run_id = %s",
-        (run_id,),
-    )
-    failing = [
-        r["check_name"]
-        for r in stack.query(
-            "SELECT check_name FROM audit.marketplace_quality_result "
-            "WHERE run_id = %s AND severity = 'MANDATORY' AND status <> 'PASS'",
-            (run_id,),
-        )
-    ]
-    return {
-        **batch_outcome(run_id, rows[0] if rows else None, failing),
-        "ingest_silver_records_per_second": ingest["silver_records_per_second"],
-    }
-
-
 # The replayed load comes from the generator, not the crawler, so it leaves no
 # crawl attempt to reconcile Silver against, and this mandatory rule fails on
 # every replayed batch. Any other failing check, or a crash, fails the run.
@@ -566,7 +451,7 @@ def batch_outcome(run_id: str, row: dict[str, Any] | None, failing_checks: Seque
     if row is None or row["completed_at"] is None:
         raise BenchFailed(f"batch {run_id} did not finish: {row}")
     failing = sorted(failing_checks)
-    if row["status"] == "SUCCEEDED":
+    if row["status"] in ("PROMOTED", "SUCCEEDED"):
         gate = "passed"
     elif row["status"] == "QUALITY_FAILED" and failing and set(failing) <= REPLAY_EXPECTED_FAILURES:
         gate = "failed_as_expected_on_replayed_data"
@@ -680,14 +565,10 @@ def variants(scenario: str, args: argparse.Namespace) -> list[tuple[str, dict[st
             )
             for d in args.delays
         ]
-    if scenario == "ingest":
-        return [(f"n={n}", {"count": n}) for n in args.sizes]
-    if scenario == "batch":
-        return [(f"n={n}", {"count": n}) for n in args.sizes]
     return [(f"rate={r:g}/s", {"rate": r, "seconds": args.seconds}) for r in args.rates]
 
 
-RUNNERS = {"crawl": run_crawl, "ingest": run_ingest, "batch": run_batch, "speed": run_speed}
+RUNNERS = {"crawl": run_crawl, "speed": run_speed}
 
 
 def variant_result(
@@ -734,7 +615,7 @@ def run_scenario(scenario: str, args: argparse.Namespace) -> tuple[list[Path], l
         for repeat in range(args.repeat):
             stack = Stack()
             run_params = dict(params)
-            if scenario in ("ingest", "batch", "speed"):
+            if scenario == "speed":
                 run_params["seed"] = args.seed + repeat
             run_started = datetime.now(UTC)
             try:

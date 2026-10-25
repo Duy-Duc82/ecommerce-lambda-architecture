@@ -27,6 +27,7 @@ from urllib.parse import unquote, urlparse
 from ecomdata.ops.bootstrap import connection_factory as _connection_factory
 from ecomdata.ops.bootstrap import object_store as _object_store
 from ecomdata.ops.bootstrap import settings as _settings
+from ecomdata.ops.bronze import listing_rows
 
 PASS, FAIL = "PASS", "FAIL"
 SCHEDULED_RUN_PREFIX = "mp-"
@@ -58,7 +59,6 @@ class Limits:
     reconciliation_lookback_seconds: int
     reconciliation_settle_seconds: int
     offer_ttl_seconds: int
-    max_silver_lag: int = 0
 
 
 def _result(name: str, ok: bool, observed: Any, expected: Any) -> CheckResult:
@@ -86,34 +86,23 @@ def bronze_present(src: Sources, limits: Limits) -> CheckResult:
     return _result("bronze_present", not missing, {"attempts": len(rows), "missing": missing[:10]}, {"missing": []})
 
 
-def kafka_to_silver_lag(src: Sources, limits: Limits) -> CheckResult:
-    from ecomdata.domain.topics import MARKETPLACE_OBSERVATIONS
-    lag = src.consumer_lag(_settings().kafka.silver_consumer_group, MARKETPLACE_OBSERVATIONS.name)
-    return _result("kafka_to_silver_lag", lag <= limits.max_silver_lag, lag, f"<= {limits.max_silver_lag}")
-
-
-def _silver_rows_by_run(src: Sources, *, as_of: datetime, oldest: datetime) -> dict[str, list[datetime]]:
-    """Observed instants per crawl run, for Silver rows observed at or before ``as_of``."""
-    root = _object_store().uri("silver", _settings().batch.silver_dataset)
+def _bronze_rows_by_run(src: Sources, *, as_of: datetime, oldest: datetime) -> dict[str, list[datetime]]:
+    """Listing rows per crawl run in Bronze/records, fetched at or before ``as_of`` (the instants, per row)."""
+    root = _object_store().uri("bronze", _settings().batch.records_dataset)
     runs: dict[str, list[datetime]] = {}
-    for uri in src.list_objects(root):
-        # The path carries observed_date: skip days wholly outside the window.
-        day = next((part.split("=", 1)[1] for part in uri.split("/") if part.startswith("observed_date=")), None)
-        if day is not None and not (oldest.date() <= datetime.fromisoformat(day).date() <= as_of.date()):
-            continue
-        payload = src.read_object(uri)
-        if payload is None:
-            continue
-        event = json.loads(payload)
-        observed = _instant(event["payload"]["observation"]["observed_at"])
-        if observed <= as_of:
-            runs.setdefault(event["crawl_run_id"], []).append(observed)
+    for record in listing_rows(src, root, since_day=oldest.date().isoformat()):
+        fetched = _instant(record["fetched_at"])
+        if fetched <= as_of:
+            runs.setdefault(record["crawl_run_id"], []).append(fetched)
     return runs
 
 
-def silver_reconciles_with_audit(src: Sources, limits: Limits) -> CheckResult:
-    """Phase 7 check 8, outside Spark, over the window the serving run judged."""
-    name = "silver_reconciles_with_audit"
+def records_reconcile_with_audit(src: Sources, limits: Limits) -> CheckResult:
+    """Check 8 (audit parsed_count against stored rows), outside Spark, over the window the serving run judged.
+
+    Bronze/records holds every extracted listing row, so its per-run count is the audit's ``parsed_count``
+    exactly when persistence lost nothing."""
+    name = "records_reconcile_with_audit"
     pointer = src.current_pointer()
     if pointer is None:
         return _result(name, False, "no serving pointer", "a pointer to anchor the window")
@@ -133,8 +122,8 @@ def silver_reconciles_with_audit(src: Sources, limits: Limits) -> CheckResult:
         )
     )
     mismatched = []
-    silver = _silver_rows_by_run(src, as_of=as_of, oldest=oldest)
-    for run_id, observed in sorted(silver.items()):
+    in_bronze = _bronze_rows_by_run(src, as_of=as_of, oldest=oldest)
+    for run_id, observed in sorted(in_bronze.items()):
         # As in check 8: an audited run settles at its completion, a run with
         # no audit at its last observation; an unfinished one waits.
         settled = (
@@ -205,14 +194,14 @@ def batch_latest_terminal(src: Sources, limits: Limits) -> CheckResult:
         (SCHEDULED_RUN_PREFIX + "%",),
     )
     if not rows:
-        return _result("batch_latest_terminal", False, "no scheduled run", "SUCCEEDED, or QUALITY_FAILED with results")
+        return _result("batch_latest_terminal", False, "no scheduled run", "PROMOTED, or QUALITY_FAILED with results")
     run_id, status, results = rows[0]
-    ok = status == "SUCCEEDED" or (status == "QUALITY_FAILED" and results > 0)
+    ok = status in ("PROMOTED", "SUCCEEDED") or (status == "QUALITY_FAILED" and results > 0)
     return _result(
         "batch_latest_terminal",
         ok,
         {"run_id": run_id, "status": status, "quality_results": results},
-        "SUCCEEDED, or QUALITY_FAILED with results",
+        "PROMOTED, or QUALITY_FAILED with results",
     )
 
 
@@ -265,8 +254,7 @@ def quality_results_complete(src: Sources, limits: Limits) -> CheckResult:
 
 CHECKS: tuple[Callable[[Sources, Limits], CheckResult], ...] = (
     bronze_present,
-    kafka_to_silver_lag,
-    silver_reconciles_with_audit,
+    records_reconcile_with_audit,
     dlq_only_bad_records,
     speed_last_batch_succeeded,
     es_changes_unique,

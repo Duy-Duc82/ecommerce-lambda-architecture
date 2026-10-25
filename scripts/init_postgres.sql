@@ -330,7 +330,14 @@ ALTER TABLE audit.marketplace_batch_run
     ADD COLUMN IF NOT EXISTS manifest_promoted BOOLEAN NOT NULL DEFAULT FALSE;
 ALTER TABLE audit.marketplace_batch_run DROP CONSTRAINT IF EXISTS marketplace_batch_run_status_check;
 ALTER TABLE audit.marketplace_batch_run ADD CONSTRAINT marketplace_batch_run_status_check
-    CHECK (status IN ('RUNNING','GOLD_WRITTEN','QUALITY_FAILED','SUCCEEDED','FAILED'));
+    CHECK (status IN ('CREATED','SILVER_BUILT','GOLD_WRITTEN','QUALITY_PASSED','QUALITY_FAILED','PUBLISHED','PROMOTED',
+                      'HELD','FAILED','RUNNING','SUCCEEDED'));
+-- Stage-based batch: the state machine of ecomdata.domain.batch_run. RUNNING and SUCCEEDED are the
+-- names rows of the single-process batch carry; they read as CREATED and PROMOTED.
+ALTER TABLE audit.marketplace_batch_run
+    ADD COLUMN IF NOT EXISTS last_completed_status VARCHAR(16),
+    ADD COLUMN IF NOT EXISTS expected_current_run_id VARCHAR(64),
+    ADD COLUMN IF NOT EXISTS held_reason VARCHAR(64);
 
 -- The serving cache names the manifest and the rule version that admitted it,
 -- so "which Gold version is live, under which rules" needs no object listing.

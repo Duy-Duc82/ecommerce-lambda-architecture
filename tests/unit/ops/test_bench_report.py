@@ -61,15 +61,6 @@ def test_a_crawl_run_without_attempts_fails_rather_than_reporting_zero():
         bench.crawl_metrics([])
 
 
-def test_silver_latency_states_its_one_second_resolution():
-    pairs = [(T0 + timedelta(seconds=s), T0) for s in (1, 2, 3, 10)]
-
-    m = bench.silver_latency_metrics(pairs)
-
-    assert (m["silver_latency_p50_ms"], m["silver_latency_p95_ms"], m["silver_latency_max_ms"]) == (2000, 10000, 10000)
-    assert m["silver_latency_resolution_ms"] == 1000 and m["silver_latency_samples"] == 4
-
-
 def test_speed_metrics_count_busy_time_and_do_not_average_percentiles():
     batches = [
         {
@@ -210,15 +201,6 @@ def test_a_moving_offset_is_flagged_as_a_clock_step():
     assert stepped["clock_step_suspected"] is True
 
 
-def test_silver_latency_is_put_on_the_host_clock():
-    # MinIO (VM clock, 30 s ahead) wrote 2 s after the host stamped produced_at.
-    pairs = [(T0 + timedelta(seconds=32), T0)]
-
-    m = bench.silver_latency_metrics(pairs, clock_offset_seconds=30)
-
-    assert m["silver_latency_p50_ms"] == pytest.approx(2000)
-
-
 def test_speed_latency_is_put_on_the_host_clock_but_batch_duration_is_not():
     batches = [
         {
@@ -283,11 +265,11 @@ def test_an_unfinished_batch_fails_the_run():
 def test_a_failed_repeat_keeps_the_finished_runs_and_the_next_variant_still_runs(monkeypatch, tmp_path):
     calls = []
 
-    def runner(stack, *, count, seed):
-        calls.append((count, seed))
-        if count == 10 and seed == 2:
+    def runner(stack, *, rate, seconds, seed):
+        calls.append((rate, seed))
+        if rate == 10 and seed == 2:
             raise bench.BenchFailed("speed layer never caught up")
-        return {"seconds": count}
+        return {"seconds": rate}
 
     class FakeStack:
         def down(self):
@@ -307,10 +289,10 @@ def test_a_failed_repeat_keeps_the_finished_runs_and_the_next_variant_still_runs
     monkeypatch.setattr(bench, "RESULTS", tmp_path)
     monkeypatch.setattr(bench, "Stack", FakeStack)
     monkeypatch.setattr(bench, "ResourceSampler", FakeSampler)
-    monkeypatch.setitem(bench.RUNNERS, "ingest", runner)
-    args = bench.argparse.Namespace(sizes=[10, 20], repeat=3, seed=1, keep=False)
+    monkeypatch.setitem(bench.RUNNERS, "speed", runner)
+    args = bench.argparse.Namespace(rates=[10, 20], seconds=5, repeat=3, seed=1, keep=False)
 
-    paths, failures = bench.run_scenario("ingest", args)
+    paths, failures = bench.run_scenario("speed", args)
 
     assert calls == [(10, 1), (10, 2), (20, 1), (20, 2), (20, 3)]
     first, second = (json.loads(p.read_text(encoding="utf-8")) for p in paths)

@@ -6,7 +6,7 @@ batch. This module then walks the audience through what that run proves,
 one step at a time. It never touches the network beyond the demo project,
 and never ``mp-live``.
 
-The two fault steps are drills D3 and D8, narrated: the same functions, the
+The two fault steps are drill D8, narrated: the same functions, the
 same assertions, so the demo cannot show a recovery the drills do not prove.
 Their records are printed, never written to ``data/ops/drills``, where they
 would overwrite the drill evidence the evaluation reads.
@@ -189,7 +189,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--auto", action="store_true", help="no pauses between steps")
     parser.add_argument("--snapshot", action="store_true", help="take a restorable backup at the end")
-    parser.add_argument("--skip-faults", action="store_true", help="leave out the D3 and D8 steps")
+    parser.add_argument("--skip-faults", action="store_true", help="leave out the D8 step")
     args = parser.parse_args(argv)
     if os.environ.get("COMPOSE_PROJECT_NAME") == drills.LIVE_PROJECT or not os.environ.get("MP_CONTAINER_PREFIX"):
         print("the demo runs only in its own project: .\\scripts\\mp.ps1 -EnvFile env/demo.env demo", file=sys.stderr)
@@ -205,11 +205,7 @@ def main(argv: list[str] | None = None) -> int:
     if not args.skip_faults:
         steps += [
             (
-                "5. Failure: MinIO goes down under the Silver sink (drill D3)",
-                lambda: narrated(stack, "d3", drills.d3_minio_down_during_sink),
-            ),
-            (
-                "6. Quality gate: a bad run never reaches the cache (drill D8)",
+                "5. Quality gate: a bad run never reaches the cache (drill D8)",
                 lambda: narrated(stack, "d8", drills.d8_quality_failure),
             ),
         ]

@@ -22,9 +22,9 @@ def _profiles() -> dict[str, list[str]]:
     return found
 
 
-DEMO = ("stub-source", "crawl-worker", "silver-sink", "speed", "batch-scheduler", "es-projector", "kibana",
+DEMO = ("stub-source", "crawl-worker", "speed", "batch-scheduler", "es-projector", "kibana",
         "kibana-marketplace-setup", "superset", "superset-init")
-BENCH = ("stub-source", "crawl-worker", "silver-sink", "speed", "batch-once")
+BENCH = ("stub-source", "crawl-worker", "speed", "batch-once")
 
 
 @pytest.mark.parametrize("service", DEMO)
@@ -40,7 +40,7 @@ def test_the_bench_profile_carries_the_benchmark_services(service):
 def test_the_new_profiles_keep_every_service_s_old_profile():
     """Labels are added, never moved: `--profile smoke` still starts the stub."""
     profiles = _profiles()
-    for service, old in (("stub-source", "smoke"), ("crawl-worker", "crawl"), ("silver-sink", "ingest"),
+    for service, old in (("stub-source", "smoke"), ("crawl-worker", "crawl"),
                          ("speed", "speed"), ("batch-once", "batch"), ("es-projector", "ops"), ("kibana", "serve")):
         assert profiles[service][0] == old
 

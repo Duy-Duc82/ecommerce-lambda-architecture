@@ -7,7 +7,7 @@
 # Redis and Elasticsearch, plus their one-shot init containers. Everything
 # else runs under a profile (Phase 8 plan section 7.2):
 #
-#   crawl   crawl-worker           ingest  silver-sink
+#   crawl   crawl-worker
 #   speed   speed                  batch   batch-scheduler, batch-once
 #   serve   kibana, superset,      legacy  the Kaggle demo (Spark 3.5.1)
 #           kibana-marketplace-setup
@@ -180,24 +180,6 @@ services:
       start_period: 60s
     depends_on: *core-ready
 
-  silver-sink:
-    <<: *marketplace-python
-    profiles: ["ingest", "demo", "bench"]
-    container_name: ${MP_CONTAINER_PREFIX:-}silver-sink
-    restart: unless-stopped
-    command: ["python", "-m", "ecomdata.ingestion.silver_service"]
-    environment:
-      <<: *marketplace-env
-      SERVICE_HEARTBEAT_FILE: /tmp/heartbeat
-    healthcheck:
-      # Beats once per poll; three of the longest retry backoff (60 s).
-      test: ["CMD", "python", "-m", "ecomdata.infra.heartbeat", "--check", "/tmp/heartbeat", "--max-age", "180"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 60s
-    depends_on: *core-ready
-
   speed:
     <<: *spark-marketplace
     profiles: ["speed", "demo", "bench"]
@@ -245,11 +227,11 @@ services:
 
   # Operator commands, never started by `up`:
   #   docker compose --profile batch run --rm batch-once \
-  #     python3 -m ecomdata.processing.batch.warehouse --run-id ... --as-of ... [--resume]
+  #     python3 -m ecomdata.processing.batch run --all --run-id ... --as-of ... [--resume]
   batch-once:
     <<: *spark-marketplace
     profiles: ["batch", "demo", "bench"]
-    command: ["python3", "-m", "ecomdata.processing.batch.warehouse", "--help"]
+    command: ["python3", "-m", "ecomdata.processing.batch", "run", "--help"]
     restart: "no"
     environment:
       <<: *marketplace-env

@@ -550,7 +550,6 @@ def test_the_derived_stores_are_allowed_to_be_empty_after_a_restore():
     results = [
         _check("bronze_present", b.PASS),
         _check("es_changes_unique", b.FAIL),
-        _check("kafka_to_silver_lag", b.FAIL),
         _check("redis_offer_state_present", b.FAIL),
     ]
 
@@ -560,7 +559,7 @@ def test_the_derived_stores_are_allowed_to_be_empty_after_a_restore():
     # 4 says they refill from new crawls. A fresh restore has not crawled, and
     # its broker has never seen the Silver consumer group at all.
     assert ok is True
-    assert tolerated == ["es_changes_unique", "kafka_to_silver_lag", "redis_offer_state_present"]
+    assert tolerated == ["es_changes_unique", "redis_offer_state_present"]
     assert unexpected == []
 
 
@@ -580,7 +579,7 @@ def test_a_fully_green_validate_passes_the_restored_judgement_too():
 
 def test_the_tolerated_checks_are_exactly_the_stores_that_are_not_backed_up():
     # Pinned so widening the allowance is a deliberate edit with a reason.
-    assert b.RESTORED_STACK_EXPECTED_EMPTY == ("es_changes_unique", "kafka_to_silver_lag", "redis_offer_state_present")
+    assert b.RESTORED_STACK_EXPECTED_EMPTY == ("es_changes_unique", "redis_offer_state_present")
 
 
 def test_the_mp_script_holds_no_stray_control_characters():

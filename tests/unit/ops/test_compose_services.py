@@ -14,7 +14,7 @@ from tests.paths import REPO_ROOT
 COMPOSE = REPO_ROOT / "docker-compose.yml"
 
 # Started by `up` and expected to stay up: a dependency outage must not end them.
-LONG_RUNNING = ("crawl-worker", "silver-sink", "speed", "batch-scheduler", "stub-source", "es-projector")
+LONG_RUNNING = ("crawl-worker", "speed", "batch-scheduler", "stub-source", "es-projector")
 # `run --rm` tools and init containers. Docker restarts nothing started by
 # `run`, but an inherited policy would still be wrong, and `restart: "no"`
 # says so. The Kibana importer must not loop either: it is idempotent, but a
