@@ -1,27 +1,35 @@
-"""PostgreSQL connections for long-running services.
+"""PostgreSQL access: the one connection factory and the one JDBC URL.
 
-The repositories in this codebase open connections as
-``with factory() as conn, conn.cursor() as cur``. On a bare psycopg2
-connection that block commits or rolls back but never closes the
-connection, which a service running for days would leak once per call until
-PostgreSQL ran out of connections. The factory here closes what it opens.
+Repositories open connections as ``with factory() as conn, conn.cursor() as
+cur``. On a bare psycopg2 connection that block commits or rolls back but
+never closes, which a service running for days would leak once per call; the
+factory here closes what it opens.
 """
 from __future__ import annotations
 
 from collections.abc import Callable
 from contextlib import contextmanager
-from typing import Any
+from typing import Any, Protocol
 
 
-def postgres_connection_factory() -> Callable[[], Any]:
-    import psycopg2
+class PostgresTarget(Protocol):
+    """The shape of ``ecomdata.settings.PostgresSettings``."""
 
-    from ecomdata.settings import POSTGRES_DB, POSTGRES_HOST, POSTGRES_PASSWORD, POSTGRES_PORT, POSTGRES_USER
+    host: str
+    port: int
+    user: str
+    password: str
+    db: str
+
+
+def connection_factory(pg: PostgresTarget) -> Callable[[], Any]:
+    """A zero-argument callable returning a context manager over one connection."""
 
     @contextmanager
     def connect():
-        conn = psycopg2.connect(host=POSTGRES_HOST, port=POSTGRES_PORT, user=POSTGRES_USER,
-                                password=POSTGRES_PASSWORD, dbname=POSTGRES_DB)
+        import psycopg2
+
+        conn = psycopg2.connect(host=pg.host, port=pg.port, user=pg.user, password=pg.password, dbname=pg.db)
         try:
             with conn:
                 yield conn
@@ -29,3 +37,16 @@ def postgres_connection_factory() -> Callable[[], Any]:
             conn.close()
 
     return connect
+
+
+def jdbc_url(pg: PostgresTarget) -> str:
+    return f"jdbc:postgresql://{pg.host}:{pg.port}/{pg.db}"
+
+
+def jdbc_properties(pg: PostgresTarget) -> dict[str, str]:
+    return {"user": pg.user, "password": pg.password, "driver": "org.postgresql.Driver"}
+
+
+def libpq_env(pg: PostgresTarget) -> dict[str, str]:
+    """Environment for ``pg_dump``/``pg_restore``/``psql``."""
+    return {"PGHOST": pg.host, "PGPORT": str(pg.port), "PGUSER": pg.user, "PGPASSWORD": pg.password}

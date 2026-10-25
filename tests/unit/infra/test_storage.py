@@ -11,25 +11,32 @@ from __future__ import annotations
 import pytest
 
 from ecomdata.infra import storage
+from ecomdata.settings import SettingsError, load_settings
 
 
-@pytest.fixture(autouse=True)
-def _clear_profile_cache():
-    storage.active_profile.cache_clear()
-    yield
-    storage.active_profile.cache_clear()
+class _Profiles:
+    """Builds the storage settings from an explicit environment, as a composition root does."""
+
+    def __init__(self):
+        self.env = {}
+
+    def active_profile(self):
+        return load_settings(self.env).storage
+
+    def resolve_profile_name(self):
+        return self.active_profile().profile
 
 
 def _use(monkeypatch, **env):
-    for name in ("DATA_LAKE_PROFILE", "DATA_LAKE_MODE", "DATA_LAKE_ENDPOINT", "DATA_LAKE_REGION"):
-        monkeypatch.delenv(name, raising=False)
-    for key, value in env.items():
-        monkeypatch.setenv(key, value)
+    profiles.env = dict(env)
+
+
+profiles = _Profiles()
 
 
 def test_local_profile_has_no_hadoop_options(monkeypatch):
     _use(monkeypatch, DATA_LAKE_PROFILE="local")
-    profile = storage.active_profile()
+    profile = profiles.active_profile()
 
     assert profile.is_local
     assert profile.scheme == "file"
@@ -38,7 +45,7 @@ def test_local_profile_has_no_hadoop_options(monkeypatch):
 
 def test_minio_profile_uses_path_style_and_plain_http(monkeypatch):
     _use(monkeypatch, DATA_LAKE_PROFILE="minio", MINIO_ENDPOINT="minio:9000")
-    options = storage.spark_hadoop_options(storage.active_profile())
+    options = storage.spark_hadoop_options(profiles.active_profile())
 
     assert options["fs.s3a.path.style.access"] == "true"
     assert options["fs.s3a.connection.ssl.enabled"] == "false"
@@ -47,7 +54,7 @@ def test_minio_profile_uses_path_style_and_plain_http(monkeypatch):
 
 def test_s3_profile_inverts_both_minio_settings(monkeypatch):
     _use(monkeypatch, DATA_LAKE_PROFILE="s3", DATA_LAKE_REGION="ap-southeast-1")
-    profile = storage.active_profile()
+    profile = profiles.active_profile()
     options = storage.spark_hadoop_options(profile)
 
     # Exactly the two values that were previously hardcoded to MinIO's needs.
@@ -62,7 +69,7 @@ def test_s3_profile_inverts_both_minio_settings(monkeypatch):
 def test_r2_profile_requires_an_endpoint(monkeypatch):
     _use(monkeypatch, DATA_LAKE_PROFILE="r2")
     with pytest.raises(ValueError, match="DATA_LAKE_ENDPOINT"):
-        storage.active_profile()
+        profiles.active_profile()
 
 
 def test_r2_profile_keeps_tls_with_path_style(monkeypatch):
@@ -71,7 +78,7 @@ def test_r2_profile_keeps_tls_with_path_style(monkeypatch):
         DATA_LAKE_PROFILE="r2",
         DATA_LAKE_ENDPOINT="https://acct123.r2.cloudflarestorage.com",
     )
-    profile = storage.active_profile()
+    profile = profiles.active_profile()
     options = storage.spark_hadoop_options(profile)
 
     assert options["fs.s3a.path.style.access"] == "true"
@@ -82,18 +89,18 @@ def test_r2_profile_keeps_tls_with_path_style(monkeypatch):
 def test_data_lake_mode_still_selects_minio(monkeypatch):
     """docker-compose and scripts/*.ps1 set DATA_LAKE_MODE, not a profile."""
     _use(monkeypatch, DATA_LAKE_MODE="s3a")
-    assert storage.resolve_profile_name() == "minio"
+    assert profiles.resolve_profile_name() == "minio"
 
     _use(monkeypatch, DATA_LAKE_MODE="local")
-    assert storage.resolve_profile_name() == "local"
+    assert profiles.resolve_profile_name() == "local"
 
 
 def test_explicit_profile_overrides_legacy_mode(monkeypatch):
     _use(monkeypatch, DATA_LAKE_MODE="s3a", DATA_LAKE_PROFILE="s3")
-    assert storage.resolve_profile_name() == "s3"
+    assert profiles.resolve_profile_name() == "s3"
 
 
 def test_unknown_profile_is_rejected(monkeypatch):
     _use(monkeypatch, DATA_LAKE_PROFILE="dropbox")
-    with pytest.raises(ValueError, match="Unknown DATA_LAKE_PROFILE"):
-        storage.active_profile()
+    with pytest.raises(SettingsError, match="unknown DATA_LAKE_PROFILE"):
+        profiles.active_profile()
