@@ -6,12 +6,10 @@ from decimal import Decimal
 import pytest
 
 from ecomdata.domain.change_rules import detect_observation_changes
-from ecomdata.domain.topics import MARKETPLACE_CHANGES, MARKETPLACE_OBSERVATIONS
+from ecomdata.domain.topics import MARKETPLACE_CHANGES
 from ecomdata.domain.wire import WireContractError, canonical_json
-from ecomdata.ingestion.publisher import publish_observation
 from ecomdata.processing.speed.change_producer import publish_change
 from tests.unit.domain.test_marketplace_change_rules import CONFIG, _event
-from tests.unit.domain.test_marketplace_schema import make_event
 
 
 class FakeFuture:
@@ -48,34 +46,6 @@ def _new_offer_change():
     return detect_observation_changes(None, _event(), CONFIG).changes[0]
 
 
-def test_observation_publish_uses_topic_partition_key_and_ack_timeout():
-    producer = FakeProducer()
-    event = make_event()
-
-    publish_observation(producer, event, ack_timeout_seconds=7)
-
-    sent = producer.sent[0]
-    assert sent["topic"] == MARKETPLACE_OBSERVATIONS.name
-    assert sent["key"] == event.partition_key
-    assert sent["key"] == f"tiki:{event.payload.offer.platform_listing_id}"
-    assert sent["future"].timeouts == [7]
-
-
-def test_observation_publish_sends_canonical_wire_values():
-    producer = FakeProducer()
-    event = make_event()
-
-    publish_observation(producer, event)
-
-    assert producer.sent[0]["value"] == json.loads(canonical_json(event))
-    assert producer.sent[0]["value"]["payload"]["observation"]["current_price"] == "100.00"
-
-
-def test_observation_publish_rejects_a_foreign_event_type():
-    with pytest.raises(TypeError, match="MarketplaceObservationV1"):
-        publish_observation(FakeProducer(), _new_offer_change())
-
-
 def test_change_publish_uses_topic_offer_key_and_ack_timeout():
     producer = FakeProducer()
     change = _new_offer_change()
@@ -97,12 +67,9 @@ def test_change_publish_revalidates_the_wire_before_sending():
     assert producer.sent[0]["value"] == json.loads(canonical_json(change))
 
 
-@pytest.mark.parametrize("publish", [publish_observation, publish_change])
-def test_publish_rejects_non_positive_ack_timeout(publish):
-    event = make_event() if publish is publish_observation else _new_offer_change()
-
+def test_publish_rejects_non_positive_ack_timeout():
     with pytest.raises(ValueError, match="ack_timeout_seconds"):
-        publish(FakeProducer(), event, ack_timeout_seconds=0)
+        publish_change(FakeProducer(), _new_offer_change(), ack_timeout_seconds=0)
 
 
 def test_change_publish_failure_propagates():

@@ -26,7 +26,9 @@ from pyspark.sql import DataFrame, SparkSession
 from pyspark.sql import functions as F
 
 from ecomdata.domain.change_rules import ChangeRuleConfig
+from ecomdata.domain.topics import MARKETPLACE_OBSERVATIONS, MARKETPLACE_RECORDS, MARKETPLACE_RECORDS_DLQ
 from ecomdata.processing.speed import stream as layer
+from ecomdata.processing.speed.normalizer import normalize_micro_batch
 from ecomdata.processing.speed.stream import SPEED_OUTPUT_SCHEMA
 
 
@@ -72,6 +74,51 @@ def start_query(
         .trigger(processingTime=trigger)
         .outputMode("append")
         .foreachBatch(write_batch)
+        .start()
+    )
+
+
+def read_marketplace_records(spark: SparkSession, bootstrap_servers: str) -> DataFrame:
+    """The source records Kafka holds, one ``value`` string per message."""
+    return (
+        spark.readStream.format("kafka")
+        .option("kafka.bootstrap.servers", bootstrap_servers)
+        .option("subscribe", MARKETPLACE_RECORDS.name)
+        .option("startingOffsets", "earliest")
+        .load()
+        .select(F.col("value").cast("string").alias("value"))
+    )
+
+
+def normalizer_batch_writer(bootstrap_servers: str) -> Callable[[DataFrame, int], None]:
+    """``foreachBatch`` function: normalise a micro-batch of records and publish the canonical events.
+
+    Valid organic rows go to ``marketplace.observations.v1`` (the speed layer's own derived topic: this
+    query is its only producer); every rejected row goes to the records DLQ with its reason. A micro-batch
+    replayed after a failure republishes the same events, which the stateful query counts as duplicates.
+    """
+
+    def write(batch: DataFrame, batch_id: int) -> None:
+        events, rejected = normalize_micro_batch(batch.select("value"))
+        base = {"kafka.bootstrap.servers": bootstrap_servers}
+        events.write.format("kafka").options(**base).option("topic", MARKETPLACE_OBSERVATIONS.name).save()
+        dead = rejected.select(
+            "key", F.to_json(F.struct(F.col("reason"), F.col("value").alias("record"))).alias("value")
+        )
+        dead.write.format("kafka").options(**base).option("topic", MARKETPLACE_RECORDS_DLQ.name).save()
+
+    return write
+
+
+def start_normalizer(
+    spark: SparkSession, *, bootstrap_servers: str, checkpoint: str, trigger: str, query_name: str
+) -> Any:
+    return (
+        read_marketplace_records(spark, bootstrap_servers)
+        .writeStream.queryName(f"{query_name}-normalizer")
+        .option("checkpointLocation", checkpoint)
+        .trigger(processingTime=trigger)
+        .foreachBatch(normalizer_batch_writer(bootstrap_servers))
         .start()
     )
 
@@ -279,7 +326,15 @@ def main(argv: list[str] | None = None) -> None:
     install_signal_handlers(stop)
     spark = spark_factory(settings).create()
     recorder = ProgressRecorder(connection_factory(settings.postgres), query_name=settings.speed.query_name)
+    normalizer = None
     try:
+        normalizer = start_normalizer(
+            spark,
+            bootstrap_servers=settings.kafka.bootstrap_servers,
+            checkpoint=settings.speed.checkpoint_path() + "-normalizer",
+            trigger=settings.speed.trigger,
+            query_name=settings.speed.query_name,
+        )
         query = start_query(
             spark,
             config=change_config(settings.speed),
@@ -289,8 +344,17 @@ def main(argv: list[str] | None = None) -> None:
             trigger=settings.speed.trigger,
             query_name=settings.speed.query_name,
         )
-        await_query(query, stop=stop, on_poll=lambda: record_progress_safely(recorder, query))
+
+        def poll() -> None:
+            record_progress_safely(recorder, query)
+            # A normaliser that died would leave the stateful query idle without any error of its own.
+            if not normalizer.isActive:
+                raise RuntimeError(f"the normaliser query stopped: {normalizer.exception()}")
+
+        await_query(query, stop=stop, on_poll=poll)
     finally:
+        if normalizer is not None and normalizer.isActive:
+            normalizer.stop()
         spark.stop()
 
 

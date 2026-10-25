@@ -23,6 +23,7 @@ from ecomdata.domain.change_rules import (
     detect_stale_change,
     offer_state_to_json,
 )
+from ecomdata.domain.ordering import order_key
 from ecomdata.domain.topics import MARKETPLACE_OBSERVATIONS
 from ecomdata.domain.wire import marketplace_observation_from_wire
 from ecomdata.processing.speed.sinks import SpeedOutput
@@ -131,8 +132,13 @@ def _process_group(rows: Iterable[dict], previous=None, config: ChangeRuleConfig
         raise ValueError("a ChangeRuleConfig is required")
     state = previous
     result: list[SpeedOutput] = []
-    for row in sorted(rows, key=lambda item: (item["event_time"], item["observation_id"])):
-        event = marketplace_observation_from_wire(json.loads(row["event_json"]))
+    decoded = [(row, marketplace_observation_from_wire(json.loads(row["event_json"]))) for row in rows]
+
+    def position(pair):
+        observation = pair[1].payload.observation
+        return order_key(observation.observed_at, observation.fetched_at, observation.observation_id)
+
+    for row, event in sorted(decoded, key=position):
         detection = detect_observation_changes(state, event, config)
         if detection.disposition is ObservationDisposition.APPLIED:
             state = detection.next_state
