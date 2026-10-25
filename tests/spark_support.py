@@ -1,7 +1,7 @@
 """Probe for a Spark runtime that can round-trip rows back into Python.
 
-PySpark 3.5.1 supports Python 3.8-3.11 and Java 8/11/17. On a newer
-interpreter or JVM the JVM side still runs but the Python worker dies, so
+PySpark 4.0 supports Python 3.9-3.13 and Java 17/21. On an interpreter or JVM
+outside that range the JVM side still runs but the Python worker dies, so
 anything that collects rows fails. Tests that need real DataFrames use
 ``requires_spark`` and skip with that reason instead of failing the suite.
 """
@@ -52,7 +52,7 @@ def _probe() -> tuple[bool, str]:
     return False, (
         "Spark cannot return rows to Python here "
         f"(python {sys.version_info.major}.{sys.version_info.minor}); "
-        "pyspark 3.5.1 needs Python 3.8-3.11 and Java 8/11/17"
+        "pyspark 4.0 needs Python 3.9-3.13 and Java 17/21"
     )
 
 
@@ -78,7 +78,7 @@ def spark():
         .appName("marketplace-tests")
         .config("spark.ui.enabled", "false")
         .config("spark.sql.shuffle.partitions", "1")
-        # build_spark() pins the session to UTC; a test session on local time
+        # SparkSessionFactory pins the session to UTC; a test session on local time
         # would bucket observed_date differently from production.
         .config("spark.sql.session.timeZone", "UTC")
         .getOrCreate()
