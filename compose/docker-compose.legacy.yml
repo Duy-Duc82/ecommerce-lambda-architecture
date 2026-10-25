@@ -1,0 +1,107 @@
+# The Kaggle demo (Spark 3.5.1) and its jobs. Add to the main file:
+#   docker compose -f compose/docker-compose.yml -f compose/docker-compose.legacy.yml --profile legacy up
+# It reuses the core (MinIO, PostgreSQL, Elasticsearch, Kibana) and the network.
+services:
+  # ── LEGACY KAGGLE DEMO (Spark 3.5.1) ───────────────────────
+  spark:
+    profiles: ["legacy"]
+    image: apache/spark:3.5.1
+    container_name: ${MP_CONTAINER_PREFIX:-}spark
+    hostname: spark
+    command:
+      - /opt/spark/bin/spark-class
+      - org.apache.spark.deploy.master.Master
+      - --host
+      - spark
+      - --port
+      - "7077"
+      - --webui-port
+      - "8080"
+    environment:
+      SPARK_PUBLIC_DNS: localhost
+    ports:
+      - "${SPARK_UI_HOST_PORT:-8080}:8080"   # Spark Master Web UI
+      - "${SPARK_RPC_HOST_PORT:-7077}:7077"  # Spark Master RPC
+    networks:
+      - bigdata
+
+  spark-worker:
+    profiles: ["legacy"]
+    image: apache/spark:3.5.1
+    container_name: ${MP_CONTAINER_PREFIX:-}spark-worker
+    hostname: spark-worker
+    command:
+      - /opt/spark/bin/spark-class
+      - org.apache.spark.deploy.worker.Worker
+      - spark://spark:7077
+    environment:
+      SPARK_PUBLIC_DNS: localhost
+      # The Kaggle months are 5-9 GB of CSV each. A 2g worker cannot hold even
+      # one shuffle stage of that and dies with OOM/heartbeat timeouts, which
+      # reads like an infrastructure failure but is purely this number.
+      # Override per machine via .env; 8g/4 cores fits a 16 GB laptop.
+      SPARK_WORKER_CORES: ${SPARK_WORKER_CORES:-4}
+      SPARK_WORKER_MEMORY: ${SPARK_WORKER_MEMORY:-8g}
+    ports:
+      - "${SPARK_WORKER_UI_HOST_PORT:-8081}:8081"   # Spark Worker Web UI
+    depends_on:
+      - spark
+    networks:
+      - bigdata
+
+  # Reproducible batch runtime with pinned PostgreSQL JDBC and MinIO S3A jars.
+  # Kept on its own `jobs` profile: scripts/run_warehouse.ps1 runs it with
+  # `--profile jobs run --rm`, and under `legacy` an `up` would start it.
+  warehouse-job:
+    profiles: ["jobs"]
+    build:
+      context: ..
+      dockerfile: legacy/kaggle/docker/spark-warehouse/Dockerfile
+    image: ecommerce/spark-warehouse:3.5.1
+    container_name: ${MP_CONTAINER_PREFIX:-}warehouse-job
+    environment:
+      DATA_LAKE_MODE: s3a
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
+      MINIO_BUCKET_BRONZE: ecommerce-bronze
+      MINIO_BUCKET_SILVER: ecommerce-silver
+      MINIO_BUCKET_GOLD: ecommerce-gold
+      POSTGRES_HOST: postgres-dw
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: ${POSTGRES_USER:-admin}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-admin123}
+      POSTGRES_DB: ${POSTGRES_DB:-data_warehouse}
+      PYSPARK_PYTHON: python3
+      PYSPARK_DRIVER_PYTHON: python3
+    volumes:
+      - ../:/app
+    depends_on:
+      minio:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+      postgres-dw:
+        condition: service_healthy
+    networks:
+      - bigdata
+
+  # Auto-import the legacy Kaggle dashboards.
+  kibana-setup:
+    profiles: ["legacy"]
+    image: python:3.12-slim
+    container_name: ${MP_CONTAINER_PREFIX:-}kibana-setup
+    depends_on:
+      kibana:
+        condition: service_healthy
+    volumes:
+      - ../legacy/kaggle/display/kibana:/app/kibana
+    working_dir: /app
+    command: >
+      /bin/sh -c "
+      pip install requests==2.32.3 elasticsearch==8.18.0 --quiet;
+      python kibana/setup_kibana.py;
+      echo 'Kibana setup completed!';
+      "
+    networks:
+      - bigdata

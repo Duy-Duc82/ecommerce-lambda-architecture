@@ -330,14 +330,22 @@ ALTER TABLE audit.marketplace_batch_run
     ADD COLUMN IF NOT EXISTS manifest_promoted BOOLEAN NOT NULL DEFAULT FALSE;
 ALTER TABLE audit.marketplace_batch_run DROP CONSTRAINT IF EXISTS marketplace_batch_run_status_check;
 ALTER TABLE audit.marketplace_batch_run ADD CONSTRAINT marketplace_batch_run_status_check
-    CHECK (status IN ('CREATED','SILVER_BUILT','GOLD_WRITTEN','QUALITY_PASSED','QUALITY_FAILED','PUBLISHED','PROMOTED',
-                      'HELD','FAILED','RUNNING','SUCCEEDED'));
--- Stage-based batch: the state machine of ecomdata.domain.batch_run. RUNNING and SUCCEEDED are the
--- names rows of the single-process batch carry; they read as CREATED and PROMOTED.
+    CHECK (status IN ('RUNNING','GOLD_WRITTEN','QUALITY_FAILED','SUCCEEDED','FAILED'));
+
+-- Refactor: a batch run is a state machine over stages (ecomdata.domain.batch_run).
+-- RUNNING and SUCCEEDED stay valid so a row written before the refactor still
+-- reads (they mean CREATED and PROMOTED). The two columns make a run resumable
+-- and its promotion a compare-and-swap: last_completed_status is where a FAILED
+-- run picks up, expected_current_run_id is the serving pointer's run when the
+-- run was created.
 ALTER TABLE audit.marketplace_batch_run
     ADD COLUMN IF NOT EXISTS last_completed_status VARCHAR(16),
     ADD COLUMN IF NOT EXISTS expected_current_run_id VARCHAR(64),
-    ADD COLUMN IF NOT EXISTS held_reason VARCHAR(64);
+    ADD COLUMN IF NOT EXISTS held_reason TEXT;
+ALTER TABLE audit.marketplace_batch_run DROP CONSTRAINT IF EXISTS marketplace_batch_run_status_check;
+ALTER TABLE audit.marketplace_batch_run ADD CONSTRAINT marketplace_batch_run_status_check
+    CHECK (status IN ('CREATED','SILVER_BUILT','GOLD_WRITTEN','QUALITY_PASSED','QUALITY_FAILED','PUBLISHED',
+                      'PROMOTED','HELD','FAILED','RUNNING','SUCCEEDED'));
 
 -- The serving cache names the manifest and the rule version that admitted it,
 -- so "which Gold version is live, under which rules" needs no object listing.

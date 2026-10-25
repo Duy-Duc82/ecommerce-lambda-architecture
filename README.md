@@ -395,9 +395,8 @@ copy .env.example .env
 ```
 
 Superset is at http://localhost:8088, Kibana at http://localhost:5601, and
-the MinIO console at http://localhost:9001. Setup: `pip install -e ".[dev,spark]"`. Tests: `python -m pytest`
-(1,474 offline tests; the drills need the stack: `-m drill`). Lint: `ruff check src tests services`, `lint-imports`.
-Refactor status and the remaining work: `docs/REFACTOR_REPORT.md`, `docs/HANDOFF_REFACTOR.md`.
+the MinIO console at http://localhost:9001. Tests: `python -m pytest`
+(1,006 offline tests; the drills need the stack: `-m drill`).
 
 | Document | For |
 |---|---|
