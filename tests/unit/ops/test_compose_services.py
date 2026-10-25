@@ -123,3 +123,19 @@ def test_the_speed_and_batch_images_set_their_own_driver_memory_through_the_sett
     text = COMPOSE.read_text(encoding="utf-8")
 
     assert text.count("SPARK_DRIVER_MEMORY: ${SPARK_DRIVER_MEMORY:-3g}") >= 3
+
+
+def test_kafka_init_creates_every_topic_the_pipeline_reads_or_writes():
+    """The speed layer reads records and writes observations (its own derived topic).
+
+    A topic missing here failed the first end-to-end run: Spark's Kafka source
+    raised UnknownTopicOrPartitionException and the service restarted in a loop.
+    """
+    from ecomdata.domain.topics import MARKETPLACE_OBSERVATIONS, MARKETPLACE_RECORDS, MARKETPLACE_RECORDS_DLQ
+
+    text = COMPOSE.read_text(encoding="utf-8")
+    loop = next(line for line in text.splitlines() if "for topic in" in line)
+
+    for topic in (MARKETPLACE_RECORDS, MARKETPLACE_RECORDS_DLQ, MARKETPLACE_OBSERVATIONS):
+        assert topic.name in loop, topic.name
+    assert "marketplace.changes.v1" in loop

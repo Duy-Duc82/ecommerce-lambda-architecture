@@ -24,19 +24,31 @@ RUN set -eux; cd /opt/spark/jars; \
       org/postgresql/postgresql/42.7.5/postgresql-42.7.5.jar; \
     do curl -fsSLO "$MAVEN/$jar"; done
 
+# Python 3.12, which the package requires (the base image's python3 is 3.10 on
+# Ubuntu 22.04). Spark's own pyspark in /opt/spark/python runs on it unchanged.
+RUN set -eux; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends software-properties-common curl ca-certificates; \
+    add-apt-repository -y ppa:deadsnakes/ppa; \
+    apt-get install -y --no-install-recommends python3.12; \
+    curl -fsSL https://bootstrap.pypa.io/get-pip.py | python3.12; \
+    rm -rf /var/lib/apt/lists/*; \
+    ln -sf /usr/bin/python3.12 /usr/local/bin/python3; \
+    python3 --version
+
 # The package without its [spark] extra: pyspark is the image's own. pandas and
 # numpy are installed on their own, at the pins of constraints.txt.
 COPY pyproject.toml constraints.txt README.md /build/
 COPY src /build/src
-RUN pip install --no-cache-dir -c /build/constraints.txt /build pandas numpy \
+RUN python3.12 -m pip install --no-cache-dir -c /build/constraints.txt /build pandas numpy \
  && rm -rf /build
 
 # The jars are baked in: an empty SPARK_KAFKA_PACKAGE stops the speed service
 # from resolving the Kafka connector over the network at start.
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    PYSPARK_PYTHON=python3 \
-    PYSPARK_DRIVER_PYTHON=python3 \
+    PYSPARK_PYTHON=python3.12 \
+    PYSPARK_DRIVER_PYTHON=python3.12 \
     PYTHONPATH=/app/src:/app:/opt/spark/python:/opt/spark/python/lib/py4j-0.10.9.9-src.zip \
     SPARK_KAFKA_PACKAGE=
 

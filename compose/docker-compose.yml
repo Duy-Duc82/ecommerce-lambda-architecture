@@ -195,7 +195,7 @@ services:
     command:
       - |
         set -e
-        for topic in marketplace.records.v1 marketplace.records.v1.dlq marketplace.changes.v1; do
+        for topic in marketplace.records.v1 marketplace.records.v1.dlq marketplace.observations.v1 marketplace.changes.v1; do
           /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:19092 --create --if-not-exists \
             --topic "$$topic" --partitions ${KAFKA_MARKETPLACE_PARTITIONS:-3} --replication-factor 1
         done
