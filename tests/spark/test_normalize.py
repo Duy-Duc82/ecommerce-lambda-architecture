@@ -115,7 +115,9 @@ def test_ids_equal_the_python_identity_functions(spark, tiki_frame):
 
     for row in valid.collect():
         assert row.offer_id == make_offer_id("tiki", row.platform_listing_id)
-        assert row.observation_id == make_observation_id("tiki", row.platform_listing_id, FETCHED, BODY_SHA)
+        organic_form = make_observation_id("tiki", row.platform_listing_id, FETCHED, BODY_SHA)
+        # A sponsored row also carries its display position, so it never collides with an organic one.
+        assert (row.observation_id != organic_form) == bool(row.is_advertisement)
         assert row.event_id == row.observation_id
         assert row.partition_key == f"tiki:{row.platform_listing_id}"
 

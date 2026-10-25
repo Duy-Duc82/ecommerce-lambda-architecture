@@ -270,11 +270,23 @@ def canonical(records: DataFrame, spec: Any, fields: SourceFields) -> DataFrame:
         organic_rank.alias("_organic_rank"),
     )
     observed_at = F.col("fetched_at")
+    organic_observation = deterministic_id(
+        "obs", F.lit(code), F.col("_listing"), iso_microseconds(observed_at), F.col("body_sha256")
+    )
+    # A sponsored row can repeat a listing that is also on the page organically, at
+    # the same instant and from the same response; the display position tells the
+    # two observations apart, so they never collide.
+    sponsored_observation = deterministic_id(
+        "obs", F.lit(code), F.col("_listing"), iso_microseconds(observed_at), F.col("body_sha256"), F.lit("ad"),
+        F.col("record_index"),
+    )
+    first_of_listing = F.row_number().over(
+        Window.partitionBy("raw_artifact_id", "_listing", "_ad").orderBy("record_index")
+    )
     selected = base.select(
         "*",
-        deterministic_id("obs", F.lit(code), F.col("_listing"), iso_microseconds(observed_at), F.col("body_sha256")).alias(
-            "_observation_id"
-        ),
+        F.when(F.col("_ad"), sponsored_observation).otherwise(organic_observation).alias("_observation_id"),
+        first_of_listing.alias("_listing_occurrence"),
     )
     result = selected.select(
         F.col("_observation_id").alias("event_id"),
@@ -335,6 +347,7 @@ def canonical(records: DataFrame, spec: Any, fields: SourceFields) -> DataFrame:
         F.col("request_target"),
         F.col("request_page"),
         F.col("payload_json"),
+        F.col("_listing_occurrence"),
     )
     return result.withColumn("reason", quarantine_reason())
 
@@ -343,6 +356,8 @@ def quarantine_reason() -> Column:
     """The first reason a row cannot be a valid observation, or null."""
     reasons = [
         F.when(F.col("platform_listing_id").isNull(), "missing_listing_id"),
+        # The same listing twice on one page, organically: the first stays, the rest are accounted for here.
+        F.when(~F.col("is_advertisement") & (F.col("_listing_occurrence") > 1), "duplicate_listing_on_page"),
         F.when(F.col("product_title").isNull(), "missing_title"),
         F.when(F.col("current_price").isNull(), "missing_or_invalid_price"),
         F.when(F.col("fetched_at").isNull(), "missing_fetched_at"),
