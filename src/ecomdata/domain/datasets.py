@@ -25,6 +25,9 @@ MART = "mart"
 KINDS = (DIM, BRIDGE, FACT, MART)
 
 # PostgreSQL schemas: the star is published to dw, the marts to cache.
+# The Gold dataset root: run-scoped marts, manifests and the serving pointer
+# all live under gold/<GOLD_DATASET>/.
+GOLD_DATASET = "marketplace"
 DW_SCHEMA = "dw"
 CACHE_SCHEMA = "cache"
 

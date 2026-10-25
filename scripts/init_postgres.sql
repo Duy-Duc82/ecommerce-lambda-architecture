@@ -349,7 +349,7 @@ CREATE TABLE IF NOT EXISTS audit.crawl_frontier (
     marketplace_id VARCHAR(128) NOT NULL,
     target TEXT NOT NULL CHECK (length(btrim(target)) > 0),
     resource_type VARCHAR(32) NOT NULL CHECK (resource_type IN ('LISTING_PAGE', 'PRODUCT_DETAIL')),
-    tier VARCHAR(16) NOT NULL CHECK (tier IN ('ACTIVE', 'NORMAL', 'COLD')),
+    tier VARCHAR(16) NOT NULL CHECK (tier IN ('ACTIVE', 'NORMAL', 'COLD', 'HOT', 'SWEEP')),
     priority INTEGER NOT NULL DEFAULT 0 CHECK (priority >= 0),
     scheduled_for TIMESTAMPTZ NOT NULL,
     status VARCHAR(16) NOT NULL CHECK (status IN ('READY', 'LEASED', 'RETRY_WAIT', 'SUCCEEDED', 'FAILED', 'DISABLED')),
@@ -423,6 +423,10 @@ ALTER TABLE audit.crawl_frontier
     ADD CONSTRAINT crawl_frontier_last_error_kind_check CHECK (last_error_kind IS NULL OR last_error_kind IN (
         'RATE_LIMITED', 'TRANSIENT_NETWORK', 'SERVER_ERROR', 'CLIENT_ERROR',
         'ROBOTS_DENIED', 'STORAGE_ERROR', 'PARSE_ERROR', 'VALIDATION_ERROR', 'PUBLISH_ERROR', 'UNKNOWN'));
+-- Refactor: the HOT and SWEEP tiers of long-term collection.
+ALTER TABLE audit.crawl_frontier DROP CONSTRAINT IF EXISTS crawl_frontier_tier_check;
+ALTER TABLE audit.crawl_frontier
+    ADD CONSTRAINT crawl_frontier_tier_check CHECK (tier IN ('ACTIVE', 'NORMAL', 'COLD', 'HOT', 'SWEEP'));
 ALTER TABLE audit.crawl_request_attempt DROP CONSTRAINT IF EXISTS crawl_request_attempt_error_kind_check;
 ALTER TABLE audit.crawl_request_attempt
     ADD CONSTRAINT crawl_request_attempt_error_kind_check CHECK (error_kind IS NULL OR error_kind IN (
