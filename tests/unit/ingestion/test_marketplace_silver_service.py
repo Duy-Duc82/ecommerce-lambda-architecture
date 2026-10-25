@@ -213,7 +213,7 @@ def test_the_consumer_never_auto_commits_and_starts_from_the_earliest_offset(mon
 
     monkeypatch.setattr(kafka, "KafkaConsumer", RecordingConsumer)
 
-    service.create_consumer("localhost:9092")
+    service.create_consumer("localhost:9092", "marketplace-silver-v1")
 
     from kafka.consumer.group import KafkaConsumer
 

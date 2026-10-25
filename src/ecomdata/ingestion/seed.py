@@ -13,7 +13,6 @@ operator action: pass ``--scheduled-for``.
 """
 from __future__ import annotations
 
-import argparse
 from collections.abc import Iterable
 from datetime import UTC, datetime
 from typing import Any
@@ -70,37 +69,10 @@ def seed(
     return created
 
 
-def main() -> None:
-    from ecomdata.settings import CRAWL_MAX_ATTEMPTS, TIKI_CATEGORIES
+def main(argv: list[str] | None = None) -> None:
+    from ecomdata.ingestion.cli import seed_main
 
-    parser = argparse.ArgumentParser(description="Seed the crawl frontier with listing-page targets")
-    parser.add_argument("--marketplace", default="tiki", choices=sorted(MARKETPLACE_IDS))
-    parser.add_argument("--category", action="append", help="repeatable; defaults to TIKI_CATEGORIES")
-    parser.add_argument("--pages", type=int, default=1, help="listing pages per category")
-    parser.add_argument("--tier", default=CrawlTier.NORMAL.value, choices=[tier.value for tier in CrawlTier])
-    parser.add_argument("--priority", type=int, default=0)
-    parser.add_argument("--scheduled-for", default=None,
-                        help="ISO instant for a new chain; omit to stay idempotent")
-    args = parser.parse_args()
-
-    from ecomdata.ingestion.frontier import PostgresCrawlFrontier
-    from ecomdata.ingestion.service import postgres_connection_factory
-
-    scheduled_for = SEED_SCHEDULED_FOR
-    if args.scheduled_for:
-        scheduled_for = datetime.fromisoformat(args.scheduled_for.replace("Z", "+00:00"))
-    created = seed(
-        PostgresCrawlFrontier(postgres_connection_factory()),
-        marketplace_code=args.marketplace,
-        marketplace_id=MARKETPLACE_IDS[args.marketplace],
-        categories=args.category or TIKI_CATEGORIES,
-        pages=args.pages,
-        tier=CrawlTier(args.tier),
-        priority=args.priority,
-        max_attempts=CRAWL_MAX_ATTEMPTS,
-        scheduled_for=scheduled_for,
-    )
-    print(f"seeded {created} new task(s)")
+    seed_main(argv)
 
 
 if __name__ == "__main__":

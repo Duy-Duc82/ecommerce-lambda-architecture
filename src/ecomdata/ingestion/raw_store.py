@@ -18,7 +18,6 @@ from ecomdata.domain.acquisition import (
 from ecomdata.domain.identity import make_raw_artifact_id
 from ecomdata.domain.observations import RawArtifact, create_raw_artifact
 from ecomdata.domain.serialization import serialize_for_wire
-from ecomdata.infra.object_store import put_bytes
 
 RAW_METADATA_SCHEMA_VERSION = "marketplace-raw-artifact-metadata.v1"
 
@@ -68,7 +67,7 @@ def persist_fetch_result(
     fetch_result: FetchResult,
     crawl_run_id: str,
     adapter_version: str,
-    writer: Callable[[str, str, bytes], str] = put_bytes,
+    writer: Callable[[str, str, bytes], str],
 ) -> PersistedRawArtifact:
     """Write one response body and its sidecar, in that order.
 

@@ -31,7 +31,6 @@ from ecomdata.domain.identity import deterministic_id
 
 # Re-exported: the crawl service was their first home, and callers import them here.
 from ecomdata.infra.lifecycle import StopSignal, install_signal_handlers  # noqa: F401
-from ecomdata.infra.postgres import postgres_connection_factory  # noqa: F401
 from ecomdata.ingestion.scheduling import CrawlTask
 
 
@@ -139,38 +138,38 @@ def non_decreasing_clock(source: Callable[[], datetime]) -> Callable[[], datetim
     return clock
 
 
-def build_worker(*, site: str, worker_id: str, publish: Callable[[Any], Any], connection_factory: Callable[[], Any]):
+def build_worker(
+    *,
+    site: str,
+    worker_id: str,
+    publish: Callable[[Any], Any],
+    connection_factory: Callable[[], Any],
+    writer: Callable[[str, str, bytes], str],
+    crawl: Any,
+):
+    """Wire one crawl worker from the crawl settings (``CrawlSettings``)."""
     from ecomdata.ingestion.audit import CrawlAuditRepository
     from ecomdata.ingestion.cli import listing_page_executor
     from ecomdata.ingestion.frontier import PostgresCrawlFrontier
     from ecomdata.ingestion.scheduling import RetryPolicy
     from ecomdata.ingestion.worker import CrawlWorker
-    from ecomdata.settings import (
-        CRAWL_CIRCUIT_FAILURE_THRESHOLD,
-        CRAWL_CIRCUIT_OPEN_SECONDS,
-        CRAWL_LEASE_SECONDS,
-        CRAWL_MAX_ATTEMPTS,
-        CRAWL_RETRY_BASE_SECONDS,
-        CRAWL_RETRY_JITTER_RATIO,
-        CRAWL_RETRY_MAX_SECONDS,
-        CRAWL_WORKER_BATCH_SIZE,
-    )
 
     clock = non_decreasing_clock(lambda: datetime.now(UTC))  # the one wall clock, injected once
     return CrawlWorker(
         frontier=PostgresCrawlFrontier(connection_factory),
         audit=CrawlAuditRepository(connection_factory),
-        executor=publishing_executor(listing_page_executor(site=site, clock=clock), publish=publish),
+        executor=publishing_executor(listing_page_executor(site=site, writer=writer, clock=clock), publish=publish),
         clock=clock,
         policy=RetryPolicy(
-            CRAWL_MAX_ATTEMPTS, CRAWL_RETRY_BASE_SECONDS, CRAWL_RETRY_MAX_SECONDS, CRAWL_RETRY_JITTER_RATIO
+            crawl.max_attempts, crawl.retry_base_seconds, crawl.retry_max_seconds, crawl.retry_jitter_ratio
         ),
         worker_id=worker_id,
-        lease_seconds=CRAWL_LEASE_SECONDS,
-        batch_size=CRAWL_WORKER_BATCH_SIZE,
-        circuit_threshold=CRAWL_CIRCUIT_FAILURE_THRESHOLD,
-        circuit_open_seconds=CRAWL_CIRCUIT_OPEN_SECONDS,
+        lease_seconds=crawl.lease_seconds,
+        batch_size=crawl.worker_batch_size,
+        circuit_threshold=crawl.circuit_failure_threshold,
+        circuit_open_seconds=crawl.circuit_open_seconds,
         jitter=lambda: Decimal(str(random.random())),
+        cadence_minutes=crawl.cadence_minutes,
     )
 
 
@@ -184,32 +183,34 @@ def main() -> None:
     args = parser.parse_args()
 
     from ecomdata.infra.heartbeat import heartbeat
-    from ecomdata.ingestion.publisher import create_marketplace_producer, publish_observation
-    from ecomdata.settings import (
-        CRAWL_SERVICE_IDLE_SECONDS,
-        CRAWL_SERVICE_WORKER_ID,
-        CRAWL_WORKER_POLL_SECONDS,
-        SERVICE_HEARTBEAT_FILE,
-    )
+    from ecomdata.infra.kafka import create_producer
+    from ecomdata.infra.object_store import object_store_for
+    from ecomdata.infra.postgres import connection_factory
+    from ecomdata.ingestion.publisher import publish_observation
+    from ecomdata.settings import load_settings
 
+    settings = load_settings(dotenv=True)
     stop = StopSignal()
     install_signal_handlers(stop)
-    producer = create_marketplace_producer()
+    producer = create_producer(settings.kafka.bootstrap_servers)
+    ack = settings.kafka.producer_ack_timeout_seconds
     try:
         worker = build_worker(
             site=args.site,
-            worker_id=args.worker_id or CRAWL_SERVICE_WORKER_ID or default_worker_id(),
-            publish=lambda event: publish_observation(producer, event),
-            connection_factory=postgres_connection_factory(),
+            worker_id=args.worker_id or settings.crawl.service_worker_id or default_worker_id(),
+            publish=lambda event: publish_observation(producer, event, ack_timeout_seconds=ack),
+            connection_factory=connection_factory(settings.postgres),
+            writer=object_store_for(settings.storage).put,
+            crawl=settings.crawl,
         )
         run_service(
             worker,
             stop=stop,
-            idle_seconds=CRAWL_SERVICE_IDLE_SECONDS,
-            poll_seconds=CRAWL_WORKER_POLL_SECONDS,
+            idle_seconds=settings.crawl.service_idle_seconds,
+            poll_seconds=settings.crawl.worker_poll_seconds,
             max_cycles=args.max_cycles,
             log=lambda line: print(line, flush=True),
-            beat=heartbeat(SERVICE_HEARTBEAT_FILE),
+            beat=heartbeat(settings.service.heartbeat_file),
         )
     finally:
         producer.flush()

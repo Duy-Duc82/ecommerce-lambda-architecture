@@ -27,6 +27,9 @@ import sys
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+from ecomdata.ops.bootstrap import connection_factory as _connection_factory
+from ecomdata.ops.bootstrap import settings as _settings
+
 INIT_SQL = Path(__file__).resolve().parents[3] / "scripts" / "init_postgres.sql"
 # The ops container's one writable bind (./data/ops on the host), so a second
 # Compose project can read a backup the first one wrote.
@@ -35,24 +38,20 @@ DEFAULT_BACKUP_ROOT = "/reports/backups"
 
 def migrate() -> int:
     """Every statement in the script is idempotent, so re-applying it is safe."""
-    from ecomdata.infra.postgres import postgres_connection_factory
 
     sql = INIT_SQL.read_text(encoding="utf-8")
-    with postgres_connection_factory()() as conn, conn.cursor() as cur:
+    with _connection_factory()() as conn, conn.cursor() as cur:
         cur.execute(sql)
     print(json.dumps({"event": "migrated", "script": INIT_SQL.name}))
     return 0
 
 
 def seed_smoke() -> int:
-    from ecomdata.infra.postgres import postgres_connection_factory
     from ecomdata.ingestion.frontier import PostgresCrawlFrontier
     from ecomdata.ingestion.scheduling import CrawlTier
     from ecomdata.ingestion.seed import MARKETPLACE_IDS, seed
     from ecomdata.ops.smoke import SMOKE_CATEGORIES, SMOKE_PAGES, activate
-    from ecomdata.settings import CRAWL_MAX_ATTEMPTS
-
-    factory = postgres_connection_factory()
+    factory = _connection_factory()
     created = seed(
         PostgresCrawlFrontier(factory),
         marketplace_code="tiki",
@@ -61,7 +60,7 @@ def seed_smoke() -> int:
         pages=SMOKE_PAGES,
         tier=CrawlTier.ACTIVE,
         priority=0,
-        max_attempts=CRAWL_MAX_ATTEMPTS,
+        max_attempts=_settings().crawl.max_attempts,
     )
     # A smoke run before this one parked its tasks; seeding alone is a no-op then.
     reactivated = activate(factory)
@@ -79,10 +78,9 @@ def seed_smoke() -> int:
 
 
 def park_smoke() -> int:
-    from ecomdata.infra.postgres import postgres_connection_factory
     from ecomdata.ops.smoke import park
 
-    print(json.dumps({"event": "parked_smoke", "disabled": park(postgres_connection_factory())}))
+    print(json.dumps({"event": "parked_smoke", "disabled": park(_connection_factory())}))
     return 0
 
 
@@ -328,10 +326,8 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "wait-quiet":
         return wait_quiet(args.timeout)
     if args.command == "batch-plan":
-        from ecomdata.settings import MARKETPLACE_QUALITY_RECONCILIATION_SETTLE_SECONDS
-
         return batch_plan(
-            MARKETPLACE_QUALITY_RECONCILIATION_SETTLE_SECONDS if args.settle is None else args.settle,
+            _settings().quality.reconciliation_settle_seconds if args.settle is None else args.settle,
             after_last_crawl=args.after_last_crawl,
         )
     if args.command == "validate":

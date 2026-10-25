@@ -20,7 +20,7 @@ from ecomdata.processing.batch.manifest import (
     ManifestDataset,
     serialize_manifest,
 )
-from ecomdata.settings import MARKETPLACE_MANIFEST_SCHEMA_VERSION
+from ecomdata.processing.batch.manifest import MANIFEST_SCHEMA_VERSION as MARKETPLACE_MANIFEST_SCHEMA_VERSION
 from tests.paths import REPO_ROOT
 
 AS_OF = datetime(2026, 10, 4, 7, tzinfo=UTC)

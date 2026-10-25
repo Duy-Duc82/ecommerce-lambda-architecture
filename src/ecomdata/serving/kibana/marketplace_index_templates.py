@@ -222,20 +222,24 @@ def index_patterns() -> tuple[str, ...]:
     return tuple(sorted(pattern for body in INDEX_TEMPLATES.values() for pattern in body["index_patterns"]))
 
 
-def projector_indices() -> tuple[str, ...]:
-    """The four indices ops/es_projector.py writes, in template order."""
-    from ecomdata.settings import (
-        ES_INDEX_MARKETPLACE_CRAWL_ATTEMPTS,
-        ES_INDEX_MARKETPLACE_DLQ,
-        ES_INDEX_MARKETPLACE_SOURCE_HEALTH,
-        ES_INDEX_MARKETPLACE_SPEED_BATCHES,
-    )
-
-    return (ES_INDEX_MARKETPLACE_SOURCE_HEALTH, ES_INDEX_MARKETPLACE_CRAWL_ATTEMPTS,
-            ES_INDEX_MARKETPLACE_SPEED_BATCHES, ES_INDEX_MARKETPLACE_DLQ)
+# The defaults of the ES_INDEX_MARKETPLACE_* settings, in template order.
+DEFAULT_PROJECTOR_INDICES = (
+    "marketplace-source-health-v1",
+    "marketplace-crawl-attempts-v1",
+    "marketplace-speed-batches-v1",
+    "marketplace-dlq-v1",
+)
 
 
-def ensure_projector_indices(es: Any) -> list[str]:
+def projector_indices(es_settings: Any = None) -> tuple[str, ...]:
+    """The four indices the ES projector writes, in template order."""
+    if es_settings is None:
+        return DEFAULT_PROJECTOR_INDICES
+    return (es_settings.index_source_health, es_settings.index_crawl_attempts,
+            es_settings.index_speed_batches, es_settings.index_dlq)
+
+
+def ensure_projector_indices(es: Any, indices: tuple[str, ...] = DEFAULT_PROJECTOR_INDICES) -> list[str]:
     """Create each projector index if it is absent.
 
     An index only springs into existence with its first document, and the DLQ
@@ -245,7 +249,7 @@ def ensure_projector_indices(es: Any) -> list[str]:
     front and the template gives it its mapping.
     """
     created = []
-    for index in projector_indices():
+    for index in indices:
         if not es.indices.exists(index=index):
             es.indices.create(index=index)
             created.append(index)
@@ -266,12 +270,13 @@ def main() -> int:
 
     from elasticsearch import Elasticsearch
 
-    from ecomdata.settings import ES_HOST
+    from ecomdata.serving.bootstrap import settings
 
-    es = Elasticsearch(ES_HOST)
+    config = settings().es
+    es = Elasticsearch(config.host)
     try:
         installed = install_index_templates(es)
-        created = ensure_projector_indices(es)
+        created = ensure_projector_indices(es, projector_indices(config))
     finally:
         es.close()
     print(json.dumps({"event": "index_templates_installed", "templates": installed,

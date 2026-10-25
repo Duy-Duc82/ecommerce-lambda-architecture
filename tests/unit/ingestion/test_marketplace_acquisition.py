@@ -283,3 +283,22 @@ def test_programmer_contract_errors_are_not_converted_to_source_failure():
         acquire_listing_page(
             adapter, _request(), crawl_run_id="run-1", writer=_writer([]), clock=_clock()
         )
+
+
+def test_a_target_the_adapter_cannot_turn_into_a_url_is_a_failed_report():
+    # Regression, bug (c): request_url() ran outside the try, so the adapter's
+    # ValueError left the pipeline instead of becoming a FAILED report.
+    class RejectingAdapter(FakeAdapter):
+        def request_url(self, target, page):
+            raise ValueError("category id must be digits")
+
+    adapter, calls = RejectingAdapter(), []
+
+    report = acquire_listing_page(
+        adapter, _request(), crawl_run_id="run-1", writer=_writer(calls), clock=_clock()
+    )
+
+    assert report.status is AcquisitionStatus.FAILED
+    assert report.failure.stage is AcquisitionStage.FETCH
+    assert "category id must be digits" in str(report.failure.error)
+    assert calls == [] and not any(call[0] in ("fetch", "robots") for call in adapter.calls)

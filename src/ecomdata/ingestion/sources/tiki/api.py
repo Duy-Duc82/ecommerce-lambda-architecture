@@ -44,12 +44,12 @@ from ecomdata.domain.observations import (
     create_offer_observation,
 )
 from ecomdata.ingestion.site_crawler import SiteCrawler
-from ecomdata.settings import CRAWL_HTTP_TIMEOUT_SECONDS, TIKI_LISTING_URL
 
 logger = logging.getLogger(__name__)
 
-# The default endpoint, from settings. An instance may be given another one.
-LISTING_URL = TIKI_LISTING_URL
+# The default endpoint. An instance may be given another one (the stub source).
+LISTING_URL = "https://tiki.vn/api/personalish/v1/blocks/listings"
+HTTP_TIMEOUT_SECONDS = 10.0
 # 40 is the page size the site itself uses; asking for more is not honoured.
 PAGE_SIZE = 40
 
@@ -75,6 +75,7 @@ class TikiCrawler(SiteCrawler):
         self._http_get = kwargs.pop("http_get", None)
         self._monotonic = kwargs.pop("monotonic", time.monotonic)
         # Set before the base constructor, which reads robots_url.
+        self.http_timeout_seconds = kwargs.pop("http_timeout_seconds", HTTP_TIMEOUT_SECONDS)
         listing_url = kwargs.pop("listing_url", None)
         if listing_url is not None:
             self.listing_url = listing_url
@@ -112,14 +113,11 @@ class TikiCrawler(SiteCrawler):
         get = getattr(self, "_http_get", None) or requests.get
         monotonic = getattr(self, "_monotonic", time.monotonic)
         started = monotonic()
-        try:
-            response = get(
-                request_url,
-                headers={"User-Agent": self.user_agent},
-                timeout=CRAWL_HTTP_TIMEOUT_SECONDS,
-            )
-        except Exception:
-            raise
+        response = get(
+            request_url,
+            headers={"User-Agent": self.user_agent},
+            timeout=getattr(self, "http_timeout_seconds", HTTP_TIMEOUT_SECONDS),
+        )
 
         body = response.content
         fetched_at = self._now()

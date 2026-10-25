@@ -18,11 +18,10 @@ from ecomdata.processing.speed.stream import (
     SPEED_OUTPUT_SCHEMA,
     SpeedOutputKind,
     _process_group,
-    checkpoint_path,
     decode_observation_stream,
     speed_output_schema,
 )
-from ecomdata.settings import MARKETPLACE_STREAM_CHECKPOINT_VERSION
+from ecomdata.settings import SpeedSettings
 from tests.spark_support import requires_spark
 from tests.unit.domain.test_marketplace_change_rules import CONFIG, _event, _later
 from tests.unit.domain.test_marketplace_schema import OBSERVED_AT
@@ -166,9 +165,10 @@ def test_a_new_observation_after_a_timeout_reopens_the_stale_window():
 
 # 26
 def test_checkpoint_path_contains_the_configured_version():
-    path = checkpoint_path()
+    speed = SpeedSettings()
+    path = speed.checkpoint_path()
 
-    assert path.endswith(MARKETPLACE_STREAM_CHECKPOINT_VERSION)
+    assert path.endswith(speed.checkpoint_version)
     assert "marketplace_speed" in path.replace("\\", "/")
 
 

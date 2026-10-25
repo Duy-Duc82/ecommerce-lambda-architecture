@@ -25,6 +25,9 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
+from ecomdata.ops.bootstrap import object_store as _object_store
+from ecomdata.ops.bootstrap import settings as _settings
+
 SMOKE_CATEGORIES = ("9001", "9002", "9003")
 SMOKE_PAGES = 2
 SUCCEEDED_ATTEMPTS = ("SUCCEEDED", "PARTIAL")
@@ -103,14 +106,12 @@ def crawl_condition(src, *, targets, since) -> Condition:
 
 
 def silver_condition(src, *, targets, since) -> Condition:
-    from ecomdata.settings import MARKETPLACE_SILVER_DATASET, data_lake_uri
-
     parsed = dict(
         src.query(f"SELECT a.crawl_run_id, sum(a.parsed_count) {_SMOKE_ATTEMPTS} GROUP BY 1", (list(targets), since))
     )
     expected = sum(int(n) for n in parsed.values())
     found = 0
-    for uri in src.list_objects(data_lake_uri("silver", MARKETPLACE_SILVER_DATASET)):
+    for uri in src.list_objects(_object_store().uri("silver", _settings().batch.silver_dataset)):
         payload = src.read_object(uri)
         if payload is not None and json.loads(payload).get("crawl_run_id") in parsed:
             found += 1
@@ -181,11 +182,9 @@ def wait_for_quiet(
     nothing new is being published.
     """
     from ecomdata.domain.topics import MARKETPLACE_OBSERVATIONS
-    from ecomdata.settings import KAFKA_SILVER_CONSUMER_GROUP
-
     deadline = monotonic() + timeout_seconds
     while True:
-        lag = src.consumer_lag(KAFKA_SILVER_CONSUMER_GROUP, MARKETPLACE_OBSERVATIONS.name)
+        lag = src.consumer_lag(_settings().kafka.silver_consumer_group, MARKETPLACE_OBSERVATIONS.name)
         log(json.dumps({"event": "smoke_quiet", "silver_lag": lag}))
         if lag == 0:
             return True

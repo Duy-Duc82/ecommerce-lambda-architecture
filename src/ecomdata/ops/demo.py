@@ -25,6 +25,8 @@ from collections.abc import Callable
 from pathlib import Path
 
 from ecomdata.ops import drills
+from ecomdata.ops.bootstrap import object_store as _object_store
+from ecomdata.ops.bootstrap import settings as _settings
 from ecomdata.ops.drills import Record, Stack
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -76,9 +78,7 @@ def step_raw_first(stack: Stack) -> list[str]:
     if not rows:
         return ["no attempt with a raw artifact yet"]
     crawl_run_id, raw_uri, raw_bytes, parsed = rows[0]
-    from ecomdata.settings import MARKETPLACE_SILVER_DATASET, data_lake_uri
-
-    names = stack.src.list_objects(data_lake_uri("silver", MARKETPLACE_SILVER_DATASET))
+    names = stack.src.list_objects(_object_store().uri("silver", _settings().batch.silver_dataset))
     match = None
     for uri in names:
         event = json.loads(stack.src.read_object(uri) or b"{}")
@@ -104,12 +104,10 @@ def step_raw_first(stack: Stack) -> list[str]:
 def step_realtime(stack: Stack) -> list[str]:
     from elasticsearch import Elasticsearch
 
-    from ecomdata.settings import ES_HOST, ES_INDEX_MARKETPLACE_CHANGES
-
-    es = Elasticsearch(ES_HOST)
+    es = Elasticsearch(_settings().es.host)
     try:
-        es.indices.refresh(index=ES_INDEX_MARKETPLACE_CHANGES)
-        hits = es.search(index=ES_INDEX_MARKETPLACE_CHANGES, size=1000, query={"match_all": {}})["hits"]["hits"]
+        es.indices.refresh(index=_settings().es.index_changes)
+        hits = es.search(index=_settings().es.index_changes, size=1000, query={"match_all": {}})["hits"]["hits"]
     finally:
         es.close()
     kinds = Counter(hit["_source"].get("change_type") for hit in hits)

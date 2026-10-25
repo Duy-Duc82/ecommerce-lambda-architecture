@@ -23,15 +23,15 @@ from ecomdata.processing.speed.sinks import (
     MarketplaceSpeedSinks,
     SpeedOutput,
 )
-from ecomdata.settings import (
-    ES_INDEX_MARKETPLACE_CHANGES,
-    ES_INDEX_MARKETPLACE_OFFERS,
-    MARKETPLACE_SPEED_QUERY_NAME,
-    REDIS_MARKETPLACE_OFFER_TTL_SECONDS,
-)
 from tests.paths import REPO_ROOT
 from tests.unit.domain.test_marketplace_change_rules import CONFIG, _event, _later
 from tests.unit.ingestion.test_marketplace_producer import FakeProducer
+
+# The defaults MarketplaceSpeedSinks is built with when no setting overrides them.
+ES_INDEX_MARKETPLACE_CHANGES = "marketplace-changes-v1"
+ES_INDEX_MARKETPLACE_OFFERS = "marketplace-offers-current-v1"
+MARKETPLACE_SPEED_QUERY_NAME = "marketplace-speed-v1"
+REDIS_MARKETPLACE_OFFER_TTL_SECONDS = 86400
 
 # The id Spark keeps in a query's checkpoint; batch IDs are unique only within it.
 QUERY_ID = "36f9e1c9-87cc-4f53-97a9-e9f1e14397ec"

@@ -50,6 +50,11 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+from ecomdata.ops.bootstrap import connection_factory as _connection_factory
+from ecomdata.ops.bootstrap import object_store as _object_store
+from ecomdata.ops.bootstrap import producer as _producer
+from ecomdata.ops.bootstrap import settings as _settings
+
 ROOT = Path(__file__).resolve().parents[3]
 RESULTS = ROOT / "data" / "ops" / "bench"
 COMPOSE = ["docker", "compose", "-f", str(ROOT / "docker-compose.yml")]
@@ -412,9 +417,8 @@ class Stack:
         ).stdout
 
     def query(self, sql: str, params: tuple = ()) -> list[dict[str, Any]]:
-        from ecomdata.infra.postgres import postgres_connection_factory
 
-        with postgres_connection_factory()() as conn, conn.cursor() as cur:
+        with _connection_factory()() as conn, conn.cursor() as cur:
             cur.execute(sql, params)
             names = [d[0] for d in cur.description]
             return [dict(zip(names, row, strict=False)) for row in cur.fetchall()]
@@ -445,13 +449,12 @@ def wait_until(check: Callable[[], bool], *, timeout: float, what: str, poll: fl
 
 def _send_load(*, seed: int, count: int, offers: int, rate: float, cadence_seconds: int = 60) -> tuple[int, float]:
     """Fixture load whose rounds all lie in the past, so a batch at `now` sees them."""
-    from ecomdata.ingestion.publisher import create_marketplace_producer
     from ecomdata.ops import bench_load
 
     rounds = math.ceil(count / offers)
     start = datetime.now(UTC).replace(second=0, microsecond=0) - timedelta(seconds=rounds * cadence_seconds)
     spec = bench_load.LoadSpec(seed=seed, start=start, count=count, offers=offers, cadence_seconds=cadence_seconds)
-    producer = create_marketplace_producer()
+    producer = _producer()
     began = time.monotonic()
     try:
         sent = bench_load.send(
@@ -465,25 +468,19 @@ def _send_load(*, seed: int, count: int, offers: int, rate: float, cadence_secon
 def _silver_lag() -> int:
     from ecomdata.domain.topics import MARKETPLACE_OBSERVATIONS
     from ecomdata.ops.validate import LiveSources
-    from ecomdata.settings import KAFKA_SILVER_CONSUMER_GROUP
-
-    return LiveSources().consumer_lag(KAFKA_SILVER_CONSUMER_GROUP, MARKETPLACE_OBSERVATIONS.name)
+    return LiveSources().consumer_lag(_settings().kafka.silver_consumer_group, MARKETPLACE_OBSERVATIONS.name)
 
 
 def _silver_latency_sample(limit: int = 300) -> list[tuple[datetime, datetime]]:
-    from ecomdata.infra.object_store import _client
-    from ecomdata.infra.storage import active_profile
-    from ecomdata.settings import MARKETPLACE_SILVER_DATASET, MINIO_BUCKET_SILVER
-
-    client = _client(active_profile())
+    client = _object_store().client
     objects = sorted(
-        client.list_objects(MINIO_BUCKET_SILVER, prefix=MARKETPLACE_SILVER_DATASET.strip("/") + "/", recursive=True),
+        client.list_objects(_settings().storage.bucket_silver, prefix=_settings().batch.silver_dataset.strip("/") + "/", recursive=True),
         key=lambda o: o.object_name,
     )
     step = max(1, len(objects) // limit)
     pairs = []
     for obj in objects[::step][:limit]:
-        response = client.get_object(MINIO_BUCKET_SILVER, obj.object_name)
+        response = client.get_object(_settings().storage.bucket_silver, obj.object_name)
         try:
             produced = datetime.fromisoformat(json.loads(response.read())["produced_at"].replace("Z", "+00:00"))
         finally:

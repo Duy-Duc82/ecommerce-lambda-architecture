@@ -475,7 +475,7 @@ def test_the_runner_adapter_binds_phase_two_without_the_worker_knowing_the_site(
     runner.execute_listing_page = fake_execute
     try:
         target = encode_listing_page_task_target("1846", 2)
-        executor = listing_page_executor(site="tiki", clock=lambda: NOW)
+        executor = listing_page_executor(site="tiki", writer=lambda *a: "", clock=lambda: NOW)
         report = executor(task=_task(target=target), crawl_run_id="run-1")
     finally:
         runner.execute_listing_page = original

@@ -9,12 +9,14 @@ from ecomdata.domain.topics import (
     MARKETPLACE_OBSERVATIONS_DLQ,
     MARKETPLACE_TOPIC_SPECS,
     TopicSpec,
+    with_partitions,
 )
-from ecomdata.settings import KAFKA_MARKETPLACE_PARTITIONS
 
 
-def test_registry_declares_exactly_the_three_brief_topics():
+def test_registry_declares_the_record_observation_and_change_topics():
     assert [spec.name for spec in MARKETPLACE_TOPIC_SPECS] == [
+        "marketplace.records.v1",
+        "marketplace.records.v1.dlq",
         "marketplace.observations.v1",
         "marketplace.observations.v1.dlq",
         "marketplace.changes.v1",
@@ -28,9 +30,10 @@ def test_registry_names_are_unique():
 
 
 def test_every_topic_carries_the_configured_partition_count():
-    for spec in MARKETPLACE_TOPIC_SPECS:
-        assert spec.partitions == KAFKA_MARKETPLACE_PARTITIONS
+    for spec in with_partitions(5):
+        assert spec.partitions == 5
         assert spec.replication_factor == 1
+    assert [spec.name for spec in with_partitions(5)] == [spec.name for spec in MARKETPLACE_TOPIC_SPECS]
 
 
 def test_registry_exposes_each_topic_individually():

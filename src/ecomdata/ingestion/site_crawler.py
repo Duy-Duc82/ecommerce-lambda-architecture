@@ -25,12 +25,13 @@ from legacy.kaggle.schema import normalize_price_snapshot
 
 from ecomdata.domain.acquisition import FetchResult, ListingPageRequest, ParsedListingPage
 from ecomdata.domain.observations import RawArtifact
-from ecomdata.settings import (
-    CRAWL_JITTER_SECONDS,
-    CRAWL_MAX_PAGES,
-    CRAWL_REQUEST_DELAY_SECONDS,
-    CRAWL_USER_AGENT,
-)
+
+# Defaults of the crawl settings (ecomdata.settings.CrawlSettings); a
+# composition root passes the configured values.
+CRAWL_REQUEST_DELAY_SECONDS = 2.0
+CRAWL_JITTER_SECONDS = 1.0
+CRAWL_USER_AGENT = "EcommercePriceResearchBot/0.1 (+thesis project; rate-limited)"
+CRAWL_MAX_PAGES = 50
 
 logger = logging.getLogger(__name__)
 

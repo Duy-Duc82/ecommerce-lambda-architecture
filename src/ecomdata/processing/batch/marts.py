@@ -10,7 +10,6 @@ from pyspark.sql import functions as F
 
 from ecomdata.domain.counter_semantics import counter_semantic
 from ecomdata.processing.batch.anomaly import build_price_anomaly_daily
-from ecomdata.settings import MARKETPLACE_PERCENTILE_ACCURACY
 
 if TYPE_CHECKING:
     from ecomdata.processing.batch.warehouse import MarketplaceBatchContext
@@ -221,7 +220,7 @@ def build_offer_freshness(
     )
 
 
-def build_category_price_daily(observations: DataFrame) -> DataFrame:
+def build_category_price_daily(observations: DataFrame, *, percentile_accuracy: int = 10000) -> DataFrame:
     return (
         observations.withColumn("category_path", F.coalesce("category_path", F.lit(UNKNOWN_CATEGORY)))
         .withColumn("observed_date", F.to_date("observed_at"))
@@ -230,11 +229,11 @@ def build_category_price_daily(observations: DataFrame) -> DataFrame:
             F.countDistinct("offer_id").alias("observed_offer_count"),
             F.count("observation_id").alias("observation_count"),
             F.min("current_price").cast(MONEY).alias("min_price"),
-            F.percentile_approx("current_price", 0.25, MARKETPLACE_PERCENTILE_ACCURACY).cast(MONEY).alias("p25_price"),
-            F.percentile_approx("current_price", 0.5, MARKETPLACE_PERCENTILE_ACCURACY)
+            F.percentile_approx("current_price", 0.25, percentile_accuracy).cast(MONEY).alias("p25_price"),
+            F.percentile_approx("current_price", 0.5, percentile_accuracy)
             .cast(MONEY)
             .alias("median_price"),
-            F.percentile_approx("current_price", 0.75, MARKETPLACE_PERCENTILE_ACCURACY).cast(MONEY).alias("p75_price"),
+            F.percentile_approx("current_price", 0.75, percentile_accuracy).cast(MONEY).alias("p75_price"),
             F.max("current_price").cast(MONEY).alias("max_price"),
             F.avg("current_price").cast(MONEY).alias("avg_price"),
         )
@@ -626,7 +625,9 @@ def build_marketplace_marts(
             stale_after_seconds=context.freshness_seconds,
             rule_version=context.freshness_rule_version,
         ),
-        "category_price_daily": build_category_price_daily(observations),
+        "category_price_daily": build_category_price_daily(
+            observations, percentile_accuracy=context.percentile_accuracy
+        ),
         "source_coverage_daily": build_source_coverage_daily(
             observations,
             attempts,

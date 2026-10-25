@@ -370,7 +370,7 @@ def summarise(outcomes: Sequence[ReparseOutcome], *, reported_at: datetime) -> d
     }
 
 
-def main(argv: Sequence[str] | None = None) -> int:
+def main(argv: Sequence[str] | None = None, *, reader: Reader | None = None) -> int:
     parser = argparse.ArgumentParser(description="Verify that a stored raw artifact reparses unchanged")
     parser.add_argument("--marketplace", required=True)
     parser.add_argument("--observed-date", required=True)
@@ -383,8 +383,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--report-path", default=None, help="also write the report to this local file")
     args = parser.parse_args(argv)
 
-    import ecomdata.infra.object_store as object_store
     from ecomdata.ingestion.sources.tiki.api import TikiCrawler
+
+    if reader is None:
+        from ecomdata.ingestion import bootstrap
+
+        reader = bootstrap.object_store().get
 
     adapters = {"tiki": TikiCrawler}
     refs = [
@@ -396,9 +400,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         # Parse-only: no categories to crawl, and no robots.txt fetch, so a
         # verification run never reaches the marketplace.
         adapter_for=lambda code: adapters[code](categories=[], fetch_robots=False),
-        reader=object_store.get_bytes,
+        reader=reader,
         clock=lambda: datetime.now(UTC),
-        silver_reader=object_store.get_bytes,
+        silver_reader=reader,
         silver_dataset=args.silver_dataset,
     )
     report = json.dumps(summarise(outcomes, reported_at=datetime.now(UTC)), ensure_ascii=False, sort_keys=True)

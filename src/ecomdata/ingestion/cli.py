@@ -23,12 +23,10 @@ from ecomdata.domain.acquisition import (
     decode_listing_page_task_target,
 )
 from ecomdata.domain.serialization import serialize_for_wire
-from ecomdata.infra.object_store import put_bytes
 from ecomdata.ingestion.pipeline import acquire_listing_page
 from ecomdata.ingestion.site_crawler import SiteCrawler
 from ecomdata.ingestion.sources.tiki.api import TikiCrawler
 from ecomdata.ingestion.sources.tiki.html import TikiCategoryHtmlCrawler
-from ecomdata.settings import CRAWL_MAX_PAGES, TIKI_CATEGORIES
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
@@ -39,10 +37,9 @@ SITE_CRAWLERS = {
     # Same marketplace code ("tiki"), read from the public category page.
     "tiki-html": TikiCategoryHtmlCrawler,
 }
-SITE_CATEGORIES = {
-    "tiki": TIKI_CATEGORIES,
-    "tiki-html": TIKI_CATEGORIES,
-}
+# Filled from the crawl settings by main(); a test sets its own.
+SITE_CATEGORIES: dict[str, list[str]] = {}
+DEFAULT_MAX_PAGES = 50
 
 
 def _utc_now() -> datetime:
@@ -71,7 +68,7 @@ def execute_listing_page(
     site: str,
     task_target: str,
     crawl_run_id: str,
-    writer: Callable[[str, str, bytes], str] = put_bytes,
+    writer: Callable[[str, str, bytes], str],
     clock: Callable[[], datetime],
 ) -> Phase2AcquisitionReport:
     """Execute exactly one encoded target/page for the Phase 3 worker."""
@@ -95,7 +92,7 @@ def execute_listing_page(
 def listing_page_executor(
     *,
     site: str,
-    writer: Callable[[str, str, bytes], str] = put_bytes,
+    writer: Callable[[str, str, bytes], str],
     clock: Callable[[], datetime],
 ):
     """Bind Phase 2 acquisition into the executor the Phase 3 worker calls.
@@ -137,19 +134,18 @@ def run_site(
     site: str,
     *,
     categories: list[str] | None = None,
-    max_pages: int = CRAWL_MAX_PAGES,
+    max_pages: int = DEFAULT_MAX_PAGES,
     crawl_run_id: str | None = None,
-    writer: Callable[[str, str, bytes], str] = put_bytes,
+    writer: Callable[[str, str, bytes], str],
     clock: Callable[[], datetime] = _utc_now,
     output: TextIO | None = None,
 ) -> dict[str, int]:
     """Run bounded raw-first collection for one registered site."""
     if max_pages < 1:
         raise ValueError("max_pages must be at least one")
-    try:
-        configured_categories = SITE_CATEGORIES[site]
-    except KeyError as exc:
-        raise ValueError(f"unknown crawler site: {site}") from exc
+    if site not in SITE_CRAWLERS:
+        raise ValueError(f"unknown crawler site: {site}")
+    configured_categories = SITE_CATEGORIES.get(site, [])
     selected_categories = list(categories or configured_categories)
     if not selected_categories:
         raise ValueError(f"no categories configured for site: {site}")
@@ -270,11 +266,18 @@ def main() -> None:
     parser.add_argument(
         "--max-pages",
         type=int,
-        default=CRAWL_MAX_PAGES,
+        default=None,
         metavar="N",
-        help=f"Maximum pages per category (default: {CRAWL_MAX_PAGES}).",
+        help="Maximum pages per category (default: CRAWL_MAX_PAGES).",
     )
     args = parser.parse_args()
+    from ecomdata.infra.object_store import object_store_for
+    from ecomdata.settings import load_settings
+
+    settings = load_settings(dotenv=True)
+    store = object_store_for(settings.storage)
+    tiki_categories = list(settings.crawl.default_categories.get("tiki", ()))
+    SITE_CATEGORIES.update({"tiki": tiki_categories, "tiki-html": tiki_categories})
     if args.dry_run:
         logger.warning("--dry-run no longer bypasses Bronze; raw responses will still be persisted")
 
@@ -292,7 +295,8 @@ def main() -> None:
                 run_site(
                     site,
                     categories=args.categories,
-                    max_pages=args.max_pages,
+                    max_pages=args.max_pages or settings.crawl.max_pages,
+                    writer=store.put,
                     output=output,
                 )
             except Exception:
@@ -301,6 +305,41 @@ def main() -> None:
         if output_file is not None:
             output_file.close()
             logger.info("JSONL written: %s", args.out_jsonl)
+
+
+def seed_main(argv: list[str] | None = None) -> None:
+    """``seed``: enqueue listing-page targets, idempotently (see ``ecomdata.ingestion.seed``)."""
+    from ecomdata.infra.postgres import connection_factory
+    from ecomdata.ingestion.frontier import PostgresCrawlFrontier
+    from ecomdata.ingestion.scheduling import CrawlTier
+    from ecomdata.ingestion.seed import MARKETPLACE_IDS, SEED_SCHEDULED_FOR, seed
+    from ecomdata.settings import load_settings
+
+    parser = argparse.ArgumentParser(description="Seed the crawl frontier with listing-page targets")
+    parser.add_argument("--marketplace", default="tiki", choices=sorted(MARKETPLACE_IDS))
+    parser.add_argument("--category", action="append", help="repeatable; defaults to <CODE>_CATEGORIES")
+    parser.add_argument("--pages", type=int, default=1, help="listing pages per category")
+    parser.add_argument("--tier", default=CrawlTier.NORMAL.value, choices=[tier.value for tier in CrawlTier])
+    parser.add_argument("--priority", type=int, default=0)
+    parser.add_argument("--scheduled-for", default=None, help="ISO instant for a new chain; omit to stay idempotent")
+    args = parser.parse_args(argv)
+
+    settings = load_settings(dotenv=True)
+    scheduled_for = SEED_SCHEDULED_FOR
+    if args.scheduled_for:
+        scheduled_for = datetime.fromisoformat(args.scheduled_for.replace("Z", "+00:00"))
+    created = seed(
+        PostgresCrawlFrontier(connection_factory(settings.postgres)),
+        marketplace_code=args.marketplace,
+        marketplace_id=MARKETPLACE_IDS[args.marketplace],
+        categories=args.category or settings.crawl.default_categories.get(args.marketplace, ()),
+        pages=args.pages,
+        tier=CrawlTier(args.tier),
+        priority=args.priority,
+        max_attempts=settings.crawl.max_attempts,
+        scheduled_for=scheduled_for,
+    )
+    print(f"seeded {created} new task(s)")
 
 
 if __name__ == "__main__":

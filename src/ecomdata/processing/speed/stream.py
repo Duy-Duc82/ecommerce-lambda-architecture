@@ -7,8 +7,10 @@ batch test use exactly the same ordering and identities.
 from __future__ import annotations
 
 import json
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable, Mapping
+from dataclasses import dataclass, field
 from enum import Enum
+from typing import Any
 
 from pyspark.sql import DataFrame, SparkSession
 from pyspark.sql import functions as F
@@ -24,16 +26,6 @@ from ecomdata.domain.change_rules import (
 from ecomdata.domain.topics import MARKETPLACE_OBSERVATIONS
 from ecomdata.domain.wire import marketplace_observation_from_wire
 from ecomdata.processing.speed.sinks import SpeedOutput
-from ecomdata.settings import (
-    CHECKPOINTS_DIR,
-    KAFKA_BOOTSTRAP_SERVERS,
-    MARKETPLACE_CHANGE_RULE_VERSION,
-    MARKETPLACE_LARGE_DROP_ABSOLUTE,
-    MARKETPLACE_LARGE_DROP_RELATIVE,
-    MARKETPLACE_SPEED_CHECKPOINT_ROOT,
-    MARKETPLACE_STALE_AFTER_SECONDS,
-    MARKETPLACE_STREAM_CHECKPOINT_VERSION,
-)
 
 
 class SpeedOutputKind(str, Enum):
@@ -67,23 +59,10 @@ def speed_output_schema() -> StructType:
     return SPEED_OUTPUT_SCHEMA
 
 
-def checkpoint_path() -> str:
-    # The version is always the last component, so bumping it starts a fresh
-    # checkpoint wherever the root was moved to.
-    from pathlib import Path
-
-    root = (
-        Path(MARKETPLACE_SPEED_CHECKPOINT_ROOT)
-        if MARKETPLACE_SPEED_CHECKPOINT_ROOT
-        else CHECKPOINTS_DIR / "marketplace_speed"
-    )
-    return str((root / MARKETPLACE_STREAM_CHECKPOINT_VERSION).resolve())
-
-
-def read_marketplace_observations(spark: SparkSession) -> DataFrame:
+def read_marketplace_observations(spark: SparkSession, bootstrap_servers: str) -> DataFrame:
     return (
         spark.readStream.format("kafka")
-        .option("kafka.bootstrap.servers", KAFKA_BOOTSTRAP_SERVERS)
+        .option("kafka.bootstrap.servers", bootstrap_servers)
         .option("subscribe", MARKETPLACE_OBSERVATIONS.name)
         .option("startingOffsets", "earliest")
         .load()
@@ -148,12 +127,8 @@ def decode_observation_stream(raw: DataFrame) -> tuple[DataFrame, DataFrame]:
 
 
 def _process_group(rows: Iterable[dict], previous=None, config: ChangeRuleConfig | None = None) -> list[SpeedOutput]:
-    config = config or ChangeRuleConfig(
-        MARKETPLACE_CHANGE_RULE_VERSION,
-        MARKETPLACE_LARGE_DROP_ABSOLUTE,
-        MARKETPLACE_LARGE_DROP_RELATIVE,
-        MARKETPLACE_STALE_AFTER_SECONDS,
-    )
+    if config is None:
+        raise ValueError("a ChangeRuleConfig is required")
     state = previous
     result: list[SpeedOutput] = []
     for row in sorted(rows, key=lambda item: (item["event_time"], item["observation_id"])):
@@ -301,40 +276,43 @@ def build_change_stream(valid: DataFrame, config: ChangeRuleConfig) -> DataFrame
     return valid.sparkSession.createDataFrame(outputs, schema=SPEED_OUTPUT_SCHEMA)
 
 
-def _sink_clients():
-    from elasticsearch import Elasticsearch
-    from redis import Redis
+@dataclass(frozen=True)
+class SinkWiring:
+    """How a micro-batch reaches its sinks: built by the speed service."""
 
-    from ecomdata.processing.speed.change_producer import create_change_producer
-    from ecomdata.settings import ES_HOST, REDIS_DB, REDIS_HOST, REDIS_PORT
+    clients: Callable[[], tuple[Any, Any, Any]]
+    connection_factory: Callable[[], Any]
+    sink_options: Mapping[str, Any] = field(default_factory=dict)
 
-    return create_change_producer(), Elasticsearch(ES_HOST), Redis(host=REDIS_HOST, port=REDIS_PORT, db=REDIS_DB)
 
+def make_batch_writer(wiring: SinkWiring) -> Callable[[DataFrame, int], None]:
+    """The ``foreachBatch`` function: one micro-batch to Kafka, ES, Redis and the audit."""
 
-def write_marketplace_batch(batch_df: DataFrame, batch_id: int) -> None:
-    from ecomdata.infra import postgres
-    from ecomdata.processing.speed.sinks import MarketplaceSpeedAudit, MarketplaceSpeedSinks
+    def write_marketplace_batch(batch_df: DataFrame, batch_id: int) -> None:
+        from ecomdata.processing.speed.sinks import MarketplaceSpeedAudit, MarketplaceSpeedSinks
 
-    # Spark sets the query id, which lives in the checkpoint, as a local
-    # property of every micro-batch. Batch IDs are unique only within it.
-    query_id = batch_df.sparkSession.sparkContext.getLocalProperty("sql.streaming.queryId")
-    if not query_id:
-        raise ValueError("micro-batch carries no streaming query id; refusing to audit it as another run's batch")
-    producer, es, redis = _sink_clients()
-    try:
-        # A closing factory: the query runs for days, one micro-batch every
-        # trigger, and a bare psycopg2 connection would leak on every audit call.
-        audit = MarketplaceSpeedAudit(postgres.postgres_connection_factory())
-        outputs = [SpeedOutput(**row.asDict()) for row in batch_df.collect()]
-        MarketplaceSpeedSinks(producer=producer, es=es, redis=redis, audit=audit).write_batch(
-            outputs, batch_id, query_id=query_id
-        )
-    finally:
-        # The same holds for the three sink clients: a producer left open per
-        # batch keeps its network thread and sockets alive. Closing an already
-        # closed client (the sink closes them on failure) is a no-op.
-        for client in (producer, es, redis):
-            try:
-                client.close()
-            except Exception:
-                pass
+        # Spark sets the query id, which lives in the checkpoint, as a local
+        # property of every micro-batch. Batch IDs are unique only within it.
+        query_id = batch_df.sparkSession.sparkContext.getLocalProperty("sql.streaming.queryId")
+        if not query_id:
+            raise ValueError("micro-batch carries no streaming query id; refusing to audit it as another run's batch")
+        producer, es, redis = wiring.clients()
+        try:
+            # A closing factory: the query runs for days, one micro-batch every
+            # trigger, and a bare psycopg2 connection would leak on every audit call.
+            audit = MarketplaceSpeedAudit(wiring.connection_factory)
+            outputs = [SpeedOutput(**row.asDict()) for row in batch_df.collect()]
+            MarketplaceSpeedSinks(
+                producer=producer, es=es, redis=redis, audit=audit, **dict(wiring.sink_options)
+            ).write_batch(outputs, batch_id, query_id=query_id)
+        finally:
+            # The same holds for the three sink clients: a producer left open per
+            # batch keeps its network thread and sockets alive. Closing an
+            # already closed client (the sink closes them on failure) is a no-op.
+            for client in (producer, es, redis):
+                try:
+                    client.close()
+                except Exception:
+                    pass
+
+    return write_marketplace_batch

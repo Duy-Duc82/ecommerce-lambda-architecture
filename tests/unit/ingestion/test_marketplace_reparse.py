@@ -431,9 +431,11 @@ def stored_tiki_with_silver(monkeypatch, *, tamper=None):
         if document is not None:
             payload = json.dumps(document, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
             store.write("silver", silver_observation_path(event), payload)
-    import ecomdata.infra.object_store as object_store
+    from types import SimpleNamespace
 
-    monkeypatch.setattr(object_store, "get_bytes", store.read)
+    from ecomdata.ingestion import bootstrap
+
+    monkeypatch.setattr(bootstrap, "object_store", lambda: SimpleNamespace(get=store.read))
     return store, ref, len(parsed.observations)
 
 

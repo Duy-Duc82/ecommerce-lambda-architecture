@@ -39,13 +39,24 @@ class SilverWriteError(RuntimeError):
     """
 
 
-def silver_observation_path(event, dataset: str = "marketplace/offer_observations") -> str:
+DEFAULT_SILVER_DATASET = "marketplace/offer_observations"
+
+
+def silver_observation_path(event, dataset: str = DEFAULT_SILVER_DATASET) -> str:
     """Where an observation lands in Silver; the raw reparse reads it back here."""
     observation = event.payload.observation
     return f"{dataset.strip('/')}/marketplace={quote(event.marketplace, safe='')}/observed_date={observation.observed_at.date().isoformat()}/observation_id={quote(observation.observation_id, safe='')}.json"
 
 
-def process_record(record: SourceRecord, *, writer, dlq_producer, clock):
+def process_record(
+    record: SourceRecord, *, writer, dlq_producer, clock, dataset: str = DEFAULT_SILVER_DATASET, ack_timeout_seconds: int = 30
+):
+    """Write one Kafka record to Silver under ``dataset``, or quarantine it.
+
+    ``dataset`` is the configured Silver dataset (``MARKETPLACE_SILVER_DATASET``);
+    it used to be hard-coded here, so a stack configured with another dataset
+    landed observations where neither the batch nor the reparse looked.
+    """
     if record.topic != MARKETPLACE_OBSERVATIONS.name:
         raise ValueError("source topic is not marketplace observations")
     text = None
@@ -58,7 +69,7 @@ def process_record(record: SourceRecord, *, writer, dlq_producer, clock):
         key = record.key.decode("utf-8") if record.key is not None else None
         if key != event.partition_key:
             raise ValueError("Kafka key does not equal event partition_key")
-        path = silver_observation_path(event)
+        path = silver_observation_path(event, dataset)
         payload = json.dumps(
             serialize_for_wire(event), ensure_ascii=False, sort_keys=True, separators=(",", ":")
         ).encode("utf-8")
@@ -90,7 +101,7 @@ def process_record(record: SourceRecord, *, writer, dlq_producer, clock):
                 "utf-8"
             ),
         )
-        publish_marketplace_dlq(dlq_producer, dlq, ack_timeout_seconds=30)
+        publish_marketplace_dlq(dlq_producer, dlq, ack_timeout_seconds=ack_timeout_seconds)
         return SilverSinkResult("QUARANTINE", uri, None, dlq.dlq_id)
     # Outside the except above on purpose: only decoding and validation decide
     # that a record is bad. A write that fails here is the store's fault.

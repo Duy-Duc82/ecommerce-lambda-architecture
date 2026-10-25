@@ -33,6 +33,10 @@ from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+from ecomdata.ops.bootstrap import connection_factory as _connection_factory
+from ecomdata.ops.bootstrap import object_store as _object_store
+from ecomdata.ops.bootstrap import settings as _settings
+
 THRESHOLD_DAYS = 30
 DATASET = "live"
 REPORTS = Path("/reports/evaluation")
@@ -358,20 +362,16 @@ def _universe_check(cur, universe: Sequence[str]) -> None:
 
 def _produce_delays(limit: int = 500) -> list[float]:
     """``produced_at - fetched_at`` over a spread sample of Silver objects."""
-    from ecomdata.infra.object_store import _client
-    from ecomdata.infra.storage import active_profile
-    from ecomdata.settings import MARKETPLACE_SILVER_DATASET, MINIO_BUCKET_SILVER
-
-    client = _client(active_profile())
+    client = _object_store().client
     names = sorted(
         o.object_name
         for o in client.list_objects(
-            MINIO_BUCKET_SILVER, prefix=MARKETPLACE_SILVER_DATASET.strip("/") + "/", recursive=True
+            _settings().storage.bucket_silver, prefix=_settings().batch.silver_dataset.strip("/") + "/", recursive=True
         )
     )
     delays = []
     for name in names[:: max(1, len(names) // limit)][:limit]:
-        response = client.get_object(MINIO_BUCKET_SILVER, name)
+        response = client.get_object(_settings().storage.bucket_silver, name)
         try:
             event = json.loads(response.read())
         finally:
@@ -384,11 +384,10 @@ def _produce_delays(limit: int = 500) -> list[float]:
 
 
 def live_reliability(cadence_seconds: int, universe: Sequence[str]) -> dict[str, Any]:
-    from ecomdata.infra.postgres import postgres_connection_factory
 
     drills_dir = Path(__file__).resolve().parents[3] / "data" / "ops" / "drills"
     drills = [json.loads(p.read_text(encoding="utf-8")) for p in sorted(drills_dir.glob("d*.json"))]
-    with postgres_connection_factory()() as conn, conn.cursor() as cur:
+    with _connection_factory()() as conn, conn.cursor() as cur:
         _universe_check(cur, universe)
         attempts = _rows(
             cur,
@@ -410,9 +409,8 @@ def live_reliability(cadence_seconds: int, universe: Sequence[str]) -> dict[str,
 
 
 def live_freshness(cadence_seconds: int, universe: Sequence[str]) -> dict[str, Any]:
-    from ecomdata.infra.postgres import postgres_connection_factory
 
-    with postgres_connection_factory()() as conn, conn.cursor() as cur:
+    with _connection_factory()() as conn, conn.cursor() as cur:
         _universe_check(cur, universe)
         bounds = _rows(
             cur, "SELECT min(started_at) AS start, max(completed_at) AS end FROM audit.crawl_request_attempt"
@@ -441,9 +439,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--out", default=str(REPORTS))
     parser.add_argument("--universe", default="", help="comma-separated frozen categories (mp passes TIKI_CATEGORIES)")
     args = parser.parse_args(argv)
-    from ecomdata.settings import CRAWL_ACTIVE_CADENCE_MINUTES
-
-    cadence = args.cadence_seconds or CRAWL_ACTIVE_CADENCE_MINUTES * 60
+    cadence = args.cadence_seconds or _settings().crawl.cadence_minutes["ACTIVE"] * 60
     if args.kind == "storage":
         # P2-04, plan section 10: from audit.storage_snapshot only.
         from ecomdata.ops.storage import run_growth_report

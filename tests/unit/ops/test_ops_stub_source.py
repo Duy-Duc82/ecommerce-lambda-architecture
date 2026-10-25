@@ -41,14 +41,16 @@ def test_prices_follow_the_serve_counter_by_a_fixed_table():
 def test_the_large_step_is_a_large_drop_under_the_configured_rule():
     from decimal import Decimal
 
-    from ecomdata.settings import MARKETPLACE_LARGE_DROP_RELATIVE
+    from ecomdata.settings import load_settings
+
+    relative_cut = load_settings({}).speed.large_drop_relative
 
     # The rule is absolute OR relative; the relative cut alone qualifies.
     for row in state().rows:
         if not isinstance(row.get("price"), int) or row["price"] <= 0:
             continue
         base, cut = row["price"], row["price"] * 60 // 100
-        assert Decimal(base - cut) / Decimal(base) >= MARKETPLACE_LARGE_DROP_RELATIVE
+        assert Decimal(base - cut) / Decimal(base) >= relative_cut
 
 
 def test_pages_and_categories_hold_distinct_stable_listing_ids():

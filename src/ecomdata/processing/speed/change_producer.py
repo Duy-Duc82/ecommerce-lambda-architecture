@@ -7,31 +7,15 @@ from typing import Any
 
 from ecomdata.domain.topics import MARKETPLACE_CHANGES
 from ecomdata.domain.wire import canonical_json, marketplace_change_from_wire
-from ecomdata.settings import KAFKA_BOOTSTRAP_SERVERS, KAFKA_CHANGE_ACK_TIMEOUT_SECONDS
+from ecomdata.infra.kafka import send_acknowledged
 
 
-def create_change_producer(bootstrap_servers: str = KAFKA_BOOTSTRAP_SERVERS) -> Any:
-    try:
-        from kafka import KafkaProducer
-    except ImportError as exc:  # pragma: no cover
-        raise ImportError("kafka-python-ng is required") from exc
-    return KafkaProducer(
-        bootstrap_servers=bootstrap_servers,
-        key_serializer=lambda key: key.encode("utf-8") if key is not None else None,
-        value_serializer=lambda value: canonical_json(value).encode("utf-8"),
-        # At-least-once, not idempotent: kafka-python-ng has no idempotent
-        # producer. Deterministic event IDs absorb a duplicate; one request in
-        # flight keeps a retry from reordering an offer's changes.
-        acks="all",
-        retries=5,
-        max_in_flight_requests_per_connection=1,
-    )
-
-
-def publish_change(producer: Any, event: Any, *, ack_timeout_seconds: int = KAFKA_CHANGE_ACK_TIMEOUT_SECONDS) -> Any:
+def publish_change(producer: Any, event: Any, *, ack_timeout_seconds: int = 30) -> Any:
+    """Validate a change against the wire contract, send it keyed by offer, wait for the ack."""
     if ack_timeout_seconds <= 0:
         raise ValueError("ack_timeout_seconds must be positive")
     wire = json.loads(canonical_json(event))
     checked = marketplace_change_from_wire(wire)
-    future = producer.send(MARKETPLACE_CHANGES.name, key=checked.offer_id, value=wire)
-    return future.get(timeout=ack_timeout_seconds)
+    return send_acknowledged(
+        producer, MARKETPLACE_CHANGES.name, key=checked.offer_id, value=wire, ack_timeout_seconds=ack_timeout_seconds
+    )

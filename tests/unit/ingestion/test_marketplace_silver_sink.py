@@ -65,6 +65,23 @@ def test_a_valid_record_lands_in_silver_under_its_observation_identity():
     assert producer.sent == []
 
 
+def test_the_silver_path_follows_the_configured_dataset():
+    # Regression, bug (a): the sink hard-coded marketplace/offer_observations
+    # and ignored MARKETPLACE_SILVER_DATASET, so a stack configured with
+    # another dataset landed observations where the batch never read.
+    event = make_event()
+    writer, producer = MemoryWriter(), FakeProducer()
+
+    result = process_record(
+        _record(event), writer=writer, dlq_producer=producer, clock=lambda: FAILED_AT, dataset="custom/silver_v9"
+    )
+
+    ((zone, path),) = writer.objects
+    assert zone == "silver"
+    assert path.startswith("custom/silver_v9/marketplace=tiki/")
+    assert result.object_uri == f"s3a://silver/{path}"
+
+
 def test_the_landed_object_is_the_canonical_event():
     event = make_event()
 

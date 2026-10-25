@@ -530,13 +530,9 @@ def test_a_backfill_over_a_silver_that_kept_growing_passes_once_cut(spark):
 def test_the_rule_version_moved_when_checks_6_and_8_changed_meaning():
     # Verdicts stored under v1 judged a different question. Keeping the old
     # version would make them indistinguishable from verdicts under the new one.
-    import os
+    from ecomdata.settings import load_settings
 
-    from ecomdata.settings import MARKETPLACE_QUALITY_RULE_VERSION
-
-    if "MARKETPLACE_QUALITY_RULE_VERSION" in os.environ:
-        pytest.skip("the environment overrides the rule version")
-    assert MARKETPLACE_QUALITY_RULE_VERSION == "quality-rules.v2"
+    assert load_settings({}).quality.rule_version == "quality-rules.v2"
 
 
 # 26

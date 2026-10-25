@@ -102,9 +102,8 @@ def run_sink(
     return handled
 
 
-def create_consumer(bootstrap_servers: str | None = None) -> Any:
+def create_consumer(bootstrap_servers: str, group_id: str) -> Any:
     from ecomdata.domain.topics import MARKETPLACE_OBSERVATIONS
-    from ecomdata.settings import KAFKA_BOOTSTRAP_SERVERS, KAFKA_SILVER_CONSUMER_GROUP
 
     try:
         from kafka import KafkaConsumer
@@ -114,8 +113,8 @@ def create_consumer(bootstrap_servers: str | None = None) -> Any:
     # whose Silver write had not happened yet.
     return KafkaConsumer(
         MARKETPLACE_OBSERVATIONS.name,
-        bootstrap_servers=bootstrap_servers or KAFKA_BOOTSTRAP_SERVERS,
-        group_id=KAFKA_SILVER_CONSUMER_GROUP,
+        bootstrap_servers=bootstrap_servers,
+        group_id=group_id,
         enable_auto_commit=False,
         auto_offset_reset="earliest",
     )
@@ -127,33 +126,37 @@ def main() -> None:
     args = parser.parse_args()
 
     from ecomdata.infra.heartbeat import heartbeat
+    from ecomdata.infra.kafka import create_producer
     from ecomdata.infra.lifecycle import StopSignal, install_signal_handlers
-    from ecomdata.infra.object_store import put_bytes
-    from ecomdata.ingestion.publisher import create_marketplace_producer
+    from ecomdata.infra.object_store import object_store_for
     from ecomdata.ingestion.silver_sink import process_record
-    from ecomdata.settings import (
-        MARKETPLACE_SILVER_POLL_TIMEOUT_MS,
-        MARKETPLACE_SILVER_RETRY_BASE_SECONDS,
-        MARKETPLACE_SILVER_RETRY_MAX_SECONDS,
-        SERVICE_HEARTBEAT_FILE,
-    )
+    from ecomdata.settings import load_settings
 
+    settings = load_settings(dotenv=True)
+    store = object_store_for(settings.storage)
     stop = StopSignal()
     install_signal_handlers(stop)
-    consumer = create_consumer()
-    dlq_producer = create_marketplace_producer()
+    consumer = create_consumer(settings.kafka.bootstrap_servers, settings.kafka.silver_consumer_group)
+    dlq_producer = create_producer(settings.kafka.bootstrap_servers)
     clock = lambda: datetime.now(UTC)  # noqa: E731 - the DLQ failed_at clock
     try:
         run_sink(
             consumer,
-            process=lambda record: process_record(record, writer=put_bytes, dlq_producer=dlq_producer, clock=clock),
+            process=lambda record: process_record(
+                record,
+                writer=store.put,
+                dlq_producer=dlq_producer,
+                clock=clock,
+                dataset=settings.batch.silver_dataset,
+                ack_timeout_seconds=settings.kafka.producer_ack_timeout_seconds,
+            ),
             stop=stop,
-            poll_timeout_ms=MARKETPLACE_SILVER_POLL_TIMEOUT_MS,
-            retry_base_seconds=MARKETPLACE_SILVER_RETRY_BASE_SECONDS,
-            retry_max_seconds=MARKETPLACE_SILVER_RETRY_MAX_SECONDS,
+            poll_timeout_ms=settings.service.silver_poll_timeout_ms,
+            retry_base_seconds=settings.service.silver_retry_base_seconds,
+            retry_max_seconds=settings.service.silver_retry_max_seconds,
             max_records=args.max_records,
             log=lambda line: print(line, flush=True),
-            beat=heartbeat(SERVICE_HEARTBEAT_FILE),
+            beat=heartbeat(settings.service.heartbeat_file),
         )
     finally:
         consumer.close()

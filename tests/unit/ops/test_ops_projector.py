@@ -398,13 +398,13 @@ def test_an_overlap_that_is_not_positive_is_refused():
 
 
 def test_the_configured_overlap_exceeds_the_configured_interval():
-    from ecomdata.settings import (
-        MARKETPLACE_OPS_PROJECT_INTERVAL_SECONDS,
-        MARKETPLACE_OPS_PROJECT_OVERLAP_SECONDS,
-    )
+    from ecomdata.settings import load_settings
 
+    service = load_settings({}).service
     # Otherwise a pass that failed leaves a window nothing ever re-reads.
-    assert MARKETPLACE_OPS_PROJECT_OVERLAP_SECONDS > MARKETPLACE_OPS_PROJECT_INTERVAL_SECONDS
+    assert service.project_overlap_seconds > service.project_interval_seconds
+    with pytest.raises(ValueError, match="OVERLAP_SECONDS must exceed"):
+        load_settings({"MARKETPLACE_OPS_PROJECT_OVERLAP_SECONDS": "10", "MARKETPLACE_OPS_PROJECT_INTERVAL_SECONDS": "30"})
 
 
 def test_the_documents_carry_only_fields_the_strict_templates_declare():

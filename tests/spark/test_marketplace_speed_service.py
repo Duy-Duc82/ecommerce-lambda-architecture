@@ -12,7 +12,7 @@ from ecomdata.domain.wire import canonical_json
 from ecomdata.processing.speed import service
 from ecomdata.processing.speed import stream as layer
 from ecomdata.processing.speed.stream import SPEED_OUTPUT_SCHEMA
-from ecomdata.settings import MARKETPLACE_SPEED_QUERY_NAME, MARKETPLACE_STREAM_TRIGGER
+from ecomdata.settings import SpeedSettings, load_settings
 from tests.spark_support import requires_spark
 from tests.unit.domain.test_marketplace_change_rules import CONFIG, _event
 
@@ -46,40 +46,42 @@ class RecordingWriter:
         return SimpleNamespace(name=self.log.get("queryName"))
 
 
+def _write_batch(batch, batch_id):
+    return None
+
+
 def _start(monkeypatch, **kwargs):
     log = {}
     outputs = SimpleNamespace(writeStream=RecordingWriter(log))
     monkeypatch.setattr(service, "speed_outputs", lambda raw, config: outputs)
-    query = service.start_query(spark=None, read=lambda spark: "raw", config=CONFIG, **kwargs)
+    options = {"checkpoint": "ckpt", "write_batch": _write_batch, **kwargs}
+    query = service.start_query(spark=None, read=lambda spark: "raw", config=CONFIG, **options)
     return query, log
 
 
 # 13
 def test_the_query_carries_its_name_checkpoint_trigger_and_sink(monkeypatch):
-    query, log = _start(monkeypatch)
+    speed = SpeedSettings()
+    query, log = _start(monkeypatch, trigger=speed.trigger, query_name=speed.query_name, checkpoint="ckpt/v1")
 
-    assert log["queryName"] == MARKETPLACE_SPEED_QUERY_NAME
-    assert log["options"]["checkpointLocation"] == layer.checkpoint_path()
-    assert log["trigger"] == {"processingTime": MARKETPLACE_STREAM_TRIGGER}
+    assert log["queryName"] == speed.query_name
+    assert log["options"]["checkpointLocation"] == "ckpt/v1"
+    assert log["trigger"] == {"processingTime": speed.trigger}
     assert log["outputMode"] == "append"
-    assert log["foreachBatch"] is layer.write_marketplace_batch
+    assert log["foreachBatch"] is _write_batch
     assert log["started"] is True
-    assert query.name == MARKETPLACE_SPEED_QUERY_NAME
+    assert query.name == speed.query_name
 
 
 # 13
-def test_the_checkpoint_root_can_be_moved_but_keeps_its_version(monkeypatch, tmp_path):
-    monkeypatch.setattr(layer, "MARKETPLACE_SPEED_CHECKPOINT_ROOT", str(tmp_path / "ckpt"))
+def test_the_checkpoint_root_can_be_moved_but_keeps_its_version(tmp_path):
+    speed = load_settings({"MARKETPLACE_SPEED_CHECKPOINT_ROOT": str(tmp_path / "ckpt")}).speed
 
-    path = layer.checkpoint_path()
-
-    assert path.replace("\\", "/").endswith(f"ckpt/{layer.MARKETPLACE_STREAM_CHECKPOINT_VERSION}")
+    assert speed.checkpoint_path().replace("\\", "/").endswith(f"ckpt/{speed.checkpoint_version}")
 
 
-def test_the_default_checkpoint_root_is_unchanged(monkeypatch):
-    monkeypatch.setattr(layer, "MARKETPLACE_SPEED_CHECKPOINT_ROOT", "")
-
-    assert "marketplace_speed" in layer.checkpoint_path().replace("\\", "/")
+def test_the_default_checkpoint_root_is_unchanged():
+    assert "marketplace_speed" in SpeedSettings().checkpoint_path().replace("\\", "/")
 
 
 def test_a_stop_signal_stops_the_query_and_returns():
@@ -158,14 +160,20 @@ def test_the_entrypoint_answers_help():
 
 
 # The micro-batch sink is the speed path's long-lived PostgreSQL user.
-def test_each_micro_batch_closes_its_audit_connections(monkeypatch):
-    from ecomdata.infra import postgres
+def _wiring(clients, built=None):
+    def factory():
+        return None
 
+    if built is not None:
+        built.append("closing")
+    return layer.SinkWiring(clients=lambda: clients, connection_factory=factory)
+
+
+def test_each_micro_batch_closes_its_audit_connections(monkeypatch):
     built = []
-    monkeypatch.setattr(postgres, "postgres_connection_factory", lambda: built.append("closing") or (lambda: None))
 
     class RecordingSinks:
-        def __init__(self, *, producer, es, redis, audit):
+        def __init__(self, *, producer, es, redis, audit, **options):
             self.audit = audit
 
         def write_batch(self, outputs, batch_id, *, query_id):
@@ -174,9 +182,9 @@ def test_each_micro_batch_closes_its_audit_connections(monkeypatch):
     import ecomdata.processing.speed.sinks as sinks
 
     monkeypatch.setattr(sinks, "MarketplaceSpeedSinks", RecordingSinks)
-    monkeypatch.setattr(layer, "_sink_clients", lambda: (object(), object(), object()))
+    write = layer.make_batch_writer(_wiring((object(), object(), object()), built))
 
-    layer.write_marketplace_batch(_micro_batch("query-uuid"), 7)
+    write(_micro_batch("query-uuid"), 7)
 
     assert built == ["closing", ("batch", 7, 0, "query-uuid")]
 
@@ -194,11 +202,8 @@ class _ClosingClient:
 @pytest.mark.parametrize("outcome", ["succeeded", "collect_failed"])
 def test_each_micro_batch_closes_its_sink_clients(monkeypatch, outcome):
     import ecomdata.processing.speed.sinks as sinks
-    from ecomdata.infra import postgres
 
     clients = (_ClosingClient(), _ClosingClient(), _ClosingClient())
-    monkeypatch.setattr(postgres, "postgres_connection_factory", lambda: (lambda: None))
-    monkeypatch.setattr(layer, "_sink_clients", lambda: clients)
 
     class SucceedingSinks:
         def __init__(self, **kwargs): pass
@@ -206,16 +211,17 @@ def test_each_micro_batch_closes_its_sink_clients(monkeypatch, outcome):
         def write_batch(self, outputs, batch_id, *, query_id): pass
 
     monkeypatch.setattr(sinks, "MarketplaceSpeedSinks", SucceedingSinks)
+    write = layer.make_batch_writer(_wiring(clients))
     batch = _micro_batch("query-uuid")
     if outcome == "collect_failed":
         def failing_collect(): raise RuntimeError("executor lost")
         batch.collect = failing_collect
 
     if outcome == "succeeded":
-        layer.write_marketplace_batch(batch, 7)
+        write(batch, 7)
     else:
         with pytest.raises(RuntimeError, match="executor lost"):
-            layer.write_marketplace_batch(batch, 7)
+            write(batch, 7)
 
     assert [client.closed for client in clients] == [1, 1, 1]
 
@@ -227,53 +233,34 @@ def _micro_batch(query_id):
     return SimpleNamespace(collect=lambda: [], sparkSession=SimpleNamespace(sparkContext=context))
 
 
-def test_a_micro_batch_without_a_query_id_is_refused(monkeypatch):
-    monkeypatch.setattr(layer, "_sink_clients", lambda: (object(), object(), object()))
+def test_a_micro_batch_without_a_query_id_is_refused():
+    write = layer.make_batch_writer(_wiring((object(), object(), object())))
 
     with pytest.raises(ValueError, match="query id"):
-        layer.write_marketplace_batch(_micro_batch(None), 7)
+        write(_micro_batch(None), 7)
 
 
 def test_the_default_kafka_connector_matches_the_spark_major_version():
     # Spark 4 is built on Scala 2.13. The old default, _2.12:3.5.1, cannot
     # load on it, so the query would die at start before reading a record.
-    import os
-
     import pyspark
 
-    if "SPARK_KAFKA_PACKAGE" in os.environ:
-        pytest.skip("the environment overrides the connector")
-    from ecomdata.settings import SPARK_KAFKA_PACKAGE
-
-    group, artifact, version = SPARK_KAFKA_PACKAGE.split(":")
+    group, artifact, version = load_settings({}).kafka.spark_kafka_package.split(":")
     assert group == "org.apache.spark"
     assert artifact == "spark-sql-kafka-0-10_2.13"
     assert version.split(".")[0] == pyspark.__version__.split(".")[0]
 
 
-def test_the_speed_session_pins_a_small_shuffle_partition_count(monkeypatch):
+def test_the_speed_session_pins_a_small_shuffle_partition_count():
     # Spark fixes a stateful operator's partition count in the checkpoint on
     # the first run, so this has to be right before a production checkpoint
     # exists. The default, 200, ran 200+ tasks per micro-batch for a few dozen
     # records on the first real run.
-    from ecomdata.settings import MARKETPLACE_SPEED_SHUFFLE_PARTITIONS
+    settings = load_settings({})
 
-    captured = {}
+    conf = service.spark_factory(settings).config()
 
-    class Builder:
-        def appName(self, name):
-            return self
-
-        def config(self, key, value):
-            captured[key] = value
-            return self
-
-        def getOrCreate(self):
-            return "session"
-
-    monkeypatch.setattr(service.SparkSession, "builder", Builder())
-
-    assert service.build_spark() == "session"
-    assert captured["spark.sql.shuffle.partitions"] == str(MARKETPLACE_SPEED_SHUFFLE_PARTITIONS)
-    assert 1 <= MARKETPLACE_SPEED_SHUFFLE_PARTITIONS <= 16
-    assert captured["spark.sql.session.timeZone"] == "UTC"
+    assert conf["spark.sql.shuffle.partitions"] == str(settings.spark.speed_shuffle_partitions)
+    assert 1 <= settings.spark.speed_shuffle_partitions <= 16
+    assert conf["spark.sql.session.timeZone"] == "UTC"
+    assert conf["spark.jars.packages"] == settings.kafka.spark_kafka_package

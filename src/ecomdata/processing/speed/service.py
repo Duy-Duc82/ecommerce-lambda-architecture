@@ -28,24 +28,15 @@ from pyspark.sql import functions as F
 from ecomdata.domain.change_rules import ChangeRuleConfig
 from ecomdata.processing.speed import stream as layer
 from ecomdata.processing.speed.stream import SPEED_OUTPUT_SCHEMA
-from ecomdata.settings import (
-    MARKETPLACE_CHANGE_RULE_VERSION,
-    MARKETPLACE_LARGE_DROP_ABSOLUTE,
-    MARKETPLACE_LARGE_DROP_RELATIVE,
-    MARKETPLACE_SPEED_QUERY_NAME,
-    MARKETPLACE_SPEED_SHUFFLE_PARTITIONS,
-    MARKETPLACE_STALE_AFTER_SECONDS,
-    MARKETPLACE_STREAM_TRIGGER,
-    SPARK_KAFKA_PACKAGE,
-)
 
 
-def default_config() -> ChangeRuleConfig:
+def change_config(speed: Any) -> ChangeRuleConfig:
+    """The change rules from the speed settings (``SpeedSettings``)."""
     return ChangeRuleConfig(
-        MARKETPLACE_CHANGE_RULE_VERSION,
-        MARKETPLACE_LARGE_DROP_ABSOLUTE,
-        MARKETPLACE_LARGE_DROP_RELATIVE,
-        MARKETPLACE_STALE_AFTER_SECONDS,
+        speed.change_rule_version,
+        speed.large_drop_absolute,
+        speed.large_drop_relative,
+        speed.stale_after_seconds,
     )
 
 
@@ -67,18 +58,20 @@ def speed_outputs(raw: DataFrame, config: ChangeRuleConfig) -> DataFrame:
 def start_query(
     spark: SparkSession,
     *,
-    config: ChangeRuleConfig | None = None,
-    read: Callable[[SparkSession], DataFrame] = layer.read_marketplace_observations,
-    trigger: str = MARKETPLACE_STREAM_TRIGGER,
-    query_name: str = MARKETPLACE_SPEED_QUERY_NAME,
+    config: ChangeRuleConfig,
+    read: Callable[[SparkSession], DataFrame],
+    write_batch: Callable[[DataFrame, int], None],
+    checkpoint: str,
+    trigger: str = "30 seconds",
+    query_name: str = "marketplace-speed-v1",
 ) -> Any:
-    outputs = speed_outputs(read(spark), config or default_config())
+    outputs = speed_outputs(read(spark), config)
     return (
         outputs.writeStream.queryName(query_name)
-        .option("checkpointLocation", layer.checkpoint_path())
+        .option("checkpointLocation", checkpoint)
         .trigger(processingTime=trigger)
         .outputMode("append")
-        .foreachBatch(layer.write_marketplace_batch)
+        .foreachBatch(write_batch)
         .start()
     )
 
@@ -170,7 +163,7 @@ class ProgressRecorder:
         self,
         connection_factory: Callable[[], Any],
         *,
-        query_name: str = MARKETPLACE_SPEED_QUERY_NAME,
+        query_name: str = "marketplace-speed-v1",
         clock: Callable[[], datetime] = lambda: datetime.now(UTC),
     ) -> None:
         self.connection_factory, self.query_name, self.clock = connection_factory, query_name, clock
@@ -228,34 +221,74 @@ def await_query(query: Any, *, stop: Any, poll_seconds: float = 5, on_poll: Call
             return
 
 
-def build_spark() -> SparkSession:
-    builder = (
-        SparkSession.builder.appName(MARKETPLACE_SPEED_QUERY_NAME)
-        .config("spark.sql.session.timeZone", "UTC")
-        # Fixed in the checkpoint on first run; see the setting.
-        .config("spark.sql.shuffle.partitions", str(MARKETPLACE_SPEED_SHUFFLE_PARTITIONS))
+def spark_factory(settings: Any):
+    from ecomdata.infra.spark import SparkSessionFactory
+
+    return SparkSessionFactory.for_storage(
+        settings.storage,
+        app_name=settings.speed.query_name,
+        # Fixed in the checkpoint on its first run: changing it needs a new
+        # checkpoint version (and a replay).
+        shuffle_partitions=settings.spark.speed_shuffle_partitions,
+        driver_memory=settings.spark.driver_memory,
+        master=settings.spark.master,
+        # Empty inside the Spark 4 image, whose jars are baked in.
+        packages=settings.kafka.spark_kafka_package or None,
     )
-    # Empty inside the Spark 4 image, whose jars are baked in; set on a host
-    # that must resolve the connector at start.
-    if SPARK_KAFKA_PACKAGE:
-        builder = builder.config("spark.jars.packages", SPARK_KAFKA_PACKAGE)
-    return builder.getOrCreate()
 
 
-def main() -> None:
+def sink_wiring(settings: Any) -> layer.SinkWiring:
+    from ecomdata.infra.postgres import connection_factory
+
+    def clients():
+        from elasticsearch import Elasticsearch
+        from redis import Redis
+
+        from ecomdata.infra.kafka import create_producer
+
+        return (
+            create_producer(settings.kafka.bootstrap_servers),
+            Elasticsearch(settings.es.host),
+            Redis(host=settings.redis.host, port=settings.redis.port, db=settings.redis.db),
+        )
+
+    return layer.SinkWiring(
+        clients=clients,
+        connection_factory=connection_factory(settings.postgres),
+        sink_options={
+            "query_name": settings.speed.query_name,
+            "index_changes": settings.es.index_changes,
+            "index_offers": settings.es.index_offers,
+            "offer_ttl_seconds": settings.redis.offer_ttl_seconds,
+            "recent_changes_max": settings.redis.recent_changes_max,
+            "change_ack_timeout_seconds": settings.kafka.change_ack_timeout_seconds,
+        },
+    )
+
+
+def main(argv: list[str] | None = None) -> None:
     argparse.ArgumentParser(
         description="Long-running marketplace speed query (Kafka -> changes, ES, Redis)"
-    ).parse_args()
+    ).parse_args(argv)
     from ecomdata.infra.lifecycle import StopSignal, install_signal_handlers
+    from ecomdata.infra.postgres import connection_factory
+    from ecomdata.settings import load_settings
 
+    settings = load_settings(dotenv=True)
     stop = StopSignal()
     install_signal_handlers(stop)
-    from ecomdata.infra.postgres import postgres_connection_factory
-
-    spark = build_spark()
-    recorder = ProgressRecorder(postgres_connection_factory())
+    spark = spark_factory(settings).create()
+    recorder = ProgressRecorder(connection_factory(settings.postgres), query_name=settings.speed.query_name)
     try:
-        query = start_query(spark)
+        query = start_query(
+            spark,
+            config=change_config(settings.speed),
+            read=lambda session: layer.read_marketplace_observations(session, settings.kafka.bootstrap_servers),
+            write_batch=layer.make_batch_writer(sink_wiring(settings)),
+            checkpoint=settings.speed.checkpoint_path(),
+            trigger=settings.speed.trigger,
+            query_name=settings.speed.query_name,
+        )
         await_query(query, stop=stop, on_poll=lambda: record_progress_safely(recorder, query))
     finally:
         spark.stop()

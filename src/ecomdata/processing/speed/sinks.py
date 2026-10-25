@@ -12,13 +12,6 @@ from typing import Any
 from ecomdata.domain.change_rules import offer_state_from_json
 from ecomdata.domain.wire import marketplace_change_from_wire
 from ecomdata.processing.speed.change_producer import publish_change
-from ecomdata.settings import (
-    ES_INDEX_MARKETPLACE_CHANGES,
-    ES_INDEX_MARKETPLACE_OFFERS,
-    MARKETPLACE_SPEED_QUERY_NAME,
-    REDIS_MARKETPLACE_OFFER_TTL_SECONDS,
-    REDIS_MARKETPLACE_RECENT_CHANGES_MAX,
-)
 
 
 @dataclass(frozen=True)
@@ -177,8 +170,25 @@ def _change_document(change: dict) -> dict:
 
 
 class MarketplaceSpeedSinks:
-    def __init__(self, *, producer: Any, es: Any, redis: Any, audit: Any):
+    def __init__(
+        self,
+        *,
+        producer: Any,
+        es: Any,
+        redis: Any,
+        audit: Any,
+        query_name: str = "marketplace-speed-v1",
+        index_changes: str = "marketplace-changes-v1",
+        index_offers: str = "marketplace-offers-current-v1",
+        offer_ttl_seconds: int = 86400,
+        recent_changes_max: int = 5000,
+        change_ack_timeout_seconds: int = 30,
+    ):
         self.producer, self.es, self.redis, self.audit = producer, es, redis, audit
+        self.query_name = query_name
+        self.index_changes, self.index_offers = index_changes, index_offers
+        self.offer_ttl_seconds, self.recent_changes_max = offer_ttl_seconds, recent_changes_max
+        self.change_ack_timeout_seconds = change_ack_timeout_seconds
 
     def write_batch(self, outputs: Iterable[SpeedOutput], batch_id: int, *, query_id: str) -> BatchCounts:
         # Required, with no default: a missing id is exactly how a replay's
@@ -187,7 +197,7 @@ class MarketplaceSpeedSinks:
             raise ValueError("query_id is required to identify a micro-batch")
         rows = list(outputs)
         started = datetime.now(UTC)
-        query_name = MARKETPLACE_SPEED_QUERY_NAME
+        query_name = self.query_name
         if (
             self.audit.begin_batch(query_name=query_name, query_id=query_id, batch_id=batch_id, started_at=started)
             == "SKIP"
@@ -207,19 +217,19 @@ class MarketplaceSpeedSinks:
                 if r.output_kind == "CHANGE" and r.change_json
             ]
             for event in changes:
-                publish_change(self.producer, event)
+                publish_change(self.producer, event, ack_timeout_seconds=self.change_ack_timeout_seconds)
             if hasattr(self.producer, "flush"):
                 self.producer.flush()
             es_actions = []
             change_rows = [r for r in rows if r.output_kind == "CHANGE" and r.change_json]
             for row, event in zip(change_rows, changes, strict=False):
                 doc = _change_document(json.loads(row.change_json))
-                es_actions.append({"index": {"_index": ES_INDEX_MARKETPLACE_CHANGES, "_id": event.event_id}})
+                es_actions.append({"index": {"_index": self.index_changes, "_id": event.event_id}})
                 es_actions.append(doc)
             state_rows = [r for r in rows if r.output_kind == "STATE" and r.state_json]
             states = [offer_state_from_json(row.state_json) for row in state_rows]
             for row, state in zip(state_rows, states, strict=False):
-                es_actions.append({"index": {"_index": ES_INDEX_MARKETPLACE_OFFERS, "_id": state.offer_id}})
+                es_actions.append({"index": {"_index": self.index_offers, "_id": state.offer_id}})
                 es_actions.append(json.loads(row.state_json))
             if es_actions:
                 try:
@@ -248,7 +258,7 @@ class MarketplaceSpeedSinks:
                 pipe.zadd("rt:changes:recent", {event.event_id: _epoch_micros(event.detected_at)})
                 pipe.setex(
                     f"rt:change:{event.event_id}",
-                    REDIS_MARKETPLACE_OFFER_TTL_SECONDS,
+                    self.offer_ttl_seconds,
                     json.dumps(wire, ensure_ascii=False, sort_keys=True, separators=(",", ":")),
                 )
             for row, state in zip(state_rows, states, strict=False):
@@ -262,7 +272,7 @@ class MarketplaceSpeedSinks:
                         "observation_id": state.observation_id,
                     },
                 )
-                pipe.expire(f"rt:offer:{state.offer_id}", REDIS_MARKETPLACE_OFFER_TTL_SECONDS)
+                pipe.expire(f"rt:offer:{state.offer_id}", self.offer_ttl_seconds)
                 source_key = f"rt:source:{state.marketplace}:last_observation"
                 previous = self.redis.get(source_key) if hasattr(self.redis, "get") else None
                 if isinstance(previous, bytes):
@@ -270,7 +280,7 @@ class MarketplaceSpeedSinks:
                 if previous is None or previous < state.observed_at.isoformat():
                     pipe.set(source_key, state.observed_at.isoformat(), nx=False)
             if changes:
-                pipe.zremrangebyrank("rt:changes:recent", 0, -(REDIS_MARKETPLACE_RECENT_CHANGES_MAX + 1))
+                pipe.zremrangebyrank("rt:changes:recent", 0, -(self.recent_changes_max + 1))
             if hasattr(pipe, "execute"):
                 pipe.execute()
             counts = BatchCounts(

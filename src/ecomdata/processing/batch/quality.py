@@ -36,7 +36,6 @@ from ecomdata.domain.quality_rules import (
     mandatory_rule_names,
     quality_rule,
 )
-from ecomdata.settings import MARKETPLACE_QUALITY_SAMPLE_LIMIT
 
 if TYPE_CHECKING:
     from ecomdata.processing.batch.warehouse import MarketplaceBatchContext
@@ -115,7 +114,7 @@ def _result(
     if reason is not None:
         sample = _canonical({"reason": reason})
     elif keys:
-        sample = _canonical({"keys": sorted(keys)[:MARKETPLACE_QUALITY_SAMPLE_LIMIT]})
+        sample = _canonical({"keys": sorted(keys)[:context.sample_limit]})
     return QualityResult(
         run_id=context.run_id,
         check_name=check_name,
@@ -134,14 +133,14 @@ def _violations(predicate: Column) -> Column:
     return F.coalesce(F.sum(F.when(predicate, 1).otherwise(0)), F.lit(0))
 
 
-def _sample_keys(frame: DataFrame, key: Column) -> tuple[str, ...]:
+def _sample_keys(frame: DataFrame, key: Column, limit: int) -> tuple[str, ...]:
     """Identifiers only, bounded and sorted.
 
     A failure sample points a human at the first offending rows. It must never
     carry a raw body, a product title, a URL query or a credential, so callers
     pass an explicit identifier expression rather than a whole row.
     """
-    rows = frame.select(key.alias("_key")).limit(MARKETPLACE_QUALITY_SAMPLE_LIMIT).collect()
+    rows = frame.select(key.alias("_key")).limit(limit).collect()
     return tuple(str(row["_key"]) for row in rows if row["_key"] is not None)
 
 
@@ -155,7 +154,7 @@ def _counted(
 ) -> QualityResult:
     if violations == 0:
         return _result(check_name, context, status=PASS, observed_value=0.0)
-    keys = _sample_keys(frame, key) if frame is not None and key is not None else ()
+    keys = _sample_keys(frame, key, context.sample_limit) if frame is not None and key is not None else ()
     return _result(check_name, context, status=FAIL, observed_value=float(violations), keys=keys)
 
 

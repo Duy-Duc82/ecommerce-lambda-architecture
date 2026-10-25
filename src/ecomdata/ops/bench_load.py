@@ -48,6 +48,7 @@ from ecomdata.domain.observations import (
     create_observation_event,
     create_offer_observation,
 )
+from ecomdata.ops.bootstrap import producer as _producer
 from ecomdata.ops.stub_source import FIXTURE, PRICE_STEPS
 
 MARKETPLACE = "tiki"
@@ -230,9 +231,8 @@ def main(argv: list[str] | None = None) -> int:
                         cadence_seconds=args.cadence_seconds, duplicate_ratio=args.duplicate_ratio)
         events, dataset = fixture_events(spec, clock), "replayed_fixture"
 
-    from ecomdata.ingestion.publisher import create_marketplace_producer
 
-    producer = create_marketplace_producer()
+    producer = _producer()
     began = time.monotonic()
     try:
         sent = send(events, producer, Pacer(args.rate))

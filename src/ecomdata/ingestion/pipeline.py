@@ -20,7 +20,6 @@ from ecomdata.domain.acquisition import (
     RawPersistenceError,
     RobotsDeniedError,
 )
-from ecomdata.infra.object_store import put_bytes
 from ecomdata.ingestion.raw_store import persist_fetch_result
 
 
@@ -121,7 +120,7 @@ def acquire_listing_page(
     request: ListingPageRequest,
     *,
     crawl_run_id: str,
-    writer: Callable[[str, str, bytes], str] = put_bytes,
+    writer: Callable[[str, str, bytes], str],
     clock: Callable[[], datetime],
 ) -> Phase2AcquisitionReport:
     """Fetch, persist and parse one page in the mandatory raw-first order."""
@@ -139,7 +138,25 @@ def acquire_listing_page(
         raise ValueError("adapter must expose a non-empty adapter_version")
 
     started_at = clock()
-    requested_url = adapter.request_url(request.target, request.page)
+    try:
+        requested_url = adapter.request_url(request.target, request.page)
+    except ValueError as exc:
+        # A target the adapter cannot turn into a URL is a failed task, not a
+        # crash of the worker: the report carries the reason.
+        error = FetchTransportError(f"no request URL for target {request.target!r} page {request.page}: {exc}")
+        error.__cause__ = exc
+        return _failed_report(
+            request=request,
+            crawl_run_id=crawl_run_id,
+            request_url=getattr(adapter, "base_url", None) or "https://invalid.invalid/",
+            started_at=started_at,
+            http_status=None,
+            retry_after=None,
+            raw_artifact=None,
+            raw_metadata_uri=None,
+            failure=AcquisitionFailure(AcquisitionStage.FETCH, error),
+            clock=clock,
+        )
     try:
         allowed = adapter.allowed(requested_url)
     except Exception as exc:

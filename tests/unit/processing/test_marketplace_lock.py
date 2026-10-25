@@ -9,7 +9,13 @@ import pytest
 
 from ecomdata.processing.batch import warehouse
 from ecomdata.processing.batch.lock import ALREADY_RUNNING_EXIT_CODE, BatchAlreadyRunning, exclusive_batch
-from tests.spark.test_marketplace_warehouse import batch_context, empty_reader, noop_writer, wire_orchestration
+from tests.spark.test_marketplace_warehouse import (
+    batch_context,
+    empty_reader,
+    noop_writer,
+    run_marketplace_warehouse,
+    wire_orchestration,
+)
 
 
 class FakeServer:
@@ -115,10 +121,10 @@ def test_a_failed_unlock_does_not_hide_the_run_error():
 def test_a_run_refused_by_the_lock_starts_nothing(monkeypatch):
     built = []
     parts = wire_orchestration(monkeypatch, lock_refused=True)
-    monkeypatch.setattr(warehouse, "build_spark", lambda: built.append("spark"))
+    parts["spark_factory"] = lambda: built.append("spark")
 
     with pytest.raises(BatchAlreadyRunning):
-        warehouse.run_marketplace_warehouse(batch_context(), writer=noop_writer, reader=empty_reader)
+        run_marketplace_warehouse(batch_context(), writer=noop_writer, reader=empty_reader)
 
     # The fake audit logs here too: no start_run, so no audit row.
     assert parts["log"] == []
@@ -129,7 +135,7 @@ def test_a_run_refused_by_the_lock_starts_nothing(monkeypatch):
 def test_the_lock_covers_a_run_without_postgres(monkeypatch):
     parts = wire_orchestration(monkeypatch)
 
-    warehouse.run_marketplace_warehouse(batch_context(), publish_cache=False, writer=noop_writer, reader=empty_reader)
+    run_marketplace_warehouse(batch_context(), publish_cache=False, writer=noop_writer, reader=empty_reader)
 
     assert parts["lock"] == ["acquire", "release"]
 

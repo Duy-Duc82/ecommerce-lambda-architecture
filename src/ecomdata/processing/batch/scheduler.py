@@ -19,13 +19,10 @@ from :func:`main` and the batch itself.
 """
 from __future__ import annotations
 
-import argparse
 import json
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from typing import Any
-
-from ecomdata.infra.lifecycle import StopSignal, install_signal_handlers
 
 _EPOCH = datetime(1970, 1, 1, tzinfo=UTC)
 
@@ -144,37 +141,10 @@ def run_scheduler(
     return ticks
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser(description="Marketplace batch scheduler")
-    parser.add_argument("--max-ticks", type=int, default=None, help="stop after N ticks (tests and smoke only)")
-    args = parser.parse_args()
-    from ecomdata.infra.postgres import postgres_connection_factory
-    from ecomdata.processing.batch.warehouse import run_marketplace_warehouse
-    from ecomdata.settings import (
-        MARKETPLACE_BATCH_AS_OF_LAG_SECONDS,
-        MARKETPLACE_BATCH_INTERVAL_SECONDS,
-        MARKETPLACE_GOLD_DATASET,
-        MARKETPLACE_SILVER_DATASET,
-        data_lake_uri,
-    )
+def main(argv: list[str] | None = None) -> None:
+    from ecomdata.processing.batch.bootstrap import scheduler_main
 
-    stop = StopSignal()
-    install_signal_handlers(stop)
-    run_status = PostgresRunStatus(postgres_connection_factory())
-    silver_uri = data_lake_uri("silver", MARKETPLACE_SILVER_DATASET)
-    gold_root_uri = data_lake_uri("gold", MARKETPLACE_GOLD_DATASET)
-    run_scheduler(
-        lambda now: tick(now, run_status=run_status, run_batch=run_marketplace_warehouse,
-                         silver_uri=silver_uri, gold_root_uri=gold_root_uri,
-                         interval_seconds=MARKETPLACE_BATCH_INTERVAL_SECONDS,
-                         lag_seconds=MARKETPLACE_BATCH_AS_OF_LAG_SECONDS),
-        clock=lambda: datetime.now(UTC),
-        stop=stop,
-        interval_seconds=MARKETPLACE_BATCH_INTERVAL_SECONDS,
-        lag_seconds=MARKETPLACE_BATCH_AS_OF_LAG_SECONDS,
-        max_ticks=args.max_ticks,
-        log=lambda line: print(line, flush=True),
-    )
+    scheduler_main(argv)
 
 
 if __name__ == "__main__":

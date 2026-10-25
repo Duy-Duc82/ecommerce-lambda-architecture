@@ -41,6 +41,11 @@ from pathlib import Path
 from typing import Any, Protocol
 from urllib.parse import unquote, urlparse
 
+from ecomdata.domain.datasets import GOLD_DATASET
+from ecomdata.ops.bootstrap import connection_factory as _connection_factory
+from ecomdata.ops.bootstrap import object_store as _object_store
+from ecomdata.ops.bootstrap import settings as _settings
+
 BACKUP_SCHEMA_VERSION = "marketplace-backup.v1"
 MANIFEST_NAME = "backup-manifest.json"
 # audit holds the run history, quality evidence, crawl audit and frontier;
@@ -118,9 +123,7 @@ def pointer_key() -> str:
 
 def zone_key(uri: str, zone: str) -> str:
     """The key of ``uri`` relative to its zone root, for either lake profile."""
-    from ecomdata.settings import data_lake_uri
-
-    base = data_lake_uri(zone).rstrip("/")
+    base = _object_store().uri(zone).rstrip("/")
     if uri.startswith(base):
         return unquote(uri[len(base):].lstrip("/"))
     # A manifest written under another profile still names the same object;
@@ -203,8 +206,6 @@ def backup(
 ) -> dict:
     """Copy the stack into ``store`` and return the backup manifest."""
     from ecomdata.processing.batch.manifest import parse_manifest
-    from ecomdata.settings import MARKETPLACE_GOLD_DATASET
-
     started = clock()
     identifier = backup_id or backup_id_for(started)
     key_of_pointer = pointer_key()
@@ -240,7 +241,7 @@ def backup(
         run_prefix = zone_key(pointer.gold_run_uri, "gold").rstrip("/") + "/"
         for key in lake.list_keys("gold", run_prefix):
             copy("gold", key)
-        for key in lake.list_keys("gold", f"{MARKETPLACE_GOLD_DATASET}/manifests/"):
+        for key in lake.list_keys("gold", f"{GOLD_DATASET}/manifests/"):
             copy("gold", key)
         log(f"gold: {counts.get('gold', 0)} objects")
 
@@ -454,74 +455,49 @@ def report(results: Sequence[CheckResult]) -> str:
 class LiveLake:
     """The medallion zones, through MinIO or the local filesystem."""
 
+    def __init__(self, store=None):
+        self.store = store if store is not None else _object_store()
+
     def list_keys(self, zone: str, prefix: str = "") -> list[str]:
-        from ecomdata.infra.storage import active_profile
-        from ecomdata.settings import DATA_LAKE_LOCAL_ROOT, MINIO_BUCKETS
-
-        profile = active_profile()
-        if profile.is_local:
-            root = DATA_LAKE_LOCAL_ROOT / zone.lower()
-            base = root / prefix if prefix else root
-            if not base.exists():
-                return []
-            return sorted(path.relative_to(root).as_posix() for path in base.rglob("*") if path.is_file())
-        from ecomdata.infra.object_store import _client
-
-        client = _client(profile)
-        bucket = MINIO_BUCKETS[zone.lower()]
-        if not client.bucket_exists(bucket):
-            return []
-        return sorted(obj.object_name for obj in client.list_objects(bucket, prefix=prefix or None, recursive=True))
+        return self.store.list(zone, prefix)
 
     def get(self, zone: str, key: str) -> bytes | None:
-        from ecomdata.infra.object_store import get_bytes
-
-        return get_bytes(zone, key)
+        return self.store.get(zone, key)
 
     def put(self, zone: str, key: str, data: bytes) -> None:
-        from ecomdata.infra.object_store import put_bytes
-
-        put_bytes(zone, key, data)
+        self.store.put(zone, key, data)
 
 
 class LivePostgres:
     """PostgreSQL, plus the pg_dump and pg_restore that ship in the ops image."""
 
     def _dsn_env(self) -> dict[str, str]:
-        from ecomdata.settings import POSTGRES_HOST, POSTGRES_PASSWORD, POSTGRES_PORT, POSTGRES_USER
-
-        return {**os.environ, "PGHOST": POSTGRES_HOST, "PGPORT": str(POSTGRES_PORT),
-                "PGUSER": POSTGRES_USER, "PGPASSWORD": POSTGRES_PASSWORD}
+        return {**os.environ, "PGHOST": _settings().postgres.host, "PGPORT": str(_settings().postgres.port),
+                "PGUSER": _settings().postgres.user, "PGPASSWORD": _settings().postgres.password}
 
     def query(self, sql: str, params: Sequence[Any] = ()) -> list[tuple]:
-        from ecomdata.infra.postgres import postgres_connection_factory
 
-        with postgres_connection_factory()() as conn, conn.cursor() as cur:
+        with _connection_factory()() as conn, conn.cursor() as cur:
             cur.execute(sql, tuple(params))
             return list(cur.fetchall())
 
     def dump_schema(self, schema: str, destination: Path) -> None:
-        from ecomdata.settings import POSTGRES_DB
-
         subprocess.run(["pg_dump", "--format=custom", "--no-owner", "--no-privileges",
-                        f"--schema={schema}", "--file", str(destination), POSTGRES_DB],
+                        f"--schema={schema}", "--file", str(destination), _settings().postgres.db],
                        env=self._dsn_env(), check=True)
 
     def restore_schema(self, schema: str, source: Path) -> None:
-        from ecomdata.settings import POSTGRES_DB
-
         # --clean --if-exists so this works both into a database the Compose
         # init script already populated and into an empty one.
         subprocess.run(["pg_restore", "--no-owner", "--no-privileges", "--clean", "--if-exists",
-                        "--exit-on-error", "--dbname", POSTGRES_DB, str(source)],
+                        "--exit-on-error", "--dbname", _settings().postgres.db, str(source)],
                        env=self._dsn_env(), check=True)
 
     @contextmanager
     def batch_lock(self) -> Iterator[None]:
-        from ecomdata.infra.postgres import postgres_connection_factory
         from ecomdata.processing.batch.lock import exclusive_batch
 
-        with exclusive_batch(postgres_connection_factory()):
+        with exclusive_batch(_connection_factory()):
             yield
 
 
@@ -557,11 +533,8 @@ def parquet_rows_at(uri: str) -> int | None:
 
 def reparse_sample(uris: Sequence[str]) -> dict:
     """Reparse the sampled artifacts against restored Silver, and summarise."""
-    import ecomdata.infra.object_store as object_store
     from ecomdata.ingestion.reparse import RawArtifactRef, reparse_batch, summarise
     from ecomdata.ingestion.sources.tiki.api import TikiCrawler
-    from ecomdata.settings import MARKETPLACE_SILVER_DATASET
-
     adapters = {"tiki": TikiCrawler}
     refs = [RawArtifactRef.from_uri(uri) for uri in uris]
     outcomes = reparse_batch(
@@ -569,10 +542,10 @@ def reparse_sample(uris: Sequence[str]) -> dict:
         # Parse-only: no categories, no robots fetch, so a restore check never
         # reaches the marketplace.
         adapter_for=lambda code: adapters[code](categories=[], fetch_robots=False),
-        reader=object_store.get_bytes,
+        reader=_object_store().get,
         clock=lambda: datetime.now(UTC),
-        silver_reader=object_store.get_bytes,
-        silver_dataset=MARKETPLACE_SILVER_DATASET,
+        silver_reader=_object_store().get,
+        silver_dataset=_settings().batch.silver_dataset,
     )
     return summarise(outcomes, reported_at=datetime.now(UTC))
 

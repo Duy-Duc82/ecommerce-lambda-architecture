@@ -326,17 +326,18 @@ def test_the_entrypoint_answers_help():
 
 
 # 21
-def test_settings_refuse_a_lookback_not_exceeding_interval_plus_settle(monkeypatch):
-    from ecomdata import settings
+def test_settings_refuse_a_lookback_not_exceeding_interval_plus_settle():
+    from ecomdata.settings import load_settings
 
-    monkeypatch.setattr(settings, "MARKETPLACE_BATCH_INTERVAL_SECONDS", 86400)
-    monkeypatch.setattr(settings, "MARKETPLACE_QUALITY_RECONCILIATION_SETTLE_SECONDS", 900)
-    monkeypatch.setattr(settings, "MARKETPLACE_QUALITY_RECONCILIATION_LOOKBACK_SECONDS", 86400 + 900)
+    env = {
+        "MARKETPLACE_BATCH_INTERVAL_SECONDS": "86400",
+        "MARKETPLACE_QUALITY_RECONCILIATION_SETTLE_SECONDS": "900",
+        "MARKETPLACE_QUALITY_RECONCILIATION_LOOKBACK_SECONDS": str(86400 + 900),
+    }
     with pytest.raises(ValueError, match="MARKETPLACE_BATCH_INTERVAL_SECONDS"):
-        settings.validate_marketplace_settings()
+        load_settings(env)
 
-    monkeypatch.setattr(settings, "MARKETPLACE_QUALITY_RECONCILIATION_LOOKBACK_SECONDS", 86400 + 901)
-    settings.validate_marketplace_settings()
+    load_settings({**env, "MARKETPLACE_QUALITY_RECONCILIATION_LOOKBACK_SECONDS": str(86400 + 901)})
 
 
 # 21
@@ -348,9 +349,8 @@ def test_settings_refuse_a_lookback_not_exceeding_interval_plus_settle(monkeypat
         "MARKETPLACE_BATCH_LOCK_KEY",
     ],
 )
-def test_settings_refuse_non_positive_scheduler_values(monkeypatch, name):
-    from ecomdata import settings
+def test_settings_refuse_non_positive_scheduler_values(name):
+    from ecomdata.settings import load_settings
 
-    monkeypatch.setattr(settings, name, 0)
     with pytest.raises(ValueError, match=name):
-        settings.validate_marketplace_settings()
+        load_settings({name: "0"})

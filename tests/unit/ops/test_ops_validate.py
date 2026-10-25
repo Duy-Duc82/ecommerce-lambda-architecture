@@ -109,9 +109,14 @@ class FakeSources:
 
 @pytest.fixture(autouse=True)
 def _local_lake(monkeypatch):
-    import ecomdata.settings as settings
+    class _Lake:
+        def uri(self, zone, key=""):
+            return f"file:///lake/{zone}/{key}"
 
-    monkeypatch.setattr(settings, "data_lake_uri", lambda zone, dataset="": f"file:///lake/{zone}/{dataset}")
+    from ecomdata.ops import smoke as smoke_module
+
+    monkeypatch.setattr(v, "_object_store", lambda: _Lake())
+    monkeypatch.setattr(smoke_module, "_object_store", lambda: _Lake())
 
 
 def by_name(results):
@@ -547,7 +552,7 @@ def test_the_kill_waits_for_a_batch_to_open_and_reports_which(monkeypatch):
             return self.cursor_
 
     connection = FakeConnection()
-    monkeypatch.setattr("ecomdata.infra.postgres.postgres_connection_factory", lambda: lambda: connection)
+    monkeypatch.setattr(drills, "_connection_factory", lambda: lambda: connection)
     monkeypatch.setattr(drills.time, "sleep", lambda seconds: None)
     killed = []
     stack = drills.Stack.__new__(drills.Stack)
@@ -590,7 +595,7 @@ def test_nothing_is_killed_when_no_batch_ever_opens(monkeypatch):
         def cursor(self):
             return FakeCursor()
 
-    monkeypatch.setattr("ecomdata.infra.postgres.postgres_connection_factory", lambda: FakeConnection)
+    monkeypatch.setattr(drills, "_connection_factory", lambda: FakeConnection)
     monkeypatch.setattr(drills.time, "sleep", lambda seconds: None)
     clock = iter(range(0, 10000, 30))
     monkeypatch.setattr(drills.time, "monotonic", lambda: next(clock))

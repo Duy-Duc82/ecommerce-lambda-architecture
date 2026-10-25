@@ -2,13 +2,12 @@
 
 from __future__ import annotations
 
-import argparse
-import json
 import re
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal
+from typing import Any
 from urllib.parse import quote
 
 from pyspark.sql import DataFrame, SparkSession
@@ -16,27 +15,6 @@ from pyspark.sql import functions as F
 
 from ecomdata.domain.datasets import MART_NAMES, dataset
 from ecomdata.processing.schemas import MARKETPLACE_OBSERVATION_WIRE_SCHEMA
-from ecomdata.settings import (
-    MARKETPLACE_ALLOWED_CURRENCIES,
-    MARKETPLACE_ANOMALY_IQR_MULTIPLIER,
-    MARKETPLACE_ANOMALY_MAD_THRESHOLD,
-    MARKETPLACE_ANOMALY_MIN_SAMPLES,
-    MARKETPLACE_ANOMALY_RULE_VERSION,
-    MARKETPLACE_ANOMALY_WINDOW_DAYS,
-    MARKETPLACE_BATCH_APP_NAME,
-    MARKETPLACE_BATCH_SHUFFLE_PARTITIONS,
-    MARKETPLACE_COUNTER_MAX_GAP_SECONDS,
-    MARKETPLACE_COUNTER_RULE_VERSION,
-    MARKETPLACE_FRESHNESS_RULE_VERSION,
-    MARKETPLACE_FRESHNESS_SECONDS,
-    MARKETPLACE_GOLD_DATASET,
-    MARKETPLACE_QUALITY_FUTURE_TOLERANCE_SECONDS,
-    MARKETPLACE_QUALITY_RECONCILIATION_LOOKBACK_SECONDS,
-    MARKETPLACE_QUALITY_RECONCILIATION_SETTLE_SECONDS,
-    MARKETPLACE_QUALITY_RULE_VERSION,
-    MARKETPLACE_SILVER_DATASET,
-    data_lake_uri,
-)
 
 RUN_ID_RE = re.compile(r"[a-zA-Z0-9_-]{1,64}\Z")
 
@@ -47,20 +25,24 @@ class MarketplaceBatchContext:
     as_of: datetime
     silver_uri: str
     gold_root_uri: str
-    freshness_seconds: int = MARKETPLACE_FRESHNESS_SECONDS
-    freshness_rule_version: str = MARKETPLACE_FRESHNESS_RULE_VERSION
-    counter_rule_version: str = MARKETPLACE_COUNTER_RULE_VERSION
-    counter_max_gap_seconds: int = MARKETPLACE_COUNTER_MAX_GAP_SECONDS
-    anomaly_window_days: int = MARKETPLACE_ANOMALY_WINDOW_DAYS
-    anomaly_min_samples: int = MARKETPLACE_ANOMALY_MIN_SAMPLES
-    anomaly_mad_threshold: Decimal = MARKETPLACE_ANOMALY_MAD_THRESHOLD
-    anomaly_iqr_multiplier: Decimal = MARKETPLACE_ANOMALY_IQR_MULTIPLIER
-    anomaly_rule_version: str = MARKETPLACE_ANOMALY_RULE_VERSION
-    quality_rule_version: str = MARKETPLACE_QUALITY_RULE_VERSION
-    future_tolerance_seconds: int = MARKETPLACE_QUALITY_FUTURE_TOLERANCE_SECONDS
-    reconciliation_settle_seconds: int = MARKETPLACE_QUALITY_RECONCILIATION_SETTLE_SECONDS
-    reconciliation_lookback_seconds: int = MARKETPLACE_QUALITY_RECONCILIATION_LOOKBACK_SECONDS
-    allowed_currencies: tuple[str, ...] = MARKETPLACE_ALLOWED_CURRENCIES
+    # Defaults are those of BatchSettings and QualitySettings; the batch
+    # bootstrap builds the context from the loaded settings.
+    freshness_seconds: int = 21600
+    freshness_rule_version: str = "freshness-rules.v1"
+    counter_rule_version: str = "counter-rules.v1"
+    counter_max_gap_seconds: int = 86400
+    anomaly_window_days: int = 14
+    anomaly_min_samples: int = 7
+    anomaly_mad_threshold: Decimal = Decimal("3.5")
+    anomaly_iqr_multiplier: Decimal = Decimal("1.5")
+    anomaly_rule_version: str = "anomaly-rules.v1"
+    quality_rule_version: str = "quality-rules.v2"
+    future_tolerance_seconds: int = 300
+    reconciliation_settle_seconds: int = 900
+    reconciliation_lookback_seconds: int = 172800
+    allowed_currencies: tuple[str, ...] = ("USD", "VND")
+    percentile_accuracy: int = 10000
+    sample_limit: int = 10
 
     def __post_init__(self) -> None:
         if not RUN_ID_RE.fullmatch(self.run_id):
@@ -88,6 +70,8 @@ class MarketplaceBatchContext:
             "future_tolerance_seconds",
             "reconciliation_settle_seconds",
             "reconciliation_lookback_seconds",
+            "percentile_accuracy",
+            "sample_limit",
         ):
             if getattr(self, name) <= 0:
                 raise ValueError(f"{name} must be positive")
@@ -139,21 +123,18 @@ class MarketplaceBatchResult:
     promotion_reason: str | None = None
 
 
-def build_spark() -> SparkSession:
-    from ecomdata.infra.storage import spark_hadoop_options
+@dataclass(frozen=True)
+class WarehouseDependencies:
+    """What a batch run talks to, built by the batch bootstrap and faked in tests."""
 
-    builder = (
-        SparkSession.builder.appName(MARKETPLACE_BATCH_APP_NAME)
-        .config("spark.sql.session.timeZone", "UTC")
-        .config("spark.sql.shuffle.partitions", str(MARKETPLACE_BATCH_SHUFFLE_PARTITIONS))
-        .config("spark.sql.sources.partitionOverwriteMode", "dynamic")
-    )
-    # Empty for the local profile. For any other the S3A credentials and
-    # endpoint come from the profile, which is what lets this job read and
-    # write MinIO or a cloud bucket at all (Phase 8 plan section 6.6).
-    for key, value in spark_hadoop_options().items():
-        builder = builder.config(f"spark.hadoop.{key}", value)
-    return builder.getOrCreate()
+    spark_factory: Callable[[], SparkSession]
+    read_crawl_audit: Callable[[SparkSession], tuple[DataFrame, DataFrame]]
+    writer: Callable[[str, str, bytes], str]
+    reader: Callable[[str, str], bytes | None]
+    audit: Any = None
+    quality_repository: Any = None
+    cache_publisher: Any = None
+    lock: Callable[[], Any] | None = None
 
 
 def read_marketplace_silver(spark: SparkSession, silver_uri: str) -> DataFrame:
@@ -275,17 +256,15 @@ def deduplicate_marketplace_observations(flat: DataFrame) -> DataFrame:
     return marked.drop("_content_hash").dropDuplicates(["observation_id"])
 
 
-def read_crawl_audit(spark: SparkSession) -> tuple[DataFrame, DataFrame]:
+def read_crawl_audit(spark: SparkSession, jdbc_url: str, properties: Mapping[str, str]) -> tuple[DataFrame, DataFrame]:
     from ecomdata.processing.batch.marts import attach_marketplace_code
-    from ecomdata.settings import POSTGRES_DB, POSTGRES_HOST, POSTGRES_PASSWORD, POSTGRES_PORT, POSTGRES_USER
 
-    jdbc = f"jdbc:postgresql://{POSTGRES_HOST}:{POSTGRES_PORT}/{POSTGRES_DB}"
-    props = {"user": POSTGRES_USER, "password": POSTGRES_PASSWORD, "driver": "org.postgresql.Driver"}
-    attempts = spark.read.jdbc(jdbc, "audit.crawl_request_attempt", properties=props)
-    runs = spark.read.jdbc(jdbc, "audit.crawl_run", properties=props)
+    props = dict(properties)
+    attempts = spark.read.jdbc(jdbc_url, "audit.crawl_request_attempt", properties=props)
+    runs = spark.read.jdbc(jdbc_url, "audit.crawl_run", properties=props)
     # Neither attempt nor run rows name a marketplace code; the frontier does.
     # Resolving it here keeps the marts free of a third audit frame.
-    frontier = spark.read.jdbc(jdbc, "audit.crawl_frontier", properties=props)
+    frontier = spark.read.jdbc(jdbc_url, "audit.crawl_frontier", properties=props)
     return attach_marketplace_code(attempts, frontier), runs
 
 
@@ -314,36 +293,32 @@ def write_run_scoped_gold(
     return results
 
 
-def default_batch_lock():
-    from ecomdata.infra.postgres import postgres_connection_factory
-    from ecomdata.processing.batch.lock import exclusive_batch
-
-    return exclusive_batch(postgres_connection_factory())
-
-
-def run_marketplace_warehouse(context: MarketplaceBatchContext, *, lock=None, **options) -> MarketplaceBatchResult:
+def run_marketplace_warehouse(
+    context: MarketplaceBatchContext, *, deps: WarehouseDependencies, **options
+) -> MarketplaceBatchResult:
     """Run one batch under the exclusive batch lock (Phase 8 plan section 6.5).
 
     The lock is taken before anything else, even under ``publish_cache=False``,
     which still reads the crawl audit from PostgreSQL. A run refused with
     ``BatchAlreadyRunning`` has therefore started nothing: no Spark session,
-    no audit row, no Gold. ``lock`` is a zero-argument callable returning a
-    context manager; the default is the PostgreSQL advisory lock.
+    no audit row, no Gold. ``deps.lock`` is a zero-argument callable returning
+    a context manager (the PostgreSQL advisory lock in production).
     """
-    with (lock or default_batch_lock)():
-        return _run_marketplace_warehouse(context, **options)
+    from contextlib import nullcontext
+
+    with (deps.lock or nullcontext)():
+        return _run_marketplace_warehouse(context, deps=deps, **options)
 
 
 def _run_marketplace_warehouse(
     context: MarketplaceBatchContext,
     *,
+    deps: WarehouseDependencies,
     publish_cache: bool = True,
     resume: bool = False,
     spark: SparkSession | None = None,
     allow_backfill: bool = False,
     quality_only: bool = False,
-    writer=None,
-    reader=None,
     serving_gold_root_uri: str | None = None,
 ) -> MarketplaceBatchResult:
     """Read Silver, build Gold, judge it, and publish only if it earns it.
@@ -371,19 +346,14 @@ def _run_marketplace_warehouse(
     from ecomdata.processing.batch.marts import build_marketplace_marts
     from ecomdata.processing.batch.quality import QualityGateFailure, decide, evaluate_quality_gates
 
-    if writer is None or reader is None:
-        from ecomdata.infra.object_store import get_bytes, put_bytes
-
-        writer, reader = writer or put_bytes, reader or get_bytes
+    writer, reader = deps.writer, deps.reader
     own_spark = spark is None
-    spark = spark or build_spark()
+    spark = spark or deps.spark_factory()
     observations = None
     audit = None
     try:
         if publish_cache:
-            from ecomdata.processing.batch.repositories import MarketplaceBatchAudit
-
-            audit = MarketplaceBatchAudit.from_settings()
+            audit = deps.audit
             audit.start_run(context, datetime.now(UTC), resume=resume)
         wire = read_marketplace_silver(spark, context.silver_uri)
         # Flattening still validates every Silver row, so corruption fails the
@@ -392,7 +362,7 @@ def _run_marketplace_warehouse(
         observations = deduplicate_marketplace_observations(
             observations_as_of(flatten_marketplace_observations(wire), context.as_of)
         ).cache()
-        attempts, runs = crawl_audit_as_of(*read_crawl_audit(spark), context.as_of)
+        attempts, runs = crawl_audit_as_of(*deps.read_crawl_audit(spark), context.as_of)
         marts = build_marketplace_marts(observations, attempts, runs, context)
         writes = write_run_scoped_gold(marts, context)
         silver_rows = observations.count()
@@ -412,9 +382,7 @@ def _run_marketplace_warehouse(
         if audit:
             # Its own transaction, before the decision is acted on. Evidence
             # for a refused run is the whole point of the gate.
-            from ecomdata.processing.batch.repositories import MarketplaceQualityRepository
-
-            MarketplaceQualityRepository.from_settings().record(results, run_id=context.run_id)
+            deps.quality_repository.record(results, run_id=context.run_id)
 
         previous = read_current_manifest(reader=reader)
         # A pointer that already names this run (a rerun, or a promotion whose
@@ -499,9 +467,7 @@ def _run_marketplace_warehouse(
             )
 
         if publish_cache:
-            from ecomdata.processing.batch.repositories import MarketplaceCachePublisher
-
-            publisher = MarketplaceCachePublisher.from_settings()
+            publisher = deps.cache_publisher
             staged = publisher.stage(marts, run_id=context.run_id)
             publisher.publish(
                 staged, run_id=context.run_id, published_at=context.as_of, quality=decision, manifest_uri=manifest_uri
@@ -551,80 +517,10 @@ def _run_marketplace_warehouse(
             spark.stop()
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser(description="Marketplace temporal warehouse")
-    parser.add_argument("--run-id", required=True)
-    parser.add_argument("--as-of", required=True)
-    parser.add_argument("--silver-uri", default=data_lake_uri("silver", MARKETPLACE_SILVER_DATASET))
-    serving_gold_root_uri = data_lake_uri("gold", MARKETPLACE_GOLD_DATASET)
-    parser.add_argument(
-        "--gold-root-uri",
-        default=serving_gold_root_uri,
-        help="a root other than the default is a scratch run that never publishes",
-    )
-    parser.add_argument("--skip-postgres", action="store_true")
-    parser.add_argument(
-        "--resume", action="store_true", help="resume an existing non-SUCCEEDED run with the same context"
-    )
-    parser.add_argument("--allow-backfill", action="store_true", help="let an older as-of become the published version")
-    parser.add_argument(
-        "--quality-only",
-        action="store_true",
-        help="write Gold and the run manifest, then stop; never promote or publish",
-    )
-    args = parser.parse_args()
-    from ecomdata.processing.batch.lock import ALREADY_RUNNING_EXIT_CODE, BatchAlreadyRunning
-    from ecomdata.processing.batch.quality import QualityGateFailure
+def main(argv: list[str] | None = None) -> None:
+    from ecomdata.processing.batch.bootstrap import warehouse_main
 
-    context = MarketplaceBatchContext(
-        args.run_id, datetime.fromisoformat(args.as_of.replace("Z", "+00:00")), args.silver_uri, args.gold_root_uri
-    )
-    try:
-        result = run_marketplace_warehouse(
-            context,
-            publish_cache=not args.skip_postgres,
-            resume=args.resume,
-            allow_backfill=args.allow_backfill,
-            quality_only=args.quality_only,
-            serving_gold_root_uri=serving_gold_root_uri,
-        )
-    except QualityGateFailure as refusal:
-        # A CI log alone should be enough to see why publication was refused.
-        print(
-            json.dumps(
-                {
-                    "run_id": context.run_id,
-                    "status": "QUALITY_FAILED",
-                    "quality_status": "FAIL",
-                    "mandatory_failure_count": refusal.decision.mandatory_failures,
-                    "failing_checks": list(refusal.failing),
-                },
-                sort_keys=True,
-            )
-        )
-        raise SystemExit(1) from None
-    except BatchAlreadyRunning as refusal:
-        # Nothing was started, so there is nothing to clean up or audit.
-        print(
-            json.dumps({"run_id": context.run_id, "status": "ALREADY_RUNNING", "lock_key": refusal.key}, sort_keys=True)
-        )
-        raise SystemExit(ALREADY_RUNNING_EXIT_CODE) from None
-    print(
-        json.dumps(
-            {
-                "run_id": result.run_id,
-                "status": result.status,
-                "silver_rows": result.silver_rows,
-                "dataset_counts": result.dataset_counts,
-                "quality_status": result.quality_status,
-                "mandatory_failure_count": result.mandatory_failure_count,
-                "manifest_uri": result.manifest_uri,
-                "manifest_promoted": result.manifest_promoted,
-                "promotion_reason": result.promotion_reason,
-            },
-            sort_keys=True,
-        )
-    )
+    warehouse_main(argv)
 
 
 if __name__ == "__main__":

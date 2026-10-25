@@ -23,15 +23,15 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 from urllib.parse import quote
 
-from ecomdata.domain.datasets import MARTS
-from ecomdata.settings import MARKETPLACE_GOLD_DATASET, MARKETPLACE_MANIFEST_SCHEMA_VERSION
+from ecomdata.domain.datasets import GOLD_DATASET, MARTS
 
 if TYPE_CHECKING:
     from ecomdata.processing.batch.quality import QualityDecision
     from ecomdata.processing.batch.warehouse import GoldWriteResult, MarketplaceBatchContext
 
 GOLD_ZONE = "gold"
-CURRENT_POINTER_PATH = f"{MARKETPLACE_GOLD_DATASET}/current.json"
+MANIFEST_SCHEMA_VERSION = "marketplace-gold-manifest.v1"
+CURRENT_POINTER_PATH = f"{GOLD_DATASET}/current.json"
 
 PROMOTED = "PROMOTED"
 ALREADY_CURRENT = "ALREADY_CURRENT"
@@ -48,7 +48,7 @@ _DAILY_PARTITIONS = {d.name: d.partition_columns for d in MARTS if d.partition_c
 
 
 def run_manifest_path(run_id: str) -> str:
-    return f"{MARKETPLACE_GOLD_DATASET}/manifests/run_id={quote(run_id, safe='')}/manifest.json"
+    return f"{GOLD_DATASET}/manifests/run_id={quote(run_id, safe='')}/manifest.json"
 
 
 @dataclass(frozen=True)
@@ -107,7 +107,7 @@ def build_gold_manifest(
     )
     gold_run_uri = _run_root(context)
     return GoldManifest(
-        manifest_schema_version=MARKETPLACE_MANIFEST_SCHEMA_VERSION,
+        manifest_schema_version=MANIFEST_SCHEMA_VERSION,
         run_id=context.run_id,
         as_of=context.as_of,
         silver_uri=context.silver_uri,
@@ -172,7 +172,7 @@ def serialize_manifest(manifest: GoldManifest) -> bytes:
 def parse_manifest(payload: bytes) -> GoldManifest:
     document = json.loads(payload.decode("utf-8"))
     version = document.get("manifest_schema_version")
-    if version != MARKETPLACE_MANIFEST_SCHEMA_VERSION:
+    if version != MANIFEST_SCHEMA_VERSION:
         raise ValueError(f"unsupported manifest schema version: {version!r}")
     return GoldManifest(
         manifest_schema_version=version,

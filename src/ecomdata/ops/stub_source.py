@@ -36,6 +36,8 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
+from ecomdata.ops.bootstrap import settings as _settings
+
 FIXTURE = Path(__file__).resolve().parents[3] / "tests" / "fixtures" / "tiki_listing_sample.json"
 MODES = ("ok", "429", "500", "timeout", "drift")
 # Percent of the fixture price, by serve counter modulo 4. 95 is a plain
@@ -201,8 +203,6 @@ def serve(state: StubState, *, host: str = "0.0.0.0", port: int = 8000) -> Threa
 
 
 def main() -> None:
-    from ecomdata.settings import CRAWL_HTTP_TIMEOUT_SECONDS
-
     parser = argparse.ArgumentParser(description="Offline Tiki listing stub for the smoke and the drills")
     parser.add_argument("--port", type=int, default=8000)
     parser.add_argument("--last-page", type=int, default=2)
@@ -214,7 +214,7 @@ def main() -> None:
     )
     args = parser.parse_args()
     state = load_state(
-        last_page=args.last_page, timeout_seconds=CRAWL_HTTP_TIMEOUT_SECONDS + 2, rows_per_page=args.rows_per_page
+        last_page=args.last_page, timeout_seconds=_settings().crawl.http_timeout_seconds + 2, rows_per_page=args.rows_per_page
     )
     server = serve(state, port=args.port)
     print(json.dumps({"event": "stub_listening", "port": args.port}), flush=True)

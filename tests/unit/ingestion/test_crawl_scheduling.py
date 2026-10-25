@@ -18,6 +18,7 @@ from ecomdata.domain.acquisition import (
 )
 from ecomdata.domain.observations import ResourceType
 from ecomdata.ingestion.scheduling import (
+    DEFAULT_CADENCE_MINUTES,
     CrawlTask,
     CrawlTaskStatus,
     CrawlTier,
@@ -30,11 +31,6 @@ from ecomdata.ingestion.scheduling import (
     make_crawl_task_id,
     next_scheduled_for,
     parse_retry_after,
-)
-from ecomdata.settings import (
-    CRAWL_ACTIVE_CADENCE_MINUTES,
-    CRAWL_COLD_CADENCE_MINUTES,
-    CRAWL_NORMAL_CADENCE_MINUTES,
 )
 from tests.paths import REPO_ROOT
 
@@ -120,15 +116,23 @@ def test_resource_type_must_be_an_enum():
 
 # 5
 def test_tier_cadences_use_the_configured_values():
-    assert cadence_minutes(CrawlTier.ACTIVE) == CRAWL_ACTIVE_CADENCE_MINUTES
-    assert cadence_minutes(CrawlTier.NORMAL) == CRAWL_NORMAL_CADENCE_MINUTES
-    assert cadence_minutes(CrawlTier.COLD) == CRAWL_COLD_CADENCE_MINUTES
+    assert cadence_minutes(CrawlTier.ACTIVE) == DEFAULT_CADENCE_MINUTES["ACTIVE"]
+    assert cadence_minutes(CrawlTier.NORMAL) == DEFAULT_CADENCE_MINUTES["NORMAL"]
+    assert cadence_minutes(CrawlTier.COLD) == DEFAULT_CADENCE_MINUTES["COLD"]
     assert cadence_minutes(CrawlTier.ACTIVE) < cadence_minutes(CrawlTier.COLD)
+
+
+def test_long_term_tiers_and_configured_cadences():
+    assert cadence_minutes(CrawlTier.HOT) == 120
+    assert cadence_minutes(CrawlTier.SWEEP) == 1440
+    configured = {**DEFAULT_CADENCE_MINUTES, "SWEEP": 2880}
+    assert cadence_minutes(CrawlTier.SWEEP, configured) == 2880
+    assert next_scheduled_for(CrawlTier.SWEEP, NOW, configured) == NOW + timedelta(days=2)
 
 
 def test_the_next_occurrence_is_one_cadence_later():
     assert next_scheduled_for(CrawlTier.ACTIVE, NOW) == NOW + timedelta(
-        minutes=CRAWL_ACTIVE_CADENCE_MINUTES
+        minutes=DEFAULT_CADENCE_MINUTES["ACTIVE"]
     )
 
 

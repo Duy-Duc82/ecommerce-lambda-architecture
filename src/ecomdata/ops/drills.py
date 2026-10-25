@@ -35,6 +35,10 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+from ecomdata.ops.bootstrap import connection_factory as _connection_factory
+from ecomdata.ops.bootstrap import object_store as _object_store
+from ecomdata.ops.bootstrap import settings as _settings
+
 ROOT = Path(__file__).resolve().parents[3]
 RECORDS = ROOT / "data" / "ops" / "drills"
 COMPOSE = ["docker", "compose", "-f", str(ROOT / "docker-compose.yml")]
@@ -222,13 +226,12 @@ class Stack:
         itself needs. Returns the batch it aimed at; whether the kill actually
         landed inside it is decided afterwards, by the audit row.
         """
-        from ecomdata.infra.postgres import postgres_connection_factory
 
         deadline = time.monotonic() + timeout
         # One connection, held open for the whole poll: the factory hands out
         # a context manager, and its transaction is what keeps each read from
         # paying a fresh connection's 20 ms.
-        with postgres_connection_factory()() as connection, connection.cursor() as cur:
+        with _connection_factory()() as connection, connection.cursor() as cur:
             connection.autocommit = True
             while True:
                 cur.execute(
@@ -301,9 +304,8 @@ class Stack:
     def execute(self, sql: str, params: tuple = ()) -> None:
         """A statement with no result set. `query` always fetches, and DDL
         has nothing to fetch, which psycopg2 reports as "no results to fetch"."""
-        from ecomdata.infra.postgres import postgres_connection_factory
 
-        with postgres_connection_factory()() as conn, conn.cursor() as cur:
+        with _connection_factory()() as conn, conn.cursor() as cur:
             cur.execute(sql, params)
 
     def db_now(self) -> datetime:
@@ -311,16 +313,14 @@ class Stack:
         return now
 
     def activate(self) -> int:
-        from ecomdata.infra.postgres import postgres_connection_factory
         from ecomdata.ops.smoke import activate
 
-        return activate(postgres_connection_factory())
+        return activate(_connection_factory())
 
     def park(self) -> int:
-        from ecomdata.infra.postgres import postgres_connection_factory
         from ecomdata.ops.smoke import park
 
-        return park(postgres_connection_factory())
+        return park(_connection_factory())
 
     def start_crawler(self, **overrides: str) -> None:
         self.activate()
@@ -557,9 +557,7 @@ class Stack:
         import kafka
 
         from ecomdata.domain.topics import MARKETPLACE_OBSERVATIONS
-        from ecomdata.settings import KAFKA_BOOTSTRAP_SERVERS
-
-        consumer = kafka.KafkaConsumer(bootstrap_servers=KAFKA_BOOTSTRAP_SERVERS, consumer_timeout_ms=10000)
+        consumer = kafka.KafkaConsumer(bootstrap_servers=_settings().kafka.bootstrap_servers, consumer_timeout_ms=10000)
         try:
             partitions = consumer.partitions_for_topic(MARKETPLACE_OBSERVATIONS.name)
             if not partitions:
@@ -570,9 +568,7 @@ class Stack:
             consumer.close()
 
     def silver_object_count(self) -> int:
-        from ecomdata.settings import MARKETPLACE_SILVER_DATASET, data_lake_uri
-
-        return len(self.src.list_objects(data_lake_uri("silver", MARKETPLACE_SILVER_DATASET)))
+        return len(self.src.list_objects(_object_store().uri("silver", _settings().batch.silver_dataset)))
 
     # -- D11 only: a second Compose project, and JSON out of a tool container --
     @staticmethod
@@ -648,9 +644,7 @@ class Stack:
         return validate(self.src, default_limits())
 
     def es_change_ids(self) -> list[str]:
-        from ecomdata.settings import ES_INDEX_MARKETPLACE_CHANGES
-
-        return [doc["event_id"] for doc in self.src.es_documents(ES_INDEX_MARKETPLACE_CHANGES)]
+        return [doc["event_id"] for doc in self.src.es_documents(_settings().es.index_changes)]
 
     def es_changes_covering(self, members: Iterable[str], *, timeout: float = 60) -> list[str]:
         """Change ids in Elasticsearch, once every one of ``members`` is searchable.
@@ -726,8 +720,6 @@ def restore(stack: Stack, rec: Record) -> list[str]:
 
 def d1_source_errors(stack: Stack, rec: Record) -> None:
     """429, then 500, then a timeout: classified, retried, circuit opened, then recovered."""
-    from ecomdata.settings import CRAWL_CIRCUIT_FAILURE_THRESHOLD
-
     since = stack.db_now()
     expected = {"429": "RATE_LIMITED", "500": "SERVER_ERROR", "timeout": "TRANSIENT_NETWORK"}
     stack.stub_mode("429")
@@ -765,7 +757,7 @@ def d1_source_errors(stack: Stack, rec: Record) -> None:
         timeout=180,
         what="the circuit to open",
     )
-    rec.step("observe", circuit=state, threshold=CRAWL_CIRCUIT_FAILURE_THRESHOLD)
+    rec.step("observe", circuit=state, threshold=_settings().crawl.circuit_failure_threshold)
     stack.stub_mode("ok")
     recovered_from = stack.db_now()
     rec.step("recover", stub_mode="ok")
@@ -826,9 +818,7 @@ def d3_minio_down_during_sink(stack: Stack, rec: Record) -> None:
     """MinIO stops while the sink has work: no commit, lag grows, no DLQ; then it catches up."""
     from ecomdata.domain.topics import MARKETPLACE_OBSERVATIONS
     from ecomdata.ops.smoke import silver_condition, smoke_targets
-    from ecomdata.settings import KAFKA_SILVER_CONSUMER_GROUP
-
-    lag_of = lambda: stack.src.consumer_lag(KAFKA_SILVER_CONSUMER_GROUP, MARKETPLACE_OBSERVATIONS.name)  # noqa: E731
+    lag_of = lambda: stack.src.consumer_lag(_settings().kafka.silver_consumer_group, MARKETPLACE_OBSERVATIONS.name)  # noqa: E731
     dlq_before = len(stack.src.dlq_stages())
     stack.stop("silver-sink")
     since = stack.db_now()
@@ -1240,10 +1230,8 @@ def _settled_crawl_run(stack: Stack, as_of: datetime) -> tuple[str, str, datetim
     mismatch is only seen if it joins one of those.
     """
     from ecomdata.ops.smoke import smoke_targets
-    from ecomdata.settings import MARKETPLACE_QUALITY_RECONCILIATION_LOOKBACK_SECONDS
-
     newest = as_of - timedelta(seconds=BATCH_SETTLE_SECONDS)
-    oldest = as_of - timedelta(seconds=MARKETPLACE_QUALITY_RECONCILIATION_LOOKBACK_SECONDS)
+    oldest = as_of - timedelta(seconds=_settings().quality.reconciliation_lookback_seconds)
     rows = stack.query(
         "SELECT a.crawl_run_id, a.task_id, r.completed_at FROM audit.crawl_request_attempt a "
         "JOIN audit.crawl_run r USING (crawl_run_id) JOIN audit.crawl_frontier f ON f.task_id = a.task_id "

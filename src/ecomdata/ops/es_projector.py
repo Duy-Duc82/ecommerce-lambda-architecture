@@ -43,6 +43,9 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any, Protocol
 
+from ecomdata.ops.bootstrap import connection_factory as _connection_factory
+from ecomdata.ops.bootstrap import settings as _settings
+
 # ---------------------------------------------------------------------------
 # Sources
 # ---------------------------------------------------------------------------
@@ -156,8 +159,6 @@ def _row(columns: Sequence[str], row: Sequence[Any]) -> dict:
 
 
 def source_health_document(row: Sequence[Any], *, last_observation: str | None, now: datetime) -> Projection:
-    from ecomdata.settings import ES_INDEX_MARKETPLACE_SOURCE_HEALTH
-
     values = _row(SOURCE_HEALTH_COLUMNS, row)
     opened_until = _instant(values["opened_until"])
     observed = _instant(last_observation)
@@ -177,12 +178,10 @@ def source_health_document(row: Sequence[Any], *, last_observation: str | None, 
         "freshness_seconds": None if observed is None else int((now - observed).total_seconds()),
         "projected_at": _iso(now),
     }
-    return Projection(ES_INDEX_MARKETPLACE_SOURCE_HEALTH, str(values["marketplace_code"]), document)
+    return Projection(_settings().es.index_source_health, str(values["marketplace_code"]), document)
 
 
 def crawl_attempt_document(row: Sequence[Any]) -> Projection:
-    from ecomdata.settings import ES_INDEX_MARKETPLACE_CRAWL_ATTEMPTS
-
     values = _row(CRAWL_ATTEMPT_COLUMNS, row)
     document = {
         "attempt_id": str(values["attempt_id"]),
@@ -204,12 +203,10 @@ def crawl_attempt_document(row: Sequence[Any]) -> Projection:
         "error_kind": values["error_kind"],
         "error_message": values["error_message"],
     }
-    return Projection(ES_INDEX_MARKETPLACE_CRAWL_ATTEMPTS, str(values["attempt_id"]), document)
+    return Projection(_settings().es.index_crawl_attempts, str(values["attempt_id"]), document)
 
 
 def speed_batch_document(row: Sequence[Any]) -> Projection:
-    from ecomdata.settings import ES_INDEX_MARKETPLACE_SPEED_BATCHES
-
     values = _row(SPEED_BATCH_COLUMNS, row)
     started, completed = _instant(values["started_at"]), _instant(values["completed_at"])
     document = {
@@ -239,7 +236,7 @@ def speed_batch_document(row: Sequence[Any]) -> Projection:
         "error_message": values["error_message"],
     }
     doc_id = f"{values['query_name']}:{values['query_id']}:{values['batch_id']}"
-    return Projection(ES_INDEX_MARKETPLACE_SPEED_BATCHES, doc_id, document)
+    return Projection(_settings().es.index_speed_batches, doc_id, document)
 
 
 # payload_text is deliberately not projected. It carries up to a megabyte of
@@ -265,8 +262,6 @@ DLQ_DOCUMENT_FIELDS = (
 
 
 def dlq_document(record: dict) -> Projection:
-    from ecomdata.settings import ES_INDEX_MARKETPLACE_DLQ
-
     dlq_id = record.get("dlq_id")
     if not dlq_id:
         raise ValueError("a DLQ record without dlq_id has no deterministic document id")
@@ -274,7 +269,7 @@ def dlq_document(record: dict) -> Projection:
     document["failed_at"] = _iso(record.get("failed_at"))
     for name in ("source_partition", "source_offset"):
         document[name] = None if record.get(name) is None else int(record[name])
-    return Projection(ES_INDEX_MARKETPLACE_DLQ, str(dlq_id), document)
+    return Projection(_settings().es.index_dlq, str(dlq_id), document)
 
 
 def bulk_body(projections: Iterable[Projection]) -> list[dict]:
@@ -381,9 +376,8 @@ class LiveProjectorSources:
 
     def query(self, sql: str, params: Sequence[Any] = ()) -> list[tuple]:
         if self._connection_factory is None:
-            from ecomdata.infra.postgres import postgres_connection_factory
 
-            self._connection_factory = postgres_connection_factory()
+            self._connection_factory = _connection_factory()
         with self._connection_factory() as conn, conn.cursor() as cur:
             cur.execute(sql, tuple(params))
             return list(cur.fetchall())
@@ -392,9 +386,7 @@ class LiveProjectorSources:
         if self._redis is None:
             from redis import Redis
 
-            from ecomdata.settings import REDIS_DB, REDIS_HOST, REDIS_PORT
-
-            self._redis = Redis(host=REDIS_HOST, port=REDIS_PORT, db=REDIS_DB)
+            self._redis = Redis(host=_settings().redis.host, port=_settings().redis.port, db=_settings().redis.db)
         value = self._redis.get(key)
         return value.decode("utf-8") if isinstance(value, bytes) else value
 
@@ -403,12 +395,10 @@ class LiveProjectorSources:
             from kafka import KafkaConsumer
 
             from ecomdata.domain.topics import MARKETPLACE_OBSERVATIONS_DLQ
-            from ecomdata.settings import KAFKA_BOOTSTRAP_SERVERS, KAFKA_DLQ_PROJECTOR_GROUP
-
             self._consumer = KafkaConsumer(
                 MARKETPLACE_OBSERVATIONS_DLQ.name,
-                bootstrap_servers=KAFKA_BOOTSTRAP_SERVERS,
-                group_id=KAFKA_DLQ_PROJECTOR_GROUP,
+                bootstrap_servers=_settings().kafka.bootstrap_servers,
+                group_id=_settings().kafka.dlq_projector_group,
                 enable_auto_commit=False,
                 auto_offset_reset="earliest",
             )
@@ -475,25 +465,18 @@ def main(argv: list[str] | None = None) -> int:
     from ecomdata.infra.heartbeat import heartbeat
     from ecomdata.infra.lifecycle import StopSignal, install_signal_handlers
     from ecomdata.serving.kibana.marketplace_index_templates import ensure_projector_indices, install_index_templates
-    from ecomdata.settings import (
-        ES_HOST,
-        MARKETPLACE_OPS_PROJECT_INTERVAL_SECONDS,
-        MARKETPLACE_OPS_PROJECT_OVERLAP_SECONDS,
-        SERVICE_HEARTBEAT_FILE,
-    )
-
-    interval = MARKETPLACE_OPS_PROJECT_INTERVAL_SECONDS if args.interval is None else args.interval
+    interval = _settings().service.project_interval_seconds if args.interval is None else args.interval
     stop = StopSignal()
     install_signal_handlers(stop)
-    beat = heartbeat(SERVICE_HEARTBEAT_FILE)
-    es = Elasticsearch(ES_HOST)
+    beat = heartbeat(_settings().service.heartbeat_file)
+    es = Elasticsearch(_settings().es.host)
     sources = LiveProjectorSources()
     # The templates must exist before the first document creates the index,
     # and the indices before a dashboard panel asks Elasticsearch about them.
     install_index_templates(es)
     ensure_projector_indices(es)
     projector = Projector(
-        sources=sources, bulk=elasticsearch_bulk(es), overlap_seconds=MARKETPLACE_OPS_PROJECT_OVERLAP_SECONDS
+        sources=sources, bulk=elasticsearch_bulk(es), overlap_seconds=_settings().service.project_overlap_seconds
     )
     rebuild = args.rebuild
     # Phase 9 plan section 6.3: the projector already wakes every interval on

@@ -32,6 +32,10 @@ from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any
 
+from ecomdata.ops.bootstrap import connection_factory as _connection_factory
+from ecomdata.ops.bootstrap import object_store as _object_store
+from ecomdata.ops.bootstrap import settings as _settings
+
 COMPONENTS = ("minio", "postgres", "elasticsearch", "kafka")
 SCOPE_DEPTH = 2
 
@@ -171,30 +175,25 @@ def take_snapshot(
 
 
 def live_collectors() -> dict[str, Callable[[], list[Measure]]]:
-    from ecomdata.settings import ES_HOST, MINIO_BUCKETS
-
     def minio() -> list[Measure]:
-        from ecomdata.infra.object_store import _client
-        from ecomdata.infra.storage import active_profile
 
-        client = _client(active_profile())
+        client = _object_store().client
         listings = {}
-        for bucket in sorted(set(MINIO_BUCKETS.values())):
+        for bucket in sorted(set(_settings().storage.buckets.values())):
             if client.bucket_exists(bucket):
                 listings[bucket] = [(o.object_name, o.size) for o in client.list_objects(bucket, recursive=True)]
         return measure_minio(listings)
 
     def postgres() -> list[Measure]:
-        from ecomdata.infra.postgres import postgres_connection_factory
 
-        with postgres_connection_factory()() as conn, conn.cursor() as cur:
+        with _connection_factory()() as conn, conn.cursor() as cur:
             cur.execute(POSTGRES_SQL)
             return measure_postgres(cur.fetchall())
 
     def elasticsearch() -> list[Measure]:
         from elasticsearch import Elasticsearch
 
-        es = Elasticsearch(ES_HOST)
+        es = Elasticsearch(_settings().es.host)
         try:
             return measure_elasticsearch(dict(es.indices.stats(metric="store,docs")))
         finally:
@@ -229,9 +228,8 @@ class DailySnapshot:
 
 
 def run_snapshot(now: datetime | None = None) -> dict[str, Any]:
-    from ecomdata.infra.postgres import postgres_connection_factory
 
-    report = take_snapshot(live_collectors(), postgres_connection_factory(), now=now or datetime.now(UTC))
+    report = take_snapshot(live_collectors(), _connection_factory(), now=now or datetime.now(UTC))
     print(json.dumps(report, sort_keys=True), flush=True)
     return report
 
@@ -392,9 +390,8 @@ def growth_markdown(report: Mapping[str, Any]) -> str:
 def run_growth_report(out_dir: str) -> int:
     import shutil
 
-    from ecomdata.infra.postgres import postgres_connection_factory
 
-    with postgres_connection_factory()() as conn, conn.cursor() as cur:
+    with _connection_factory()() as conn, conn.cursor() as cur:
         cur.execute("SELECT snapshot_date, component, scope, bytes, objects FROM audit.storage_snapshot")
         rows = [dict(zip(("snapshot_date", "component", "scope", "bytes", "objects"), r, strict=False)) for r in cur.fetchall()]
     mount = Path(os.environ.get("KAFKA_DATA_MOUNT", "/kafka-data"))

@@ -8,6 +8,7 @@ and asserted exactly.
 from __future__ import annotations
 
 import socket
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
@@ -26,17 +27,21 @@ from ecomdata.domain.acquisition import (
 )
 from ecomdata.domain.identity import deterministic_id
 from ecomdata.domain.observations import ResourceType
-from ecomdata.settings import (
-    CRAWL_ACTIVE_CADENCE_MINUTES,
-    CRAWL_COLD_CADENCE_MINUTES,
-    CRAWL_NORMAL_CADENCE_MINUTES,
-)
 
 
 class CrawlTier(str, Enum):
     ACTIVE = "ACTIVE"
     NORMAL = "NORMAL"
     COLD = "COLD"
+    # Long-term collection: the hand-picked categories every 2 hours, and the
+    # whole discovered category tree once a day.
+    HOT = "HOT"
+    SWEEP = "SWEEP"
+
+
+# Minutes between two occurrences of a target, per tier. A deployment
+# overrides them through CRAWL_<TIER>_CADENCE_MINUTES.
+DEFAULT_CADENCE_MINUTES: Mapping[str, int] = {"ACTIVE": 60, "NORMAL": 240, "COLD": 720, "HOT": 120, "SWEEP": 1440}
 
 
 class CrawlTaskStatus(str, Enum):
@@ -205,19 +210,17 @@ def make_crawl_task_id(
     )
 
 
-def cadence_minutes(tier: CrawlTier) -> int:
+def cadence_minutes(tier: CrawlTier, cadences: Mapping[str, int] = DEFAULT_CADENCE_MINUTES) -> int:
     if not isinstance(tier, CrawlTier):
         raise ValueError("tier must be a CrawlTier")
-    return {
-        CrawlTier.ACTIVE: CRAWL_ACTIVE_CADENCE_MINUTES,
-        CrawlTier.NORMAL: CRAWL_NORMAL_CADENCE_MINUTES,
-        CrawlTier.COLD: CRAWL_COLD_CADENCE_MINUTES,
-    }[tier]
+    return int(cadences.get(tier.value, DEFAULT_CADENCE_MINUTES[tier.value]))
 
 
-def next_scheduled_for(tier: CrawlTier, after: datetime) -> datetime:
+def next_scheduled_for(
+    tier: CrawlTier, after: datetime, cadences: Mapping[str, int] = DEFAULT_CADENCE_MINUTES
+) -> datetime:
     """The next occurrence of a target one cadence after the given time."""
-    return v.aware_utc(after, "after", error=TypeError) + timedelta(minutes=cadence_minutes(tier))
+    return v.aware_utc(after, "after", error=TypeError) + timedelta(minutes=cadence_minutes(tier, cadences))
 
 
 def classify_failure(error: Exception, http_status: int | None = None) -> FailureKind:

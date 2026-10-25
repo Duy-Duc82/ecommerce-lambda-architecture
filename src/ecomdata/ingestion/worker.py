@@ -10,7 +10,7 @@ them.
 """
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal
@@ -22,6 +22,7 @@ from ecomdata.domain.observations import CrawlRun, CrawlRunStatus
 from ecomdata.ingestion.audit import CrawlAttemptAudit, CrawlAuditRepository
 from ecomdata.ingestion.frontier import LeaseLostError, PostgresCrawlFrontier
 from ecomdata.ingestion.scheduling import (
+    DEFAULT_CADENCE_MINUTES,
     CrawlTask,
     FailureKind,
     RetryPolicy,
@@ -85,6 +86,7 @@ class CrawlWorker:
         circuit_threshold: int,
         circuit_open_seconds: int,
         jitter: Callable[[], Decimal] = lambda: Decimal("0.5"),
+        cadence_minutes: Mapping[str, int] = DEFAULT_CADENCE_MINUTES,
     ):
         if not callable(executor):
             raise TypeError("executor must be callable")
@@ -105,6 +107,7 @@ class CrawlWorker:
         self.circuit_threshold = circuit_threshold
         self.circuit_open_seconds = circuit_open_seconds
         self.jitter = jitter
+        self.cadence_minutes = dict(cadence_minutes)
 
     def run_once(self, *, crawl_run_id_for: Callable[[CrawlTask], str]) -> CycleResult:
         """Run one polling cycle. Never sleeps; an outer CLI owns the interval."""
@@ -211,7 +214,7 @@ class CrawlWorker:
             task_id=task.task_id,
             worker_id=self.worker_id,
             completed_at=completed_at,
-            next_scheduled_for=next_scheduled_for(task.tier, completed_at),
+            next_scheduled_for=next_scheduled_for(task.tier, completed_at, self.cadence_minutes),
         )
         self.audit.record_source_success(task.marketplace_code, completed_at)
         self._finish(run, completed_at, CrawlRunStatus.COMPLETED, succeeded=1, failed=0)

@@ -380,7 +380,9 @@ STUB_LISTING = "http://stub-source:8080/api/personalish/v1/blocks/listings"
 
 
 def test_the_default_listing_url_is_the_configured_setting():
-    from ecomdata.settings import TIKI_LISTING_URL
+    from ecomdata.settings import load_settings
+
+    TIKI_LISTING_URL = load_settings({}).crawl.tiki_listing_url
 
     assert TikiCrawler(categories=["1846"], fetch_robots=False).listing_url == TIKI_LISTING_URL
     assert LISTING_URL == TIKI_LISTING_URL

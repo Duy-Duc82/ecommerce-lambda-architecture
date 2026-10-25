@@ -12,7 +12,8 @@ from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from typing import Any
 
-from ecomdata.settings import MARKETPLACE_BATCH_LOCK_KEY
+# The default of MARKETPLACE_BATCH_LOCK_KEY; the composition root passes the setting.
+DEFAULT_LOCK_KEY = 820801
 
 # EX_TEMPFAIL: try again later. The scheduler's next tick is that later.
 ALREADY_RUNNING_EXIT_CODE = 75
@@ -25,7 +26,7 @@ class BatchAlreadyRunning(RuntimeError):
 
 
 @contextmanager
-def exclusive_batch(connection_factory: Callable[[], Any], *, key: int = MARKETPLACE_BATCH_LOCK_KEY) -> Iterator[None]:
+def exclusive_batch(connection_factory: Callable[[], Any], *, key: int = DEFAULT_LOCK_KEY) -> Iterator[None]:
     """Hold the batch lock for the body, or raise ``BatchAlreadyRunning``.
 
     ``connection_factory`` must hand out a dedicated connection: the lock

@@ -232,11 +232,10 @@ def test_importing_the_batch_modules_opens_no_client_or_session():
 from ecomdata.processing.batch import manifest as marketplace_manifest
 from ecomdata.processing.batch import marts as marketplace_marts
 from ecomdata.processing.batch import quality as marketplace_quality
-from ecomdata.processing.batch import repositories as marketplace_postgres
 from ecomdata.processing.batch import warehouse
 from ecomdata.processing.batch.manifest import PROMOTED, PromotionResult
 from ecomdata.processing.batch.quality import QualityDecision, QualityGateFailure, QualityResult
-from ecomdata.processing.batch.warehouse import GoldWriteResult, run_marketplace_warehouse
+from ecomdata.processing.batch.warehouse import GoldWriteResult, WarehouseDependencies
 
 MANIFEST_URI = "s3a://gold/marketplace/manifests/run_id=run-1/manifest.json"
 
@@ -337,14 +336,12 @@ def wire_orchestration(monkeypatch, *, passed=True, publish_fails=False, lock_re
         finally:
             parts["lock"].append("release")
 
-    monkeypatch.setattr(warehouse, "default_batch_lock", fake_lock)
-
-    monkeypatch.setattr(warehouse, "build_spark", lambda: FakeSpark())
+    parts["spark_factory"] = lambda: FakeSpark()
+    parts["lock_factory"] = fake_lock
     monkeypatch.setattr(warehouse, "read_marketplace_silver", lambda spark, uri: "wire")
     monkeypatch.setattr(warehouse, "flatten_marketplace_observations", lambda wire: FakeObservations())
     monkeypatch.setattr(warehouse, "observations_as_of", lambda flat, as_of: flat)
     monkeypatch.setattr(warehouse, "deduplicate_marketplace_observations", lambda flat: flat)
-    monkeypatch.setattr(warehouse, "read_crawl_audit", lambda spark: ("attempts", "runs"))
     monkeypatch.setattr(warehouse, "crawl_audit_as_of", lambda attempts, runs, as_of: (attempts, runs))
     monkeypatch.setattr(
         marketplace_marts, "build_marketplace_marts", lambda *a, **k: {name: name for name in DATASETS}
@@ -386,15 +383,28 @@ def wire_orchestration(monkeypatch, *, passed=True, publish_fails=False, lock_re
     monkeypatch.setattr(marketplace_manifest, "promotion_refusal", lambda manifest, current, **k: None)
 
     audit, repository, publisher = FakeAudit(log), FakeRepository(log), FakePublisher(log, fails=publish_fails)
-    monkeypatch.setattr(marketplace_postgres.MarketplaceBatchAudit, "from_settings", classmethod(lambda cls: audit))
-    monkeypatch.setattr(
-        marketplace_postgres.MarketplaceQualityRepository, "from_settings", classmethod(lambda cls: repository)
-    )
-    monkeypatch.setattr(
-        marketplace_postgres.MarketplaceCachePublisher, "from_settings", classmethod(lambda cls: publisher)
-    )
     parts.update(audit=audit, repository=repository, publisher=publisher)
+    _WIRED.clear()
+    _WIRED.update(parts)
     return parts
+
+
+_WIRED: dict = {}
+
+
+def run_marketplace_warehouse(context, *, writer, reader, **options):
+    """The orchestrator over the fakes ``wire_orchestration`` built."""
+    deps = WarehouseDependencies(
+        spark_factory=_WIRED["spark_factory"],
+        read_crawl_audit=lambda spark: ("attempts", "runs"),
+        writer=writer,
+        reader=reader,
+        audit=_WIRED["audit"],
+        quality_repository=_WIRED["repository"],
+        cache_publisher=_WIRED["publisher"],
+        lock=_WIRED["lock_factory"],
+    )
+    return warehouse.run_marketplace_warehouse(context, deps=deps, **options)
 
 
 def batch_context():
@@ -807,7 +817,12 @@ def test_the_cli_names_the_configured_gold_root_as_the_serving_one(monkeypatch, 
     warehouse.main()
 
     assert seen["gold_root_uri"] == "file:///scratch/gold"
-    assert seen["serving_gold_root_uri"] == warehouse.data_lake_uri("gold", warehouse.MARKETPLACE_GOLD_DATASET)
+    from ecomdata.domain.datasets import GOLD_DATASET
+    from ecomdata.infra.object_store import object_store_for
+    from ecomdata.settings import load_settings
+
+    store = object_store_for(load_settings({}).storage)
+    assert seen["serving_gold_root_uri"] == store.uri("gold", GOLD_DATASET)
 
 
 # ----------------------------------------------------------------------------
@@ -929,48 +944,3 @@ def test_context_rejects_a_reconciliation_lookback_inside_the_settle_delay():
 def test_context_rejects_non_positive_reconciliation_windows(field):
     with pytest.raises(ValueError, match=field):
         MarketplaceBatchContext("run-1", AS_OF, "file:///silver", "file:///gold", **{field: 0})
-
-
-# Phase 8 test 20: the marketplace batch reaches s3a:// only if the profile's
-# S3A options reach its Spark builder.
-class RecordingBuilder:
-    def __init__(self):
-        self.options = {}
-
-    def appName(self, name):
-        return self
-
-    def config(self, key, value):
-        self.options[key] = value
-        return self
-
-    def getOrCreate(self):
-        return self.options
-
-
-@pytest.mark.parametrize("profile, expect_s3a", [("minio", True), ("local", False)])
-def test_build_spark_applies_s3a_options_only_for_a_remote_profile(monkeypatch, profile, expect_s3a):
-    from types import SimpleNamespace
-
-    from ecomdata.infra import storage
-
-    for name in ("DATA_LAKE_PROFILE", "DATA_LAKE_MODE", "DATA_LAKE_ENDPOINT", "DATA_LAKE_REGION"):
-        monkeypatch.delenv(name, raising=False)
-    monkeypatch.setenv("DATA_LAKE_PROFILE", profile)
-    monkeypatch.setenv("MINIO_ENDPOINT", "minio:9000")
-    storage.active_profile.cache_clear()
-    monkeypatch.setattr(warehouse, "SparkSession", SimpleNamespace(builder=RecordingBuilder()))
-    try:
-        options = warehouse.build_spark()
-    finally:
-        storage.active_profile.cache_clear()
-
-    s3a = {key: value for key, value in options.items() if key.startswith("spark.hadoop.fs.s3a.")}
-    if expect_s3a:
-        assert s3a["spark.hadoop.fs.s3a.impl"] == "org.apache.hadoop.fs.s3a.S3AFileSystem"
-        assert s3a["spark.hadoop.fs.s3a.endpoint"] == "http://minio:9000"
-        assert s3a["spark.hadoop.fs.s3a.path.style.access"] == "true"
-        assert "spark.hadoop.fs.s3a.access.key" in s3a
-    else:
-        assert s3a == {}
-    assert options["spark.sql.session.timeZone"] == "UTC"

@@ -10,11 +10,8 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
-import psycopg2
-
 from ecomdata.domain.datasets import MARTS
 from ecomdata.processing.batch.warehouse import MarketplaceBatchContext
-from ecomdata.settings import POSTGRES_DB, POSTGRES_HOST, POSTGRES_PASSWORD, POSTGRES_PORT, POSTGRES_USER
 
 if TYPE_CHECKING:
     from ecomdata.processing.batch.quality import QualityDecision, QualityResult
@@ -34,18 +31,6 @@ class StagedDataset:
 class MarketplaceBatchAudit:
     def __init__(self, connection_factory: Callable[[], Any]):
         self.connection_factory = connection_factory
-
-    @classmethod
-    def from_settings(cls):
-        return cls(
-            lambda: psycopg2.connect(
-                host=POSTGRES_HOST,
-                port=POSTGRES_PORT,
-                user=POSTGRES_USER,
-                password=POSTGRES_PASSWORD,
-                dbname=POSTGRES_DB,
-            )
-        )
 
     def start_run(self, context: MarketplaceBatchContext, started_at: datetime, *, resume: bool = False) -> None:
         with self.connection_factory() as conn, conn.cursor() as cur:
@@ -164,18 +149,6 @@ class MarketplaceQualityRepository:
     def __init__(self, connection_factory: Callable[[], Any]):
         self.connection_factory = connection_factory
 
-    @classmethod
-    def from_settings(cls):
-        return cls(
-            lambda: psycopg2.connect(
-                host=POSTGRES_HOST,
-                port=POSTGRES_PORT,
-                user=POSTGRES_USER,
-                password=POSTGRES_PASSWORD,
-                dbname=POSTGRES_DB,
-            )
-        )
-
     def record(self, results: Sequence[QualityResult], *, run_id: str) -> None:
         if not results:
             raise ValueError("refusing to record an empty quality result set")
@@ -237,20 +210,6 @@ class MarketplaceCachePublisher:
         self.connection_factory = connection_factory
         self.jdbc_url = jdbc_url
         self.jdbc_properties = dict(jdbc_properties or {})
-
-    @classmethod
-    def from_settings(cls):
-        return cls(
-            lambda: psycopg2.connect(
-                host=POSTGRES_HOST,
-                port=POSTGRES_PORT,
-                user=POSTGRES_USER,
-                password=POSTGRES_PASSWORD,
-                dbname=POSTGRES_DB,
-            ),
-            f"jdbc:postgresql://{POSTGRES_HOST}:{POSTGRES_PORT}/{POSTGRES_DB}",
-            {"user": POSTGRES_USER, "password": POSTGRES_PASSWORD, "driver": "org.postgresql.Driver"},
-        )
 
     @staticmethod
     def staging_table(dataset_name: str, run_id: str) -> str:

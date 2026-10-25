@@ -24,6 +24,10 @@ from datetime import UTC, datetime, timedelta
 from typing import Any, Protocol
 from urllib.parse import unquote, urlparse
 
+from ecomdata.ops.bootstrap import connection_factory as _connection_factory
+from ecomdata.ops.bootstrap import object_store as _object_store
+from ecomdata.ops.bootstrap import settings as _settings
+
 PASS, FAIL = "PASS", "FAIL"
 SCHEDULED_RUN_PREFIX = "mp-"
 
@@ -84,17 +88,13 @@ def bronze_present(src: Sources, limits: Limits) -> CheckResult:
 
 def kafka_to_silver_lag(src: Sources, limits: Limits) -> CheckResult:
     from ecomdata.domain.topics import MARKETPLACE_OBSERVATIONS
-    from ecomdata.settings import KAFKA_SILVER_CONSUMER_GROUP
-
-    lag = src.consumer_lag(KAFKA_SILVER_CONSUMER_GROUP, MARKETPLACE_OBSERVATIONS.name)
+    lag = src.consumer_lag(_settings().kafka.silver_consumer_group, MARKETPLACE_OBSERVATIONS.name)
     return _result("kafka_to_silver_lag", lag <= limits.max_silver_lag, lag, f"<= {limits.max_silver_lag}")
 
 
 def _silver_rows_by_run(src: Sources, *, as_of: datetime, oldest: datetime) -> dict[str, list[datetime]]:
     """Observed instants per crawl run, for Silver rows observed at or before ``as_of``."""
-    from ecomdata.settings import MARKETPLACE_SILVER_DATASET, data_lake_uri
-
-    root = data_lake_uri("silver", MARKETPLACE_SILVER_DATASET)
+    root = _object_store().uri("silver", _settings().batch.silver_dataset)
     runs: dict[str, list[datetime]] = {}
     for uri in src.list_objects(root):
         # The path carries observed_date: skip days wholly outside the window.
@@ -171,9 +171,7 @@ def speed_last_batch_succeeded(src: Sources, limits: Limits) -> CheckResult:
 
 
 def es_changes_unique(src: Sources, limits: Limits) -> CheckResult:
-    from ecomdata.settings import ES_INDEX_MARKETPLACE_CHANGES
-
-    ids = [doc.get("event_id") for doc in src.es_documents(ES_INDEX_MARKETPLACE_CHANGES)]
+    ids = [doc.get("event_id") for doc in src.es_documents(_settings().es.index_changes)]
     distinct = len(set(ids))
     return _result(
         "es_changes_unique",
@@ -185,9 +183,7 @@ def es_changes_unique(src: Sources, limits: Limits) -> CheckResult:
 
 def redis_offer_state_present(src: Sources, limits: Limits) -> CheckResult:
     """Every offer whose state is younger than the Redis TTL, measured from the newest one."""
-    from ecomdata.settings import ES_INDEX_MARKETPLACE_OFFERS
-
-    docs = src.es_documents(ES_INDEX_MARKETPLACE_OFFERS)
+    docs = src.es_documents(_settings().es.index_offers)
     if not docs:
         return _result("redis_offer_state_present", False, "no offers in Elasticsearch", "at least one offer")
     newest = max(_instant(doc["observed_at"]) for doc in docs)
@@ -306,16 +302,10 @@ def report(results: Sequence[CheckResult]) -> str:
 
 
 def default_limits() -> Limits:
-    from ecomdata.settings import (
-        MARKETPLACE_QUALITY_RECONCILIATION_LOOKBACK_SECONDS,
-        MARKETPLACE_QUALITY_RECONCILIATION_SETTLE_SECONDS,
-        REDIS_MARKETPLACE_OFFER_TTL_SECONDS,
-    )
-
     return Limits(
-        MARKETPLACE_QUALITY_RECONCILIATION_LOOKBACK_SECONDS,
-        MARKETPLACE_QUALITY_RECONCILIATION_SETTLE_SECONDS,
-        REDIS_MARKETPLACE_OFFER_TTL_SECONDS,
+        _settings().quality.reconciliation_lookback_seconds,
+        _settings().quality.reconciliation_settle_seconds,
+        _settings().redis.offer_ttl_seconds,
     )
 
 
@@ -328,9 +318,8 @@ class LiveSources:
     """PostgreSQL, the lake, Kafka, Elasticsearch and Redis, read-only."""
 
     def __init__(self) -> None:
-        from ecomdata.infra.postgres import postgres_connection_factory
 
-        self._connect = postgres_connection_factory()
+        self._connect = _connection_factory()
 
     def query(self, sql: str, params: Sequence[Any] = ()) -> list[tuple]:
         with self._connect() as conn, conn.cursor() as cur:
@@ -349,10 +338,8 @@ class LiveSources:
 
     @staticmethod
     def _client():
-        from ecomdata.infra.object_store import _client
-        from ecomdata.infra.storage import active_profile
 
-        return _client(active_profile())
+        return _object_store().client
 
     def object_exists(self, uri: str) -> bool:
         scheme, bucket, key = self._split(uri)
@@ -421,20 +408,17 @@ class LiveSources:
         )
 
     def current_pointer(self) -> dict | None:
-        from ecomdata.infra.object_store import get_bytes
         from ecomdata.processing.batch.manifest import CURRENT_POINTER_PATH, GOLD_ZONE
 
-        payload = get_bytes(GOLD_ZONE, CURRENT_POINTER_PATH)
+        payload = _object_store().get(GOLD_ZONE, CURRENT_POINTER_PATH)
         return None if payload is None else json.loads(payload)
 
     # -- Kafka --
     def consumer_lag(self, group: str, topic: str) -> int:
         from kafka import KafkaAdminClient, KafkaConsumer
 
-        from ecomdata.settings import KAFKA_BOOTSTRAP_SERVERS
-
-        admin = KafkaAdminClient(bootstrap_servers=KAFKA_BOOTSTRAP_SERVERS)
-        consumer = KafkaConsumer(bootstrap_servers=KAFKA_BOOTSTRAP_SERVERS)
+        admin = KafkaAdminClient(bootstrap_servers=_settings().kafka.bootstrap_servers)
+        consumer = KafkaConsumer(bootstrap_servers=_settings().kafka.bootstrap_servers)
         try:
             committed = {
                 tp: meta.offset for tp, meta in admin.list_consumer_group_offsets(group).items() if tp.topic == topic
@@ -457,9 +441,7 @@ class LiveSources:
         from kafka import KafkaConsumer, TopicPartition
 
         from ecomdata.domain.topics import MARKETPLACE_OBSERVATIONS_DLQ
-        from ecomdata.settings import KAFKA_BOOTSTRAP_SERVERS
-
-        consumer = KafkaConsumer(bootstrap_servers=KAFKA_BOOTSTRAP_SERVERS, enable_auto_commit=False)
+        consumer = KafkaConsumer(bootstrap_servers=_settings().kafka.bootstrap_servers, enable_auto_commit=False)
         try:
             topic = MARKETPLACE_OBSERVATIONS_DLQ.name
             partitions = [TopicPartition(topic, p) for p in (consumer.partitions_for_topic(topic) or ())]
@@ -479,9 +461,7 @@ class LiveSources:
         from elasticsearch import Elasticsearch
         from elasticsearch.helpers import scan
 
-        from ecomdata.settings import ES_HOST
-
-        es = Elasticsearch(ES_HOST)
+        es = Elasticsearch(_settings().es.host)
         try:
             if not es.indices.exists(index=index):
                 return []
@@ -492,11 +472,9 @@ class LiveSources:
     def _redis_client(self):
         from redis import Redis
 
-        from ecomdata.settings import REDIS_DB, REDIS_HOST, REDIS_PORT
-
         client = getattr(self, "_redis", None)
         if client is None:
-            client = self._redis = Redis(host=REDIS_HOST, port=REDIS_PORT, db=REDIS_DB)
+            client = self._redis = Redis(host=_settings().redis.host, port=_settings().redis.port, db=_settings().redis.db)
         return client
 
     def redis_exists(self, key: str) -> bool:

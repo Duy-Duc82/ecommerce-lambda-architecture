@@ -353,6 +353,10 @@ class FakeConnection:
         self.log.append("close")
 
 
+from ecomdata.infra.postgres import connection_factory  # noqa: E402
+from ecomdata.settings import PostgresSettings  # noqa: E402
+
+
 def _fake_psycopg2(monkeypatch, log):
     module = type(sys)("psycopg2")
     module.connect = lambda **kwargs: log.append("connect") or FakeConnection(log)
@@ -364,7 +368,7 @@ def test_the_connection_factory_commits_and_closes_each_connection(monkeypatch):
     # so a long-running service would leak one connection per call.
     log = []
     _fake_psycopg2(monkeypatch, log)
-    factory = service.postgres_connection_factory()
+    factory = connection_factory(PostgresSettings())
 
     with factory() as conn:
         assert isinstance(conn, FakeConnection)
@@ -375,7 +379,7 @@ def test_the_connection_factory_commits_and_closes_each_connection(monkeypatch):
 def test_the_connection_factory_rolls_back_and_still_closes_on_error(monkeypatch):
     log = []
     _fake_psycopg2(monkeypatch, log)
-    factory = service.postgres_connection_factory()
+    factory = connection_factory(PostgresSettings())
 
     with pytest.raises(RuntimeError):
         with factory():
