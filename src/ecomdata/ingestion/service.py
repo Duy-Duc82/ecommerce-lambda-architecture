@@ -21,13 +21,14 @@ import json
 import os
 import random
 import socket
-from collections.abc import Callable
-from datetime import UTC, datetime
+from collections.abc import Callable, Sequence
+from datetime import datetime
 from decimal import Decimal
 from typing import Any
 
-from ecomdata.domain.acquisition import AcquisitionStatus, ObservationPublishError
+from ecomdata.domain.acquisition import AcquisitionStatus, RecordPublishError
 from ecomdata.domain.identity import deterministic_id
+from ecomdata.domain.records import RecordKind
 
 # Re-exported: the crawl service was their first home, and callers import them here.
 from ecomdata.infra.lifecycle import StopSignal, install_signal_handlers  # noqa: F401
@@ -51,13 +52,13 @@ def default_worker_id() -> str:
 
 
 def publishing_executor(inner: Callable[..., Any], *, publish: Callable[[Any], Any]) -> Callable[..., Any]:
-    """Wrap an acquisition executor so every parsed observation is published.
+    """Wrap an acquisition executor so every extracted listing row is published.
 
-    ``inner`` keeps the Phase 2 order — raw Bronze is persisted before
-    parsing — and this adds the step after it. Observations are published one
-    at a time, each waiting for its acknowledgement, in report order, so a
-    failure at position ``k`` means exactly ``k`` observations are in Kafka.
-    A failed acquisition is returned untouched and publishes nothing.
+    ``inner`` keeps the raw-first order (raw Bronze, then records in Bronze) and
+    this adds the step after it. Rows are published one at a time, each waiting
+    for its acknowledgement, in page order, so a failure at position ``k`` means
+    exactly ``k`` rows are in Kafka. A failed acquisition is returned untouched
+    and publishes nothing.
     """
 
     def execute(*, task: CrawlTask, crawl_run_id: str):
@@ -65,11 +66,13 @@ def publishing_executor(inner: Callable[..., Any], *, publish: Callable[[Any], A
         if report.status is AcquisitionStatus.FAILED:
             return report
         acknowledged = 0
-        for event in report.observations:
+        for record in report.records:
+            if record.record_kind is not RecordKind.LISTING_ROW:
+                continue
             try:
-                publish(event)
+                publish(record)
             except Exception as error:
-                raise ObservationPublishError(report=report, acknowledged=acknowledged, cause=error) from error
+                raise RecordPublishError(report=report, acknowledged=acknowledged, cause=error) from error
             acknowledged += 1
         return report
 
@@ -140,26 +143,26 @@ def non_decreasing_clock(source: Callable[[], datetime]) -> Callable[[], datetim
 
 def build_worker(
     *,
-    site: str,
+    runtime: Any,
     worker_id: str,
     publish: Callable[[Any], Any],
     connection_factory: Callable[[], Any],
     writer: Callable[[str, str, bytes], str],
     crawl: Any,
+    marketplace_ids: Sequence[str] | None = None,
 ):
     """Wire one crawl worker from the crawl settings (``CrawlSettings``)."""
     from ecomdata.ingestion.audit import CrawlAuditRepository
-    from ecomdata.ingestion.cli import listing_page_executor
     from ecomdata.ingestion.frontier import PostgresCrawlFrontier
+    from ecomdata.ingestion.runtime import listing_page_executor
     from ecomdata.ingestion.scheduling import RetryPolicy
     from ecomdata.ingestion.worker import CrawlWorker
 
-    clock = non_decreasing_clock(lambda: datetime.now(UTC))  # the one wall clock, injected once
     return CrawlWorker(
         frontier=PostgresCrawlFrontier(connection_factory),
         audit=CrawlAuditRepository(connection_factory),
-        executor=publishing_executor(listing_page_executor(site=site, writer=writer, clock=clock), publish=publish),
-        clock=clock,
+        executor=publishing_executor(listing_page_executor(runtime, writer=writer), publish=publish),
+        clock=runtime.clock,
         policy=RetryPolicy(
             crawl.max_attempts, crawl.retry_base_seconds, crawl.retry_max_seconds, crawl.retry_jitter_ratio
         ),
@@ -170,38 +173,55 @@ def build_worker(
         circuit_open_seconds=crawl.circuit_open_seconds,
         jitter=lambda: Decimal(str(random.random())),
         cadence_minutes=crawl.cadence_minutes,
+        marketplace_ids=marketplace_ids,
     )
 
 
-def main() -> None:
+def selected_sources(registry: Any, sources: Sequence[str] | None, source_list: str | None) -> tuple[str, ...]:
+    """The source codes named by ``--source`` and ``--sources`` (every source when none is named)."""
+    named = list(sources or [])
+    if source_list:
+        named += [code.strip() for code in source_list.split(",") if code.strip()]
+    return tuple(dict.fromkeys(registry.get(code).code for code in named)) or registry.codes()
+
+
+def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description="Long-running marketplace crawl service")
-    parser.add_argument("--site", default="tiki")
+    parser.add_argument(
+        "--source", action="append", dest="sources", help="source code to crawl (repeatable); default: every source"
+    )
+    parser.add_argument("--sources", dest="source_list", default=None, help="comma-separated source codes")
     parser.add_argument(
         "--worker-id", default=None, help="lease owner; defaults to CRAWL_SERVICE_WORKER_ID, then <hostname>:<pid>"
     )
     parser.add_argument("--max-cycles", type=int, default=None, help="stop after N cycles (tests and smoke only)")
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
+    from ecomdata.domain.sources import SOURCES
     from ecomdata.infra.heartbeat import heartbeat
     from ecomdata.infra.kafka import create_producer
     from ecomdata.infra.object_store import object_store_for
     from ecomdata.infra.postgres import connection_factory
-    from ecomdata.ingestion.publisher import publish_observation
+    from ecomdata.ingestion.bootstrap import build_runtime
+    from ecomdata.ingestion.publisher import publish_record
     from ecomdata.settings import load_settings
 
+    codes = selected_sources(SOURCES, args.sources, args.source_list)
     settings = load_settings(dotenv=True)
     stop = StopSignal()
     install_signal_handlers(stop)
     producer = create_producer(settings.kafka.bootstrap_servers)
     ack = settings.kafka.producer_ack_timeout_seconds
+    runtime = build_runtime(settings, codes)
     try:
         worker = build_worker(
-            site=args.site,
+            runtime=runtime,
             worker_id=args.worker_id or settings.crawl.service_worker_id or default_worker_id(),
-            publish=lambda event: publish_observation(producer, event, ack_timeout_seconds=ack),
+            publish=lambda record: publish_record(producer, record, ack_timeout_seconds=ack),
             connection_factory=connection_factory(settings.postgres),
             writer=object_store_for(settings.storage).put,
             crawl=settings.crawl,
+            marketplace_ids=[SOURCES.get(code).marketplace_id for code in codes],
         )
         run_service(
             worker,
@@ -213,6 +233,8 @@ def main() -> None:
             beat=heartbeat(settings.service.heartbeat_file),
         )
     finally:
+        # Closing the runtime also closes the browser session, once, on the stop signal.
+        runtime.close()
         producer.flush()
         producer.close()
 

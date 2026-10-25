@@ -188,3 +188,58 @@ def test_the_producer_keeps_per_key_order_under_retries(monkeypatch, factory):
     assert captured["acks"] == "all"
     assert captured["retries"] > 0
     assert captured["max_in_flight_requests_per_connection"] == 1
+
+
+# --- source records (marketplace.records.v1) ---
+from datetime import UTC, datetime  # noqa: E402
+
+from ecomdata.domain.acquisition import ListingPageRequest  # noqa: E402
+from ecomdata.domain.observations import ResourceType, create_raw_artifact  # noqa: E402
+from ecomdata.domain.records import RecordKind, build_records, record_to_wire  # noqa: E402
+from ecomdata.domain.sources import TIKI  # noqa: E402
+from ecomdata.domain.topics import MARKETPLACE_RECORDS  # noqa: E402
+from ecomdata.ingestion.publisher import publish_record  # noqa: E402
+
+
+def _records():
+    raw = create_raw_artifact(
+        marketplace_code="tiki", crawl_run_id="run-1", marketplace_id="marketplace-tiki",
+        request_url="https://tiki.vn/laptop/c8095", resource_type=ResourceType.LISTING_PAGE,
+        fetched_at=datetime(2026, 10, 25, 8, 30, tzinfo=UTC), http_status=200, content_type="text/html",
+        body_sha256="a" * 64, raw_uri="file:///lake/part-0.bin.gz", adapter_version=TIKI.adapter_version, raw_bytes=5,
+    )
+    request = ListingPageRequest("tiki", "marketplace-tiki", "laptop/c8095", 1)
+    return build_records(TIKI, request=request, raw_artifact=raw, rows=({"id": 1, "name": "A"},), page_context={"h1": "x"})
+
+
+def test_a_record_is_published_to_the_records_topic_keyed_by_its_category_page():
+    producer = FakeProducer()
+    context, row = _records()
+
+    publish_record(producer, row, ack_timeout_seconds=9)
+
+    sent = producer.sent[0]
+    assert sent["topic"] == MARKETPLACE_RECORDS.name == "marketplace.records.v1"
+    assert sent["key"] == "tiki|laptop/c8095" == row.partition_key
+    assert sent["value"] == record_to_wire(row)
+    assert sent["value"]["payload"] == {"id": 1, "name": "A"}
+    assert sent["future"].timeouts == [9]
+    assert context.record_kind is RecordKind.PAGE_CONTEXT
+
+
+def test_only_listing_rows_go_to_kafka():
+    context, _ = _records()
+
+    with pytest.raises(ValueError, match="only listing rows"):
+        publish_record(FakeProducer(), context)
+    with pytest.raises(TypeError, match="SourceRecord"):
+        publish_record(FakeProducer(), {"id": 1})
+
+
+def test_a_record_publish_waits_for_the_broker_and_surfaces_its_failure():
+    _, row = _records()
+
+    with pytest.raises(TimeoutError):
+        publish_record(FakeProducer(error=TimeoutError("broker")), row)
+    with pytest.raises(ValueError, match="positive"):
+        publish_record(FakeProducer(), row, ack_timeout_seconds=0)

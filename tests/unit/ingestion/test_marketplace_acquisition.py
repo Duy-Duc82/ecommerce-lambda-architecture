@@ -1,304 +1,246 @@
+"""The acquisition pipeline: raw first, records second, every failure a report."""
+from __future__ import annotations
+
 from datetime import UTC, datetime, timedelta
-from decimal import Decimal
 
 import pytest
 
 from ecomdata.domain.acquisition import (
     AcquisitionStage,
     AcquisitionStatus,
-    FetchResult,
+    ExtractedPage,
+    FetchBlockedError,
+    FetchBundle,
+    FetchPart,
     ListingPageParseError,
     ListingPageRequest,
-    ParsedListingPage,
-    RawPersistenceError,
-    RecordRejection,
 )
-from ecomdata.domain.observations import create_marketplace_offer, create_observation_event, create_offer_observation
+from ecomdata.domain.sources import TIKI
 from ecomdata.ingestion.pipeline import acquire_listing_page
+from ecomdata.ingestion.record_store import decode_records
 
-UTC = UTC
 START = datetime(2026, 9, 4, 8, 30, tzinfo=UTC)
 FETCHED = START + timedelta(seconds=1)
-PRODUCED = START + timedelta(seconds=2)
 DONE = START + timedelta(seconds=3)
+URL = "https://tiki.vn/laptop/c8095"
 
 
-class FakeAdapter:
-    site_name = "fake"
-    marketplace_id = "marketplace-fake"
-    adapter_version = "fake-v1"
-
-    def __init__(self, *, status=200, body=b"page", allowed=True, parsed=None, fetch_error=None):
-        self.status = status
-        self.body = body
-        self.allowed_result = allowed
-        self.parsed = parsed
-        self.fetch_error = fetch_error
+class FakeFetcher:
+    def __init__(self, *, status=200, allowed=True, fetch_error=None, retry_after=None, url_error=None):
+        self.status, self.allowed_result, self.fetch_error = status, allowed, fetch_error
+        self.retry_after, self.url_error = retry_after, url_error
         self.calls = []
 
-    def request_url(self, target, page):
-        self.calls.append(("url", target, page))
-        return f"https://example.test/listings?target={target}&page={page}"
+    def request_url(self, request):
+        self.calls.append("url")
+        if self.url_error:
+            raise self.url_error
+        return URL
 
     def allowed(self, url):
-        self.calls.append(("robots", url))
+        self.calls.append("robots")
+        if isinstance(self.allowed_result, Exception):
+            raise self.allowed_result
         return self.allowed_result
 
-    def throttle(self):
-        self.calls.append(("throttle",))
+    def throttle(self, url):
+        self.calls.append("throttle")
 
-    def fetch_listing_page(self, request):
-        self.calls.append(("fetch", request))
+    def fetch(self, request, url):
+        self.calls.append("fetch")
         if self.fetch_error is not None:
             raise self.fetch_error
-        return FetchResult(
-            self.request_url_without_recording(request.target, request.page),
-            FETCHED,
-            self.status,
-            "application/json",
-            self.body,
-            retry_after="9" if self.status == 429 else None,
-        )
-
-    def request_url_without_recording(self, target, page):
-        return f"https://example.test/listings?target={target}&page={page}"
-
-    def parse_listing_page(self, **kwargs):
-        self.calls.append(("parse", kwargs))
-        if isinstance(self.parsed, Exception):
-            raise self.parsed
-        if callable(self.parsed):
-            return self.parsed(**kwargs)
-        return self.parsed
+        part = FetchPart(url, self.status, "text/html", b"<page>")
+        return FetchBundle(url, FETCHED, (part,), retry_after=self.retry_after)
 
 
-def _request():
-    return ListingPageRequest("fake", "marketplace-fake", "cat-1", 1)
+class FakeExtractor:
+    def __init__(self, result=None, error=None, log=None):
+        self.result = result or ExtractedPage(rows=({"id": 1}, {"id": 2}), page_context={"h1": "x"}, last_page=1)
+        self.error, self.log = error, log if log is not None else []
+
+    def extract(self, bundle):
+        self.log.append("extract")
+        if self.error:
+            raise self.error
+        return self.result
 
 
-def _event(raw_uri="file:///lake/body.bin", raw_sha="a" * 64, run_id="run-1"):
-    offer = create_marketplace_offer(
-        marketplace_code="fake",
-        marketplace_id="marketplace-fake",
-        platform_listing_id="p1",
-        seller_id=None,
-        product_title="Product",
-        brand=None,
-        category_path="cat-1",
-        source_url="https://example.test/p1.html",
-        currency="VND",
-        first_seen_at=FETCHED,
-        last_seen_at=FETCHED,
-    )
-    observation = create_offer_observation(
-        marketplace_code="fake",
-        platform_listing_id="p1",
-        offer_id=offer.offer_id,
-        observed_at=FETCHED,
-        fetched_at=FETCHED,
-        current_price=Decimal("10.00"),
-        raw_uri=raw_uri,
-        raw_sha256=raw_sha,
-        adapter_version="fake-v1",
-        crawl_run_id=run_id,
-    )
-    return create_observation_event(
-        marketplace_code="fake",
-        offer=offer,
-        observation=observation,
-        platform_listing_id="p1",
-        produced_at=PRODUCED,
-    )
+def request():
+    return ListingPageRequest("tiki", "marketplace-tiki", "laptop/c8095", 1)
 
 
-def _writer(calls, *, fail_at=None):
-    def write(zone, path, data):
-        calls.append(("write", zone, path, data))
-        if fail_at == len(calls):
+class Lake:
+    def __init__(self, fail_on=None):
+        self.writes, self.fail_on = [], fail_on
+
+    def write(self, zone, path, data):
+        self.writes.append((zone, path, data))
+        if self.fail_on and self.fail_on in path:
             raise OSError("writer failure")
         return f"file:///lake/{path}"
 
-    return write
+    @property
+    def names(self):
+        return [path.split("/")[-1] for _, path, _ in self.writes]
 
 
-def _clock():
-    values = iter([START, PRODUCED, DONE])
+def clock():
+    values = iter([START, DONE, DONE, DONE, DONE])
     return lambda: next(values)
 
 
-def _success_parsed(**kwargs):
-    artifact = kwargs["raw_artifact"]
-    return ParsedListingPage(
-        observations=(_event(raw_uri=artifact.raw_uri, raw_sha=artifact.body_sha256),),
-        rejections=(),
-        source_record_count=1,
-        duplicate_count=0,
-        last_page=1,
-    )
-
-
-def test_success_enforces_body_metadata_parse_order_and_lineage():
-    adapter = FakeAdapter(parsed=_success_parsed)
-    calls = []
+def acquire(fetcher=None, extractor=None, lake=None, req=None):
+    fetcher = fetcher or FakeFetcher()
+    lake = lake or Lake()
     report = acquire_listing_page(
-        adapter,
-        _request(),
-        crawl_run_id="run-1",
-        writer=_writer(calls),
-        clock=_clock(),
+        TIKI, fetcher, extractor or FakeExtractor(), req or request(), crawl_run_id="run-1", writer=lake.write, clock=clock()
     )
-    assert report.status is AcquisitionStatus.SUCCEEDED
-    assert report.is_task_success is True
-    assert report.raw_artifact is not None
-    assert report.raw_metadata_uri is not None
-    assert report.canonical_observation_count == 1
-    assert [call[0] for call in adapter.calls] == ["url", "robots", "throttle", "fetch", "parse"]
-    assert [call[2].split("/")[-1] for call in calls] == ["body.bin", "metadata.json"]
-    parse_call = next(call for call in adapter.calls if call[0] == "parse")
-    assert parse_call[1]["raw_artifact"] == report.raw_artifact
+    return report, fetcher, lake
 
 
-def test_robots_denial_has_no_fetch_or_write():
-    adapter = FakeAdapter(allowed=False)
-    calls = []
-    report = acquire_listing_page(
-        adapter, _request(), crawl_run_id="run-1", writer=_writer(calls), clock=_clock()
-    )
-    assert report.status is AcquisitionStatus.FAILED
-    assert report.failure.stage is AcquisitionStage.ROBOTS
-    assert [call[0] for call in adapter.calls] == ["url", "robots"]
-    assert calls == []
+def test_a_success_stores_the_raw_parts_then_the_manifest_then_the_records():
+    log = []
+    fetcher, extractor = FakeFetcher(), FakeExtractor(log=log)
+
+    report, fetcher, lake = acquire(fetcher, extractor)
+
+    assert report.status is AcquisitionStatus.SUCCEEDED and report.is_task_success
+    assert fetcher.calls == ["url", "robots", "throttle", "fetch"]
+    assert lake.names[:2] == ["part-0.bin.gz", "metadata.json"]
+    assert lake.names[2].endswith(".jsonl.gz")
+    assert report.row_count == 2 and report.record_count == 2 and report.page_exhausted
+    assert len(report.records) == 3  # the page context and two rows
+    assert report.raw_artifact.adapter_version == TIKI.adapter_version
+    assert report.records_uri == f"file:///lake/{lake.writes[2][1]}"
+    assert [r.record_id for r in decode_records(lake.writes[2][2])] == [r.record_id for r in report.records]
 
 
-def test_transport_failure_has_no_raw_artifact():
-    adapter = FakeAdapter(fetch_error=ConnectionError("network down"))
-    calls = []
-    report = acquire_listing_page(
-        adapter, _request(), crawl_run_id="run-1", writer=_writer(calls), clock=_clock()
-    )
+def test_robots_denial_has_no_fetch_and_no_write():
+    report, fetcher, lake = acquire(FakeFetcher(allowed=False))
+
+    assert report.failure.stage is AcquisitionStage.ROBOTS and report.status is AcquisitionStatus.FAILED
+    assert fetcher.calls == ["url", "robots"] and lake.writes == []
+
+
+def test_a_failing_robots_check_denies():
+    report, _, lake = acquire(FakeFetcher(allowed=RuntimeError("dns")))
+
+    assert report.failure.stage is AcquisitionStage.ROBOTS and "dns" in str(report.failure.error)
+    assert lake.writes == []
+
+
+def test_a_transport_failure_has_no_raw_artifact():
+    report, _, lake = acquire(FakeFetcher(fetch_error=ConnectionError("network down")))
+
+    assert report.failure.stage is AcquisitionStage.FETCH and report.raw_artifact is None
+    assert type(report.failure.error).__name__ == "FetchTransportError"
+    assert lake.writes == []
+
+
+def test_a_block_is_reported_as_itself_so_it_can_open_the_circuit():
+    report, _, _ = acquire(FakeFetcher(fetch_error=FetchBlockedError("captcha", evidence="slide to verify")))
+
+    assert isinstance(report.failure.error, FetchBlockedError)
     assert report.failure.stage is AcquisitionStage.FETCH
-    assert report.raw_artifact is None
-    assert calls == []
 
 
-def test_body_failure_stops_before_metadata_and_parse():
-    adapter = FakeAdapter(parsed=_success_parsed)
-    calls = []
-    report = acquire_listing_page(
-        adapter, _request(), crawl_run_id="run-1", writer=_writer(calls, fail_at=1), clock=_clock()
-    )
+def test_a_part_write_failure_stops_before_the_manifest():
+    report, _, lake = acquire(lake=Lake(fail_on="part-0"))
+
+    assert report.failure.stage is AcquisitionStage.STORAGE and report.raw_artifact is None
+    assert lake.names == ["part-0.bin.gz"]
+
+
+def test_a_manifest_write_failure_keeps_the_artifact_and_never_extracts():
+    log = []
+    report, _, lake = acquire(extractor=FakeExtractor(log=log), lake=Lake(fail_on="metadata.json"))
+
     assert report.failure.stage is AcquisitionStage.STORAGE
-    assert isinstance(report.failure.error, RawPersistenceError)
-    assert report.raw_artifact is None
-    assert len(calls) == 1
-    assert all(call[0] != "parse" for call in adapter.calls)
+    assert report.raw_artifact is not None and report.raw_metadata_uri is None
+    assert log == [] and lake.names == ["part-0.bin.gz", "metadata.json"]
 
 
-def test_metadata_failure_retains_body_artifact_and_stops_parse():
-    adapter = FakeAdapter(parsed=_success_parsed)
-    calls = []
-    report = acquire_listing_page(
-        adapter, _request(), crawl_run_id="run-1", writer=_writer(calls, fail_at=2), clock=_clock()
-    )
-    assert report.failure.stage is AcquisitionStage.STORAGE
-    assert report.raw_artifact is not None
-    assert report.raw_metadata_uri is None
-    assert len(calls) == 2
-    assert all(call[0] != "parse" for call in adapter.calls)
+@pytest.mark.parametrize("status", [404, 429, 500, 503])
+def test_an_http_failure_persists_the_page_before_judging_the_status(status):
+    report, _, lake = acquire(FakeFetcher(status=status, retry_after="9"))
+
+    assert report.failure.stage is AcquisitionStage.HTTP and report.http_status == status
+    assert report.retry_after == "9" and report.raw_artifact is not None
+    assert lake.names == ["part-0.bin.gz", "metadata.json"]
 
 
-@pytest.mark.parametrize("status", [404, 429, 500])
-def test_http_failure_persists_body_before_status_handling(status):
-    adapter = FakeAdapter(status=status, parsed=_success_parsed)
-    calls = []
-    report = acquire_listing_page(
-        adapter, _request(), crawl_run_id="run-1", writer=_writer(calls), clock=_clock()
-    )
-    assert report.failure.stage is AcquisitionStage.HTTP
-    assert report.http_status == status
-    assert report.raw_artifact is not None
-    assert report.retry_after == ("9" if status == 429 else None)
-    assert len(calls) == 2
-    assert all(call[0] != "parse" for call in adapter.calls)
+def test_a_parse_failure_keeps_the_complete_raw_lineage():
+    report, _, lake = acquire(extractor=FakeExtractor(error=ListingPageParseError("layout changed")))
 
-
-def test_parse_failure_retains_complete_raw_lineage():
-    adapter = FakeAdapter(parsed=ListingPageParseError("malformed page"))
-    calls = []
-    report = acquire_listing_page(
-        adapter, _request(), crawl_run_id="run-1", writer=_writer(calls), clock=_clock()
-    )
     assert report.failure.stage is AcquisitionStage.PARSE
-    assert report.raw_artifact is not None
-    assert report.raw_metadata_uri is not None
-    assert report.observations == ()
+    assert report.raw_artifact is not None and report.raw_metadata_uri is not None
+    assert lake.names == ["part-0.bin.gz", "metadata.json"]
 
 
-def test_mixed_rows_are_partial_and_not_retried_by_phase2():
-    def parsed(**kwargs):
-        artifact = kwargs["raw_artifact"]
-        rejection = RecordRejection(1, AcquisitionStage.VALIDATION, ValueError("bad row"))
-        return ParsedListingPage(
-            (_event(raw_uri=artifact.raw_uri, raw_sha=artifact.body_sha256),),
-            (rejection,),
-            2,
-            0,
-            1,
-        )
+def test_an_unexpected_extractor_error_becomes_a_parse_failure():
+    report, _, _ = acquire(extractor=FakeExtractor(error=KeyError("props")))
 
-    adapter = FakeAdapter(parsed=parsed)
-    report = acquire_listing_page(
-        adapter, _request(), crawl_run_id="run-1", writer=_writer([]), clock=_clock()
-    )
-    assert report.status is AcquisitionStatus.PARTIAL
-    assert report.is_task_success is True
-    assert report.rejected_count == 1
+    assert report.failure.stage is AcquisitionStage.PARSE
+    assert isinstance(report.failure.error, ListingPageParseError)
+    assert isinstance(report.failure.error.__cause__, KeyError)
 
 
-def test_all_invalid_rows_are_terminal_validation_failure():
-    rejection = RecordRejection(0, AcquisitionStage.VALIDATION, ValueError("bad row"))
-    parsed = ParsedListingPage((), (rejection,), 1, 0, 1)
-    adapter = FakeAdapter(parsed=parsed)
-    report = acquire_listing_page(
-        adapter, _request(), crawl_run_id="run-1", writer=_writer([]), clock=_clock()
-    )
-    assert report.status is AcquisitionStatus.FAILED
-    assert report.failure.stage is AcquisitionStage.VALIDATION
-    assert report.is_task_success is False
+def test_a_block_found_while_extracting_stays_a_block():
+    report, _, _ = acquire(extractor=FakeExtractor(error=FetchBlockedError("no __NEXT_DATA__")))
+
+    assert isinstance(report.failure.error, FetchBlockedError)
+    assert report.failure.stage is AcquisitionStage.PARSE and report.raw_artifact is not None
 
 
-def test_empty_page_is_successful_and_exhausted():
-    adapter = FakeAdapter(parsed=ParsedListingPage((), (), 0, 0, None))
-    report = acquire_listing_page(
-        adapter, _request(), crawl_run_id="run-1", writer=_writer([]), clock=_clock()
-    )
-    assert report.status is AcquisitionStatus.SUCCEEDED
-    assert report.page_exhausted is True
-    assert report.canonical_observation_count == 0
+def test_a_records_write_failure_keeps_the_raw_artifact():
+    report, _, lake = acquire(lake=Lake(fail_on=".jsonl.gz"))
+
+    assert report.failure.stage is AcquisitionStage.STORAGE
+    assert report.raw_artifact is not None and report.raw_metadata_uri is not None and report.records == ()
 
 
-def test_programmer_contract_errors_are_not_converted_to_source_failure():
-    adapter = FakeAdapter(parsed=None)
-    with pytest.raises(TypeError, match="ParsedListingPage"):
-        acquire_listing_page(
-            adapter, _request(), crawl_run_id="run-1", writer=_writer([]), clock=_clock()
-        )
+def test_a_page_with_no_rows_is_a_success_and_exhausted():
+    empty = ExtractedPage(rows=(), page_context={"h1": "x"}, last_page=None)
+
+    report, _, _ = acquire(extractor=FakeExtractor(empty))
+
+    assert report.is_task_success and report.row_count == 0 and report.page_exhausted
+    assert len(report.records) == 1  # the page context alone
 
 
-def test_a_target_the_adapter_cannot_turn_into_a_url_is_a_failed_report():
-    # Regression, bug (c): request_url() ran outside the try, so the adapter's
-    # ValueError left the pipeline instead of becoming a FAILED report.
-    class RejectingAdapter(FakeAdapter):
-        def request_url(self, target, page):
-            raise ValueError("category id must be digits")
+def test_the_last_page_ends_a_paginated_walk():
+    page = ExtractedPage(rows=({"id": 1},), last_page=3)
 
-    adapter, calls = RejectingAdapter(), []
+    report, _, _ = acquire(extractor=FakeExtractor(page), req=ListingPageRequest("tiki", "marketplace-tiki", "laptop/c8095", 2))
 
-    report = acquire_listing_page(
-        adapter, _request(), crawl_run_id="run-1", writer=_writer(calls), clock=_clock()
-    )
+    assert report.page == 2 and not report.page_exhausted
+    assert report.last_page == 3
 
-    assert report.status is AcquisitionStatus.FAILED
-    assert report.failure.stage is AcquisitionStage.FETCH
+
+def test_a_target_the_source_cannot_turn_into_a_url_is_a_failed_report():
+    # Regression, bug (c): request_url() ran outside the try, so the ValueError
+    # left the pipeline instead of becoming a FAILED report.
+    fetcher = FakeFetcher(url_error=ValueError("category id must be digits"))
+
+    report, fetcher, lake = acquire(fetcher)
+
+    assert report.status is AcquisitionStatus.FAILED and report.failure.stage is AcquisitionStage.FETCH
     assert "category id must be digits" in str(report.failure.error)
-    assert calls == [] and not any(call[0] in ("fetch", "robots") for call in adapter.calls)
+    assert fetcher.calls == ["url"] and lake.writes == []
+
+
+def test_a_request_of_another_source_is_a_programming_error():
+    other = ListingPageRequest("lazada", "marketplace-lazada", "laptop", 1)
+
+    with pytest.raises(ValueError, match="does not belong"):
+        acquire(req=other)
+
+
+def test_a_fetcher_returning_the_wrong_type_is_a_programming_error():
+    class Broken(FakeFetcher):
+        def fetch(self, request, url):
+            return b"raw"
+
+    with pytest.raises(TypeError, match="FetchBundle"):
+        acquire(Broken())

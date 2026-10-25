@@ -1,26 +1,42 @@
-"""Raw-first orchestration for one marketplace listing-page request."""
+"""Acquire one listing page, raw first.
 
+The steps and their order are fixed; what varies by source is injected:
+
+    url -> robots -> throttle -> fetch -> persist raw -> HTTP status ->
+    extract -> build records -> persist records -> report
+
+A failure at any step ends in a FAILED report that says which step and keeps
+whatever was already stored. The raw responses are written before anything
+parses them, and the records file before anything publishes them.
+"""
 from __future__ import annotations
 
 from collections.abc import Callable
 from datetime import datetime
+from typing import Any
 
 from ecomdata.domain.acquisition import (
     AcquisitionFailure,
+    AcquisitionReport,
     AcquisitionStage,
     AcquisitionStatus,
-    FetchResult,
+    ExtractedPage,
+    FetchBlockedError,
+    FetchBundle,
     FetchTransportError,
     HttpResponseError,
-    ListingPageAdapter,
     ListingPageParseError,
     ListingPageRequest,
-    ParsedListingPage,
-    Phase2AcquisitionReport,
     RawPersistenceError,
+    RecordBuildError,
     RobotsDeniedError,
 )
-from ecomdata.ingestion.raw_store import persist_fetch_result
+from ecomdata.domain.records import build_records
+from ecomdata.ingestion.raw_store import persist_fetch_bundle
+from ecomdata.ingestion.record_store import persist_records
+
+# A report needs a URL even when none could be built.
+_UNKNOWN_URL = "https://invalid.invalid/"
 
 
 def _completion(clock: Callable[[], datetime]) -> datetime:
@@ -39,12 +55,8 @@ def _failed_report(
     raw_metadata_uri: str | None,
     failure: AcquisitionFailure,
     clock: Callable[[], datetime],
-    rejections=(),
-    source_record_count: int = 0,
-    duplicate_count: int = 0,
-    last_page: int | None = None,
-) -> Phase2AcquisitionReport:
-    return Phase2AcquisitionReport(
+) -> AcquisitionReport:
+    return AcquisitionReport(
         status=AcquisitionStatus.FAILED,
         marketplace_code=request.marketplace_code,
         marketplace_id=request.marketplace_id,
@@ -59,231 +71,137 @@ def _failed_report(
         retry_after=retry_after,
         raw_artifact=raw_artifact,
         raw_metadata_uri=raw_metadata_uri,
-        observations=(),
-        rejections=tuple(rejections),
-        source_record_count=source_record_count,
-        duplicate_count=duplicate_count,
-        last_page=last_page,
+        records=(),
+        records_uri=None,
+        last_page=None,
         failure=failure,
     )
 
 
-def _report_from_parsed(
-    *,
+def acquire_listing_page(
+    spec: Any,
+    fetcher: Any,
+    extractor: Any,
     request: ListingPageRequest,
+    *,
     crawl_run_id: str,
-    fetch_result: FetchResult,
-    persisted,
-    parsed: ParsedListingPage,
-    started_at: datetime,
+    writer: Callable[[str, str, bytes], str],
     clock: Callable[[], datetime],
-) -> Phase2AcquisitionReport:
-    if parsed.rejections and parsed.observations:
-        status = AcquisitionStatus.PARTIAL
-        failure = None
-    elif parsed.rejections:
-        status = AcquisitionStatus.FAILED
-        failure = AcquisitionFailure(
-            AcquisitionStage.VALIDATION,
-            ValueError("all non-duplicate listing rows were rejected"),
-        )
-    else:
-        status = AcquisitionStatus.SUCCEEDED
-        failure = None
+) -> AcquisitionReport:
+    """Fetch, store and extract one page in the mandatory raw-first order."""
+    if request.marketplace_code != spec.code or request.marketplace_id != spec.marketplace_id:
+        raise ValueError("request does not belong to the source spec")
 
-    return Phase2AcquisitionReport(
-        status=status,
+    started_at = clock()
+
+    def fail(stage, error, *, url, bundle=None, persisted=None, raw_artifact=None) -> AcquisitionReport:
+        return _failed_report(
+            request=request,
+            crawl_run_id=crawl_run_id,
+            request_url=url,
+            started_at=started_at,
+            http_status=bundle.http_status if bundle else None,
+            retry_after=bundle.retry_after if bundle else None,
+            raw_artifact=persisted.artifact if persisted else raw_artifact,
+            raw_metadata_uri=persisted.metadata_uri if persisted else None,
+            failure=AcquisitionFailure(stage, error),
+            clock=clock,
+        )
+
+    try:
+        url = fetcher.request_url(request)
+    except ValueError as exc:
+        # A target the source cannot turn into a URL is a failed task, not a
+        # crash of the worker: the report carries the reason.
+        error = FetchTransportError(f"no request URL for target {request.target!r} page {request.page}: {exc}")
+        error.__cause__ = exc
+        return fail(AcquisitionStage.FETCH, error, url=getattr(spec, "base_url", None) or _UNKNOWN_URL)
+
+    try:
+        allowed = fetcher.allowed(url)
+    except Exception as exc:
+        error = RobotsDeniedError(f"robots check failed for {url}: {exc}")
+        error.__cause__ = exc
+        return fail(AcquisitionStage.ROBOTS, error, url=url)
+    if not allowed:
+        return fail(AcquisitionStage.ROBOTS, RobotsDeniedError(f"robots.txt disallows {url}"), url=url)
+
+    try:
+        fetcher.throttle(url)
+        bundle = fetcher.fetch(request, url)
+    except FetchBlockedError as exc:
+        return fail(AcquisitionStage.FETCH, exc, url=url)
+    except Exception as exc:
+        wrapped = FetchTransportError(f"fetch failed for {url}: {exc}")
+        wrapped.__cause__ = exc
+        return fail(AcquisitionStage.FETCH, wrapped, url=url)
+    if not isinstance(bundle, FetchBundle):
+        raise TypeError("fetcher.fetch() must return a FetchBundle")
+
+    try:
+        persisted = persist_fetch_bundle(
+            request=request,
+            bundle=bundle,
+            crawl_run_id=crawl_run_id,
+            adapter_version=spec.adapter_version,
+            writer=writer,
+        )
+    except RawPersistenceError as exc:
+        return fail(AcquisitionStage.STORAGE, exc, url=bundle.request_url, bundle=bundle, raw_artifact=exc.raw_artifact)
+
+    def fail_after_store(stage, error) -> AcquisitionReport:
+        return fail(stage, error, url=bundle.request_url, bundle=bundle, persisted=persisted)
+
+    if not 200 <= bundle.http_status <= 299:
+        return fail_after_store(AcquisitionStage.HTTP, HttpResponseError(bundle.http_status, bundle.retry_after))
+
+    try:
+        extracted = extractor.extract(bundle)
+    except (ListingPageParseError, FetchBlockedError) as exc:
+        return fail_after_store(AcquisitionStage.PARSE, exc)
+    except Exception as exc:
+        error = ListingPageParseError(f"listing page extraction failed: {exc}")
+        error.__cause__ = exc
+        return fail_after_store(AcquisitionStage.PARSE, error)
+    if not isinstance(extracted, ExtractedPage):
+        raise TypeError("extractor.extract() must return an ExtractedPage")
+
+    try:
+        records = build_records(
+            spec,
+            request=request,
+            raw_artifact=persisted.artifact,
+            rows=extracted.rows,
+            page_context=extracted.page_context,
+        )
+    except Exception as exc:
+        error = RecordBuildError(f"records could not be built: {exc}")
+        error.__cause__ = exc
+        return fail_after_store(AcquisitionStage.VALIDATION, error)
+
+    try:
+        records_uri = persist_records(records, writer=writer)
+    except RawPersistenceError as exc:
+        return fail_after_store(AcquisitionStage.STORAGE, exc)
+
+    return AcquisitionReport(
+        status=AcquisitionStatus.SUCCEEDED,
         marketplace_code=request.marketplace_code,
         marketplace_id=request.marketplace_id,
         target=request.target,
         page=request.page,
         resource_type=request.resource_type,
         crawl_run_id=crawl_run_id,
-        request_url=fetch_result.request_url,
+        request_url=bundle.request_url,
         started_at=started_at,
         completed_at=_completion(clock),
-        http_status=fetch_result.http_status,
-        retry_after=fetch_result.retry_after,
+        http_status=bundle.http_status,
+        retry_after=bundle.retry_after,
         raw_artifact=persisted.artifact,
         raw_metadata_uri=persisted.metadata_uri,
-        observations=parsed.observations,
-        rejections=parsed.rejections,
-        source_record_count=parsed.source_record_count,
-        duplicate_count=parsed.duplicate_count,
-        last_page=parsed.last_page,
-        failure=failure,
-    )
-
-
-def acquire_listing_page(
-    adapter: ListingPageAdapter,
-    request: ListingPageRequest,
-    *,
-    crawl_run_id: str,
-    writer: Callable[[str, str, bytes], str],
-    clock: Callable[[], datetime],
-) -> Phase2AcquisitionReport:
-    """Fetch, persist and parse one page in the mandatory raw-first order."""
-    if not isinstance(request, ListingPageRequest):
-        raise TypeError("request must be a ListingPageRequest")
-    if not isinstance(crawl_run_id, str) or not crawl_run_id.strip():
-        raise ValueError("crawl_run_id is required")
-    if not callable(clock):
-        raise TypeError("clock must be callable")
-    if request.marketplace_code != adapter.site_name:
-        raise ValueError("request marketplace_code does not match adapter")
-    if request.marketplace_id != adapter.marketplace_id:
-        raise ValueError("request marketplace_id does not match adapter")
-    if not isinstance(adapter.adapter_version, str) or not adapter.adapter_version.strip():
-        raise ValueError("adapter must expose a non-empty adapter_version")
-
-    started_at = clock()
-    try:
-        requested_url = adapter.request_url(request.target, request.page)
-    except ValueError as exc:
-        # A target the adapter cannot turn into a URL is a failed task, not a
-        # crash of the worker: the report carries the reason.
-        error = FetchTransportError(f"no request URL for target {request.target!r} page {request.page}: {exc}")
-        error.__cause__ = exc
-        return _failed_report(
-            request=request,
-            crawl_run_id=crawl_run_id,
-            request_url=getattr(adapter, "base_url", None) or "https://invalid.invalid/",
-            started_at=started_at,
-            http_status=None,
-            retry_after=None,
-            raw_artifact=None,
-            raw_metadata_uri=None,
-            failure=AcquisitionFailure(AcquisitionStage.FETCH, error),
-            clock=clock,
-        )
-    try:
-        allowed = adapter.allowed(requested_url)
-    except Exception as exc:
-        error = RobotsDeniedError(f"robots check failed for {requested_url}: {exc}")
-        error.__cause__ = exc
-        return _failed_report(
-            request=request,
-            crawl_run_id=crawl_run_id,
-            request_url=requested_url,
-            started_at=started_at,
-            http_status=None,
-            retry_after=None,
-            raw_artifact=None,
-            raw_metadata_uri=None,
-            failure=AcquisitionFailure(AcquisitionStage.ROBOTS, error),
-            clock=clock,
-        )
-    if not allowed:
-        return _failed_report(
-            request=request,
-            crawl_run_id=crawl_run_id,
-            request_url=requested_url,
-            started_at=started_at,
-            http_status=None,
-            retry_after=None,
-            raw_artifact=None,
-            raw_metadata_uri=None,
-            failure=AcquisitionFailure(
-                AcquisitionStage.ROBOTS,
-                RobotsDeniedError(f"robots.txt disallows {requested_url}"),
-            ),
-            clock=clock,
-        )
-
-    try:
-        adapter.throttle()
-        fetch_result = adapter.fetch_listing_page(request)
-    except Exception as exc:
-        wrapped = FetchTransportError(f"fetch failed for {requested_url}: {exc}")
-        wrapped.__cause__ = exc
-        return _failed_report(
-            request=request,
-            crawl_run_id=crawl_run_id,
-            request_url=requested_url,
-            started_at=started_at,
-            http_status=None,
-            retry_after=None,
-            raw_artifact=None,
-            raw_metadata_uri=None,
-            failure=AcquisitionFailure(AcquisitionStage.FETCH, wrapped),
-            clock=clock,
-        )
-    if not isinstance(fetch_result, FetchResult):
-        raise TypeError("adapter.fetch_listing_page() must return FetchResult")
-
-    try:
-        persisted = persist_fetch_result(
-            request=request,
-            fetch_result=fetch_result,
-            crawl_run_id=crawl_run_id,
-            adapter_version=adapter.adapter_version,
-            writer=writer,
-        )
-    except RawPersistenceError as exc:
-        return _failed_report(
-            request=request,
-            crawl_run_id=crawl_run_id,
-            request_url=fetch_result.request_url,
-            started_at=started_at,
-            http_status=fetch_result.http_status,
-            retry_after=fetch_result.retry_after,
-            raw_artifact=exc.raw_artifact,
-            raw_metadata_uri=None,
-            failure=AcquisitionFailure(AcquisitionStage.STORAGE, exc),
-            clock=clock,
-        )
-
-    if not 200 <= fetch_result.http_status <= 299:
-        error = HttpResponseError(fetch_result.http_status, fetch_result.retry_after)
-        return _failed_report(
-            request=request,
-            crawl_run_id=crawl_run_id,
-            request_url=fetch_result.request_url,
-            started_at=started_at,
-            http_status=fetch_result.http_status,
-            retry_after=fetch_result.retry_after,
-            raw_artifact=persisted.artifact,
-            raw_metadata_uri=persisted.metadata_uri,
-            failure=AcquisitionFailure(AcquisitionStage.HTTP, error),
-            clock=clock,
-        )
-
-    produced_at = clock()
-    try:
-        parsed = adapter.parse_listing_page(
-            request=request,
-            fetch_result=fetch_result,
-            raw_artifact=persisted.artifact,
-            crawl_run_id=crawl_run_id,
-            produced_at=produced_at,
-        )
-    except Exception as exc:
-        if isinstance(exc, ListingPageParseError):
-            error = exc
-        else:
-            error = ListingPageParseError(f"listing page parse failed: {exc}")
-            error.__cause__ = exc
-        return _failed_report(
-            request=request,
-            crawl_run_id=crawl_run_id,
-            request_url=fetch_result.request_url,
-            started_at=started_at,
-            http_status=fetch_result.http_status,
-            retry_after=fetch_result.retry_after,
-            raw_artifact=persisted.artifact,
-            raw_metadata_uri=persisted.metadata_uri,
-            failure=AcquisitionFailure(AcquisitionStage.PARSE, error),
-            clock=clock,
-        )
-    if not isinstance(parsed, ParsedListingPage):
-        raise TypeError("adapter.parse_listing_page() must return ParsedListingPage")
-    return _report_from_parsed(
-        request=request,
-        crawl_run_id=crawl_run_id,
-        fetch_result=fetch_result,
-        persisted=persisted,
-        parsed=parsed,
-        started_at=started_at,
-        clock=clock,
+        records=records,
+        records_uri=records_uri,
+        last_page=extracted.last_page,
+        failure=None,
+        row_count=len(extracted.rows),
     )

@@ -1,15 +1,12 @@
-"""Re-parse a stored raw artifact and prove it yields the same observation.
+"""Re-extract a stored raw artifact and prove it yields the same records.
 
-Phase 7 plan section 12. The parent Brief requires that reparsing the same raw
-response produces no duplicate and no divergent canonical observation. This
-module is how that claim is checked rather than assumed.
-
-The workflow is read-only by construction. It writes nothing to Silver, Kafka,
-Gold or PostgreSQL, which is what makes it safe to point at production data.
-A divergence is reported, never repaired: repairing one would be a recovery
-decision, and recovery is Phase 8.
+Raw responses are read back (v1 or v2), their checksums verified, the source's
+extractor run over them, and the resulting records compared with the ones
+Bronze/records holds for that artifact. The workflow is read-only by
+construction: it writes nothing to Bronze, Silver, Kafka, Gold or PostgreSQL,
+which is what makes it safe to point at production data. A divergence is
+reported, never repaired: repairing one is a recovery decision.
 """
-
 from __future__ import annotations
 
 import argparse
@@ -19,333 +16,121 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
-from urllib.parse import quote, unquote
 
-from ecomdata.domain.acquisition import FetchResult, ListingPageRequest
-from ecomdata.domain.observations import ResourceType, create_raw_artifact
-from ecomdata.domain.serialization import serialize_for_wire
-from ecomdata.ingestion.raw_store import RAW_METADATA_SCHEMA_VERSION
+from ecomdata.domain.records import SourceRecord, build_records, record_json
+from ecomdata.ingestion.raw_store import RawArtifactRef, RawArtifactUnreadable, load_raw_artifact
+from ecomdata.ingestion.record_store import read_records, records_path
 
 IDENTICAL = "IDENTICAL"
 DIVERGED = "DIVERGED"
-NEW_OBSERVATIONS = "NEW_OBSERVATIONS"
+RECORDS_MISSING = "RECORDS_MISSING"
 CHECKSUM_MISMATCH = "CHECKSUM_MISMATCH"
 PARSE_FAILED = "PARSE_FAILED"
 ADAPTER_VERSION_CHANGED = "ADAPTER_VERSION_CHANGED"
 
-BRONZE_ZONE = "bronze"
-SILVER_ZONE = "silver"
-
 Reader = Callable[[str, str], "bytes | None"]
-
-
-class RawArtifactUnreadable(RuntimeError):
-    """The stored artifact cannot be trusted enough to parse."""
-
-
-def _component(value: str) -> str:
-    return quote(value.strip(), safe="-_.~")
-
-
-@dataclass(frozen=True)
-class RawArtifactRef:
-    marketplace_code: str
-    observed_date: str
-    hour: str
-    crawl_run_id: str
-    raw_artifact_id: str
-
-    @property
-    def _base(self) -> str:
-        return (
-            "marketplace/raw/"
-            f"marketplace={_component(self.marketplace_code)}/"
-            f"observed_date={self.observed_date}/"
-            f"hour={self.hour}/"
-            f"crawl_run_id={_component(self.crawl_run_id)}/"
-            f"raw_artifact_id={_component(self.raw_artifact_id)}"
-        )
-
-    @property
-    def body_path(self) -> str:
-        return f"{self._base}/body.bin"
-
-    @property
-    def metadata_path(self) -> str:
-        return f"{self._base}/metadata.json"
-
-    @classmethod
-    def from_uri(cls, uri: str) -> RawArtifactRef:
-        """The inverse of :attr:`body_path`, for a ``raw_uri`` out of the audit.
-
-        ``audit.crawl_request_attempt`` stores where the body landed, not the
-        five components that address it. They are all in the path, so this
-        reads them back rather than re-deriving them from a crawl the audit
-        no longer describes. A path missing one is an error, never a guess:
-        reparsing the wrong artifact would report a divergence that is really
-        a lookup bug.
-        """
-        parts = dict(
-            segment.split("=", 1)
-            for segment in unquote(uri).split("/")
-            if "=" in segment and not segment.startswith("=")
-        )
-        wanted = ("marketplace", "observed_date", "hour", "crawl_run_id", "raw_artifact_id")
-        missing = [name for name in wanted if name not in parts]
-        if missing:
-            raise ValueError(f"raw_uri is missing {', '.join(missing)}: {uri}")
-        return cls(
-            parts["marketplace"], parts["observed_date"], parts["hour"], parts["crawl_run_id"], parts["raw_artifact_id"]
-        )
 
 
 @dataclass(frozen=True)
 class ReparseOutcome:
     raw_artifact_id: str
     status: str
-    observation_ids: tuple[str, ...] = ()
+    record_ids: tuple[str, ...] = ()
     content_hashes: Mapping[str, str] = field(default_factory=dict)
-    diverged_observation_ids: tuple[str, ...] = ()
+    diverged_record_ids: tuple[str, ...] = ()
     error_type: str | None = None
     error_message: str | None = None
-    # observation_id -> where the original ingest landed it in Silver.
-    silver_paths: Mapping[str, str] = field(default_factory=dict)
 
     @property
     def ok(self) -> bool:
         return self.status == IDENTICAL
 
 
-def content_hash(observation: Any) -> str:
-    """Canonical content hash of one observation, ignoring ``produced_at``.
-
-    ``produced_at`` records when *this* message was built, so a reparse will
-    always carry a newer one. Including it would make every reparse look
-    divergent and hide the defects this check exists to find. Everything that
-    describes the offer, the observation and its raw lineage is hashed.
-    """
-    document = serialize_for_wire(observation)
-    if isinstance(document, dict):
-        document = {key: value for key, value in document.items() if key != "produced_at"}
-    payload = json.dumps(document, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+def content_hash(record: SourceRecord) -> str:
+    """Hash of one record's canonical JSON: envelope, lineage and payload."""
+    return hashlib.sha256(record_json(record).encode("utf-8")).hexdigest()
 
 
-def load_raw_artifact(ref: RawArtifactRef, *, reader: Reader) -> tuple[Mapping[str, Any], bytes]:
-    """Read the sidecar and the body, verifying the checksum before anything else.
-
-    A corrupted artifact is never handed to a parser. Parsing it would launder
-    corruption into Silver-shaped output that looks canonical.
-    """
-    raw_metadata = reader(BRONZE_ZONE, ref.metadata_path)
-    if raw_metadata is None:
-        raise RawArtifactUnreadable(f"no metadata sidecar at {ref.metadata_path}")
-    metadata = json.loads(raw_metadata.decode("utf-8"))
-    version = metadata.get("schema_version")
-    if version != RAW_METADATA_SCHEMA_VERSION:
-        raise RawArtifactUnreadable(f"unsupported raw metadata schema version: {version!r}")
-
-    body = reader(BRONZE_ZONE, ref.body_path)
-    if body is None:
-        raise RawArtifactUnreadable(f"no stored body at {ref.body_path}")
-
-    expected = metadata["raw_artifact"]["body_sha256"]
-    actual = hashlib.sha256(body).hexdigest()
-    if actual != expected:
-        raise RawArtifactUnreadable(f"body checksum {actual} does not match the recorded {expected}")
-    return metadata, body
-
-
-def _rebuild(ref: RawArtifactRef, metadata: Mapping[str, Any], body: bytes):
-    """Rebuild the request, fetch result and artifact from the sidecar alone.
-
-    Nothing is taken from a caller argument, so a reparse cannot be aimed at
-    the wrong target by a mistyped command line.
-    """
-    stored = metadata["raw_artifact"]
-    fetched_at = datetime.fromisoformat(stored["fetched_at"])
-    request = ListingPageRequest(
-        marketplace_code=ref.marketplace_code,
-        marketplace_id=stored["marketplace_id"],
-        target=metadata["request"]["target"],
-        page=int(metadata["request"]["page"]),
-        resource_type=ResourceType(stored["resource_type"]),
-    )
-    fetch_result = FetchResult(
-        request_url=stored["request_url"],
-        fetched_at=fetched_at,
-        http_status=stored["http_status"],
-        content_type=stored["content_type"],
-        body=body,
-        retry_after=metadata.get("response", {}).get("retry_after"),
-        elapsed_ms=metadata.get("response", {}).get("elapsed_ms"),
-    )
-    artifact = create_raw_artifact(
-        marketplace_code=ref.marketplace_code,
-        crawl_run_id=stored["crawl_run_id"],
-        marketplace_id=stored["marketplace_id"],
-        request_url=stored["request_url"],
-        resource_type=ResourceType(stored["resource_type"]),
-        fetched_at=fetched_at,
-        http_status=stored["http_status"],
-        content_type=stored["content_type"],
-        body_sha256=stored["body_sha256"],
-        raw_uri=stored["raw_uri"],
-        adapter_version=stored["adapter_version"],
-        raw_bytes=int(stored["raw_bytes"]),
-    )
-    return request, fetch_result, artifact
+def diff_records(reparsed: Mapping[str, str], stored: Mapping[str, str]) -> tuple[str, ...]:
+    """Record ids whose content differs, or that exist on one side only, sorted."""
+    return tuple(sorted({key for key in reparsed.keys() | stored.keys() if reparsed.get(key) != stored.get(key)}))
 
 
 def reparse_raw_artifact(
-    ref: RawArtifactRef,
-    *,
-    adapter,
-    reader: Reader,
-    clock: Callable[[], datetime],
-    silver_dataset: str | None = None,
+    ref: RawArtifactRef, *, spec: Any, extractor: Any, reader: Reader
 ) -> ReparseOutcome:
-    """Re-run the adapter over a stored body in the mandatory order."""
+    """Re-run the extractor over a stored artifact and grade it against Bronze/records."""
     try:
-        metadata, body = load_raw_artifact(ref, reader=reader)
+        loaded = load_raw_artifact(ref, reader=reader)
     except RawArtifactUnreadable as error:
         status = CHECKSUM_MISMATCH if "checksum" in str(error) else PARSE_FAILED
         return ReparseOutcome(ref.raw_artifact_id, status, error_type=type(error).__name__, error_message=str(error))
 
-    stored_version = metadata["raw_artifact"]["adapter_version"]
-    if stored_version != getattr(adapter, "adapter_version", None):
-        # Reparsing under a different adapter is a Silver version change, not a
-        # verification. Superseding stored observations needs a schema bump.
+    stored_version = loaded.artifact.adapter_version
+    if stored_version != spec.adapter_version:
+        # Extracting under a different version is a Silver version change, not
+        # a verification.
         return ReparseOutcome(
             ref.raw_artifact_id,
             ADAPTER_VERSION_CHANGED,
             error_type="AdapterVersionChanged",
-            error_message=f"artifact was parsed by {stored_version}, adapter is {getattr(adapter, 'adapter_version', None)}",
+            error_message=f"artifact was extracted by {stored_version}, the extractor is {spec.adapter_version}",
         )
 
-    request, fetch_result, artifact = _rebuild(ref, metadata, body)
     try:
-        parsed = adapter.parse_listing_page(
-            request=request,
-            fetch_result=fetch_result,
-            raw_artifact=artifact,
-            crawl_run_id=artifact.crawl_run_id,
-            # An envelope field only. No observation value is ever taken from
-            # here, and content_hash() drops it before hashing.
-            produced_at=clock(),
+        extracted = extractor.extract(loaded.bundle)
+        records = build_records(
+            spec,
+            request=loaded.request,
+            raw_artifact=loaded.artifact,
+            rows=extracted.rows,
+            page_context=extracted.page_context,
         )
     except Exception as error:
         return ReparseOutcome(
             ref.raw_artifact_id, PARSE_FAILED, error_type=type(error).__name__, error_message=str(error)
         )
 
-    from ecomdata.ingestion.silver_sink import silver_observation_path
-
-    hashes = {observation.event_id: content_hash(observation) for observation in parsed.observations}
-    paths = {
-        observation.event_id: silver_observation_path(observation, *([silver_dataset] if silver_dataset else []))
-        for observation in parsed.observations
-    }
-    return ReparseOutcome(
-        ref.raw_artifact_id,
-        IDENTICAL,
-        observation_ids=tuple(sorted(hashes)),
-        content_hashes=hashes,
-        silver_paths=paths,
-    )
-
-
-def read_silver_hashes(outcome: ReparseOutcome, *, reader: Reader) -> dict[str, str]:
-    """Content hashes of the Silver records a reparse should match.
-
-    Silver holds one object per observation at a path derived from the event,
-    so the existing side is a handful of direct reads, not a scan. An absent
-    object is simply missing from the result, which ``classify`` reports as
-    ``NEW_OBSERVATIONS``.
-    """
-    existing = {}
-    for observation_id, path in outcome.silver_paths.items():
-        payload = reader(SILVER_ZONE, path)
-        if payload is not None:
-            existing[observation_id] = content_hash(json.loads(payload.decode("utf-8")))
-    return existing
-
-
-def diff_reparsed_observations(
-    reparsed: Mapping[str, str], existing: Mapping[str, str]
-) -> tuple[tuple[str, ...], tuple[str, ...]]:
-    """Compare two ``observation_id -> content hash`` maps.
-
-    Returns the diverged IDs and the IDs absent from ``existing``, both sorted.
-    A pure dict comparison, so the determinism claim is checkable in
-    milliseconds without Spark or storage.
-    """
-    diverged = sorted(key for key, value in reparsed.items() if key in existing and existing[key] != value)
-    unseen = sorted(key for key in reparsed if key not in existing)
-    return tuple(diverged), tuple(unseen)
-
-
-def classify(outcome: ReparseOutcome, existing: Mapping[str, str]) -> ReparseOutcome:
-    """Grade a successful reparse against what Silver already holds."""
-    if outcome.status != IDENTICAL:
-        return outcome
-    diverged, unseen = diff_reparsed_observations(outcome.content_hashes, existing)
+    hashes = {record.record_id: content_hash(record) for record in records}
+    path = records_path(spec.code, loaded.artifact.fetched_at, loaded.artifact.raw_artifact_id)
+    stored = read_records(path, reader=reader)
+    if stored is None:
+        return ReparseOutcome(
+            ref.raw_artifact_id,
+            RECORDS_MISSING,
+            tuple(sorted(hashes)),
+            hashes,
+            diverged_record_ids=tuple(sorted(hashes)),
+            error_type="RecordsMissingFromBronze",
+            error_message=f"no records file at {path}",
+        )
+    diverged = diff_records(hashes, {record.record_id: content_hash(record) for record in stored})
     if diverged:
         return ReparseOutcome(
-            outcome.raw_artifact_id,
+            ref.raw_artifact_id,
             DIVERGED,
-            outcome.observation_ids,
-            outcome.content_hashes,
-            diverged_observation_ids=diverged,
+            tuple(sorted(hashes)),
+            hashes,
+            diverged_record_ids=diverged,
             error_type="ContentDiverged",
-            error_message=f"{len(diverged)} observation(s) parsed to different content",
+            error_message=f"{len(diverged)} record(s) extracted to different content",
         )
-    if unseen:
-        # The original ingest lost rows. Writing them back is a Phase 8
-        # recovery decision, not something a verification tool should do.
-        return ReparseOutcome(
-            outcome.raw_artifact_id,
-            NEW_OBSERVATIONS,
-            outcome.observation_ids,
-            outcome.content_hashes,
-            diverged_observation_ids=unseen,
-            error_type="ObservationsMissingFromSilver",
-            error_message=f"{len(unseen)} observation(s) absent from Silver",
-        )
-    return outcome
+    return ReparseOutcome(ref.raw_artifact_id, IDENTICAL, tuple(sorted(hashes)), hashes)
 
 
 def reparse_batch(
     refs: Sequence[RawArtifactRef],
     *,
-    adapter_for: Callable[[str], Any],
+    spec_for: Callable[[str], Any],
+    extractor_for: Callable[[str], Any],
     reader: Reader,
-    clock: Callable[[], datetime],
-    existing: Mapping[str, str] | None = None,
-    silver_reader: Reader | None = None,
-    silver_dataset: str | None = None,
 ) -> tuple[ReparseOutcome, ...]:
-    """Reparse every artifact and grade it against Silver.
-
-    The existing side comes from ``existing`` when given, otherwise from
-    reading Silver through ``silver_reader``. With neither, an outcome is
-    ungraded, which only a unit test should ever want.
-    """
-    outcomes = []
-    for ref in refs:
-        outcome = reparse_raw_artifact(
-            ref,
-            adapter=adapter_for(ref.marketplace_code),
-            reader=reader,
-            clock=clock,
-            silver_dataset=silver_dataset,
+    return tuple(
+        reparse_raw_artifact(
+            ref, spec=spec_for(ref.marketplace_code), extractor=extractor_for(ref.marketplace_code), reader=reader
         )
-        if existing is not None:
-            outcome = classify(outcome, existing)
-        elif silver_reader is not None:
-            outcome = classify(outcome, read_silver_hashes(outcome, reader=silver_reader))
-        outcomes.append(outcome)
-    return tuple(outcomes)
+        for ref in refs
+    )
 
 
 def summarise(outcomes: Sequence[ReparseOutcome], *, reported_at: datetime) -> dict[str, Any]:
@@ -356,7 +141,7 @@ def summarise(outcomes: Sequence[ReparseOutcome], *, reported_at: datetime) -> d
         {
             "raw_artifact_id": outcome.raw_artifact_id,
             "status": outcome.status,
-            "observation_ids": list(outcome.diverged_observation_ids),
+            "record_ids": list(outcome.diverged_record_ids),
             "error_type": outcome.error_type,
         }
         for outcome in outcomes
@@ -371,40 +156,33 @@ def summarise(outcomes: Sequence[ReparseOutcome], *, reported_at: datetime) -> d
 
 
 def main(argv: Sequence[str] | None = None, *, reader: Reader | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Verify that a stored raw artifact reparses unchanged")
-    parser.add_argument("--marketplace", required=True)
+    parser = argparse.ArgumentParser(description="Verify that a stored raw artifact re-extracts unchanged")
+    parser.add_argument("--marketplace", "--source", dest="marketplace", required=True)
     parser.add_argument("--observed-date", required=True)
     parser.add_argument("--hour", required=True)
     parser.add_argument("--crawl-run-id", required=True)
     parser.add_argument("--raw-artifact-id", required=True, action="append")
-    parser.add_argument(
-        "--silver-dataset", default=None, help="Silver dataset prefix the ingest landed observations under"
-    )
     parser.add_argument("--report-path", default=None, help="also write the report to this local file")
     args = parser.parse_args(argv)
 
-    from ecomdata.ingestion.sources.tiki.api import TikiCrawler
+    from ecomdata.domain.sources import SOURCES
 
     if reader is None:
         from ecomdata.ingestion import bootstrap
 
         reader = bootstrap.object_store().get
 
-    adapters = {"tiki": TikiCrawler}
     refs = [
         RawArtifactRef(args.marketplace, args.observed_date, args.hour, args.crawl_run_id, artifact_id)
         for artifact_id in args.raw_artifact_id
     ]
-    outcomes = reparse_batch(
-        refs,
-        # Parse-only: no categories to crawl, and no robots.txt fetch, so a
-        # verification run never reaches the marketplace.
-        adapter_for=lambda code: adapters[code](categories=[], fetch_robots=False),
-        reader=reader,
-        clock=lambda: datetime.now(UTC),
-        silver_reader=reader,
-        silver_dataset=args.silver_dataset,
-    )
+
+    def extractor_for(code: str) -> Any:
+        extractor = SOURCES.extractor(code)
+        return extractor() if isinstance(extractor, type) else extractor
+
+    # Parse-only: nothing is fetched, so a verification run never reaches the marketplace.
+    outcomes = reparse_batch(refs, spec_for=SOURCES.get, extractor_for=extractor_for, reader=reader)
     report = json.dumps(summarise(outcomes, reported_at=datetime.now(UTC)), ensure_ascii=False, sort_keys=True)
     print(report)
     if args.report_path:

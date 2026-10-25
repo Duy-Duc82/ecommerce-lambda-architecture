@@ -527,3 +527,24 @@ def test_lease_rejects_a_naive_now():
 def test_the_factory_must_be_callable():
     with pytest.raises(TypeError, match="callable"):
         PostgresCrawlFrontier(object())
+
+
+def test_a_worker_can_lease_only_the_sources_it_can_fetch():
+    cursor = FakeCursor(rows=[])
+    frontier = PostgresCrawlFrontier(_factory(cursor))
+
+    frontier.lease_due(
+        worker_id="worker-1", now=NOW, lease_seconds=300, limit=5, marketplace_ids=["marketplace-lazada"]
+    )
+
+    assert "marketplace_id = ANY(%s::text[])" in _sql(cursor)
+    assert _params(cursor).count(["marketplace-lazada"]) == 2
+
+
+def test_no_source_filter_leases_every_source():
+    cursor = FakeCursor(rows=[])
+    frontier = PostgresCrawlFrontier(_factory(cursor))
+
+    frontier.lease_due(worker_id="worker-1", now=NOW, lease_seconds=300, limit=5)
+
+    assert _params(cursor).count(None) == 2

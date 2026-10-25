@@ -9,11 +9,11 @@ from decimal import Decimal
 import pytest
 
 from ecomdata.domain.acquisition import (
-    CanonicalRecordError,
     FetchTransportError,
     HttpResponseError,
     ListingPageParseError,
     RawPersistenceError,
+    RecordBuildError,
     RobotsDeniedError,
 )
 from ecomdata.domain.observations import ResourceType
@@ -148,7 +148,7 @@ def test_the_next_occurrence_is_one_cadence_later():
         (HttpResponseError(429), None, FailureKind.RATE_LIMITED),
         (HttpResponseError(500), None, FailureKind.SERVER_ERROR),
         (HttpResponseError(503), None, FailureKind.SERVER_ERROR),
-        (RawPersistenceError("s3 down", write_stage="BODY"), None, FailureKind.STORAGE_ERROR),
+        (RawPersistenceError("s3 down", write_stage="PART"), None, FailureKind.STORAGE_ERROR),
     ],
 )
 def test_transient_rate_limited_and_server_failures_are_retryable(
@@ -171,7 +171,7 @@ def test_transient_rate_limited_and_server_failures_are_retryable(
         (HttpResponseError(404), None, FailureKind.CLIENT_ERROR),
         (RobotsDeniedError("disallowed"), None, FailureKind.ROBOTS_DENIED),
         (ListingPageParseError("schema drift"), None, FailureKind.PARSE_ERROR),
-        (CanonicalRecordError("bad price"), None, FailureKind.VALIDATION_ERROR),
+        (RecordBuildError("bad price"), None, FailureKind.VALIDATION_ERROR),
         (KeyError("programming error"), None, FailureKind.UNKNOWN),
     ],
 )
@@ -391,12 +391,12 @@ def test_a_retryable_decision_must_carry_a_delay():
 # ----------------------------------------------------------------------------
 from types import SimpleNamespace
 
-from ecomdata.domain.acquisition import ObservationPublishError
+from ecomdata.domain.acquisition import RecordPublishError
 
 
 def _publish_error(acknowledged=0):
-    report = SimpleNamespace(observations=(1, 2))
-    return ObservationPublishError(report=report, acknowledged=acknowledged, cause=RuntimeError("broker down"))
+    report = SimpleNamespace(records=(1, 2))
+    return RecordPublishError(report=report, acknowledged=acknowledged, cause=RuntimeError("broker down"))
 
 
 def test_a_publish_failure_is_its_own_kind_and_is_retryable():
@@ -430,3 +430,27 @@ def test_every_failure_kind_is_allowed_by_both_audit_constraints_and_their_migra
     # A fresh database creates the tables first, so their inline lists must
     # carry the new kind too, or the ALTER would be the only thing hiding drift.
     assert sql.count("'PUBLISH_ERROR'") >= 4
+
+
+# --- BLOCKED: a challenge page backs the crawl off, and is never worked around ---
+from ecomdata.domain.acquisition import FetchBlockedError  # noqa: E402
+
+
+def test_a_block_is_classified_blocked_and_retried_after_a_backoff():
+    error = FetchBlockedError("captcha page", evidence="slide to verify")
+
+    decision = _decide(error, http_status=200)
+
+    assert decision.failure_kind is FailureKind.BLOCKED
+    assert decision.retryable is True and decision.delay_seconds > 0
+
+
+def test_a_block_stops_being_retried_once_the_attempts_are_used_up():
+    assert _decide(FetchBlockedError("captcha"), attempts=POLICY.max_attempts).retryable is False
+
+
+def test_the_database_accepts_every_failure_kind_the_code_can_record():
+    sql = (REPO_ROOT / "scripts" / "init_postgres.sql").read_text(encoding="utf-8")
+    constraint = sql.split("crawl_request_attempt_error_kind_check CHECK", 1)[1].split(";", 1)[0]
+
+    assert all(f"'{kind.value}'" in constraint for kind in FailureKind)

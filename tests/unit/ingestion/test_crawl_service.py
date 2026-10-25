@@ -9,11 +9,13 @@ import signal
 import subprocess
 import sys
 from datetime import timedelta
+from types import SimpleNamespace
 
 import pytest
 
-from ecomdata.domain.acquisition import AcquisitionStatus, ObservationPublishError, decode_listing_page_task_target
+from ecomdata.domain.acquisition import AcquisitionStatus, RecordPublishError, decode_listing_page_task_target
 from ecomdata.domain.observations import ResourceType
+from ecomdata.domain.records import RecordKind
 from ecomdata.ingestion import seed as seed_frontier
 from ecomdata.ingestion import service
 from ecomdata.ingestion.scheduling import CrawlTaskStatus, CrawlTier, make_crawl_task_id
@@ -129,19 +131,37 @@ def test_sigterm_and_sigint_set_the_stop_signal():
             signal.signal(sig, handler)
 
 
+def _rows(*names):
+    return tuple(SimpleNamespace(record_kind=RecordKind.LISTING_ROW, name=name) for name in names)
+
+
+def _names(sent):
+    return [record.name for record in sent]
+
+
 # 3
-def test_every_observation_is_published_in_order_and_the_report_returned_unchanged():
-    report = FakeReport(observations=("obs-a", "obs-b", "obs-c"))
+def test_every_row_is_published_in_order_and_the_report_returned_unchanged():
+    report = FakeReport(records=_rows("a", "b", "c"))
     sent = []
     execute = service.publishing_executor(lambda *, task, crawl_run_id: report, publish=sent.append)
 
     assert execute(task=_task(), crawl_run_id="run-1") is report
-    assert sent == ["obs-a", "obs-b", "obs-c"]
+    assert _names(sent) == ["a", "b", "c"]
+
+
+def test_the_page_context_record_is_not_published():
+    context = SimpleNamespace(record_kind=RecordKind.PAGE_CONTEXT, name="context")
+    report = FakeReport(records=(context, *_rows("a")))
+    sent = []
+
+    service.publishing_executor(lambda *, task, crawl_run_id: report, publish=sent.append)(task=_task(), crawl_run_id="r")
+
+    assert _names(sent) == ["a"]
 
 
 # 3
 def test_a_failed_acquisition_is_never_published():
-    report = FakeReport(status=AcquisitionStatus.FAILED, http_status=500, observations=("obs-a",))
+    report = FakeReport(status=AcquisitionStatus.FAILED, http_status=500, records=_rows("a"))
     sent = []
     execute = service.publishing_executor(lambda *, task, crawl_run_id: report, publish=sent.append)
 
@@ -163,35 +183,35 @@ def test_an_acquisition_error_passes_through_unpublished():
 
 
 # 4
-def test_a_failed_publish_reports_how_many_observations_were_acknowledged():
-    report = FakeReport(observations=("obs-a", "obs-b", "obs-c", "obs-d"))
+def test_a_failed_publish_reports_how_many_rows_were_acknowledged():
+    report = FakeReport(records=_rows("a", "b", "c", "d"))
     sent = []
 
-    def publish(event):
-        if event == "obs-c":
+    def publish(record):
+        if record.name == "c":
             raise RuntimeError("KafkaTimeoutError: broker unavailable")
-        sent.append(event)
+        sent.append(record)
 
     execute = service.publishing_executor(lambda *, task, crawl_run_id: report, publish=publish)
 
-    with pytest.raises(ObservationPublishError) as caught:
+    with pytest.raises(RecordPublishError) as caught:
         execute(task=_task(), crawl_run_id="run-1")
 
     assert caught.value.acknowledged == 2
     assert caught.value.report is report
     assert isinstance(caught.value.__cause__, RuntimeError)
     # Nothing after the failure is attempted: order is what makes the count exact.
-    assert sent == ["obs-a", "obs-b"]
+    assert _names(sent) == ["a", "b"]
 
 
 # 4
 def test_a_publish_error_refuses_an_impossible_acknowledged_count():
-    report = FakeReport(observations=("obs-a",))
+    report = FakeReport(records=_rows("a"))
 
     with pytest.raises(ValueError, match="acknowledged"):
-        ObservationPublishError(report=report, acknowledged=2, cause=RuntimeError("x"))
+        RecordPublishError(report=report, acknowledged=2, cause=RuntimeError("x"))
     with pytest.raises(ValueError, match="acknowledged"):
-        ObservationPublishError(report=report, acknowledged=-1, cause=RuntimeError("x"))
+        RecordPublishError(report=report, acknowledged=-1, cause=RuntimeError("x"))
 
 
 # 6

@@ -17,12 +17,13 @@ from enum import Enum
 
 from ecomdata.domain import validation as v
 from ecomdata.domain.acquisition import (
-    CanonicalRecordError,
+    FetchBlockedError,
     FetchTransportError,
     HttpResponseError,
     ListingPageParseError,
-    ObservationPublishError,
     RawPersistenceError,
+    RecordBuildError,
+    RecordPublishError,
     RobotsDeniedError,
 )
 from ecomdata.domain.identity import deterministic_id
@@ -65,6 +66,9 @@ class FailureKind(str, Enum):
     # Kafka refused or timed out after a good fetch and parse. Retryable, and
     # never a reason to open the source circuit: the marketplace was fine.
     PUBLISH_ERROR = "PUBLISH_ERROR"
+    # A block, challenge or captcha page. Retried only after a long wait, and it
+    # counts towards opening the source circuit; never worked around.
+    BLOCKED = "BLOCKED"
     UNKNOWN = "UNKNOWN"
 
 
@@ -75,6 +79,7 @@ _RETRYABLE_KINDS = frozenset(
         FailureKind.SERVER_ERROR,
         FailureKind.STORAGE_ERROR,
         FailureKind.PUBLISH_ERROR,
+        FailureKind.BLOCKED,
     }
 )
 # 408 Request Timeout, 425 Too Early and 429 Too Many Requests are the only
@@ -226,15 +231,17 @@ def next_scheduled_for(
 def classify_failure(error: Exception, http_status: int | None = None) -> FailureKind:
     """Map a Phase 2 boundary failure onto the persisted error taxonomy."""
     # First: the fetch behind it succeeded, so its HTTP status says nothing.
-    if isinstance(error, ObservationPublishError):
+    if isinstance(error, RecordPublishError):
         return FailureKind.PUBLISH_ERROR
+    if isinstance(error, FetchBlockedError):
+        return FailureKind.BLOCKED
     if isinstance(error, RobotsDeniedError):
         return FailureKind.ROBOTS_DENIED
     if isinstance(error, RawPersistenceError):
         return FailureKind.STORAGE_ERROR
     if isinstance(error, ListingPageParseError):
         return FailureKind.PARSE_ERROR
-    if isinstance(error, CanonicalRecordError):
+    if isinstance(error, RecordBuildError):
         return FailureKind.VALIDATION_ERROR
     if isinstance(error, HttpResponseError):
         http_status = http_status if http_status is not None else error.status_code

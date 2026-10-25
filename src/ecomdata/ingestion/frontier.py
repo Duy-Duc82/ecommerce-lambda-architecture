@@ -6,7 +6,7 @@ an error message are remote text and are never interpolated into a statement.
 """
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from datetime import datetime, timedelta
 from typing import Any
 
@@ -112,8 +112,12 @@ class PostgresCrawlFrontier:
         now: datetime,
         lease_seconds: int,
         limit: int,
+        marketplace_ids: Sequence[str] | None = None,
     ) -> list[CrawlTask]:
         """Claim up to `limit` due tasks for this worker.
+
+        ``marketplace_ids`` restricts the claim to those sources (a worker that
+        can only fetch some of them, such as the one with the browser).
 
         One statement selects and updates: the CTE takes row locks with
         SKIP LOCKED so a second worker steps over them instead of blocking,
@@ -126,12 +130,14 @@ class PostgresCrawlFrontier:
         if isinstance(limit, bool) or not isinstance(limit, int) or limit <= 0:
             raise ValueError("limit must be a positive integer")
         expires_at = now + timedelta(seconds=lease_seconds)
+        sources = list(marketplace_ids) if marketplace_ids else None
         with self.connection_factory() as conn, conn.cursor() as cur:
             cur.execute(
                 "WITH due AS ("
                 "  SELECT task_id FROM audit.crawl_frontier"
-                "  WHERE (status IN ('READY', 'RETRY_WAIT') AND scheduled_for <= %s)"
-                "     OR (status = 'LEASED' AND lease_expires_at <= %s)"
+                "  WHERE ((status IN ('READY', 'RETRY_WAIT') AND scheduled_for <= %s)"
+                "     OR (status = 'LEASED' AND lease_expires_at <= %s))"
+                "    AND (%s::text[] IS NULL OR marketplace_id = ANY(%s::text[]))"
                 "  ORDER BY priority DESC, scheduled_for ASC"
                 "  LIMIT %s"
                 "  FOR UPDATE SKIP LOCKED"
@@ -141,7 +147,7 @@ class PostgresCrawlFrontier:
                 "    attempts = f.attempts + 1, updated_at = %s "
                 "FROM due WHERE f.task_id = due.task_id "
                 f"RETURNING {_FRONTIER_COLUMNS}",
-                (now, now, limit, worker_id, expires_at, now),
+                (now, now, sources, sources, limit, worker_id, expires_at, now),
             )
             rows = cur.fetchall() or []
         return [_row_to_task(row) for row in rows]

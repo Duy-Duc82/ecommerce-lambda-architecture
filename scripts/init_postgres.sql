@@ -422,7 +422,7 @@ ALTER TABLE audit.crawl_frontier DROP CONSTRAINT IF EXISTS crawl_frontier_last_e
 ALTER TABLE audit.crawl_frontier
     ADD CONSTRAINT crawl_frontier_last_error_kind_check CHECK (last_error_kind IS NULL OR last_error_kind IN (
         'RATE_LIMITED', 'TRANSIENT_NETWORK', 'SERVER_ERROR', 'CLIENT_ERROR',
-        'ROBOTS_DENIED', 'STORAGE_ERROR', 'PARSE_ERROR', 'VALIDATION_ERROR', 'PUBLISH_ERROR', 'UNKNOWN'));
+        'ROBOTS_DENIED', 'STORAGE_ERROR', 'PARSE_ERROR', 'VALIDATION_ERROR', 'PUBLISH_ERROR', 'BLOCKED', 'UNKNOWN'));
 -- Refactor: the HOT and SWEEP tiers of long-term collection.
 ALTER TABLE audit.crawl_frontier DROP CONSTRAINT IF EXISTS crawl_frontier_tier_check;
 ALTER TABLE audit.crawl_frontier
@@ -431,7 +431,7 @@ ALTER TABLE audit.crawl_request_attempt DROP CONSTRAINT IF EXISTS crawl_request_
 ALTER TABLE audit.crawl_request_attempt
     ADD CONSTRAINT crawl_request_attempt_error_kind_check CHECK (error_kind IS NULL OR error_kind IN (
         'RATE_LIMITED', 'TRANSIENT_NETWORK', 'SERVER_ERROR', 'CLIENT_ERROR',
-        'ROBOTS_DENIED', 'STORAGE_ERROR', 'PARSE_ERROR', 'VALIDATION_ERROR', 'PUBLISH_ERROR', 'UNKNOWN'));
+        'ROBOTS_DENIED', 'STORAGE_ERROR', 'PARSE_ERROR', 'VALIDATION_ERROR', 'PUBLISH_ERROR', 'BLOCKED', 'UNKNOWN'));
 
 CREATE TABLE IF NOT EXISTS audit.crawl_source_state (
     marketplace_code VARCHAR(32) PRIMARY KEY CHECK (marketplace_code = lower(marketplace_code)),

@@ -10,14 +10,14 @@ them.
 """
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Protocol
 
 from ecomdata.domain import validation as v
-from ecomdata.domain.acquisition import AcquisitionStatus, ObservationPublishError, Phase2AcquisitionReport
+from ecomdata.domain.acquisition import AcquisitionReport, AcquisitionStatus, RecordPublishError
 from ecomdata.domain.observations import CrawlRun, CrawlRunStatus
 from ecomdata.ingestion.audit import CrawlAttemptAudit, CrawlAuditRepository
 from ecomdata.ingestion.frontier import LeaseLostError, PostgresCrawlFrontier
@@ -39,6 +39,7 @@ _CIRCUIT_KINDS = frozenset(
         FailureKind.TRANSIENT_NETWORK,
         FailureKind.SERVER_ERROR,
         FailureKind.STORAGE_ERROR,
+        FailureKind.BLOCKED,
     }
 )
 
@@ -46,7 +47,7 @@ _CIRCUIT_KINDS = frozenset(
 class AcquisitionExecutor(Protocol):
     def __call__(
         self, *, task: CrawlTask, crawl_run_id: str
-    ) -> Phase2AcquisitionReport: ...
+    ) -> AcquisitionReport: ...
 
 
 @dataclass(frozen=True)
@@ -59,13 +60,13 @@ class CycleResult:
     recovered_leases: int
 
 
-def _retry_after(report: Phase2AcquisitionReport | None, error: Exception) -> str | None:
+def _retry_after(report: AcquisitionReport | None, error: Exception) -> str | None:
     if report is not None and getattr(report, "retry_after", None):
         return report.retry_after
     return getattr(error, "retry_after", None)
 
 
-def _http_status(report: Phase2AcquisitionReport | None, error: Exception) -> int | None:
+def _http_status(report: AcquisitionReport | None, error: Exception) -> int | None:
     if report is not None and getattr(report, "http_status", None) is not None:
         return report.http_status
     return getattr(error, "status_code", None)
@@ -87,6 +88,7 @@ class CrawlWorker:
         circuit_open_seconds: int,
         jitter: Callable[[], Decimal] = lambda: Decimal("0.5"),
         cadence_minutes: Mapping[str, int] = DEFAULT_CADENCE_MINUTES,
+        marketplace_ids: Sequence[str] | None = None,
     ):
         if not callable(executor):
             raise TypeError("executor must be callable")
@@ -108,6 +110,7 @@ class CrawlWorker:
         self.circuit_open_seconds = circuit_open_seconds
         self.jitter = jitter
         self.cadence_minutes = dict(cadence_minutes)
+        self.marketplace_ids = tuple(marketplace_ids) if marketplace_ids else None
 
     def run_once(self, *, crawl_run_id_for: Callable[[CrawlTask], str]) -> CycleResult:
         """Run one polling cycle. Never sleeps; an outer CLI owns the interval."""
@@ -118,6 +121,7 @@ class CrawlWorker:
             now=now,
             lease_seconds=self.lease_seconds,
             limit=self.batch_size,
+            marketplace_ids=self.marketplace_ids,
         )
         succeeded = retried = failed = skipped = 0
         for task in tasks:
@@ -168,7 +172,7 @@ class CrawlWorker:
         )
         self.audit.start_run(run)
 
-        report: Phase2AcquisitionReport | None = None
+        report: AcquisitionReport | None = None
         error: Exception | None = None
         try:
             report = self.executor(task=task, crawl_run_id=crawl_run_id)
@@ -206,8 +210,8 @@ class CrawlWorker:
                 raw_artifact_id=getattr(report.raw_artifact, "raw_artifact_id", None),
                 raw_uri=getattr(report.raw_artifact, "raw_uri", None),
                 raw_bytes=getattr(report.raw_artifact, "raw_bytes", 0) or 0,
-                parsed_count=len(report.observations),
-                rejected_count=len(report.rejections),
+                parsed_count=report.record_count,
+                rejected_count=report.rejected_count,
             )
         )
         self.frontier.mark_succeeded(
@@ -227,8 +231,8 @@ class CrawlWorker:
         # terminal (found by Phase 8 drill D1).
         failure = getattr(report, "failure", None)
         error = error or getattr(failure, "error", None) or RuntimeError("acquisition failed")
-        parsed_count = len(report.observations) if report else 0
-        if isinstance(error, ObservationPublishError):
+        parsed_count = report.record_count if report else 0
+        if isinstance(error, RecordPublishError):
             # The fetch, raw write and parse all happened; only publication
             # failed part-way. The report rides on the error so the audit can
             # still name the raw artifact, and only the observations Kafka
@@ -260,7 +264,7 @@ class CrawlWorker:
                 raw_artifact_id=getattr(getattr(report, "raw_artifact", None), "raw_artifact_id", None),
                 raw_uri=getattr(getattr(report, "raw_artifact", None), "raw_uri", None),
                 parsed_count=parsed_count,
-                rejected_count=len(report.rejections) if report else 0,
+                rejected_count=0,
                 error_kind=kind,
                 error_message=str(error),
             )

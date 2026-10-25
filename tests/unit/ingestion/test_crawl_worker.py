@@ -6,16 +6,17 @@ or PostgreSQL, and no sleep.
 
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
+from types import SimpleNamespace
 
 import pytest
 
 from ecomdata.domain.acquisition import (
     AcquisitionStatus,
-    CanonicalRecordError,
     FetchTransportError,
     HttpResponseError,
     ListingPageParseError,
     RawPersistenceError,
+    RecordBuildError,
 )
 from ecomdata.domain.observations import CrawlRunStatus, ResourceType
 from ecomdata.ingestion.audit import CrawlAttemptAudit
@@ -55,21 +56,21 @@ def _task(attempts=1, **overrides):
 
 
 class FakeReport:
-    """Stands in for Phase2AcquisitionReport with only what the worker reads."""
+    """Stands in for AcquisitionReport with only what the worker reads."""
 
     def __init__(
         self,
         status=AcquisitionStatus.SUCCEEDED,
         http_status=200,
-        observations=(),
-        rejections=(),
+        records=(),
         retry_after=None,
         failure=None,
     ):
         self.status = status
         self.http_status = http_status
-        self.observations = observations
-        self.rejections = rejections
+        self.records = records
+        self.record_count = len(records)
+        self.rejected_count = 0
         self.retry_after = retry_after
         self.failure = failure
         self.raw_artifact = None
@@ -85,8 +86,8 @@ class FakeFrontier:
         self.calls.append(("recover", now))
         return self.recovered
 
-    def lease_due(self, *, worker_id, now, lease_seconds, limit):
-        self.calls.append(("lease", worker_id, limit))
+    def lease_due(self, *, worker_id, now, lease_seconds, limit, marketplace_ids=None):
+        self.calls.append(("lease", worker_id, limit, marketplace_ids))
         return self.tasks
 
     def mark_succeeded(self, *, task_id, worker_id, completed_at, next_scheduled_for):
@@ -132,7 +133,7 @@ class FakeAudit:
         return [call[0] for call in self.calls]
 
 
-def _worker(frontier, audit, executor, clock=None):
+def _worker(frontier, audit, executor, clock=None, **options):
     times = iter([NOW, NOW, NOW + timedelta(seconds=2)] * 20)
     return CrawlWorker(
         frontier=frontier,
@@ -146,6 +147,7 @@ def _worker(frontier, audit, executor, clock=None):
         circuit_threshold=5,
         circuit_open_seconds=900,
         jitter=lambda: Decimal("0.5"),
+        **options,
     )
 
 
@@ -197,7 +199,7 @@ def test_attempt_audit_truncates_an_oversized_error_message():
 def test_a_successful_execution_writes_counts_and_completes_the_run():
     frontier = FakeFrontier(tasks=[_task()])
     audit = FakeAudit()
-    report = FakeReport(observations=(1, 2, 3), rejections=(4,))
+    report = FakeReport(records=(1, 2, 3))
 
     result = _run(frontier, audit, lambda *, task, crawl_run_id: report)
 
@@ -206,7 +208,7 @@ def test_a_successful_execution_writes_counts_and_completes_the_run():
     attempt = audit.attempts[0]
     assert attempt.status == "SUCCEEDED"
     assert attempt.parsed_count == 3
-    assert attempt.rejected_count == 1
+    assert attempt.rejected_count == 0
     assert attempt.latency_ms == 2000
     assert ("finish_run", "run-" + _task().task_id[:8], CrawlRunStatus.COMPLETED) in audit.calls
     assert "source_success" in audit.kinds()
@@ -226,7 +228,7 @@ def test_success_schedules_the_next_occurrence_one_cadence_later():
 @pytest.mark.parametrize(
     "error",
     [
-        RawPersistenceError("minio down", write_stage="BODY"),
+        RawPersistenceError("minio down", write_stage="PART"),
         FetchTransportError("connection reset"),
         HttpResponseError(503),
     ],
@@ -266,7 +268,7 @@ def test_an_exhausted_task_becomes_terminal_instead_of_retrying():
     "error, kind",
     [
         (ListingPageParseError("schema drift"), FailureKind.PARSE_ERROR),
-        (CanonicalRecordError("bad price"), FailureKind.VALIDATION_ERROR),
+        (RecordBuildError("bad price"), FailureKind.VALIDATION_ERROR),
     ],
 )
 def test_parser_and_validation_failures_are_terminal_and_spare_the_circuit(error, kind):
@@ -391,17 +393,6 @@ def test_a_report_marked_failed_is_treated_as_a_failure():
     assert result.retried == 1
 
 
-def test_a_partial_report_still_counts_as_progress():
-    frontier = FakeFrontier(tasks=[_task()])
-    audit = FakeAudit()
-    report = FakeReport(status=AcquisitionStatus.PARTIAL, observations=(1,))
-
-    result = _run(frontier, audit, lambda *, task, crawl_run_id: report)
-
-    assert result.succeeded == 1
-    assert audit.attempts[0].status == "PARTIAL"
-
-
 def test_a_retry_after_header_from_the_report_reaches_the_decision():
     frontier = FakeFrontier(tasks=[_task()])
     audit = FakeAudit()
@@ -459,54 +450,57 @@ def test_the_worker_validates_its_collaborators():
         CrawlWorker(**{**base, "worker_id": "  "})
 
 
-def test_the_runner_adapter_binds_phase_two_without_the_worker_knowing_the_site():
+def test_the_executor_binds_acquisition_without_the_worker_knowing_the_source():
     from ecomdata.domain.acquisition import encode_listing_page_task_target
-    from ecomdata.ingestion.cli import listing_page_executor
+    from ecomdata.ingestion.runtime import listing_page_executor
 
     seen = {}
 
-    def fake_execute(*, site, task_target, crawl_run_id, writer, clock):
-        seen.update(site=site, task_target=task_target, crawl_run_id=crawl_run_id)
-        return FakeReport()
+    class FakeRuntime:
+        def spec(self, code):
+            return SimpleNamespace(code=code, marketplace_id="marketplace-" + code)
 
-    import ecomdata.ingestion.cli as runner
+        def acquire(self, code, request, *, crawl_run_id, writer):
+            seen.update(code=code, target=request.target, page=request.page, crawl_run_id=crawl_run_id)
+            return FakeReport()
 
-    original = runner.execute_listing_page
-    runner.execute_listing_page = fake_execute
-    try:
-        target = encode_listing_page_task_target("1846", 2)
-        executor = listing_page_executor(site="tiki", writer=lambda *a: "", clock=lambda: NOW)
-        report = executor(task=_task(target=target), crawl_run_id="run-1")
-    finally:
-        runner.execute_listing_page = original
+    target = encode_listing_page_task_target("1846", 2)
+    report = listing_page_executor(FakeRuntime(), writer=lambda *a: "")(task=_task(target=target), crawl_run_id="run-1")
 
     assert report.status is AcquisitionStatus.SUCCEEDED
-    assert seen == {"site": "tiki", "task_target": target, "crawl_run_id": "run-1"}
+    assert seen == {"code": "tiki", "target": "1846", "page": 2, "crawl_run_id": "run-1"}
+
+
+def test_a_worker_leases_only_the_sources_it_was_given():
+    frontier = FakeFrontier(tasks=[])
+    worker = _worker(frontier, FakeAudit(), lambda *, task, crawl_run_id: FakeReport(), marketplace_ids=["marketplace-lazada"])
+
+    worker.run_once(crawl_run_id_for=lambda task: "run")
+
+    assert ("lease", "worker-1", 10, ("marketplace-lazada",)) in frontier.calls
 
 
 # ----------------------------------------------------------------------------
 # Phase 8 plan section 6.1, item 5: a crawl attempt that parsed and stored its
 # raw response but could not publish every observation.
 # ----------------------------------------------------------------------------
-from types import SimpleNamespace
-
-from ecomdata.domain.acquisition import ObservationPublishError
+from ecomdata.domain.acquisition import RecordPublishError
 
 
 def _publish_failure(report, acknowledged):
     def executor(*, task, crawl_run_id):
-        raise ObservationPublishError(
+        raise RecordPublishError(
             report=report, acknowledged=acknowledged, cause=RuntimeError("broker unavailable")
         )
 
     return executor
 
 
-def test_a_partial_publish_records_only_the_acknowledged_observations():
+def test_a_partial_publish_records_only_the_acknowledged_rows():
     # Phase 7 check 8 compares parsed_count with Silver rows per crawl run.
     # Only acknowledged observations can ever reach Silver, so recording the
     # parsed total would leave that run mismatched for good.
-    report = FakeReport(observations=(1, 2, 3), rejections=(9,))
+    report = FakeReport(records=(1, 2, 3, 9))
     report.raw_artifact = SimpleNamespace(raw_artifact_id="raw_1", raw_uri="s3a://bronze/raw_1/body.bin", raw_bytes=512)
     frontier, audit = FakeFrontier(tasks=[_task()]), FakeAudit()
 
@@ -516,7 +510,7 @@ def test_a_partial_publish_records_only_the_acknowledged_observations():
     assert attempt.status == "FAILED"
     assert attempt.error_kind == FailureKind.PUBLISH_ERROR
     assert attempt.parsed_count == 2
-    assert attempt.rejected_count == 1
+    assert attempt.rejected_count == 0
     # The raw response was stored before parsing, and the audit must say where.
     assert attempt.raw_artifact_id == "raw_1"
     assert attempt.raw_uri == "s3a://bronze/raw_1/body.bin"
@@ -524,7 +518,7 @@ def test_a_partial_publish_records_only_the_acknowledged_observations():
 
 
 def test_a_publish_failure_with_nothing_acknowledged_records_zero():
-    report = FakeReport(observations=(1, 2))
+    report = FakeReport(records=(1, 2))
     frontier, audit = FakeFrontier(tasks=[_task()]), FakeAudit()
 
     _run(frontier, audit, _publish_failure(report, 0))
@@ -536,7 +530,7 @@ def test_a_publish_failure_is_retried_and_never_opens_the_source_circuit():
     # Kafka being down says nothing about the marketplace.
     frontier, audit = FakeFrontier(tasks=[_task()]), FakeAudit()
 
-    _run(frontier, audit, _publish_failure(FakeReport(observations=(1,)), 0))
+    _run(frontier, audit, _publish_failure(FakeReport(records=(1,)), 0))
 
     retry = next(call for call in frontier.calls if call[0] == "retry")
     assert retry[2] is FailureKind.PUBLISH_ERROR
@@ -570,7 +564,7 @@ def test_a_returned_failure_is_classified_by_its_own_exception(stage, error, kin
 
     exception = {
         "transport": FetchTransportError("fetch failed: Read timed out. (read timeout=10)"),
-        "storage": RawPersistenceError("MinIO unreachable", write_stage="BODY"),
+        "storage": RawPersistenceError("MinIO unreachable", write_stage="PART"),
         "parse": ListingPageParseError("Tiki response data must be a list"),
         "robots": RobotsDeniedError("robots.txt disallows the path"),
     }[error]
