@@ -2,6 +2,73 @@
 
 Ngày 2026-10-25. Plan: `docs/PLAN_REFACTOR_ARCHITECTURE.md`. Nhật ký: `docs/REFACTOR_REPORT.md` (có bảng AC1–AC14 hiện tại).
 
+## 0. BẮT ĐẦU Ở ĐÂY (cập nhật 2026-10-25 16:40)
+
+**Việc tiếp theo:** đưa bản nháp R6/R7 ở nhánh `wip/r6-r7-draft` (`1abef01`) về `refactor/architecture`, sửa cho suite xanh, rồi làm nốt những ô chưa xong ở bảng dưới. Sau đó sang R8 (mục 4.3), rồi R9 (mục 4.4).
+
+**Trạng thái các nhánh:**
+
+- `refactor/architecture` (`C:\code\data-refactor`) sạch; R0–R5 đã xong và đã kiểm. HEAD là commit docs sau `f529d45`.
+- `wip/r6-r7-draft` dựa trên `6983f6a`. Nó do một session bị dừng giữa chừng viết ra, chưa commit theo từng phần và chưa xanh.
+
+**Không còn session hay tiến trình nền nào.** Luôn chỉ cho **một** session ghi vào worktree tại một thời điểm.
+
+### 0.1 Kết quả kiểm bản nháp (25/10, worktree `C:\code\data-refactor-verify`, detached ở `1abef01`)
+
+**Lưu ý môi trường:** `.venv` cài editable trỏ vào `C:\code\data-refactor\src`. Muốn test một worktree khác thì phải đặt `PYTHONPATH=<worktree>/src`. Nếu không, Python sẽ import code của worktree chính.
+
+**`pytest` (bỏ `tests/unit/ops/test_ops_validate.py`):** 1386 passed, **4 failed**, 2 skipped, 11 deselected. Mất 34 phút.
+
+Các test fail:
+
+- `tests/unit/ops/test_ops_backup.py::test_the_derived_stores_are_allowed_to_be_empty_after_a_restore`
+- `tests/unit/ops/test_ops_backup.py::test_the_tolerated_checks_are_exactly_the_stores_that_are_not_backed_up`
+  - Rất có thể do `silver-sink` và Silver JSON đã bị bỏ, nên danh sách store được backup đổi theo.
+- `tests/unit/ops/test_retention.py::test_only_raw_older_than_the_window_is_deleted`
+  - `ops/retention.py` mới, test mới.
+- `tests/unit/processing/test_marketplace_scheduler.py::test_the_entrypoint_answers_help`
+  - Scheduler cũ còn gọi entrypoint của `warehouse.py`, file này đã bị xoá. Phải chuyển sang `python -m ecomdata.processing.batch run --all`.
+
+**`tests/unit/ops/test_ops_validate.py` hỏng:** `SyntaxError` ở dòng 26 (`gzip.compress("` bị cắt ngang). Session trước bị dừng đúng lúc đang ghi file này. Viết lại hàm helper đó.
+
+**Kiểm tĩnh:**
+
+- `lint-imports`: 4 kept, 0 broken.
+- `ruff check src tests services`: **5 lỗi**, trong đó 2 sửa được bằng `--fix`.
+
+### 0.2 Checklist R6/R7 đối chiếu bản nháp
+
+| Mục (plan §3.4 / §4) | Trạng thái trong `wip/r6-r7-draft` |
+|---|---|
+| `stages/{marts,quality,publish,promote}.py` + `stages/base.py` | Có; có test `tests/spark/test_batch_stages.py`, `test_batch_inputs.py`. |
+| `runner.py`, `cli.py`, `__main__.py` (`--stage` lặp, `--all`, `--force`, `--resume`, `--allow-backfill`, `--quality-only`) | Có; test `tests/unit/processing/test_batch_runner.py`. |
+| Xoá `warehouse.py` và cập nhật các chỗ tham chiếu | Đã xoá. **Còn sót** entrypoint của scheduler (test fail ở trên). Rà lại `ops/bench.py`, `ops/drills.py` (chuỗi `python -m`). |
+| `batch/bootstrap.py` inject adapter thật; không còn `from_settings()` trong `stages/` | Có; grep `from_settings` trong `stages/` không ra kết quả. |
+| `spark.driver.memory` tường minh | Có, `infra/spark.py:24` mặc định `3g`. |
+| Sửa check `observation_id_unique` (đọc số trùng trước dedup) | Có (`batch/quality.py` khoảng dòng 217 và 460, tham số `accounted_rows`). Cần xác nhận có test "đầu vào trùng thì FAIL". |
+| Thống nhất ordering qua `domain/ordering.py` | **Chưa.** `marts.py` dòng 22, 29, 97, 346, 559, 568 vẫn viết thẳng `orderBy(observed_at, fetched_at, observation_id)`. |
+| `build_offer_change_daily` gọi `domain/change_rules.py`; một setting freshness/stale | **Chưa kiểm**, có thể chưa làm. |
+| Thay `10000` cứng ở `marts.py:474` bằng `context.percentile_accuracy` | **Chưa.** |
+| Bỏ action Spark (`count`, `collect`) trong hàm thuần | **Chưa kiểm.** |
+| AC8: `--all` và từng stage riêng cho cùng Gold, manifest, audit; chạy lại là no-op; test chuyển trạng thái | Test runner đã có; **cần xác nhận** có test so `--all` với từng stage riêng. |
+| R7: speed đọc `marketplace.records.v1` | Có. `processing/speed/service.py:81` `read_marketplace_records` dùng `normalizer.normalize_micro_batch`, ghi sang `marketplace.observations.v1` (giờ là topic dẫn xuất của speed), rồi `stream.py` đọc tiếp. Test `tests/spark/test_speed_normalizer.py`. |
+| R7: bỏ `silver-sink` | Đã bỏ khỏi `src/` và compose. **Còn sót** tham chiếu ở `observability/{build_grafana_dashboard.py,promtail.yml,run_report_metrics.py}`. |
+| Một phần của R8/R9 đã nằm trong bản nháp | 3 DAG ở `orchestration/dags/` (`DockerOperator`, `@hourly`, `max_active_runs=1`), `orchestration/tasks.py`, `ops/{bronze,retention}.py`, `docs/adr/0001–0006`. Chưa có image Airflow và compose `orchestration`. |
+
+### 0.3 Các bước cụ thể cho session tiếp theo
+
+1. Trong `C:\code\data-refactor`, chạy `git merge --squash wip/r6-r7-draft`. Nếu có conflict thì giữ bản của `refactor/architecture` cho `docs/`.
+2. Sửa:
+   - `tests/unit/ops/test_ops_validate.py`;
+   - 4 test fail;
+   - 5 lỗi ruff;
+   - tham chiếu `silver-sink` trong `observability/`.
+3. Làm nốt các ô **Chưa** ở bảng 0.2.
+4. Chạy toàn bộ suite (khoảng 35 phút), `ruff check src tests services` và `lint-imports`. Cả ba phải sạch.
+5. Commit thành từng phần: stages + runner; ordering + rules; speed; ops; observability. Mỗi commit đứng tên người dùng, **không** có `Co-Authored-By`.
+6. Thêm mục R6/R7 vào `docs/REFACTOR_REPORT.md`, cập nhật bảng AC, sửa mục 0 của file này.
+7. Sang R8 (mục 4.3), rồi R9 (mục 4.4).
+
 ## 1. Trạng thái hiện tại
 
 | Mục | Giá trị |

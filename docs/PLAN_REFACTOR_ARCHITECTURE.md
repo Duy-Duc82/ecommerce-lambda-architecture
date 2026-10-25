@@ -8,6 +8,8 @@ Plan này đi trước, và là nền cho:
 
 Phần star schema (dim/fact, SCD2, Delta) **không** thuộc plan này. Ở đây chỉ chừa chỗ cho nó trong khung stage.
 
+> **Session mới: đọc `docs/HANDOFF_REFACTOR.md` mục 0 trước.** Mục đó ghi chỗ cần làm tiếp và kết quả kiểm gần nhất. Cập nhật 2026-10-25: R0–R5 xong; R6/R7 có bản nháp ở nhánh `wip/r6-r7-draft`, chưa xanh; R8–R9 chưa làm.
+
 ---
 
 ## 0. Bàn giao (session thực thi đọc trước)

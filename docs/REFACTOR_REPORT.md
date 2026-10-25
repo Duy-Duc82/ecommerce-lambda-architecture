@@ -126,3 +126,14 @@ Test đã bỏ có chủ đích từ R0 đến R5: xem R3 (4 file test của ada
 | AC12 E2E `mp-refactor` | **not started** | Cần R6–R8. |
 | AC13 Tài liệu | **not started** | `docs/ARCHITECTURE.md` vẫn bản cũ; chưa có `docs/adr/`, `docs/archive/`. Đã có: `REFACTOR_REPORT.md`, `HANDOFF_REFACTOR.md`. |
 | AC14 Git | **partial** | `git log --format=%an refactor/architecture ^phase-10-dimensional-model` chỉ có tên người dùng; `git log --format=%B ... \| grep -ci co-authored` = 0; không push. Chưa so `docker ps -a` và `docker volume ls` trước/sau với baseline (session này không chạm Docker). |
+
+
+## Cập nhật 2026-10-25 16:40: trạng thái R6/R7
+
+- Một session nền bị dừng giữa chừng đã để lại bản nháp R6/R7 chưa commit. Bản nháp được lưu nguyên trạng ở nhánh `wip/r6-r7-draft` (`1abef01`). Nhánh `refactor/architecture` giữ R0–R5 sạch.
+- Kiểm bản nháp (`PYTHONPATH` trỏ vào `src` của bản nháp):
+  - `pytest`: 1386 passed, 4 failed, 2 skipped, 11 deselected. Có 1 file test bị cắt ngang (`tests/unit/ops/test_ops_validate.py`, `SyntaxError`).
+  - `lint-imports`: 4/4 kept.
+  - `ruff`: 5 lỗi.
+- Chi tiết từng mục và các bước tiếp theo: `docs/HANDOFF_REFACTOR.md` mục 0.
+- AC chưa đổi so với bảng ở trên: AC8 vẫn "chưa xong" cho tới khi bản nháp được đưa vào và suite xanh.
