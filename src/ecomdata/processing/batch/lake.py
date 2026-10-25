@@ -92,12 +92,34 @@ def read_crawl_audit(spark: SparkSession, jdbc_url: str, properties: Mapping[str
 
 def silver_schemas() -> dict[str, StructType]:
     """Explicit read schemas of the Silver datasets later stages read back."""
-    from pyspark.sql.types import IntegerType, StringType, StructField, TimestampType
+    from pyspark.sql.types import (
+        ArrayType,
+        BooleanType,
+        DateType,
+        DecimalType,
+        IntegerType,
+        LongType,
+        StringType,
+        StructField,
+        TimestampType,
+    )
+
+    spark_types = {
+        "string": StringType(),
+        "timestamp": TimestampType(),
+        "date": DateType(),
+        "int": IntegerType(),
+        "bigint": LongType(),
+        "boolean": BooleanType(),
+        "array<string>": ArrayType(StringType()),
+        common.MONEY: DecimalType(38, 6),
+    }
 
     from ecomdata.processing.batch.stages.silver import OBSERVATIONS, QUARANTINE
 
-    def ddl(columns: Sequence[tuple[str, str]]) -> StructType:
-        return StructType.fromDDL(", ".join(f"{name} {dtype}" for name, dtype in columns))
+    def declared(columns: Sequence[tuple[str, str]]) -> StructType:
+        # Built from the types, not parsed from DDL: parsing needs a running JVM.
+        return StructType([StructField(name, spark_types[dtype]) for name, dtype in columns])
 
     quarantine = StructType(
         [
@@ -112,7 +134,7 @@ def silver_schemas() -> dict[str, StructType]:
             StructField("payload_json", StringType()),
         ]
     )
-    return {OBSERVATIONS: ddl(common.CANONICAL_COLUMNS), QUARANTINE: quarantine}
+    return {OBSERVATIONS: declared(common.CANONICAL_COLUMNS), QUARANTINE: quarantine}
 
 
 __all__ = ["SparkLakeIO", "read_crawl_audit", "silver_schemas"]

@@ -9,6 +9,7 @@ from pyspark.sql import DataFrame, Window
 from pyspark.sql import functions as F
 
 from ecomdata.domain.counter_semantics import counter_semantic
+from ecomdata.domain.ordering import ORDER_COLUMNS
 from ecomdata.processing.batch.anomaly import build_price_anomaly_daily
 
 if TYPE_CHECKING:
@@ -18,17 +19,23 @@ MONEY = "decimal(38,6)"
 UNKNOWN_CATEGORY = "__UNKNOWN__"
 
 
+def _ascending() -> list:
+    return [F.col(name) for name in ORDER_COLUMNS]
+
+
+def _descending() -> list:
+    return [F.col(name).desc() for name in ORDER_COLUMNS]
+
+
 def _ordered(df: DataFrame, partition: list[str] | str) -> Window:
-    return Window.partitionBy(partition).orderBy(F.col("observed_at"), F.col("fetched_at"), F.col("observation_id"))
+    return Window.partitionBy(partition).orderBy(*_ascending())
 
 
 def _latest(df: DataFrame, partition: list[str] | str) -> DataFrame:
     # row_number() = 1 takes the first row of the window, so the ordering must
     # be descending here. _ordered() stays ascending because lag() and the
     # _first markers depend on it.
-    newest = Window.partitionBy(partition).orderBy(
-        F.col("observed_at").desc(), F.col("fetched_at").desc(), F.col("observation_id").desc()
-    )
+    newest = Window.partitionBy(partition).orderBy(*_descending())
     return df.withColumn("_rn", F.row_number().over(newest)).filter("_rn = 1").drop("_rn")
 
 
@@ -93,9 +100,7 @@ def build_offer_price_history_daily(observations: DataFrame) -> DataFrame:
     w = _ordered(ordered, ["marketplace", "offer_id", "observed_date", "currency"])
     marked = ordered.withColumn("_first", F.row_number().over(w)).withColumn(
         "_last",
-        F.row_number().over(
-            w.orderBy(F.col("observed_at").desc(), F.col("fetched_at").desc(), F.col("observation_id").desc())
-        ),
+        F.row_number().over(w.orderBy(*_descending())),
     )
     return marked.groupBy("marketplace", "offer_id", "observed_date", "currency").agg(
         F.min(F.when(F.col("_first") == 1, F.col("observed_at"))).alias("first_observed_at"),
@@ -343,9 +348,7 @@ def build_source_coverage_daily(
         .withColumn(
             "_rn",
             F.row_number().over(
-                Window.partitionBy(calendar.marketplace, calendar.offer_id, calendar.observed_date).orderBy(
-                    F.col("observed_at").desc(), F.col("fetched_at").desc(), F.col("observation_id").desc()
-                )
+                Window.partitionBy(calendar.marketplace, calendar.offer_id, calendar.observed_date).orderBy(*_descending())
             ),
         )
         .filter("_rn = 1")
@@ -437,7 +440,9 @@ def build_source_coverage_daily(
     )
 
 
-def build_crawl_reliability_daily(attempts: DataFrame, runs: DataFrame) -> DataFrame:
+def build_crawl_reliability_daily(
+    attempts: DataFrame, runs: DataFrame, *, percentile_accuracy: int = 10000
+) -> DataFrame:
     attempts = _with_marketplace(attempts, runs)
     marketplace = F.col("_marketplace")
     date = F.to_date(_audit_col(attempts, "request_date", _audit_col(attempts, "started_at")))
@@ -471,7 +476,7 @@ def build_crawl_reliability_daily(attempts: DataFrame, runs: DataFrame) -> DataF
             F.sum(F.when(F.col("_status").isin("SUCCEEDED", "PARTIAL"), 1).otherwise(0)).alias("succeeded_count"),
             F.sum(F.when(F.col("_status") == "FAILED", 1).otherwise(0)).alias("failed_count"),
             F.avg("_latency").alias("avg_latency_ms"),
-            F.percentile_approx("_latency", 0.95, 10000).alias("p95_latency_ms"),
+            F.percentile_approx("_latency", 0.95, percentile_accuracy).alias("p95_latency_ms"),
             *[
                 F.sum(x).alias(x)
                 for x in (
@@ -556,17 +561,13 @@ def build_counter_transitions(observations: DataFrame, *, max_gap_seconds: int, 
 
 
 def build_counter_delta_daily(transitions: DataFrame) -> DataFrame:
-    order = Window.partitionBy("marketplace", "offer_id", "observed_date", "counter_name").orderBy(
-        F.col("observed_at"), F.col("fetched_at"), F.col("observation_id")
-    )
+    order = Window.partitionBy("marketplace", "offer_id", "observed_date", "counter_name").orderBy(*_ascending())
     marked = (
         transitions.withColumn("observed_date", F.to_date("observed_at"))
         .withColumn("_first", F.row_number().over(order))
         .withColumn(
             "_last",
-            F.row_number().over(
-                order.orderBy(F.col("observed_at").desc(), F.col("fetched_at").desc(), F.col("observation_id").desc())
-            ),
+            F.row_number().over(order.orderBy(*_descending())),
         )
     )
     return (
@@ -636,7 +637,9 @@ def build_marketplace_marts(
             stale_after_seconds=context.freshness_seconds,
             rule_version=context.freshness_rule_version,
         ),
-        "crawl_reliability_daily": build_crawl_reliability_daily(attempts, runs),
+        "crawl_reliability_daily": build_crawl_reliability_daily(
+            attempts, runs, percentile_accuracy=context.percentile_accuracy
+        ),
         "counter_delta_daily": build_counter_delta_daily(
             build_counter_transitions(
                 observations, max_gap_seconds=context.counter_max_gap_seconds, rule_version=context.counter_rule_version

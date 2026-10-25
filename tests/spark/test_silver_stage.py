@@ -21,18 +21,19 @@ from ecomdata.domain.observations import (
     create_observation_event,
     create_offer_observation,
 )
-from ecomdata.domain.records import record_json
 from ecomdata.domain.sources import TIKI
 from ecomdata.domain.wire import canonical_json
 from ecomdata.processing.batch.context import MarketplaceBatchContext
 from ecomdata.processing.batch.inputs import organic_only
 from ecomdata.processing.batch.marts import build_marketplace_marts
+from ecomdata.processing.batch.memory import MemoryStore
 from ecomdata.processing.batch.stages import silver as silver_stage
 from ecomdata.processing.batch.stages.base import RunOptions, StageContext
 from ecomdata.processing.batch.stages.silver import SilverStage, duplicate_counts
-from ecomdata.processing.batch.warehouse import deduplicate_marketplace_observations, flatten_marketplace_observations
 from ecomdata.processing.normalize import common
 from ecomdata.processing.schemas import MARKETPLACE_OBSERVATION_WIRE_SCHEMA
+from tests.spark.lake_support import MemoryLake, lines_of
+from tests.spark.legacy_path import deduplicate_marketplace_observations, flatten_marketplace_observations
 from tests.spark.test_marketplace_marts import _audit
 from tests.spark.test_normalize import FETCHED, lazada_records, tiki_records
 from tests.spark_support import requires_spark
@@ -40,44 +41,6 @@ from tests.spark_support import requires_spark
 pytestmark = requires_spark
 
 AS_OF = datetime(2026, 10, 25, 10, tzinfo=UTC)
-
-
-class MemoryLake:
-    """The LakeIO port over DataFrames held in memory; records are decoded from the lines handed in."""
-
-    def __init__(self, spark, lines):
-        self.spark = spark
-        self.lines = list(lines)
-        self.written: dict[str, object] = {}
-        self.partitions: dict[str, tuple[str, ...]] = {}
-
-    def read_records(self, *, since_date=None):
-        frame = common.decode_records(self.spark.createDataFrame([(line,) for line in self.lines], "value string"))
-        if since_date is not None:
-            frame = frame.filter(F.to_date("fetched_at") >= F.lit(since_date))
-        return frame
-
-    def write_silver(self, name, frame, *, partition_by=()):
-        self.written[name] = frame.cache()
-        self.written[name].count()
-        self.partitions[name] = tuple(partition_by)
-        return f"memory://silver/{name}"
-
-
-class MemoryStore:
-    def __init__(self):
-        self.objects: dict[tuple[str, str], bytes] = {}
-
-    def put(self, zone, key, data):
-        self.objects[(zone, key)] = data
-        return f"memory://{zone}/{key}"
-
-    def get(self, zone, key):
-        return self.objects.get((zone, key))
-
-
-def lines_of(records):
-    return [record_json(r) for r in records]
 
 
 def run_silver(spark, lines, *, options=None, as_of=AS_OF):

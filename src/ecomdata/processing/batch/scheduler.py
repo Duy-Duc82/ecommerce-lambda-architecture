@@ -82,9 +82,9 @@ def tick(
     Never raises for a failed batch. A refused or crashed window must not stop
     the windows after it; its evidence is already in PostgreSQL.
     """
+    from ecomdata.processing.batch.context import MarketplaceBatchContext
     from ecomdata.processing.batch.lock import BatchAlreadyRunning
     from ecomdata.processing.batch.quality import QualityGateFailure
-    from ecomdata.processing.batch.warehouse import MarketplaceBatchContext
 
     as_of = window_as_of(now, interval_seconds=interval_seconds, lag_seconds=lag_seconds)
     run_id = run_id_for(as_of)
@@ -94,7 +94,7 @@ def tick(
         # Inside the try: PostgreSQL restarting as a tick fires is one failed
         # window, not the end of the scheduler.
         previous = run_status(run_id)
-        if previous == "SUCCEEDED":
+        if previous in ("PROMOTED", "SUCCEEDED"):
             return {**report, "outcome": "SKIPPED_SUCCEEDED"}
         # Never allow_backfill: a backfill is a deliberate operator command.
         result = run_batch(context, resume=previous is not None, serving_gold_root_uri=gold_root_uri)
@@ -142,9 +142,11 @@ def run_scheduler(
 
 
 def main(argv: list[str] | None = None) -> None:
-    from ecomdata.processing.batch.bootstrap import scheduler_main
+    import sys
 
-    scheduler_main(argv)
+    from ecomdata.processing.batch.cli import main as cli_main
+
+    cli_main(["scheduler", *(sys.argv[1:] if argv is None else argv)])
 
 
 if __name__ == "__main__":

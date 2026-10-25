@@ -8,9 +8,9 @@ from datetime import UTC, datetime, timedelta, timezone
 import pytest
 
 from ecomdata.processing.batch import scheduler
+from ecomdata.processing.batch.context import MarketplaceBatchResult
 from ecomdata.processing.batch.lock import BatchAlreadyRunning
 from ecomdata.processing.batch.quality import QualityDecision, QualityGateFailure
-from ecomdata.processing.batch.warehouse import MarketplaceBatchResult
 
 DAY, LAG = 86400, 1800
 UTC = UTC

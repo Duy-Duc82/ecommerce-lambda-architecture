@@ -24,6 +24,7 @@ from ecomdata.domain.quality_rules import (
     quality_rule,
     rules_with_severity,
 )
+from ecomdata.processing.batch.context import MarketplaceBatchContext
 from ecomdata.processing.batch.marts import build_marketplace_marts
 from ecomdata.processing.batch.quality import (
     FAIL,
@@ -33,7 +34,6 @@ from ecomdata.processing.batch.quality import (
     decide,
     evaluate_quality_gates,
 )
-from ecomdata.processing.batch.warehouse import MarketplaceBatchContext
 
 # The observation builder is forty fields wide. Re-declaring it here would make
 # two fixtures that drift apart; importing it keeps one definition of what a
@@ -500,7 +500,7 @@ def test_an_audit_without_run_completion_times_skips_reconciliation(spark):
 def test_a_backfill_over_a_silver_that_kept_growing_passes_once_cut(spark):
     # The case the cut exists for: Silver holds rows days past this run's
     # as_of, from crawl runs that had not even started yet.
-    from ecomdata.processing.batch.warehouse import crawl_audit_as_of, observations_as_of
+    from ecomdata.processing.batch.inputs import crawl_audit_as_of, observations_as_of
 
     ctx = context()
     later = ctx.as_of + timedelta(days=2)

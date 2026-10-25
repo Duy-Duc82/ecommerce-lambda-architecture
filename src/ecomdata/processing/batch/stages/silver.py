@@ -29,6 +29,7 @@ from pyspark.sql import functions as F
 
 from ecomdata.domain.batch_run import BatchRunStatus as S
 from ecomdata.domain.sources import SOURCES, SourceRegistry
+from ecomdata.processing.batch.inputs import duplicate_counts
 from ecomdata.processing.batch.stages.base import Outcome, Stage, StageContext
 from ecomdata.processing.normalize import common
 
@@ -38,8 +39,6 @@ PAGE_CONTEXT = "page_context"
 RUNS_DIRECTORY = "_runs"
 SILVER_ZONE = "silver"
 SILVER_PARTITIONS = ("source_code", "observed_date")
-# Which record a row came from, not what the row says.
-LINEAGE_COLUMNS = ("record_id", "raw_artifact_id")
 QUARANTINE_COLUMNS = (
     "record_id",
     "source_code",
@@ -186,31 +185,6 @@ def drop_replayed_records(records: DataFrame) -> tuple[DataFrame, int]:
         return records, 0
     keyed = records.filter(F.col("record_id").isNotNull()).dropDuplicates(["record_id"])
     return keyed.unionByName(records.filter(F.col("record_id").isNull())), replayed
-
-
-def duplicate_counts(observations: DataFrame) -> dict[str, int]:
-    """Rows, and how many of them repeat an ``observation_id`` or repeat a whole row, before any dedup.
-
-    ``observation_id`` is deterministic from (source, listing, instant, body), so a
-    repeat means the same listing twice in one response (or a replayed record).
-    ``identical_content`` counts the repeats whose canonical columns, bar the
-    lineage ones (``LINEAGE_COLUMNS``, which name the record the row came from), equal
-    another row's; ``observation_id`` minus ``identical_content`` is the number
-    of ids that carry different content, which dedup would refuse.
-    """
-    content = F.sha2(
-        F.to_json(F.struct(*[F.col(name) for name in observations.columns if name not in LINEAGE_COLUMNS])), 256
-    )
-    row = observations.agg(
-        F.count("*").alias("rows"),
-        F.countDistinct("observation_id").alias("ids"),
-        F.countDistinct(content).alias("contents"),
-    ).first()
-    return {
-        "rows": row.rows,
-        "observation_id": row.rows - row.ids,
-        "identical_content": row.rows - row.contents,
-    }
 
 
 def _union(frames: list[DataFrame], columns: tuple[str, ...] | None) -> DataFrame | None:

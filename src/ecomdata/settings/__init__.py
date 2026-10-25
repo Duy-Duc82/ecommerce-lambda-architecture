@@ -194,7 +194,6 @@ class KafkaSettings:
     producer_ack_timeout_seconds: int = 30
     change_ack_timeout_seconds: int = 30
     dlq_projector_group: str = "marketplace-dlq-projector-v1"
-    silver_consumer_group: str = "marketplace-silver-v1"
     # The connector must match the Spark runtime (4.x, Scala 2.13). Empty
     # inside an image whose connector jars are already on the classpath.
     spark_kafka_package: str = "org.apache.spark:spark-sql-kafka-0-10_2.13:4.0.1"
@@ -327,6 +326,8 @@ class SparkSettings:
 @dataclass(frozen=True)
 class BatchSettings:
     silver_dataset: str = "marketplace/offer_observations"
+    # Where the Silver v2 datasets (offer_observations_v2, quarantine, page_context, ...) live in the silver bucket.
+    silver_root: str = "marketplace"
     records_dataset: str = "marketplace/records"
     freshness_seconds: int = 21600
     freshness_rule_version: str = "freshness-rules.v1"
@@ -436,7 +437,6 @@ def _read(env: _Env) -> Settings:
             producer_ack_timeout_seconds=env.integer("KAFKA_PRODUCER_ACK_TIMEOUT_SECONDS", 30),
             change_ack_timeout_seconds=env.integer("KAFKA_CHANGE_ACK_TIMEOUT_SECONDS", 30),
             dlq_projector_group=env.text("KAFKA_DLQ_PROJECTOR_GROUP", "marketplace-dlq-projector-v1"),
-            silver_consumer_group=env.text("KAFKA_SILVER_CONSUMER_GROUP", "marketplace-silver-v1"),
             spark_kafka_package=env.text(
                 "SPARK_KAFKA_PACKAGE", "org.apache.spark:spark-sql-kafka-0-10_2.13:4.0.1"
             ),
@@ -476,6 +476,7 @@ def _read(env: _Env) -> Settings:
         batch=BatchSettings(
             silver_dataset=env.text("MARKETPLACE_SILVER_DATASET", batch_defaults.silver_dataset),
             records_dataset=env.text("MARKETPLACE_RECORDS_DATASET", batch_defaults.records_dataset),
+            silver_root=env.text("MARKETPLACE_SILVER_ROOT", batch_defaults.silver_root),
             freshness_seconds=env.integer("MARKETPLACE_FRESHNESS_SECONDS", batch_defaults.freshness_seconds),
             freshness_rule_version=env.text("MARKETPLACE_FRESHNESS_RULE_VERSION", batch_defaults.freshness_rule_version),
             counter_rule_version=env.text("MARKETPLACE_COUNTER_RULE_VERSION", batch_defaults.counter_rule_version),
@@ -626,6 +627,7 @@ def validate(settings: Settings) -> Settings:
         "MARKETPLACE_COUNTER_RULE_VERSION": batch.counter_rule_version,
         "MARKETPLACE_SILVER_DATASET": batch.silver_dataset,
         "MARKETPLACE_RECORDS_DATASET": batch.records_dataset,
+        "MARKETPLACE_SILVER_ROOT": batch.silver_root,
         "MARKETPLACE_BATCH_APP_NAME": settings.spark.batch_app_name,
         "MARKETPLACE_ANOMALY_RULE_VERSION": batch.anomaly_rule_version,
         "MARKETPLACE_QUALITY_RULE_VERSION": quality.rule_version,

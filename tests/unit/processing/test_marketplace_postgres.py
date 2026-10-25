@@ -8,6 +8,8 @@ from datetime import UTC, datetime
 
 import pytest
 
+from ecomdata.domain.batch_run import BatchRunStatus, InvalidTransition
+from ecomdata.processing.batch.context import MarketplaceBatchContext
 from ecomdata.processing.batch.quality import QualityDecision, QualityGateFailure, QualityResult
 from ecomdata.processing.batch.repositories import (
     DATASET_COLUMNS,
@@ -17,7 +19,6 @@ from ecomdata.processing.batch.repositories import (
     MarketplaceQualityRepository,
     StagedDataset,
 )
-from ecomdata.processing.batch.warehouse import MarketplaceBatchContext
 
 AS_OF = datetime(2026, 9, 29, tzinfo=UTC)
 MANIFEST_URI = "s3a://gold/marketplace/manifests/run_id=run-1/manifest.json"
@@ -261,8 +262,9 @@ def test_publish_uses_one_transaction_with_explicit_columns():
     assert statements[0].startswith("SELECT pg_advisory_xact_lock")
     truncate_at = next(i for i, sql in enumerate(statements) if sql.startswith("TRUNCATE"))
     version_at = next(i for i, sql in enumerate(statements) if "marketplace_cache_version" in sql)
-    succeeded_at = next(i for i, sql in enumerate(statements) if "status='SUCCEEDED'" in sql)
-    assert truncate_at < version_at < succeeded_at
+    assert truncate_at < version_at
+    # The audit row belongs to the runner, which advances it after the cache is published.
+    assert not any("marketplace_batch_run" in sql for sql in statements)
     for name in DATASETS:
         insert = next(sql for sql in statements if f"INSERT INTO cache.marketplace_{name} (" in sql)
         assert ",".join(DATASET_COLUMNS[name]) in insert
@@ -294,7 +296,7 @@ def test_a_failure_on_any_table_leaves_no_cache_version_row():
         publisher.publish(staged, run_id="run-1", published_at=AS_OF, quality=passing(), manifest_uri=MANIFEST_URI)
 
     assert not any("marketplace_cache_version" in sql for sql, _ in cursor.executed)
-    assert not any("status='SUCCEEDED'" in sql for sql, _ in cursor.executed)
+    assert not any("marketplace_batch_run" in sql for sql, _ in cursor.executed)
 
 
 def test_cleanup_never_raises():
@@ -307,90 +309,141 @@ def test_cleanup_never_raises():
     publisher.cleanup(_staged(publisher))
 
 
+def run_row(status="CREATED", last="CREATED", *, as_of=AS_OF, silver="s3a://silver", expected=None, counts=None):
+    return (
+        "run-1", as_of, silver, status, last, expected, None, None, counts, None, None, None, False, False, None, None,
+    )  # fmt: skip
+
+
+def audit_ctx():
+    return MarketplaceBatchContext("run-1", AS_OF, "s3a://silver", "s3a://gold")
+
+
 # 44
-def test_a_succeeded_run_id_cannot_restart():
-    cursor = FakeCursor(rows=("SUCCEEDED", "run-1", AS_OF, "s3a://silver"))
+def test_a_new_run_is_inserted_as_created_with_the_pointer_it_expects():
+    cursor = FakeCursor(rows=None)
     audit = MarketplaceBatchAudit(_factory(cursor))
-    context = MarketplaceBatchContext("run-1", AS_OF, "s3a://silver", "s3a://gold")
 
-    with pytest.raises(ValueError, match="already SUCCEEDED"):
-        audit.start_run(context, AS_OF)
+    audit.open_run(audit_ctx(), AS_OF, expected_current_run_id="run-0")
+
+    insert, params = next((sql, p) for sql, p in cursor.executed if sql.lstrip().startswith("INSERT INTO audit"))
+    assert "'CREATED','CREATED'" in insert
+    assert params == ("run-1", AS_OF, "s3a://silver", AS_OF, "run-0")
 
 
-def test_an_existing_run_requires_explicit_resume():
-    cursor = FakeCursor(rows=("RUNNING", "run-1", AS_OF, "s3a://silver"))
+def test_an_existing_run_is_returned_not_overwritten():
+    cursor = FakeCursor(rows=run_row("SILVER_BUILT", "SILVER_BUILT", expected="run-0"))
     audit = MarketplaceBatchAudit(_factory(cursor))
-    context = MarketplaceBatchContext("run-1", AS_OF, "s3a://silver", "s3a://gold")
 
-    with pytest.raises(ValueError, match="explicit resume"):
-        audit.start_run(context, AS_OF)
+    record = audit.open_run(audit_ctx(), AS_OF, expected_current_run_id="run-9")
+
+    assert record.status is BatchRunStatus.SILVER_BUILT
+    assert record.expected_current_run_id == "run-0"
+    assert not any(sql.lstrip().startswith("INSERT") for sql, _ in cursor.executed)
 
 
 @pytest.mark.parametrize(
     "stored_as_of, stored_silver",
-    [
-        (datetime(2026, 9, 28, tzinfo=UTC), "s3a://silver"),
-        (AS_OF, "s3a://other-silver"),
-    ],
+    [(datetime(2026, 9, 28, tzinfo=UTC), "s3a://silver"), (AS_OF, "s3a://other-silver")],
 )
-def test_resume_requires_an_identical_context(stored_as_of, stored_silver):
-    cursor = FakeCursor(rows=("RUNNING", "run-1", stored_as_of, stored_silver))
+def test_an_existing_run_of_another_context_is_refused(stored_as_of, stored_silver):
+    cursor = FakeCursor(rows=run_row(as_of=stored_as_of, silver=stored_silver))
     audit = MarketplaceBatchAudit(_factory(cursor))
-    context = MarketplaceBatchContext("run-1", AS_OF, "s3a://silver", "s3a://gold")
 
-    with pytest.raises(ValueError, match="resume context does not match"):
-        audit.start_run(context, AS_OF, resume=True)
+    with pytest.raises(ValueError, match="another context"):
+        audit.open_run(audit_ctx(), AS_OF, expected_current_run_id=None)
 
 
-def test_resume_with_an_identical_context_restarts_the_run():
-    cursor = FakeCursor(rows=("FAILED", "run-1", AS_OF, "s3a://silver"))
+def test_a_row_written_before_stages_reads_with_the_new_status_names():
+    cursor = FakeCursor(rows=run_row("SUCCEEDED", None))
+
+    record = MarketplaceBatchAudit(_factory(cursor)).get("run-1")
+
+    assert record.status is BatchRunStatus.PROMOTED
+    assert record.last_completed_status is BatchRunStatus.PROMOTED
+
+
+def test_advance_checks_the_state_machine_under_a_row_lock():
+    cursor = FakeCursor(rows=run_row("CREATED", "CREATED"))
     audit = MarketplaceBatchAudit(_factory(cursor))
-    context = MarketplaceBatchContext("run-1", AS_OF, "s3a://silver", "s3a://gold")
 
-    audit.start_run(context, AS_OF, resume=True)
+    with pytest.raises(InvalidTransition):
+        audit.advance("run-1", BatchRunStatus.PUBLISHED, AS_OF)
 
-    insert = cursor.executed[1][0]
-    assert "ON CONFLICT(run_id) DO UPDATE" in insert
-    assert "status='RUNNING'" in insert
+    assert cursor.executed[0][0].endswith("FOR UPDATE")
+    assert not any(sql.startswith("UPDATE") for sql, _ in cursor.executed)
 
 
-def test_a_fresh_run_id_starts_without_resume():
-    cursor = FakeCursor(rows=None)
+def test_advance_records_the_status_the_milestone_and_the_columns():
+    cursor = FakeCursor(rows=run_row("SILVER_BUILT", "SILVER_BUILT"))
     audit = MarketplaceBatchAudit(_factory(cursor))
-    context = MarketplaceBatchContext("run-1", AS_OF, "s3a://silver", "s3a://gold")
 
-    audit.start_run(context, AS_OF)
+    audit.advance(
+        "run-1", BatchRunStatus.GOLD_WRITTEN, AS_OF, gold_run_uri="s3a://gold/runs/run_id=run-1",
+        dataset_counts={"seller_current": 2, "offer_current": 3}, silver_rows=10,
+    )  # fmt: skip
 
-    assert "INSERT INTO audit.marketplace_batch_run" in cursor.executed[1][0]
+    sql, params = next((sql, p) for sql, p in cursor.executed if sql.startswith("UPDATE"))
+    assert "status=%s" in sql and "last_completed_status=%s" in sql and "held_reason=%s" in sql
+    assert params[0] == "GOLD_WRITTEN"
+    assert '{"offer_current": 3, "seller_current": 2}' in params
+    assert 5 in params  # gold_rows, summed from the counts
+    assert params[-1] == "run-1"
+
+
+def test_a_held_run_keeps_its_last_milestone():
+    cursor = FakeCursor(rows=run_row("QUALITY_PASSED", "QUALITY_PASSED"))
+    audit = MarketplaceBatchAudit(_factory(cursor))
+
+    audit.advance("run-1", BatchRunStatus.HELD, AS_OF, held_reason="BACKFILL_REFUSED")
+
+    sql, params = next((sql, p) for sql, p in cursor.executed if sql.startswith("UPDATE"))
+    assert "last_completed_status" not in sql
+    assert params[0] == "HELD" and params[1] == AS_OF and "BACKFILL_REFUSED" in params
+
+
+def test_an_unknown_audit_column_is_refused():
+    cursor = FakeCursor(rows=run_row())
+
+    with pytest.raises(ValueError, match="unknown audit column"):
+        MarketplaceBatchAudit(_factory(cursor)).set_columns("run-1", status="PROMOTED")
 
 
 # 45
 def test_a_failed_run_is_recorded_with_a_truncated_error():
-    cursor = FakeCursor()
+    cursor = FakeCursor(rows=run_row("GOLD_WRITTEN", "GOLD_WRITTEN"))
     audit = MarketplaceBatchAudit(_factory(cursor))
 
-    audit.mark_failed(run_id="run-1", completed_at=AS_OF, error=RuntimeError("x" * 5000))
+    audit.fail("run-1", AS_OF, RuntimeError("x" * 5000))
 
-    sql, params = cursor.executed[0]
+    sql, params = next((sql, p) for sql, p in cursor.executed if sql.startswith("UPDATE"))
     assert "status='FAILED'" in sql
     assert len(params[1]) == 2000
 
 
-def test_gold_written_records_dataset_counts_deterministically():
-    cursor = FakeCursor()
-    audit = MarketplaceBatchAudit(_factory(cursor))
+def test_a_finished_run_cannot_be_failed():
+    cursor = FakeCursor(rows=run_row("PROMOTED", "PROMOTED"))
 
-    audit.mark_gold_written(
-        run_id="run-1",
-        gold_run_uri="s3a://gold/runs/run_id=run-1",
-        silver_rows=10,
-        dataset_counts={"seller_current": 2, "offer_current": 3},
-        completed_at=AS_OF,
-    )
+    with pytest.raises(InvalidTransition):
+        MarketplaceBatchAudit(_factory(cursor)).fail("run-1", AS_OF, RuntimeError("late"))
 
-    params = cursor.executed[0][1]
-    assert params[2] == 5
-    assert params[3] == '{"offer_current": 3, "seller_current": 2}'
+
+@pytest.mark.parametrize("status", ["FAILED", "QUALITY_FAILED"])
+def test_reopen_returns_a_failed_run_to_its_last_milestone(status):
+    cursor = FakeCursor(rows=run_row(status, "GOLD_WRITTEN"))
+
+    MarketplaceBatchAudit(_factory(cursor)).reopen("run-1", AS_OF)
+
+    sql = next(sql for sql, _ in cursor.executed if sql.startswith("UPDATE"))
+    assert "status=last_completed_status" in sql and "error_message=NULL" in sql
+
+
+def test_reopen_leaves_a_run_that_did_not_fail_alone():
+    cursor = FakeCursor(rows=run_row("HELD", "QUALITY_PASSED"))
+
+    MarketplaceBatchAudit(_factory(cursor)).reopen("run-1", AS_OF)
+
+    assert not any(sql.startswith("UPDATE") for sql, _ in cursor.executed)
 
 
 # ----------------------------------------------------------------------------
@@ -501,87 +554,6 @@ def test_a_run_with_no_stored_results_has_no_decision():
     assert MarketplaceQualityRepository(_factory(cursor)).latest_decision(run_id="run-1") is None
 
 
-# 55
-def test_a_refused_run_is_recorded_as_quality_failed_not_failed():
-    cursor = FakeCursor()
-    audit = MarketplaceBatchAudit(_factory(cursor))
-
-    audit.mark_quality_failed(
-        run_id="run-1",
-        completed_at=AS_OF,
-        decision=quality_decision(),
-        manifest_uri="s3a://gold/marketplace/manifests/run_id=run-1/manifest.json",
-    )
-
-    sql, params = cursor.executed[0]
-    assert "status='QUALITY_FAILED'" in sql
-    assert "manifest_promoted=FALSE" in sql
-    assert "cache_published=FALSE" in sql
-    assert params[0] == AS_OF
-    assert params[1] == 2
-
-
-@pytest.mark.parametrize("reason", ["BACKFILL_REFUSED", "QUALITY_ONLY"])
-def test_a_held_run_is_recorded_as_gold_written_with_nothing_published(reason):
-    cursor = FakeCursor()
-    audit = MarketplaceBatchAudit(_factory(cursor))
-
-    audit.mark_held(
-        run_id="run-1",
-        completed_at=AS_OF,
-        reason=reason,
-        manifest_uri="s3a://gold/marketplace/manifests/run_id=run-1/manifest.json",
-    )
-
-    sql, params = cursor.executed[0]
-    assert "status='GOLD_WRITTEN'" in sql
-    assert "quality_status='PASS'" in sql
-    assert "manifest_promoted=FALSE" in sql
-    assert "cache_published=FALSE" in sql
-    assert params[0] == AS_OF
-    assert params[1] == f"held: {reason}"
-
-
-@pytest.mark.parametrize("promoted", [True, False])
-def test_the_pointer_outcome_is_recorded_after_it_happens(promoted):
-    cursor = FakeCursor()
-    audit = MarketplaceBatchAudit(_factory(cursor))
-
-    audit.mark_promotion(run_id="run-1", promoted=promoted)
-
-    sql, params = cursor.executed[0]
-    assert "SET manifest_promoted=%s" in sql
-    assert params == (promoted, "run-1")
-
-
-def test_a_passing_decision_cannot_be_filed_as_a_quality_failure():
-    audit = MarketplaceBatchAudit(_factory(FakeCursor()))
-
-    with pytest.raises(ValueError, match="passing decision"):
-        audit.mark_quality_failed(
-            run_id="run-1",
-            completed_at=AS_OF,
-            decision=quality_decision(passed=True, failures=0),
-            manifest_uri=None,
-        )
-
-
-def test_a_decision_belonging_to_another_run_cannot_be_filed():
-    audit = MarketplaceBatchAudit(_factory(FakeCursor()))
-
-    with pytest.raises(ValueError, match="another run"):
-        audit.mark_quality_failed(
-            run_id="run-1",
-            completed_at=AS_OF,
-            decision=quality_decision(run_id="run-2"),
-            manifest_uri=None,
-        )
-
-
-# ----------------------------------------------------------------------------
-# The gate on publication, Phase 7 plan section 10.
-# ----------------------------------------------------------------------------
-# 51
 def test_a_failed_decision_blocks_publication_before_any_lock_or_truncate():
     cursor = FakeCursor()
     publisher = MarketplaceCachePublisher(_factory(cursor))
@@ -631,14 +603,7 @@ def test_publication_records_the_manifest_and_rule_version_it_published_under():
     version_sql, version_params = next(
         (sql, params) for sql, params in cursor.executed if "marketplace_cache_version" in sql
     )
-    run_sql, run_params = next((sql, params) for sql, params in cursor.executed if "marketplace_batch_run" in sql)
 
     assert version_params[3] == "quality-rules.v1"
     assert version_params[4] == MANIFEST_URI
-    assert "quality_status='PASS'" in run_sql
-    # The pointer has not moved yet when the cache commits. Claiming it had
-    # left the audit row asserting a promotion that a failed or refused
-    # pointer write never made.
-    assert "manifest_promoted=FALSE" in run_sql
-    assert "manifest_promoted=TRUE" not in run_sql
-    assert run_params[1] == MANIFEST_URI
+    assert not any("marketplace_batch_run" in sql for sql, _ in cursor.executed)

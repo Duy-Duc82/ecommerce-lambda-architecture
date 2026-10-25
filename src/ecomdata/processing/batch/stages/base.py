@@ -98,6 +98,10 @@ class Outcome:
     status: BatchRunStatus
     columns: Mapping[str, Any] = field(default_factory=dict)
     detail: Mapping[str, Any] = field(default_factory=dict)
+    # Statuses the run passes through, in order, before ``status`` (a held run first passes its quality gate).
+    via: tuple[BatchRunStatus, ...] = ()
+    # Raised by the runner once the status and columns are recorded: a refused run keeps its evidence.
+    failure: BaseException | None = None
 
 
 class Stage(ABC):

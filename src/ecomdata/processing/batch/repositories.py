@@ -10,8 +10,10 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
+from ecomdata.domain.batch_run import PROGRESS, BatchRunStatus, check_transition, parse_status
 from ecomdata.domain.datasets import MARTS
-from ecomdata.processing.batch.warehouse import MarketplaceBatchContext
+from ecomdata.processing.batch.context import MarketplaceBatchContext
+from ecomdata.processing.batch.ports import RunRecord
 
 if TYPE_CHECKING:
     from ecomdata.processing.batch.quality import QualityDecision, QualityResult
@@ -28,97 +30,185 @@ class StagedDataset:
     row_count: int
 
 
+_RUN_COLUMNS = (
+    "run_id, as_of, silver_uri, status, last_completed_status, expected_current_run_id, gold_run_uri, silver_rows, "
+    "dataset_counts, manifest_uri, quality_status, mandatory_failure_count, cache_published, manifest_promoted, "
+    "held_reason, error_message"
+)
+# The audit columns an ``advance`` or ``set_columns`` call may set.
+_SETTABLE = frozenset(
+    {
+        "gold_run_uri",
+        "silver_rows",
+        "dataset_counts",
+        "manifest_uri",
+        "quality_status",
+        "mandatory_failure_count",
+        "cache_published",
+        "manifest_promoted",
+        "held_reason",
+        "expected_current_run_id",
+    }
+)
+_COMPLETING = frozenset(
+    {BatchRunStatus.PROMOTED, BatchRunStatus.QUALITY_FAILED, BatchRunStatus.HELD, BatchRunStatus.FAILED}
+)
+
+
+def _record_from_row(row: Sequence[Any]) -> RunRecord:
+    (
+        run_id,
+        as_of,
+        silver_uri,
+        status,
+        last,
+        expected,
+        gold_uri,
+        silver_rows,
+        counts,
+        manifest_uri,
+        quality_status,
+        failures,
+        published,
+        promoted,
+        held_reason,
+        error,
+    ) = row
+    if isinstance(counts, str):
+        counts = json.loads(counts)
+    return RunRecord(
+        run_id=run_id,
+        as_of=as_of,
+        silver_uri=silver_uri,
+        status=parse_status(status),
+        last_completed_status=parse_status(last or status),
+        expected_current_run_id=expected,
+        gold_run_uri=gold_uri,
+        silver_rows=silver_rows,
+        dataset_counts=counts or {},
+        manifest_uri=manifest_uri,
+        quality_status=quality_status,
+        mandatory_failure_count=failures,
+        cache_published=bool(published),
+        manifest_promoted=bool(promoted),
+        held_reason=held_reason,
+        error_message=error,
+    )
+
+
 class MarketplaceBatchAudit:
+    """The run's audit row in PostgreSQL; every status change is checked against the domain's state machine."""
+
     def __init__(self, connection_factory: Callable[[], Any]):
         self.connection_factory = connection_factory
 
-    def start_run(self, context: MarketplaceBatchContext, started_at: datetime, *, resume: bool = False) -> None:
+    def get(self, run_id: str) -> RunRecord | None:
         with self.connection_factory() as conn, conn.cursor() as cur:
-            cur.execute(
-                "SELECT status,run_id,as_of,silver_uri FROM audit.marketplace_batch_run WHERE run_id=%s",
-                (context.run_id,),
-            )
-            row = cur.fetchone() if hasattr(cur, "fetchone") else None
-            if row and row[0] == "SUCCEEDED":
-                raise ValueError(f"run_id already SUCCEEDED: {context.run_id}")
-            if row and not resume:
-                raise ValueError("existing run requires explicit resume")
-            if row and (str(row[2]) != str(context.as_of) or row[3] != context.silver_uri):
-                raise ValueError("resume context does not match existing run")
-            cur.execute(
-                """INSERT INTO audit.marketplace_batch_run(run_id,as_of,silver_uri,started_at,status)
-                VALUES (%s,%s,%s,%s,'RUNNING') ON CONFLICT(run_id) DO UPDATE SET status='RUNNING',started_at=EXCLUDED.started_at,error_message=NULL""",
-                (context.run_id, context.as_of, context.silver_uri, started_at),
-            )
+            return self._select(cur, run_id)
 
-    def mark_gold_written(
-        self,
-        *,
-        run_id: str,
-        gold_run_uri: str,
-        silver_rows: int,
-        dataset_counts: Mapping[str, int],
-        completed_at: datetime | None,
-    ) -> None:
-        status = "GOLD_WRITTEN"
-        with self.connection_factory() as conn, conn.cursor() as cur:
-            cur.execute(
-                "UPDATE audit.marketplace_batch_run SET gold_run_uri=%s,silver_rows=%s,gold_rows=%s,dataset_counts=%s,status=%s,completed_at=%s WHERE run_id=%s",
-                (
-                    gold_run_uri,
-                    silver_rows,
-                    sum(dataset_counts.values()),
-                    json.dumps(dict(dataset_counts), sort_keys=True),
-                    status,
-                    completed_at,
-                    run_id,
-                ),
-            )
+    @staticmethod
+    def _select(cur: Any, run_id: str, *, lock: bool = False) -> RunRecord | None:
+        cur.execute(
+            f"SELECT {_RUN_COLUMNS} FROM audit.marketplace_batch_run WHERE run_id=%s" + (" FOR UPDATE" if lock else ""),
+            (run_id,),
+        )
+        row = cur.fetchone()
+        return None if row is None else _record_from_row(row)
 
-    def mark_failed(self, *, run_id: str, completed_at: datetime, error: Exception) -> None:
+    def open_run(
+        self, context: MarketplaceBatchContext, now: datetime, *, expected_current_run_id: str | None
+    ) -> RunRecord:
         with self.connection_factory() as conn, conn.cursor() as cur:
+            existing = self._select(cur, context.run_id, lock=True)
+            if existing is not None:
+                if existing.as_of != context.as_of or existing.silver_uri != context.silver_uri:
+                    raise ValueError("the run exists with another context")
+                return existing
+            cur.execute(
+                """INSERT INTO audit.marketplace_batch_run
+                (run_id,as_of,silver_uri,started_at,status,last_completed_status,expected_current_run_id)
+                VALUES (%s,%s,%s,%s,'CREATED','CREATED',%s)""",
+                (context.run_id, context.as_of, context.silver_uri, now, expected_current_run_id),
+            )
+        return RunRecord(
+            context.run_id,
+            context.as_of,
+            context.silver_uri,
+            BatchRunStatus.CREATED,
+            BatchRunStatus.CREATED,
+            expected_current_run_id=expected_current_run_id,
+        )
+
+    def advance(self, run_id: str, target: BatchRunStatus, now: datetime, **columns: Any) -> RunRecord:
+        columns.setdefault("held_reason", None)
+        with self.connection_factory() as conn, conn.cursor() as cur:
+            current = self._select(cur, run_id, lock=True)
+            if current is None:
+                raise KeyError(run_id)
+            check_transition(current.status, target)
+            assignments = ["status=%s", "error_message=NULL", "completed_at=%s"]
+            values: list[Any] = [target.value, now if target in _COMPLETING else None]
+            if target in PROGRESS:
+                assignments.append("last_completed_status=%s")
+                values.append(target.value)
+            self._assign(columns, assignments, values)
+            cur.execute(
+                f"UPDATE audit.marketplace_batch_run SET {', '.join(assignments)} WHERE run_id=%s", (*values, run_id)
+            )
+            record = self._select(cur, run_id)
+        if record is None:
+            raise RuntimeError("the run row vanished after its update")
+        return record
+
+    def reopen(self, run_id: str, now: datetime) -> RunRecord:
+        with self.connection_factory() as conn, conn.cursor() as cur:
+            current = self._select(cur, run_id, lock=True)
+            if current is None:
+                raise KeyError(run_id)
+            if current.status in (BatchRunStatus.FAILED, BatchRunStatus.QUALITY_FAILED):
+                cur.execute(
+                    "UPDATE audit.marketplace_batch_run SET status=last_completed_status,error_message=NULL,"
+                    "completed_at=NULL WHERE run_id=%s",
+                    (run_id,),
+                )
+                current = self._select(cur, run_id)
+        if current is None:
+            raise RuntimeError("the run row vanished after its update")
+        return current
+
+    def fail(self, run_id: str, now: datetime, error: BaseException) -> None:
+        with self.connection_factory() as conn, conn.cursor() as cur:
+            current = self._select(cur, run_id, lock=True)
+            if current is None:
+                raise KeyError(run_id)
+            check_transition(current.status, BatchRunStatus.FAILED)
             cur.execute(
                 "UPDATE audit.marketplace_batch_run SET status='FAILED',completed_at=%s,error_message=%s WHERE run_id=%s",
-                (completed_at, str(error)[:2000], run_id),
+                (now, str(error)[:2000], run_id),
             )
 
-    def mark_quality_failed(
-        self, *, run_id: str, completed_at: datetime, decision: QualityDecision, manifest_uri: str | None
-    ) -> None:
-        # QUALITY_FAILED, not FAILED. The run produced complete, inspectable
-        # Gold and was refused; losing that distinction would make a refusal
-        # look like a crash in every operational view.
-        if decision.run_id != run_id:
-            raise ValueError("decision belongs to another run")
-        if decision.passed:
-            raise ValueError("a passing decision cannot be recorded as a quality failure")
+    def set_columns(self, run_id: str, **columns: Any) -> None:
+        if not columns:
+            return
+        assignments: list[str] = []
+        values: list[Any] = []
+        self._assign(columns, assignments, values)
         with self.connection_factory() as conn, conn.cursor() as cur:
             cur.execute(
-                """UPDATE audit.marketplace_batch_run SET status='QUALITY_FAILED',completed_at=%s,
-                quality_status='FAIL',mandatory_failure_count=%s,manifest_uri=%s,manifest_promoted=FALSE,cache_published=FALSE
-                WHERE run_id=%s""",
-                (completed_at, decision.mandatory_failures, manifest_uri, run_id),
+                f"UPDATE audit.marketplace_batch_run SET {', '.join(assignments)} WHERE run_id=%s", (*values, run_id)
             )
 
-    def mark_promotion(self, *, run_id: str, promoted: bool) -> None:
-        # Separate from publication, and after the pointer write: the cache
-        # commits first, so only the promotion outcome can say whether it moved.
-        with self.connection_factory() as conn, conn.cursor() as cur:
-            cur.execute(
-                "UPDATE audit.marketplace_batch_run SET manifest_promoted=%s WHERE run_id=%s", (promoted, run_id)
-            )
-
-    def mark_held(self, *, run_id: str, completed_at: datetime, reason: str, manifest_uri: str | None) -> None:
-        # GOLD_WRITTEN, not SUCCEEDED: the run passed its gate but was held back
-        # from serving — a refused backfill, or an inspection with
-        # --quality-only — so it stays resumable once an operator opts in.
-        with self.connection_factory() as conn, conn.cursor() as cur:
-            cur.execute(
-                """UPDATE audit.marketplace_batch_run SET status='GOLD_WRITTEN',completed_at=%s,error_message=%s,
-                quality_status='PASS',mandatory_failure_count=0,manifest_uri=%s,manifest_promoted=FALSE,cache_published=FALSE
-                WHERE run_id=%s""",
-                (completed_at, f"held: {reason}", manifest_uri, run_id),
-            )
+    @staticmethod
+    def _assign(columns: Mapping[str, Any], assignments: list[str], values: list[Any]) -> None:
+        for name, value in columns.items():
+            if name not in _SETTABLE:
+                raise ValueError(f"unknown audit column: {name}")
+            if name == "dataset_counts":
+                assignments += ["dataset_counts=%s", "gold_rows=%s"]
+                values += [json.dumps(dict(value), sort_keys=True), sum(value.values())]
+            else:
+                assignments.append(f"{name}=%s")
+                values.append(value)
 
 
 class MarketplaceQualityRepository:
@@ -291,11 +381,6 @@ class MarketplaceCachePublisher:
                 ON CONFLICT(singleton) DO UPDATE SET run_id=EXCLUDED.run_id,published_at=EXCLUDED.published_at,dataset_counts=EXCLUDED.dataset_counts,
                     quality_rule_version=EXCLUDED.quality_rule_version,manifest_uri=EXCLUDED.manifest_uri""",
                 (run_id, published_at, json.dumps(counts, sort_keys=True), quality.rule_version, manifest_uri),
-            )
-            cur.execute(
-                """UPDATE audit.marketplace_batch_run SET status='SUCCEEDED',completed_at=%s,cache_published=TRUE,
-                quality_status='PASS',mandatory_failure_count=0,manifest_uri=%s,manifest_promoted=FALSE WHERE run_id=%s""",
-                (published_at, manifest_uri, run_id),
             )
 
     def cleanup(self, staged: Sequence[StagedDataset]) -> None:

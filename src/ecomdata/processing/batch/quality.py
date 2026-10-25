@@ -38,7 +38,7 @@ from ecomdata.domain.quality_rules import (
 )
 
 if TYPE_CHECKING:
-    from ecomdata.processing.batch.warehouse import MarketplaceBatchContext
+    from ecomdata.processing.batch.context import MarketplaceBatchContext
 
 PASS = "PASS"
 FAIL = "FAIL"
@@ -190,7 +190,9 @@ def _silver_row_checks(observations: DataFrame, context: MarketplaceBatchContext
     }
 
 
-def _evaluate_silver(observations: DataFrame, context: MarketplaceBatchContext) -> tuple[list[QualityResult], int]:
+def _evaluate_silver(
+    observations: DataFrame, context: MarketplaceBatchContext, repeated_before_dedup: int = 0
+) -> tuple[list[QualityResult], int]:
     predicates = _silver_row_checks(observations, context)
     aggregates = [F.count(F.lit(1)).alias("_total"), F.countDistinct("observation_id").alias("_distinct")]
     aggregates += [_violations(predicate).alias(name) for name, predicate in predicates.items()]
@@ -207,7 +209,9 @@ def _evaluate_silver(observations: DataFrame, context: MarketplaceBatchContext) 
         for name, predicate in predicates.items()
     ]
 
-    duplicated = int(totals["_total"]) - int(totals["_distinct"])
+    # The frame is deduplicated before it reaches the gate, so its own repeats are
+    # zero by construction; the repeats the stage counted before dedup are the ones that matter.
+    duplicated = int(totals["_total"]) - int(totals["_distinct"]) + int(repeated_before_dedup)
     duplicates = observations.groupBy("observation_id").count().filter(F.col("count") > 1)
     results.append(
         _counted("observation_id_unique", context, violations=duplicated, frame=duplicates, key=F.col("observation_id"))
@@ -231,7 +235,11 @@ def _evaluate_silver(observations: DataFrame, context: MarketplaceBatchContext) 
 
 
 def _evaluate_audit_reconciliation(
-    observations: DataFrame, attempts: DataFrame, runs: DataFrame, context: MarketplaceBatchContext
+    observations: DataFrame,
+    attempts: DataFrame,
+    runs: DataFrame,
+    context: MarketplaceBatchContext,
+    accounted: DataFrame | None = None,
 ) -> QualityResult:
     name = "silver_parse_attempt_reconciliation"
     missing = {"crawl_run_id", "parsed_count"} - set(attempts.columns)
@@ -250,7 +258,10 @@ def _evaluate_audit_reconciliation(
         # compare against, and a mandatory skip fails the gate in decide().
         return _result(name, context, status=SKIPPED, observed_value=None, reason="crawl attempt audit is empty")
 
-    silver_runs = observations.groupBy("crawl_run_id").agg(
+    # ``accounted`` is every listing row a crawl run's pages produced that Silver kept or quarantined
+    # (sponsored rows and quarantined ones included): the crawl audit counts rows as extracted, before
+    # any of them is judged, so comparing it with the organic observations alone would never match.
+    silver_runs = accounted if accounted is not None else observations.groupBy("crawl_run_id").agg(
         F.count(F.lit(1)).alias("_silver_rows"),
         F.max("observed_at").alias("_last_observed_at"),
     )
@@ -439,8 +450,16 @@ def evaluate_quality_gates(
     attempts: DataFrame,
     runs: DataFrame,
     context: MarketplaceBatchContext,
+    *,
+    duplicate_observation_ids: int = 0,
+    accounted_rows: DataFrame | None = None,
 ) -> tuple[QualityResult, ...]:
     """Run every registered rule and return exactly one result for each.
+
+    ``duplicate_observation_ids`` is how many repeated ids Silver held before it
+    was deduplicated; ``observation_id_unique`` fails when it is not zero.
+    ``accounted_rows`` (``crawl_run_id``, ``_silver_rows``, ``_last_observed_at``) replaces the
+    observations as the Silver side of the audit reconciliation when it is given.
 
     The reconciliation reads parsed counts from ``attempts`` and each crawl
     run's completion time from ``runs``, which decides whether the run has
@@ -451,8 +470,8 @@ def evaluate_quality_gates(
     if absent:
         raise ValueError(f"quality evaluation needs these marts: {sorted(absent)}")
 
-    results, silver_rows = _evaluate_silver(observations, context)
-    results.append(_evaluate_audit_reconciliation(observations, attempts, runs, context))
+    results, silver_rows = _evaluate_silver(observations, context, duplicate_observation_ids)
+    results.append(_evaluate_audit_reconciliation(observations, attempts, runs, context, accounted_rows))
     results.extend(_evaluate_gold(observations, marts, context, silver_rows))
     results.extend(_evaluate_advisory(marts, context, silver_rows))
 

@@ -2,20 +2,13 @@
 from __future__ import annotations
 
 import json
-import sys
 from contextlib import contextmanager
 
 import pytest
 
-from ecomdata.processing.batch import warehouse
+from ecomdata.processing.batch import cli, runner
 from ecomdata.processing.batch.lock import ALREADY_RUNNING_EXIT_CODE, BatchAlreadyRunning, exclusive_batch
-from tests.spark.test_marketplace_warehouse import (
-    batch_context,
-    empty_reader,
-    noop_writer,
-    run_marketplace_warehouse,
-    wire_orchestration,
-)
+from ecomdata.settings import load_settings
 
 
 class FakeServer:
@@ -118,38 +111,15 @@ def test_a_failed_unlock_does_not_hide_the_run_error():
 
 
 # 18
-def test_a_run_refused_by_the_lock_starts_nothing(monkeypatch):
-    built = []
-    parts = wire_orchestration(monkeypatch, lock_refused=True)
-    parts["spark_factory"] = lambda: built.append("spark")
-
-    with pytest.raises(BatchAlreadyRunning):
-        run_marketplace_warehouse(batch_context(), writer=noop_writer, reader=empty_reader)
-
-    # The fake audit logs here too: no start_run, so no audit row.
-    assert parts["log"] == []
-    assert built == []
-
-
-# 18
-def test_the_lock_covers_a_run_without_postgres(monkeypatch):
-    parts = wire_orchestration(monkeypatch)
-
-    run_marketplace_warehouse(batch_context(), publish_cache=False, writer=noop_writer, reader=empty_reader)
-
-    assert parts["lock"] == ["acquire", "release"]
-
-
-# 18
 def test_the_cli_reports_already_running_and_exits_75(monkeypatch, capsys):
     def refused(context, **kwargs):
         raise BatchAlreadyRunning(820801)
 
-    monkeypatch.setattr(warehouse, "run_marketplace_warehouse", refused)
-    monkeypatch.setattr(sys, "argv", ["marketplace_warehouse", "--run-id", "run-1", "--as-of", "2026-09-05T10:00:00Z"])
+    monkeypatch.setattr(runner, "run_batch", refused)
+    argv = ["run", "--all", "--run-id", "run-1", "--as-of", "2026-09-05T10:00:00Z"]
 
     with pytest.raises(SystemExit) as exited:
-        warehouse.main()
+        cli.main(argv, settings=load_settings({}))
 
     assert exited.value.code == ALREADY_RUNNING_EXIT_CODE == 75
     report = json.loads(capsys.readouterr().out)

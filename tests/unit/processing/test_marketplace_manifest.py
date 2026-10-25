@@ -8,6 +8,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
+from ecomdata.processing.batch.context import GoldWriteResult, MarketplaceBatchContext
 from ecomdata.processing.batch.manifest import (
     ALREADY_CURRENT,
     BACKFILL_REFUSED,
@@ -28,7 +29,6 @@ from ecomdata.processing.batch.manifest import (
 )
 from ecomdata.processing.batch.quality import QualityDecision
 from ecomdata.processing.batch.repositories import DATASETS
-from ecomdata.processing.batch.warehouse import GoldWriteResult, MarketplaceBatchContext
 
 AS_OF = datetime(2026, 9, 29, tzinfo=UTC)
 
