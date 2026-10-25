@@ -115,11 +115,11 @@ Test đã bỏ có chủ đích từ R0 đến R5: xem R3 (4 file test của ada
 | AC1 Đóng gói | **pass** | `pip install -e ".[dev,spark]"` (R1). `git grep -n "sys.path.insert" -- src tests services` không ra gì. `git ls-files \| grep -c "\.pyc$"` = 0. `src/ecomdata.egg-info` đã `git rm --cached` (`6983f6a`). |
 | AC2 Luật phụ thuộc | **pass** | `lint-imports`: 4 contract kept. `pytest tests/architecture`: `test_import_rules.py`, `test_single_definitions.py`, `test_site_literals.py`. |
 | AC3 Lint | **pass** | `python -m ruff check src tests services`: All checks passed. Ngoại lệ: `E501`, `UP042`, `E402` trong `tests/**` (R1). |
-| AC4 Suite xanh | **pass tại `6983f6a`** (số ở trên); **partial** so với plan: chưa có test cho các module R6–R9 vì chưa có. | `python -m pytest -q -p no:cacheprovider -rs` |
-| AC5 Một chỗ cấu hình | **partial** | Đạt: `SourceRegistry` (`domain/sources.py`), Spark factory (`infra/spark.py`), `jdbc_url` (`infra/postgres.py`), Kafka producer factory (`infra/kafka.py`), helper validate (`domain/validation.py`). Chưa đạt: ordering (`domain/ordering.py` chưa được `marts.py` và `speed/stream.py` dùng). Kiểm: `tests/architecture/test_single_definitions.py`, `git grep -n "orderBy(F.col(\"observed_at\")" src`. |
+| AC4 Suite xanh | **pass tại `6d2d072`**: 1455 passed, 2 skipped, 11 deselected (drill), 30 phút. Test cho R6/R7 có; R8/R9 chưa có. | `python -m pytest -q -p no:cacheprovider -rs` |
+| AC5 Một chỗ cấu hình | **pass** | `SourceRegistry`, Spark factory, `jdbc_url`, Kafka producer factory, `domain/validation.py`, và `domain/ordering.py` (`marts.py` dùng `ORDER_COLUMNS`, `speed/stream.py` dùng `order_key`). `percentile_accuracy` lấy từ `context`. Kiểm: `tests/architecture/test_single_definitions.py`. |
 | AC6 ELT không mất dữ liệu | **pass (mức test, fixture)** | `tests/unit/domain/test_source_records.py`, `tests/unit/ingestion/test_{tiki_source,lazada_source,raw_store,record_store,marketplace_reparse}.py`; quarantine đếm đủ hàng ở Silver: `tests/spark/test_silver_stage.py`. Chưa kiểm trên dữ liệu crawl thật. |
 | AC7 Parity | **pass (Tiki)** | `pytest tests/spark/test_silver_stage.py -k "marts_of_the_new_path or observation_rows_agree"`: 10 mart và các cột cũ khớp từng dòng, không có chỗ lệch. |
-| AC8 Batch theo stage | **not started** (chỉ có `SilverStage`; bản nháp ở `wip/r6-r8-draft`) | `pytest tests/spark/test_batch_stages.py` (chưa có ở `6983f6a`); `git grep from_settings -- src/ecomdata/processing/batch/stages` |
+| AC8 Batch theo stage | **pass (mức test, in-memory)** | `tests/unit/processing/test_batch_runner.py` (chuyển trạng thái, no-op, `--force`, lock); `tests/spark/test_batch_stages.py`: `--all` và từng stage cho cùng Gold, manifest, audit; `observation_id` trùng thì quality FAIL. `git grep from_settings -- src/ecomdata/processing/batch/stages` rỗng. Chưa chạy trên Parquet/MinIO thật (R9). |
 | AC9 Sửa bug | **pass** | (a) `test_the_silver_path_follows_the_configured_dataset`; (b) `test_robots_are_fetched_once_per_host_and_cached`, `test_robots_are_downloaded_once_for_every_page_a_worker_acquires`; (c) `test_a_target_the_adapter_cannot_turn_into_a_url_is_a_failed_report`; (d) `git grep -n "except Exception:" -A1 src/ecomdata/ingestion/sources` không còn `raise` trần. |
 | AC10 Lazada | **partial** | Đạt: `test_lazada_source.py` (extractor), `test_browser_fetcher.py` (XHR, trang chặn, đóng session), `test_browser_session.py`. Chưa chạy: `tests/integration/test_lazada_live.py` (chạm mạng; `pytest -m integration tests/integration`). |
 | AC11 Image và compose | **not started** | Bản nháp ở `wip/r6-r8-draft`. Kiểm: `docker image inspect` 3 tag cũ so `docs/evidence/refactor-20261024/baseline/images_before.txt`. |
@@ -137,3 +137,16 @@ Test đã bỏ có chủ đích từ R0 đến R5: xem R3 (4 file test của ada
   - `ruff`: 5 lỗi.
 - Chi tiết từng mục và các bước tiếp theo: `docs/HANDOFF_REFACTOR.md` mục 0.
 - AC chưa đổi so với bảng ở trên: AC8 vẫn "chưa xong" cho tới khi bản nháp được đưa vào và suite xanh.
+
+## R6/R7. Batch theo stage, speed đọc envelope (2026-10-25)
+
+Nguồn: bản nháp `wip/r6-r7-draft` squash vào `refactor/architecture`, sửa cho xanh, commit `a80984f`..`6d2d072`.
+
+- Sửa test: `test_ops_validate.py` (helper bị cắt), `test_ops_backup.py` (bỏ check `kafka_to_silver_lag`, vì `silver-sink` đã bỏ), `test_retention.py` (ngày bằng cutoff được giữ), test drills (D3 là drill của `silver-sink`, đã bỏ; còn D1–D2, D4–D11).
+- Lỗi thật: `scheduler.main()` bỏ qua `sys.argv`, nên `python -m ecomdata.processing.batch.scheduler --help` chạy scheduler thật. Đã sửa, test `test_the_entrypoint_answers_help` xanh.
+- Ordering: `marts.py` dựng window từ `domain/ordering.ORDER_COLUMNS`; `speed/stream.py` sắp theo `order_key(observed_at, fetched_at, observation_id)`.
+- `build_crawl_reliability_daily` nhận `percentile_accuracy` từ `MarketplaceBatchContext`.
+- `observability/`: bỏ `silver-sink` khỏi promtail và tiêu đề dashboard.
+- **Chưa làm:** `build_offer_change_daily` chưa gọi `domain/change_rules.py` (luật đó là Python theo từng offer, mart là Spark; cần quyết định thiết kế). `collect()` còn ở `marts.py` (max date, danh sách marketplace) và `inputs.py` (kiểm xung đột `observation_id`).
+- `docs/ARCHITECTURE.md` do bản nháp viết lại; chưa rà, thuộc R9.
+- Tiếp theo: R8 (Dockerfile, compose tách lớp, image Airflow), R9 (E2E `mp-refactor`).

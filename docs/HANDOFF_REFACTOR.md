@@ -2,7 +2,17 @@
 
 Ngày 2026-10-25. Plan: `docs/PLAN_REFACTOR_ARCHITECTURE.md`. Nhật ký: `docs/REFACTOR_REPORT.md` (có bảng AC1–AC14 hiện tại).
 
-## 0. BẮT ĐẦU Ở ĐÂY (cập nhật 2026-10-25 16:40)
+## 0. BẮT ĐẦU Ở ĐÂY (cập nhật 2026-10-25 tối)
+
+**R6 và R7 đã xong** trên `refactor/architecture` (HEAD `6d2d072`): suite 1455 passed, `ruff` sạch, `lint-imports` 4 kept. Chi tiết ở `docs/REFACTOR_REPORT.md`, mục "R6/R7". Nhánh `wip/r6-r7-draft` đã được thay thế, có thể xoá.
+
+**Việc tiếp theo:** R8 (mục 4.3), rồi R9 (mục 4.4). Tham khảo `wip/r6-r8-draft` cho `compose/*`, `docker/*`, `env/*`; không merge nguyên.
+
+**Còn nợ từ R6:** `build_offer_change_daily` chưa gọi `domain/change_rules.py` (cần quyết định thiết kế); `docs/ARCHITECTURE.md` là bản nháp chưa rà.
+
+**Lưu ý môi trường:** file trong repo dùng CRLF; sửa bằng script phải giữ CRLF. Phần dưới của mục này là ghi chép cũ (16:40), giữ để tra cứu.
+
+### (cũ) 16:40
 
 **Việc tiếp theo:** đưa bản nháp R6/R7 ở nhánh `wip/r6-r7-draft` (`1abef01`) về `refactor/architecture`, sửa cho suite xanh, rồi làm nốt những ô chưa xong ở bảng dưới. Sau đó sang R8 (mục 4.3), rồi R9 (mục 4.4).
 
