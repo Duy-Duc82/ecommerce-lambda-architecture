@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 from datetime import UTC, datetime
+from pathlib import Path
 
 import pytest
 
@@ -16,6 +17,7 @@ from ecomdata.domain.acquisition import (
 from ecomdata.domain.observations import ResourceType, create_raw_artifact
 from ecomdata.domain.records import RecordKind, build_records
 from ecomdata.domain.sources import LAZADA, SOURCES
+from ecomdata.ingestion.sources.lazada import discovery as discovery_module
 from ecomdata.ingestion.sources.lazada.discovery import DEFAULT_PATH, LazadaConfiguredDiscovery
 from ecomdata.ingestion.sources.lazada.extractor import MAX_PAGES, LazadaExtractor
 from tests.paths import FIXTURES
@@ -187,6 +189,7 @@ def test_a_list_naming_a_category_twice_is_refused(tmp_path):
         LazadaConfiguredDiscovery(path=path).discover()
 
 
-def test_the_default_list_is_the_one_in_env_sources():
-    assert DEFAULT_PATH.name == "lazada_categories.json" and DEFAULT_PATH.parent.name == "sources"
+def test_the_default_list_ships_inside_the_package():
+    # Next to the module, so an installed copy (an Airflow task container) finds it without the repository.
+    assert DEFAULT_PATH.name == "categories.json" and DEFAULT_PATH.parent == Path(discovery_module.__file__).parent
     assert DEFAULT_PATH.is_file()

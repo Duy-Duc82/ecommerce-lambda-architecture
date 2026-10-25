@@ -1,7 +1,7 @@
 """Lazada categories from a configured list.
 
 Lazada publishes no category sitemap this project may rely on, so discovery is a
-hand-kept JSON list (``env/sources/lazada_categories.json``): the large
+hand-kept JSON list (``categories.json`` next to this module, shipped with the package): the large
 categories worth sampling, each a path like ``dien-thoai-di-dong``.
 """
 from __future__ import annotations
@@ -10,7 +10,7 @@ import json
 from collections.abc import Callable
 from pathlib import Path
 
-DEFAULT_PATH = Path(__file__).resolve().parents[5] / "env" / "sources" / "lazada_categories.json"
+DEFAULT_PATH = Path(__file__).resolve().parent / "categories.json"
 
 
 class LazadaConfiguredDiscovery:

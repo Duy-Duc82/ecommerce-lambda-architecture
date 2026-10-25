@@ -58,6 +58,7 @@ include = ["ecomdata*"]
 
 [tool.setuptools.package-data]
 "ecomdata.serving.kibana" = ["saved_objects/*.ndjson"]
+"ecomdata.ingestion.sources.lazada" = ["categories.json"]
 
 # ---------------------------------------------------------------- pytest
 [tool.pytest.ini_options]
