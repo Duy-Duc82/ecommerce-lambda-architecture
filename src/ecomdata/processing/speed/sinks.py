@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import math
+import time
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -11,7 +12,7 @@ from typing import Any
 
 from ecomdata.domain.change_rules import offer_state_from_json
 from ecomdata.domain.wire import marketplace_change_from_wire
-from ecomdata.processing.speed.change_producer import publish_change
+from ecomdata.processing.speed.change_producer import publish_changes
 
 
 @dataclass(frozen=True)
@@ -59,6 +60,28 @@ class BatchLatency:
     p50_ms: int
     p95_ms: int
     max_ms: int
+
+
+@dataclass(frozen=True)
+class BatchStages:
+    """Where one micro-batch's time went, in milliseconds (speed-cost benchmark).
+
+    ``clients_ms`` opens the Kafka, Elasticsearch and Redis clients and
+    ``collect_ms`` is Spark computing the batch, the stateful comparison
+    included, and handing it to the driver; both are measured by
+    ``stream.BatchWriter``. The three sink stages are measured here.
+    The audit writes themselves are the rest of Spark's ``addBatch``.
+    """
+
+    clients_ms: int | None = None
+    collect_ms: int | None = None
+    kafka_ms: int | None = None
+    es_ms: int | None = None
+    redis_ms: int | None = None
+
+
+def _elapsed_ms(began: float) -> int:
+    return round((time.monotonic() - began) * 1000)
 
 
 def _nearest_rank(ordered: list[int], q: float) -> int:
@@ -110,22 +133,25 @@ class MarketplaceSpeedAudit:
         completed_at: datetime,
         counts: BatchCounts,
         latency: BatchLatency | None = None,
+        stages: BatchStages | None = None,
     ) -> None:
-        self._update(query_name, query_id, batch_id, "SUCCEEDED", completed_at, counts, None, latency)
+        self._update(query_name, query_id, batch_id, "SUCCEEDED", completed_at, counts, None, latency, stages)
 
     def mark_failed(
         self, *, query_name: str, query_id: str, batch_id: int, completed_at: datetime, error: Exception
     ) -> None:
-        self._update(query_name, query_id, batch_id, "FAILED", completed_at, None, str(error)[:2000], None)
+        self._update(query_name, query_id, batch_id, "FAILED", completed_at, None, str(error)[:2000], None, None)
 
-    def _update(self, query_name, query_id, batch_id, status, completed_at, counts, error, latency):
+    def _update(self, query_name, query_id, batch_id, status, completed_at, counts, error, latency, stages):
         counts = counts or BatchCounts()
+        stages = stages or BatchStages()
         p50, p95, top = (latency.p50_ms, latency.p95_ms, latency.max_ms) if latency else (None, None, None)
         with self.connection_factory() as conn, conn.cursor() as cur:
             cur.execute(
                 """UPDATE audit.marketplace_speed_batch SET status=%s,completed_at=%s,
                 input_rows=%s,invalid_rows=%s,applied_rows=%s,duplicate_rows=%s,late_rows=%s,
                 change_rows=%s,kafka_rows=%s,es_rows=%s,redis_rows=%s,error_message=%s,
+                stage_clients_ms=%s,stage_collect_ms=%s,stage_kafka_ms=%s,stage_es_ms=%s,stage_redis_ms=%s,
                 latency_p50_ms=%s,latency_p95_ms=%s,latency_max_ms=%s
                 WHERE query_name=%s AND query_id=%s AND batch_id=%s""",
                 (
@@ -141,6 +167,11 @@ class MarketplaceSpeedAudit:
                     counts.es_rows,
                     counts.redis_rows,
                     error,
+                    stages.clients_ms,
+                    stages.collect_ms,
+                    stages.kafka_ms,
+                    stages.es_ms,
+                    stages.redis_ms,
                     p50,
                     p95,
                     top,
@@ -190,7 +221,9 @@ class MarketplaceSpeedSinks:
         self.offer_ttl_seconds, self.recent_changes_max = offer_ttl_seconds, recent_changes_max
         self.change_ack_timeout_seconds = change_ack_timeout_seconds
 
-    def write_batch(self, outputs: Iterable[SpeedOutput], batch_id: int, *, query_id: str) -> BatchCounts:
+    def write_batch(
+        self, outputs: Iterable[SpeedOutput], batch_id: int, *, query_id: str, stages: BatchStages | None = None
+    ) -> BatchCounts:
         # Required, with no default: a missing id is exactly how a replay's
         # batches were once taken for the old run's and skipped.
         if not isinstance(query_id, str) or not query_id.strip():
@@ -211,15 +244,14 @@ class MarketplaceSpeedSinks:
             late_rows=sum(r.output_kind == "LATE" for r in rows),
         )
         try:
+            began = time.monotonic()
             changes = [
                 marketplace_change_from_wire(json.loads(r.change_json))
                 for r in rows
                 if r.output_kind == "CHANGE" and r.change_json
             ]
-            for event in changes:
-                publish_change(self.producer, event, ack_timeout_seconds=self.change_ack_timeout_seconds)
-            if hasattr(self.producer, "flush"):
-                self.producer.flush()
+            publish_changes(self.producer, changes, ack_timeout_seconds=self.change_ack_timeout_seconds)
+            kafka_ms, began = _elapsed_ms(began), time.monotonic()
             es_actions = []
             change_rows = [r for r in rows if r.output_kind == "CHANGE" and r.change_json]
             for row, event in zip(change_rows, changes, strict=False):
@@ -252,6 +284,7 @@ class MarketplaceSpeedSinks:
                         f"{error.get('type', '')}: {error.get('reason', '')}" if isinstance(error, dict) else str(error)
                     )
                     raise RuntimeError(f"Elasticsearch item failure ({len(failed)} item(s)): {reason}"[:1000])
+            es_ms, began = _elapsed_ms(began), time.monotonic()
             pipe = self.redis.pipeline() if hasattr(self.redis, "pipeline") else self.redis
             for row, event in zip(change_rows, changes, strict=False):
                 wire = json.loads(row.change_json)
@@ -273,16 +306,26 @@ class MarketplaceSpeedSinks:
                     },
                 )
                 pipe.expire(f"rt:offer:{state.offer_id}", self.offer_ttl_seconds)
-                source_key = f"rt:source:{state.marketplace}:last_observation"
+            # One read per marketplace, against the batch's latest: the queued
+            # sets only land at execute, so comparing each state with the
+            # stored value let an older state queued last win.
+            latest: dict[str, str] = {}
+            for state in states:
+                observed = state.observed_at.isoformat()
+                if observed > latest.get(state.marketplace, ""):
+                    latest[state.marketplace] = observed
+            for marketplace, observed in latest.items():
+                source_key = f"rt:source:{marketplace}:last_observation"
                 previous = self.redis.get(source_key) if hasattr(self.redis, "get") else None
                 if isinstance(previous, bytes):
                     previous = previous.decode("utf-8")
-                if previous is None or previous < state.observed_at.isoformat():
-                    pipe.set(source_key, state.observed_at.isoformat(), nx=False)
+                if previous is None or previous < observed:
+                    pipe.set(source_key, observed, nx=False)
             if changes:
                 pipe.zremrangebyrank("rt:changes:recent", 0, -(self.recent_changes_max + 1))
             if hasattr(pipe, "execute"):
                 pipe.execute()
+            redis_ms = _elapsed_ms(began)
             counts = BatchCounts(
                 **{
                     **counts.__dict__,
@@ -300,6 +343,9 @@ class MarketplaceSpeedSinks:
             # generator, whose latencies ecomdata.ops.bench corrects for the offset.
             completed = datetime.now(UTC)
             latency = batch_latency((state.produced_at for state in states), completed)
+            measured = BatchStages(
+                **{**(stages or BatchStages()).__dict__, "kafka_ms": kafka_ms, "es_ms": es_ms, "redis_ms": redis_ms}
+            )
             self.audit.mark_succeeded(
                 query_name=query_name,
                 query_id=query_id,
@@ -307,6 +353,7 @@ class MarketplaceSpeedSinks:
                 completed_at=completed,
                 counts=counts,
                 latency=latency,
+                stages=measured,
             )
             return counts
         except Exception as exc:

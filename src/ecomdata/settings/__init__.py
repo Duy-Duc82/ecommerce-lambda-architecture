@@ -389,6 +389,10 @@ class SpeedSettings:
     large_drop_relative: Decimal = Decimal("0.20")
     stale_after_seconds: int = 21600
     trigger: str = "30 seconds"
+    # Upper bound on Kafka records one micro-batch reads; 0 means no bound
+    # (Spark's default). The speed-cost benchmark sets it to hold the batch
+    # size fixed while it measures what a batch of that size costs.
+    max_offsets_per_trigger: int = 0
     # Empty: <repo>/data/checkpoints/marketplace_speed. The version is always
     # the last path component, so bumping it starts a fresh checkpoint.
     checkpoint_root: str = ""
@@ -535,6 +539,9 @@ def _read(env: _Env) -> Settings:
             large_drop_relative=env.decimal("MARKETPLACE_LARGE_DROP_RELATIVE", "0.20"),
             stale_after_seconds=env.integer("MARKETPLACE_STALE_AFTER_SECONDS", speed_defaults.stale_after_seconds),
             trigger=env.text("MARKETPLACE_STREAM_TRIGGER", speed_defaults.trigger),
+            max_offsets_per_trigger=env.integer(
+                "MARKETPLACE_SPEED_MAX_OFFSETS_PER_TRIGGER", speed_defaults.max_offsets_per_trigger
+            ),
             checkpoint_root=env.text("MARKETPLACE_SPEED_CHECKPOINT_ROOT", "").strip(),
             checkpoint_version=env.text(
                 "MARKETPLACE_STREAM_CHECKPOINT_VERSION", speed_defaults.checkpoint_version
@@ -574,6 +581,8 @@ def validate(settings: Settings) -> Settings:
         raise SettingsError("MARKETPLACE_LARGE_DROP_ABSOLUTE must be non-negative")
     if not Decimal("0") <= speed.large_drop_relative <= Decimal("1"):
         raise SettingsError("MARKETPLACE_LARGE_DROP_RELATIVE must be between 0 and 1")
+    if speed.max_offsets_per_trigger < 0:
+        raise SettingsError("MARKETPLACE_SPEED_MAX_OFFSETS_PER_TRIGGER must be 0 (no bound) or positive")
     positive = {
         "CRAWL_SERVICE_IDLE_SECONDS": crawl.service_idle_seconds,
         "CRAWL_WORKER_POLL_SECONDS": crawl.worker_poll_seconds,

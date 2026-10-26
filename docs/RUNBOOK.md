@@ -13,31 +13,37 @@
 ```powershell
 copy .env.example .env                       # once; edit host ports if taken
 docker compose up -d                         # core only
-docker compose --profile ingest --profile speed --profile batch up -d
-docker compose --profile crawl up -d         # needs a seeded frontier
+docker compose --profile crawl --profile speed up -d     # crawl needs a seeded frontier
+docker compose --profile orchestration up -d # Airflow runs the batch (ADR-0002)
 docker compose --profile serve up -d         # Kibana, Superset
-.\scripts\start_all.ps1                      # the legacy Kaggle demo
+.\legacy\kaggle\scripts\start_all.ps1         # the legacy Kaggle demo
 ```
+
+`docker-compose.yml` at the root only includes `compose/docker-compose.yml`.
+Add `-f compose/docker-compose.legacy.yml` or
+`-f compose/docker-compose.observability.yml` for those layers.
 
 | Profile | Services |
 |---|---|
 | *(none)* | kafka, kafka-init, minio, minio-init, postgres-dw, redis, elasticsearch |
-| `crawl` | crawl-worker |
-| `ingest` | silver-sink |
-| `speed` | speed (checkpoints in volume `speed_checkpoints`) |
-| `batch` | batch-scheduler; `batch-once` for operator commands |
+| `crawl` | crawl-worker (Tiki, HTTP) |
+| `crawl-browser` | crawl-worker-lazada (Lazada, Chromium) |
+| `speed` | speed: normalizer and stateful query over `marketplace.records.v1` (checkpoints in volume `speed_checkpoints`) |
+| `orchestration` | airflow-init, airflow-api-server, airflow-scheduler, airflow-dag-processor |
+| `batch` | `batch-once` for operator commands |
+| `legacy-scheduler` | batch-scheduler, the loop scheduler Airflow replaced |
 | `serve` | kibana, superset, superset-init, kibana-marketplace-setup |
-| `legacy` | spark, spark-worker, kibana, kibana-setup |
-| `jobs` | warehouse-job (legacy; `scripts/run_warehouse.ps1`) |
 | `ops` | ops (a `run --rm` tool container; `backup`, `restore`, `validate`), es-projector (a loop service) |
 | `smoke` | stub-source, the offline Tiki stub |
+| `bench`, `demo` | the services those stacks need, listed in `compose/docker-compose.yml` |
+| `legacy`, `jobs` | in `compose/docker-compose.legacy.yml`: spark, spark-worker, kibana-setup, warehouse-job |
 
 Operator batch run, for example a resume or a backfill:
 
 ```powershell
 docker compose --profile batch run --rm batch-once `
-  python3 -m batch_layer.marketplace_warehouse --run-id mp-20261002T0000Z `
-  --as-of 2026-10-02T00:00:00Z --resume
+  python3 -m ecomdata.processing.batch run --run-id mp-20261002T0000Z `
+  --as-of 2026-10-02T00:00:00Z --all --resume
 ```
 
 Exit code 75 with `{"status": "ALREADY_RUNNING"}` means another batch holds
@@ -63,7 +69,7 @@ use of the stack therefore runs in a Compose project of its own, beside it:
 .\scripts\mp.ps1 -EnvFile env/live.env status
 .\scripts\mp.ps1 -EnvFile env/live.env validate -Json data/ops/live/validate-2026-10-05.json
 .\scripts\mp.ps1 -EnvFile env/bench.env smoke
-.\scripts\mp.ps1 -EnvFile env/bench.env drill d3
+.\scripts\mp.ps1 -EnvFile env/bench.env drill d4
 ```
 
 `-EnvFile` sets the file's variables for that one call and puts the caller's
@@ -84,7 +90,9 @@ do not exist on Tiki.
 
 | Command | Stack | What it writes |
 |---|---|---|
-| `mp -EnvFile env/bench.env bench crawl\|ingest\|speed\|batch\|all [--repeat 3]` | bench, rebuilt per run | `data/ops/bench/<scenario>-<variant>-<stamp>.json` |
+| `mp -EnvFile env/bench.env bench crawl\|speed\|all [--repeat 3]` | bench, rebuilt per run | `data/ops/bench/<scenario>-<variant>-<stamp>.json` |
+| `mp -EnvFile env/bench.env bench speed-cost [--cost-sizes 1 10 100 1000 5000 15000] [--cost-batches 8] [--repeat 3]` | bench, rebuilt per run | cost of one speed micro-batch per batch size K, and where it went |
+| `mp -EnvFile env/bench.env bench speed-soak [--soak-rates 200] [--soak-seconds 1800] [--trigger "30 seconds"]` | bench, rebuilt per run | one rate held at one trigger, cut into windows, with a `stable` verdict |
 | `mp -EnvFile env/bench.env bench report` | none, it reads files | Markdown tables to stdout |
 | `mp -EnvFile env/live.env evaluate reliability\|freshness\|storage` | live, read-only | `data/ops/evaluation/<kind>-<stamp>.{json,md}` |
 | `mp -EnvFile env/demo.env demo [--auto] [--snapshot] [--skip-faults] [--without-serve]` | demo | the demo, plus `data/ops/demo-backup/latest.json` with `--snapshot` |
@@ -107,6 +115,23 @@ trigger, a p50 of 10–25 s is the trigger and not a slow pipeline.
 `audit.marketplace_stream_progress` holds Spark's own per-batch numbers; join
 it to the batch audit on `(query_name, query_id, batch_id)`.
 
+**Reading the speed benchmarks.**
+
+- Spark's `num_input_rows` is twice the records read: the query reads the
+  Kafka source in two branches (valid, invalid) and unions them. Count
+  records from the audit's `input_rows`, as `speed-cost` and `speed-soak` do.
+- The `stage_*_ms` columns time each stage of a batch on the monotonic clock;
+  Spark's `trigger_execution_ms` is wall clock. A batch whose duration is
+  ~30 s over the sum of its stages is a clock step, not slow work.
+- Latency crosses clocks: `produced_at` is stamped where the sender runs (the
+  host, for `bench_load`), completion inside the speed container. On a machine
+  whose Docker VM clock is off (one dev machine: ~30 s, and stepping), latency
+  is off by as much. Measure the offset first:
+  `docker exec <container> date +%s.%N` against the host's clock.
+- `speed-cost` needs room on the Docker disk for its backlog; on a nearly
+  full C: run it reduced (`--cost-sizes 1 10 100 1000 3000 --cost-batches 6
+  --repeat 1`) and watch free space.
+
 **The storage snapshot sizes Kafka from its files.** Kafka 4 no longer
 answers the `DescribeLogDirs` versions kafka-python speaks. The broker's
 volume is therefore mounted read-only into `ops` and `es-projector`, and
@@ -122,10 +147,10 @@ use `--without-serve`.
 ## `mp` — one command (plan section 9)
 
 ```powershell
-.\scripts\mp.ps1 up -With crawl,ingest,speed,batch   # core plus the listed profiles
+.\scripts\mp.ps1 up -With crawl,speed,orchestration  # core plus the listed profiles
 .\scripts\mp.ps1 status                              # containers, then the last run of each component
 .\scripts\mp.ps1 migrate                             # re-apply scripts/init_postgres.sql (idempotent)
-.\scripts\mp.ps1 seed --category 1846 --pages 2      # crawler.seed_frontier
+.\scripts\mp.ps1 seed --category 1846 --pages 2      # ecomdata.ingestion.seed
 .\scripts\mp.ps1 batch -AsOf 2026-10-02T00:00:00Z    # one-shot operator batch
 .\scripts\mp.ps1 validate -Json validate.json        # plan 9.2, exit 1 if any check fails
 .\scripts\mp.ps1 smoke                               # plan 9.1
@@ -175,8 +200,7 @@ clock — windows are anchored on the newest crawl attempt, the pointer's
 | What Brief section 20 asks | The check |
 |---|---|
 | is the raw evidence still there | `bronze_present` — every recent attempt's `raw_uri` resolves |
-| did anything get stuck between Kafka and Silver | `kafka_to_silver_lag` |
-| does Silver agree with what the crawler says it published | `silver_reconciles_with_audit` |
+| does Bronze/records agree with what the crawler says it parsed | `records_reconcile_with_audit` — per crawl run, stored rows against `parsed_count` |
 | is anything valid being quarantined | `dlq_only_bad_records` — only `DECODE` and `CONTRACT_VALIDATION` |
 | did the last batch end cleanly | `batch_latest_terminal` |
 | is the quality evidence complete | `quality_results_complete` — one row per rule |
@@ -561,7 +585,7 @@ What it does, in this order:
    confidently serving nothing;
 5. runs three checks: the restored pointer equals the restored cache version;
    every dataset the pointer names exists with its manifest row count;
-   `crawler.reparse` on a deterministic sample of restored raw artifacts
+   `ecomdata.ingestion.reparse` on a deterministic sample of restored raw artifacts
    returns `IDENTICAL`;
 6. runs a **quality-only batch** at the pointer's `as_of` under a new run ID,
    over the restored Silver and audit. Its row counts are reported next to
@@ -579,16 +603,15 @@ docker compose -f docker-compose.yml -p mp-restore --profile * down --volumes
 
 ### Why `validate --restored` exists
 
-Three `validate` checks must fail on a freshly restored stack, and only these
-three:
+Two `validate` checks must fail on a freshly restored stack, and only these
+two:
 
 | Check | Why it fails |
 |---|---|
 | `es_changes_unique` | Elasticsearch is not backed up; nothing has streamed yet |
 | `redis_offer_state_present` | Redis is not backed up, same reason |
-| `kafka_to_silver_lag` | the broker is new, so the Silver consumer group has never existed; asking for its offsets raises `GroupCoordinatorNotAvailableError` |
 
-`--restored` tolerates exactly those and fails on a fourth. Plain `validate`
+`--restored` tolerates exactly those (`ops/backup.RESTORED_STACK_EXPECTED_EMPTY`) and fails on a third. Plain `validate`
 on a restored stack reports `passed: false`, correctly — the stack really is
 missing its derived stores until it crawls again.
 
