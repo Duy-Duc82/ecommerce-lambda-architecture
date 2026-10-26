@@ -197,33 +197,106 @@ class _ClosingClient:
         self.closed += 1
 
 
-# One micro-batch every trigger, for days: clients a batch opens must not
-# outlive it, whether the batch succeeds, is skipped or never reaches the sink.
-@pytest.mark.parametrize("outcome", ["succeeded", "collect_failed"])
-def test_each_micro_batch_closes_its_sink_clients(monkeypatch, outcome):
+# One micro-batch every trigger, for days. Opening the three clients cost
+# ~110 ms of every batch, so they live across batches; what must not happen is
+# a failed batch's clients (the sink may have closed them) being used again,
+# or a client being left open when the query stops.
+def _keep_clients(monkeypatch, sinks_class):
     import ecomdata.processing.speed.sinks as sinks
 
-    clients = (_ClosingClient(), _ClosingClient(), _ClosingClient())
+    opened = []
 
-    class SucceedingSinks:
-        def __init__(self, **kwargs): pass
+    def open_clients():
+        opened.append((_ClosingClient(), _ClosingClient(), _ClosingClient()))
+        return opened[-1]
 
-        def write_batch(self, outputs, batch_id, *, query_id, stages=None): pass
+    monkeypatch.setattr(sinks, "MarketplaceSpeedSinks", sinks_class)
+    wiring = layer.SinkWiring(clients=open_clients, connection_factory=lambda: None)
+    return opened, layer.make_batch_writer(wiring)
 
-    monkeypatch.setattr(sinks, "MarketplaceSpeedSinks", SucceedingSinks)
-    write = layer.make_batch_writer(_wiring(clients))
+
+class _SucceedingSinks:
+    def __init__(self, **kwargs):
+        pass
+
+    def write_batch(self, outputs, batch_id, *, query_id, stages=None):
+        pass
+
+
+class _FailingSinks(_SucceedingSinks):
+    def write_batch(self, outputs, batch_id, *, query_id, stages=None):
+        raise RuntimeError("redis down")
+
+
+def test_succeeded_micro_batches_reuse_one_set_of_sink_clients(monkeypatch):
+    opened, write = _keep_clients(monkeypatch, _SucceedingSinks)
+
+    write(_micro_batch("query-uuid"), 7)
+    write(_micro_batch("query-uuid"), 8)
+
+    assert len(opened) == 1
+    assert [client.closed for client in opened[0]] == [0, 0, 0]
+
+
+@pytest.mark.parametrize("failure", ["sink", "collect"])
+def test_a_failed_micro_batch_closes_its_clients_and_the_next_opens_new_ones(monkeypatch, failure):
+    import ecomdata.processing.speed.sinks as sinks
+
+    opened, write = _keep_clients(monkeypatch, _FailingSinks if failure == "sink" else _SucceedingSinks)
     batch = _micro_batch("query-uuid")
-    if outcome == "collect_failed":
-        def failing_collect(): raise RuntimeError("executor lost")
+    if failure == "collect":
+
+        def failing_collect():
+            raise RuntimeError("executor lost")
+
         batch.collect = failing_collect
 
-    if outcome == "succeeded":
+    with pytest.raises(RuntimeError):
         write(batch, 7)
-    else:
-        with pytest.raises(RuntimeError, match="executor lost"):
-            write(batch, 7)
+    monkeypatch.setattr(sinks, "MarketplaceSpeedSinks", _SucceedingSinks)
+    write(_micro_batch("query-uuid"), 8)
 
-    assert [client.closed for client in clients] == [1, 1, 1]
+    assert len(opened) == 2
+    assert [client.closed for client in opened[0]] == [1, 1, 1]
+    assert [client.closed for client in opened[1]] == [0, 0, 0]
+
+
+def test_closing_the_sink_clients_closes_each_once_and_is_idempotent(monkeypatch):
+    opened, write = _keep_clients(monkeypatch, _SucceedingSinks)
+    write(_micro_batch("query-uuid"), 7)
+
+    write.close()
+    write.close()
+
+    assert [client.closed for client in opened[0]] == [1, 1, 1]
+
+
+def test_the_service_closes_the_sink_clients_when_the_query_stops(monkeypatch):
+    import ecomdata.infra.lifecycle as lifecycle
+    import ecomdata.settings as settings_module
+
+    closed = []
+
+    class Writer:
+        def __call__(self, batch_df, batch_id):
+            pass
+
+        def close(self):
+            closed.append("clients")
+
+    session = SimpleNamespace(stop=lambda: closed.append("spark"))
+    monkeypatch.setattr(settings_module, "load_settings", lambda **kwargs: load_settings({}))
+    monkeypatch.setattr(lifecycle, "install_signal_handlers", lambda stop: None)
+    monkeypatch.setattr(service, "spark_factory", lambda settings: SimpleNamespace(create=lambda: session))
+    monkeypatch.setattr(service, "ProgressRecorder", lambda *args, **kwargs: None)
+    monkeypatch.setattr(service, "start_normalizer", lambda *args, **kwargs: SimpleNamespace(isActive=False))
+    monkeypatch.setattr(service, "start_query", lambda *args, **kwargs: object())
+    monkeypatch.setattr(service, "await_query", lambda *args, **kwargs: None)
+    monkeypatch.setattr(layer, "make_batch_writer", lambda wiring: Writer())
+
+    service.main([])
+
+    assert closed == ["clients", "spark"]
 
 
 def _micro_batch(query_id):
@@ -234,7 +307,7 @@ def _micro_batch(query_id):
 
 
 def test_a_micro_batch_without_a_query_id_is_refused():
-    write = layer.make_batch_writer(_wiring((object(), object(), object())))
+    write = layer.make_batch_writer(_wiring((_ClosingClient(), _ClosingClient(), _ClosingClient())))
 
     with pytest.raises(ValueError, match="query id"):
         write(_micro_batch(None), 7)
