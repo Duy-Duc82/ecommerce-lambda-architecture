@@ -13,7 +13,7 @@ from typing import Any
 
 from ecomdata.settings import Settings, load_settings
 
-STAGE_NAMES = ("silver", "marts", "quality", "publish", "promote")
+STAGE_NAMES = ("silver", "dimensions", "marts", "quality", "publish", "promote")
 
 
 def build_parser(silver_root: str, gold_root: str) -> argparse.ArgumentParser:

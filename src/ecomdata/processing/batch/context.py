@@ -96,6 +96,14 @@ class MarketplaceBatchContext:
     def gold_dataset_uri(self, dataset_name: str) -> str:
         return f"{self.gold_run_uri}/{dataset_name}"
 
+    @property
+    def dw_root_uri(self) -> str:
+        """The star: one table per dataset, kept across runs, outside every run directory."""
+        return f"{self.gold_root_uri.rstrip('/')}/dw"
+
+    def dw_dataset_uri(self, dataset_name: str) -> str:
+        return f"{self.dw_root_uri}/{dataset_name}"
+
 
 class ConflictingObservationError(ValueError):
     pass
@@ -106,6 +114,16 @@ class GoldWriteResult:
     dataset_name: str
     uri: str
     row_count: int
+
+
+@dataclass(frozen=True)
+class DwWriteResult:
+    """A star table after a merge: its rows and, for Delta, the table version the merge left."""
+
+    dataset_name: str
+    uri: str
+    row_count: int
+    version: int | None
 
 
 # A passing run deliberately kept off the serving version for inspection.

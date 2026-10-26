@@ -2,8 +2,8 @@
 
 ::
 
-    CREATED -> SILVER_BUILT -> GOLD_WRITTEN -> QUALITY_PASSED -> PUBLISHED -> PROMOTED
-                                            +-> QUALITY_FAILED
+    CREATED -> SILVER_BUILT -> DIMENSIONS_BUILT -> GOLD_WRITTEN -> QUALITY_PASSED -> PUBLISHED -> PROMOTED
+                                                                +-> QUALITY_FAILED
     any non-terminal state -> FAILED;  QUALITY_PASSED -> HELD  (kept off the serving version)
 
 The cache is published before the ``current`` pointer moves, as it was before
@@ -22,6 +22,8 @@ from enum import Enum
 class BatchRunStatus(str, Enum):
     CREATED = "CREATED"
     SILVER_BUILT = "SILVER_BUILT"
+    # The star's dimensions are merged into the lake's dw/ tables (Phase 10).
+    DIMENSIONS_BUILT = "DIMENSIONS_BUILT"
     GOLD_WRITTEN = "GOLD_WRITTEN"
     QUALITY_PASSED = "QUALITY_PASSED"
     QUALITY_FAILED = "QUALITY_FAILED"
@@ -35,7 +37,8 @@ S = BatchRunStatus
 
 TRANSITIONS: dict[BatchRunStatus, frozenset[BatchRunStatus]] = {
     S.CREATED: frozenset({S.SILVER_BUILT, S.FAILED}),
-    S.SILVER_BUILT: frozenset({S.GOLD_WRITTEN, S.FAILED}),
+    S.SILVER_BUILT: frozenset({S.DIMENSIONS_BUILT, S.FAILED}),
+    S.DIMENSIONS_BUILT: frozenset({S.GOLD_WRITTEN, S.FAILED}),
     S.GOLD_WRITTEN: frozenset({S.QUALITY_PASSED, S.QUALITY_FAILED, S.FAILED}),
     S.QUALITY_PASSED: frozenset({S.PUBLISHED, S.HELD, S.FAILED}),
     S.PUBLISHED: frozenset({S.PROMOTED, S.HELD, S.FAILED}),
@@ -77,7 +80,7 @@ def check_transition(current: BatchRunStatus, target: BatchRunStatus) -> None:
 
 
 # The order a full run passes through, and how far each status is along it.
-PROGRESS = (S.CREATED, S.SILVER_BUILT, S.GOLD_WRITTEN, S.QUALITY_PASSED, S.PUBLISHED, S.PROMOTED)
+PROGRESS = (S.CREATED, S.SILVER_BUILT, S.DIMENSIONS_BUILT, S.GOLD_WRITTEN, S.QUALITY_PASSED, S.PUBLISHED, S.PROMOTED)
 
 
 def reached(current: BatchRunStatus, milestone: BatchRunStatus) -> bool:

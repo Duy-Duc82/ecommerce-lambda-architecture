@@ -1,7 +1,8 @@
 """The Spark implementation of the lake port: Bronze records in, Silver and Gold out, as Parquet or Delta (``table_format``).
 
-Datasets live under ``<silver root>/<name>/`` and
-``<gold root>/runs/run_id=<run>/<mart>/``. Writing a dataset replaces it (for a
+Datasets live under ``<silver root>/<name>/``,
+``<gold root>/runs/run_id=<run>/<mart>/`` and, for the star, ``<gold root>/dw/<table>/``
+(merged, not replaced: see ``merge_dw``). Writing a dataset replaces it (for a
 partitioned dataset, the partitions it has rows for, because the session sets
 dynamic partition overwrite), and a dataset that was written empty reads back
 empty: reads carry an explicit schema, so a directory holding only ``_SUCCESS``
@@ -17,7 +18,7 @@ from pyspark.sql import functions as F
 from pyspark.sql.types import StructType
 
 from ecomdata.domain.datasets import dataset
-from ecomdata.processing.batch.context import GoldWriteResult, MarketplaceBatchContext
+from ecomdata.processing.batch.context import DwWriteResult, GoldWriteResult, MarketplaceBatchContext
 from ecomdata.processing.normalize import common
 
 
@@ -81,6 +82,76 @@ class SparkLakeIO:
     def read_gold(self, context: MarketplaceBatchContext, name: str) -> DataFrame:
         return self.spark.read.format(self.table_format).load(context.gold_dataset_uri(name))
 
+    def merge_dw(self, context: MarketplaceBatchContext, name: str, frame: DataFrame) -> DwWriteResult:
+        entry = dataset(name)
+        uri = context.dw_dataset_uri(name)
+        frame = frame.select(*entry.columns)
+        if self.table_format != "delta":
+            self._create(frame, uri, entry.partition_columns, format_="parquet")
+            return DwWriteResult(name, uri, self.read_dw(context, name).count(), None)
+        current = self._existing_delta(uri)
+        if current is None:
+            self._create(frame, uri, entry.partition_columns, format_="delta")
+        elif _shape(current.schema) != _shape(frame.schema):
+            # The registry changed the table's columns: a MERGE cannot, so the
+            # table is replaced as a new version and the old one stays readable.
+            self._create(frame, uri, entry.partition_columns, format_="delta", overwrite_schema=True)
+        else:
+            self.spark.sql(merge_statement(uri, frame, entry.key, _source_view(frame, name)))
+        history = self.spark.sql(f"DESCRIBE HISTORY delta.`{uri}` LIMIT 1").first()
+        return DwWriteResult(name, uri, self.read_dw(context, name).count(), int(history["version"]))
+
+    def read_dw(self, context: MarketplaceBatchContext, name: str) -> DataFrame:
+        return self.spark.read.format(self.table_format).load(context.dw_dataset_uri(name))
+
+    def _existing_delta(self, uri: str) -> DataFrame | None:
+        from pyspark.errors import AnalysisException
+
+        try:
+            return self.spark.read.format("delta").load(uri)
+        except AnalysisException:
+            return None
+
+    @staticmethod
+    def _create(
+        frame: DataFrame, uri: str, partitions: Sequence[str], *, format_: str, overwrite_schema: bool = False
+    ) -> None:
+        writer = frame.write.mode("overwrite").option("partitionOverwriteMode", "static")
+        if overwrite_schema:
+            writer = writer.option("overwriteSchema", "true")
+        if partitions:
+            writer = writer.partitionBy(*partitions)
+        writer.format(format_).save(uri)
+
+
+def _shape(schema: StructType) -> list[tuple[str, str]]:
+    # Nullability differs between a built frame and the stored table; names and types decide.
+    return [(field.name, field.dataType.simpleString()) for field in schema.fields]
+
+
+def _source_view(frame: DataFrame, name: str) -> str:
+    view = f"_dw_merge_source_{name}"
+    frame.createOrReplaceTempView(view)
+    return view
+
+
+def merge_statement(uri: str, frame: DataFrame, key: Sequence[str], source: str) -> str:
+    """The MERGE that makes the Delta table at ``uri`` hold exactly ``source``, matched on ``key``.
+
+    A matched row is rewritten only if a column changed (compared null-safely),
+    so a rerun on the same data rewrites nothing; a key the source no longer has
+    is deleted, so the table never keeps a row the builders did not produce.
+    """
+    on = " AND ".join(f"t.`{column}` <=> s.`{column}`" for column in key)
+    values = [column for column in frame.columns if column not in key]
+    changed = " OR ".join(f"NOT (t.`{column}` <=> s.`{column}`)" for column in values) or "FALSE"
+    return (
+        f"MERGE INTO delta.`{uri}` AS t USING {source} AS s ON {on} "
+        f"WHEN MATCHED AND ({changed}) THEN UPDATE SET * "
+        "WHEN NOT MATCHED THEN INSERT * "
+        "WHEN NOT MATCHED BY SOURCE THEN DELETE"
+    )
+
 
 def read_crawl_audit(spark: SparkSession, jdbc_url: str, properties: Mapping[str, str]) -> tuple[DataFrame, DataFrame]:
     """The crawl audit tables the marts and the quality gates read: attempts (with their marketplace code) and runs."""
@@ -141,4 +212,4 @@ def silver_schemas() -> dict[str, StructType]:
     return {OBSERVATIONS: declared(common.CANONICAL_COLUMNS), QUARANTINE: quarantine}
 
 
-__all__ = ["SparkLakeIO", "read_crawl_audit", "silver_schemas"]
+__all__ = ["SparkLakeIO", "merge_statement", "read_crawl_audit", "silver_schemas"]

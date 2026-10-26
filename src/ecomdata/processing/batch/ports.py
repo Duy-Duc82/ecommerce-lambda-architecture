@@ -17,7 +17,7 @@ from ecomdata.domain.batch_run import BatchRunStatus
 if TYPE_CHECKING:
     from pyspark.sql import DataFrame, SparkSession
 
-    from ecomdata.processing.batch.context import GoldWriteResult, MarketplaceBatchContext
+    from ecomdata.processing.batch.context import DwWriteResult, GoldWriteResult, MarketplaceBatchContext
     from ecomdata.processing.batch.quality import QualityDecision, QualityResult
     from ecomdata.processing.batch.repositories import StagedDataset
 
@@ -118,6 +118,16 @@ class LakeIO(Protocol):
     def write_gold(self, context: MarketplaceBatchContext, name: str, frame: DataFrame) -> GoldWriteResult: ...
 
     def read_gold(self, context: MarketplaceBatchContext, name: str) -> DataFrame: ...
+
+    def merge_dw(self, context: MarketplaceBatchContext, name: str, frame: DataFrame) -> DwWriteResult:
+        """Make the star table ``name`` hold exactly ``frame``, matched on the registry key.
+
+        Delta: one ``MERGE`` (insert new keys, update changed rows, delete keys
+        ``frame`` no longer has), so a rerun on the same data rewrites no row
+        and every earlier version stays readable. Parquet: an overwrite.
+        """
+
+    def read_dw(self, context: MarketplaceBatchContext, name: str) -> DataFrame: ...
 
 
 BatchLock = Callable[[], AbstractContextManager[Any]]

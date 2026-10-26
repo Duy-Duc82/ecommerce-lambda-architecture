@@ -37,7 +37,7 @@ class MartsStage(Stage):
     name = "marts"
     requires = (f"silver/{OBSERVATIONS}",)
     produces = tuple(f"gold/marketplace/runs/<run>/{name}" for name in MART_NAMES) + ("silver/_runs/<run>/marts.json",)
-    allowed_from = frozenset({S.SILVER_BUILT})
+    allowed_from = frozenset({S.DIMENSIONS_BUILT})
     milestone = S.GOLD_WRITTEN
 
     def execute(self, ctx: StageContext) -> Outcome:

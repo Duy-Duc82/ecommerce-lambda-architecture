@@ -81,6 +81,14 @@ Mỗi gói: test viết cùng mã, chạy toàn bộ suite, một PR vào `devel
    - các bảng `audit.*` hiện nằm trong Postgres (run, quality, crawl attempt, crawl run, source state, speed batch, stream progress, storage snapshot) là lưu trữ, không phải cache, nên cần chuyển sang lake. Đây là gói mới D7 bên dưới.
 5. **Vai trò của Databricks:** minh chứng pipeline mang đi và chạy được trên cloud, không phải nơi chạy batch thường xuyên. Chỉ cần chạy `silver -> dimensions -> facts -> marts -> quality` một lần trên một cửa sổ dữ liệu và so kết quả với bản chạy local.
 
+### Tiến độ D1–D2
+
+**D1 (2026-10-26, `768ed9a`):** builder cho `dim_brand`, `dim_listing_flags`, `dim_seller` và `dim_category` mới, đọc bảng rộng và `page_context` (`processing/batch/star_inputs.py`, hàm `listing_attributes`, `category_names`, `category_paths` của từng nguồn); registry và `star-schema.sql` 14 bảng. Suite: 1570 passed (2 lỗi do máy host thiếu `jinja2`, `import-linter`).
+
+**D2 (2026-10-26):** `LakeIO.merge_dw`/`read_dw` (Delta: một `MERGE` theo khoá registry, chỉ ghi lại dòng đổi, xoá khoá nguồn không còn; Parquet: ghi đè; đổi cột thì ghi lại với `overwriteSchema`), `MemoryLake` tương ứng, stage `dimensions` và trạng thái `DIMENSIONS_BUILT` (state machine, constraint Postgres, ADR-0005, runner, CLI, DAG). `marts` giờ bắt đầu từ `DIMENSIONS_BUILT`. Test: chạy lại trên cùng Silver cho cùng bảng; `--all` và từng stage cho cùng star. **Chưa làm:** smoke Delta `MERGE` trên MinIO trong Docker (rủi ro P1): Docker đang tắt và ổ C: còn 7,4 GB, chờ người dùng quyết.
+
+**Giới hạn đã biết (cho D6):** stage `silver` ghi đè toàn bộ `<source>_listing_wide` và `page_context` bằng các record từ `silver_since`, nên một run có `--silver-since` mất thuộc tính và tên danh mục của listing cũ hơn mốc đó. Incremental (D6) phải giữ hai bảng này theo ngày như `offer_observations_v2`.
+
 ### Gói mới D7: trạng thái và audit trong lake
 
 | | Việc | Kiểm |

@@ -1,4 +1,4 @@
-"""The batch pipeline through its real stages: silver, marts, quality, publish, promote.
+"""The batch pipeline through its real stages: silver, dimensions, marts, quality, publish, promote.
 
 Silver and Gold are DataFrames in memory (``MemoryLake``), the audit, the quality repository and the object
 store are the in-memory ports; Spark transforms, the quality rules and the manifest logic run for real.
@@ -9,6 +9,7 @@ import json
 from datetime import UTC, date, datetime
 
 import pytest
+from pyspark.sql import functions as F
 
 from ecomdata.domain.batch_run import BatchRunStatus as S
 from ecomdata.domain.datasets import MART_NAMES
@@ -17,8 +18,10 @@ from ecomdata.processing.batch.manifest import GOLD_ZONE, read_current_manifest
 from ecomdata.processing.batch.memory import MemoryAudit, MemoryQuality, MemoryStore
 from ecomdata.processing.batch.quality import QualityGateFailure
 from ecomdata.processing.batch.runner import BatchDependencies, default_stages, run_batch, select_stages
+from ecomdata.processing.batch.stages import dimensions as dimensions_stage
 from ecomdata.processing.batch.stages import marts as marts_stage
-from ecomdata.processing.batch.stages.base import RunOptions
+from ecomdata.processing.batch.stages.base import RunOptions, StageNotAllowed
+from ecomdata.processing.batch.stages.dimensions import DIMENSION_NAMES
 from tests.spark.lake_support import MemoryLake, lines_of
 from tests.spark.test_marketplace_marts import _audit
 from tests.spark.test_normalize import lazada_records, tiki_records
@@ -27,6 +30,13 @@ from tests.spark_support import requires_spark
 pytestmark = requires_spark
 
 AS_OF = datetime(2026, 10, 25, 10, tzinfo=UTC)
+
+
+@pytest.fixture(autouse=True)
+def release_cached_frames(spark):
+    """MemoryLake caches every frame a stage writes; the session is shared, so drop them after each test."""
+    yield
+    spark.catalog.clearCache()
 
 
 class RecordingPublisher:
@@ -41,6 +51,11 @@ class RecordingPublisher:
 
     def cleanup(self, staged):
         pass
+
+
+def rows(frame):
+    """A frame's rows, comparable; the star's open valid_to (year 9999) cannot be collected as a datetime on Windows."""
+    return sorted(map(tuple, frame.select([F.col(c).cast("string") for c in frame.columns]).collect()), key=str)
 
 
 def pipeline(spark, lines, *, parsed=5, run_id="run-1", extra=None):
@@ -67,13 +82,13 @@ def run_all(spark, lines, **kwargs):
     return report, context, deps, lake, store, audit, publisher
 
 
-def test_the_five_stages_take_a_run_from_bronze_records_to_a_promoted_gold(spark):
+def test_the_six_stages_take_a_run_from_bronze_records_to_a_promoted_gold(spark):
     report, context, deps, lake, store, audit, publisher = run_all(spark, lines_of(tiki_records()))
 
     record = audit.get("run-1")
     assert record.status is S.PROMOTED
     assert [(name, status) for name, status in audit.history[1:]] == [
-        ("run-1", S.SILVER_BUILT), ("run-1", S.GOLD_WRITTEN), ("run-1", S.QUALITY_PASSED),
+        ("run-1", S.SILVER_BUILT), ("run-1", S.DIMENSIONS_BUILT), ("run-1", S.GOLD_WRITTEN), ("run-1", S.QUALITY_PASSED),
         ("run-1", S.PUBLISHED), ("run-1", S.PROMOTED),
     ]  # fmt: skip
     # 4 organic rows reach the marts; the sponsored one stays in Silver only.
@@ -101,7 +116,7 @@ def test_each_stage_run_alone_leaves_the_same_gold_manifest_and_audit_as_all_of_
 
     context, deps, lake, store, audit, _ = pipeline(spark, lines)
     options = RunOptions(serving_gold_root_uri="memory://gold")
-    for name in ("silver", "marts", "quality", "publish", "promote"):
+    for name in ("silver", "dimensions", "marts", "quality", "publish", "promote"):
         run_batch(context, deps=deps, stages=select_stages([name]), options=options)
 
     assert audit.get("run-1") == all_audit.get("run-1")
@@ -109,6 +124,7 @@ def test_each_stage_run_alone_leaves_the_same_gold_manifest_and_audit_as_all_of_
     gold = lambda lk, ctx, name: sorted(map(tuple, lk.read_gold(ctx, name).collect()), key=str)  # noqa: E731
     assert {n: gold(lake, context, n) for n in MART_NAMES} == {n: gold(all_lake, all_context, n) for n in MART_NAMES}
     assert store.objects == all_store.objects
+    assert {k: rows(v) for k, v in lake.dw.items()} == {k: rows(v) for k, v in all_lake.dw.items()}
 
 
 def test_rerunning_a_finished_pipeline_changes_nothing(spark):
@@ -154,7 +170,7 @@ def test_the_marts_summary_records_the_repeats_counted_before_dedup(spark):
     ]
     context, deps, lake, store, audit, _ = pipeline(spark, lines + twins, parsed=10)
 
-    run_batch(context, deps=deps, stages=select_stages(["silver", "marts"]))
+    run_batch(context, deps=deps, stages=select_stages(["silver", "dimensions", "marts"]))
 
     summary = json.loads(store.get("silver", marts_stage.summary_key("run-1")))
     assert summary["duplicates_before_dedup"] == {"observation_id": 4, "identical_content": 4}
@@ -182,3 +198,44 @@ def test_a_scratch_gold_root_judges_the_run_but_writes_no_manifest(spark):
     assert record.manifest_uri is None
     assert not [key for zone, key in store.objects if zone == GOLD_ZONE]
     assert deps.quality.results["run-1"]
+
+
+# ---------- the dimensions stage ----------
+
+
+def test_the_dimensions_stage_merges_every_dimension_into_the_star_outside_the_run(spark):
+    report, context, deps, lake, store, audit, _ = run_all(spark, lines_of([*tiki_records(), *lazada_records()]), parsed=10)
+
+    assert set(name for _, name in lake.dw) == set(DIMENSION_NAMES)
+    assert {root for root, _ in lake.dw} == {"memory://gold/dw"}
+    summary = json.loads(store.get("silver", dimensions_stage.summary_key("run-1")))
+    assert set(summary["sources"]) == {"tiki", "lazada"}
+    assert summary["tables"]["dim_marketplace"] == {
+        "uri": "memory://gold/dw/dim_marketplace", "rows": 3, "version": 0,
+    }  # fmt: skip
+    # Sponsored sightings are in the star too: 10 listings, 1 sponsored on each page.
+    listings = lake.read_dw(context, "dim_product_listing").filter("listing_key != -1")
+    assert listings.count() == 10
+
+
+def test_a_second_run_on_the_same_silver_leaves_the_star_as_it_was(spark):
+    lines = lines_of(tiki_records())
+    context, deps, lake, store, audit, _ = pipeline(spark, lines)
+    run_batch(context, deps=deps, stages=select_stages(["silver", "dimensions"]))
+    first = {name: rows(frame) for (_, name), frame in lake.dw.items()}
+
+    later = MarketplaceBatchContext("run-2", AS_OF, "memory://silver", "memory://gold")
+    run_batch(later, deps=deps, stages=select_stages(["silver", "dimensions"]))
+
+    assert {name: rows(frame) for (_, name), frame in lake.dw.items()} == first
+    assert set(lake.dw_versions.values()) == {1}
+    summary = json.loads(store.get("silver", dimensions_stage.summary_key("run-2")))
+    assert {table["version"] for table in summary["tables"].values()} == {1}
+
+
+def test_marts_cannot_run_before_the_dimensions(spark):
+    context, deps, *_ = pipeline(spark, lines_of(tiki_records()))
+    run_batch(context, deps=deps, stages=select_stages(["silver"]))
+
+    with pytest.raises(StageNotAllowed, match="marts cannot run on a SILVER_BUILT run"):
+        run_batch(context, deps=deps, stages=select_stages(["marts"]))

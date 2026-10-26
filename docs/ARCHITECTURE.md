@@ -102,7 +102,7 @@ Hai điểm cần đọc kỹ:
 ### `processing/`
 
 - `normalize/`: `common.py` (đọc envelope, cột canonical, quarantine, drift), `sources/{tiki,lazada}.py` (`PAYLOAD_SCHEMA`, `to_wide`, `to_offer_observation`), `wire.py` (cột canonical → event `marketplace-observation.v1`).
-- `batch/`: `stages/{base,silver,marts,quality,publish,promote}.py`, `runner.py`, `ports.py`, `context.py`, `lake.py` (`SparkLakeIO`), `inputs.py`, `memory.py` (bản trong bộ nhớ của các port), `marts.py`, `anomaly.py`, `quality.py`, `manifest.py`, `repositories.py`, `lock.py`, `scheduler.py` (vòng lặp cũ, profile `legacy-scheduler`), `cli.py`, `bootstrap.py`, `dimensions.py`, `keys.py`, `dim_date.py` (star Phase 10, chưa nối vào stage).
+- `batch/`: `stages/{base,silver,dimensions,marts,quality,publish,promote}.py`, `runner.py`, `ports.py`, `context.py`, `lake.py` (`SparkLakeIO`), `inputs.py`, `memory.py` (bản trong bộ nhớ của các port), `marts.py`, `anomaly.py`, `quality.py`, `manifest.py`, `repositories.py`, `lock.py`, `scheduler.py` (vòng lặp cũ, profile `legacy-scheduler`), `cli.py`, `bootstrap.py`, `dimensions.py`, `star_inputs.py`, `keys.py`, `dim_date.py` (star Phase 10: dimension đã nối vào stage `dimensions`, fact chưa).
 - `speed/`: `normalizer.py`, `stream.py`, `service.py`, `sinks.py`, `change_producer.py`.
 
 ### `orchestration/`, `serving/`, `ops/`
@@ -126,12 +126,13 @@ Hai điểm cần đọc kỹ:
 ## 5. Batch theo stage
 
 ```
-silver -> marts -> quality -> publish -> promote
+silver -> dimensions -> marts -> quality -> publish -> promote
 ```
 
 | Stage | Đọc | Ghi | Trạng thái sau |
 |---|---|---|---|
 | `silver` | Bronze/records (đến `as_of`) | `offer_observations_v2`, `<source>_listing_wide`, `page_context`, `quarantine`, tóm tắt `_runs/<run>/silver.json` (drift, bản trùng) | `SILVER_BUILT` |
+| `dimensions` | Silver v2 (cắt tại `as_of`, gồm cả quảng cáo), `<source>_listing_wide`, `page_context` | 7 dimension và bridge ở `gold/marketplace/dw/<bảng>/` (Delta `MERGE`, ngoài thư mục run), `_runs/<run>/dimensions.json` (số dòng, phiên bản Delta) | `DIMENSIONS_BUILT` |
 | `marts` | Silver v2, crawl audit (cắt tại `as_of`, bỏ quảng cáo) | 10 mart Gold theo run, `_runs/<run>/marts.json` | `GOLD_WRITTEN` |
 | `quality` | Silver, Gold, audit | kết quả quality, manifest của run | `QUALITY_PASSED`, `QUALITY_FAILED` hoặc `HELD` |
 | `publish` | Gold, manifest | PostgreSQL `cache.marketplace_*` | `PUBLISHED` (hoặc `HELD`) |

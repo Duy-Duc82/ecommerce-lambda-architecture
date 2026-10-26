@@ -24,6 +24,12 @@ def observations_as_of(silver: DataFrame, as_of: datetime) -> DataFrame:
     return silver.filter(F.col("observed_at") <= cutoff)
 
 
+def fetched_as_of(frame: DataFrame, as_of: datetime) -> DataFrame:
+    """Rows of a Silver table keyed by fetch time (``page_context``) as they stood at ``as_of``."""
+    cutoff = F.lit(aware_utc(as_of, "as_of")).cast("timestamp")
+    return frame.filter(F.col("fetched_at") <= cutoff)
+
+
 def organic_only(silver: DataFrame) -> DataFrame:
     """Without sponsored placements.
 

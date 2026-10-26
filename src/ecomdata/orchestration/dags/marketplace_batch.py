@@ -1,7 +1,7 @@
-"""DAG ``marketplace_batch``: one hourly run of the five batch stages.
+"""DAG ``marketplace_batch``: one hourly run of the six batch stages.
 
 Each stage is a ``DockerOperator`` task in the Spark image; the stages talk to
-each other only through storage (Silver v2, Gold, the manifest) and the run's
+each other only through storage (Silver v2, the star, Gold, the manifest) and the run's
 audit row, so a failed task is retried alone and later tasks wait for it.
 ``as_of`` is the end of the data interval, ``run_id`` follows from it
 (``run_id_for``), and ``max_active_runs=1`` keeps two runs from racing for the

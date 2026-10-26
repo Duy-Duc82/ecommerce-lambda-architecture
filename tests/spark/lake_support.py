@@ -21,6 +21,9 @@ class MemoryLake:
         self.written: dict[str, object] = {}
         self.partitions: dict[str, tuple[str, ...]] = {}
         self.gold: dict[tuple[str, str], object] = {}
+        # The star: one frame per table, kept across runs, and how many merges each took.
+        self.dw: dict[tuple[str, str], object] = {}
+        self.dw_versions: dict[tuple[str, str], int] = {}
 
     def read_records(self, *, since_date=None):
         frame = common.decode_records(self.spark.createDataFrame([(line,) for line in self.lines], "value string"))
@@ -46,6 +49,20 @@ class MemoryLake:
 
     def read_gold(self, context, name):
         return self.gold[(context.run_id, name)]
+
+    def merge_dw(self, context, name, frame):
+        from ecomdata.domain.datasets import dataset
+        from ecomdata.processing.batch.context import DwWriteResult
+
+        key = (context.dw_root_uri, name)
+        cached = frame.select(*dataset(name).columns).cache()
+        self.dw[key] = cached
+        # Like a Delta table, every merge is a new version, numbered from 0.
+        self.dw_versions[key] = self.dw_versions.get(key, -1) + 1
+        return DwWriteResult(name, context.dw_dataset_uri(name), cached.count(), self.dw_versions[key])
+
+    def read_dw(self, context, name):
+        return self.dw[(context.dw_root_uri, name)]
 
 
 def lines_of(records):

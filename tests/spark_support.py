@@ -78,6 +78,9 @@ def spark():
         .appName("marketplace-tests")
         .config("spark.ui.enabled", "false")
         .config("spark.sql.shuffle.partitions", "1")
+        # One session serves the whole suite; the default 1g driver heap runs out
+        # once the pipeline tests hold every stage's frames (Phase 10 star).
+        .config("spark.driver.memory", "2g")
         # SparkSessionFactory pins the session to UTC; a test session on local time
         # would bucket observed_date differently from production.
         .config("spark.sql.session.timeZone", "UTC")
