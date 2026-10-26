@@ -24,7 +24,7 @@
 # environment afterwards. Phase 9 plan section 5:
 #   env/live.env    live collection; smoke, drill and `down -Volumes` refuse it;
 #                   `evaluate reliability|freshness|storage` and `evidence` read it
-#   env/bench.env   benchmarks (`bench crawl|ingest|speed|batch|all|report`),
+#   env/bench.env   benchmarks (`bench crawl|speed|speed-cost|speed-soak|all|report`),
 #                   smoke and drills, beside the live stack
 #   env/demo.env    the offline demo: `demo [--auto] [--snapshot] [--skip-faults] [--without-serve]`
 #   env/refactor.env  the refactor end-to-end stack (mp-refactor, prefix rf-)
