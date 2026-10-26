@@ -439,6 +439,39 @@ def test_a_soak_counts_batches_longer_than_its_trigger():
     assert _soak([[31000, 4000]] * 3, [1400] * 3)["batches_over_trigger"] == 3
 
 
+def test_a_soak_puts_vm_timestamps_on_the_host_clock_before_windowing():
+    # Two batches at host T0+10 s and T0+280 s, stamped 30 s ahead by the VM:
+    # uncorrected, the second one would fall into window 1.
+    vm = timedelta(seconds=30)
+    progress, batches = [], []
+    for host in (10, 280):
+        at = T0 + timedelta(seconds=host) + vm
+        progress.append({"progress_at": at, "num_input_rows": 100, "trigger_execution_ms": 4000})
+        batches.append({"input_rows": 100, "completed_at": at, "latency_p50_ms": 35000, "latency_p95_ms": 40000})
+    resources = [{"name": "bench-speed", "mem_mib": 1400, "at": T0 + timedelta(seconds=5)}]
+
+    m = bench.soak_metrics(
+        batches,
+        progress,
+        resources,
+        start=T0,
+        window_seconds=300,
+        trigger_seconds=30,
+        sent=200,
+        send_seconds=10,
+        drain_seconds=5.0,
+        failed_batches=0,
+        speed_container="bench-speed",
+        clock_offset_seconds=30.0,
+    )
+
+    (window,) = m["windows"]
+    assert (window["window"], window["batches"], window["rows"]) == (0, 2, 200)
+    assert window["latency_p50_median_ms"] == pytest.approx(5000)
+    assert window["latency_p95_max_ms"] == pytest.approx(10000)
+    assert m["latency_batch_p95_max_ms"] == pytest.approx(10000)
+
+
 def test_the_new_scenarios_stay_out_of_all():
     assert "speed-cost" not in bench.SCENARIOS and "speed-soak" not in bench.SCENARIOS
     assert {"speed-cost", "speed-soak"} <= set(bench.RUNNERS)
