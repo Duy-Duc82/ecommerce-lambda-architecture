@@ -1,6 +1,6 @@
 # Phase 10 trên kiến trúc mới: star schema sau refactor
 
-Ngày 2026-10-25. Trạng thái: **bản nháp, chờ người dùng duyệt trước khi viết mã.** Nhánh `phase-10/star-on-refactor` (từ `refactor/architecture`).
+Ngày 2026-10-25. Trạng thái: **thiết kế mục 2 đã duyệt ngày 2026-10-26** (các quyết định ở mục 6). Nhánh `phase-10/star-on-refactor` (từ `refactor/architecture`).
 
 Thay thế phần "thứ tự W2–W4" của `docs/PLAN_PHASE10_REVISED.md`: ingestion ELT, Silver bằng Spark, Airflow, đa nguồn đã xong ở refactor (R0–R9). Giữ nguyên thiết kế dim/fact của `PLAN_PHASE10_DIMENSIONAL_MODEL.md` §3, cộng các điều chỉnh của bản revised §3.4.
 
@@ -24,7 +24,7 @@ Thay thế phần "thứ tự W2–W4" của `docs/PLAN_PHASE10_REVISED.md`: ing
 - `dimensions` đọc Silver v2 (bảng chung và bảng rộng theo nguồn), dựng dim, ghi vào `gold/marketplace/dw/<bảng>/` dạng Delta, cập nhật bằng `MERGE` (SCD2 cho `dim_product_listing`, SCD1 cho phần còn lại).
 - `facts` đọc Silver v2 và dim, ghi fact vào cùng `dw/`, partition theo `date_key`, `MERGE` theo khoá fact; chạy lại cùng cửa sổ cho cùng kết quả.
 - `marts` dựng 10 mart cũ **từ fact** (thay vì từ Silver), giữ nguyên tên và cột để Postgres `cache.*`, Superset và quality không đổi. Parity: mart mới bằng mart cũ trên cùng dữ liệu (như AC7 của refactor).
-- `publish` thêm bản sao `dw.*` vào PostgreSQL (star) bên cạnh `cache.*`.
+- ~~`publish` thêm bản sao `dw.*` vào PostgreSQL (star) bên cạnh `cache.*`.~~ Bỏ (mục 6, quyết định 4): star chỉ nằm trong lake dạng Delta; Postgres chỉ nhận mart `cache.*`.
 
 **Tính tái lập theo `as_of`:** manifest của run ghi phiên bản Delta của từng bảng `dw/` sau khi run chạy; đọc lại run cũ dùng `VERSION AS OF`. Bảng `dw/` ghi theo thứ tự cố định nên chạy lại một run cho cùng phiên bản dữ liệu.
 
@@ -41,7 +41,7 @@ Thay thế phần "thứ tự W2–W4" của `docs/PLAN_PHASE10_REVISED.md`: ing
 | D2 | `LakeIO.merge(...)` (Delta) và `MemoryLake` tương ứng; stage `dimensions` | test chạy lại hai lần cho cùng kết quả; smoke Delta trong Docker |
 | D3 | Builder 5 fact (+ `fact_category_page_daily`), stage `facts`, khoá và quan hệ giữa fact và dim | test khoá ngoại: mọi `*_key` của fact có trong dim |
 | D4 | `marts` dựng từ fact; parity 10 mart | test parity trên fixture, rồi trên dữ liệu E2E |
-| D5 | `publish` ghi `dw.*`; dashboard Superset "Star schema"; DAG thêm hai task; quality gate cho mô hình | chạy trên `mp-refactor` |
+| D5 | DAG thêm hai task; quality gate cho mô hình; `publish` vẫn chỉ ghi `cache.*` (mart dựng từ fact), không ghi `dw.*` | chạy trên `mp-refactor` |
 | D6 | Incremental: chạy 2 lần bằng full rebuild; thời gian batch không tăng theo tổng Silver | trên ≥ 2 tuần dữ liệu |
 
 Mỗi gói: test viết cùng mã, chạy toàn bộ suite, một PR vào `develop`. Mốc test hiện tại: 1505 passed.
@@ -61,3 +61,24 @@ Mỗi gói: test viết cùng mã, chạy toàn bộ suite, một PR vào `devel
 1. **Duyệt thiết kế mục 2**, đặc biệt: star nằm ngoài thư mục run và dùng Delta `MERGE`; thêm hai trạng thái run; mart dựng từ fact.
 2. **Thu thập dài hạn:** mở lại một stack thu thập (Tiki, Lazada) chạy liên tục để có dữ liệu cho D6? Cần quyết định về RAM của máy (xem evidence, mục áp lực bộ nhớ) và có bật sleep hay không.
 3. **Databricks:** các câu hỏi ở `docs/DATABRICKS_READINESS.md` §6 quyết định `dw/` nằm ở bucket nào. Nếu chưa biết, D0–D3 vẫn làm được vì chúng chạy trên MinIO và Delta cục bộ.
+
+## 6. Quyết định của người dùng (2026-10-26)
+
+1. **Thiết kế mục 2: duyệt.** Star nằm ngoài thư mục run, dùng Delta `MERGE`; thêm `DIMENSIONS_BUILT`, `FACTS_BUILT`; mart dựng từ fact. D0–D5 bắt đầu được.
+2. **Thu thập dài hạn: hoãn.** Hoàn thành toàn bộ phần chạy local trước. D6 (incremental trên ≥ 2 tuần dữ liệu) chờ tới lúc đó; D0–D5 làm trên fixture và dữ liệu E2E 84 phút đã có.
+3. **Databricks: chờ.** Người dùng tự đăng ký thử, xem giá và gói miễn phí có đủ không. Câu hỏi 1 và 2 ở `docs/DATABRICKS_READINESS.md` §6 còn mở.
+4. **PostgreSQL chỉ là bộ nhớ đệm phục vụ** (Superset đọc `cache.*`). Mọi lưu trữ dữ liệu của dự án dùng phương pháp big data (object storage + Delta/Parquet). Hệ quả:
+   - bỏ việc publish `dw.*` vào Postgres (mục 2, D5);
+   - chọn phương án "tách tính toán và phục vụ" của `DATABRICKS_READINESS.md` §3, không đưa Postgres lên dịch vụ ngoài;
+   - các bảng `audit.*` hiện nằm trong Postgres (run, quality, crawl attempt, crawl run, source state, speed batch, stream progress, storage snapshot) là lưu trữ, không phải cache, nên cần chuyển sang lake. Đây là gói mới D7 bên dưới.
+5. **Vai trò của Databricks:** minh chứng pipeline mang đi và chạy được trên cloud, không phải nơi chạy batch thường xuyên. Chỉ cần chạy `silver -> dimensions -> facts -> marts -> quality` một lần trên một cửa sổ dữ liệu và so kết quả với bản chạy local.
+
+### Gói mới D7: trạng thái và audit trong lake
+
+| | Việc | Kiểm |
+|---|---|---|
+| D7a | Adapter Delta cho `AuditRepo` và `QualityRepo` (`audit/batch_run`, `audit/quality_result` trong lake); bỏ advisory lock của run, thay bằng `max_active_runs=1` của Airflow cộng ghi có điều kiện vào bảng run (Delta optimistic concurrency) | test chạy chồng hai run: một run bị từ chối |
+| D7b | Crawl audit (`crawl_request_attempt`, `crawl_run`, `crawl_source_state`) ghi ra `Bronze/audit/` dạng Parquet; `read_crawl_audit` đọc từ lake thay cho JDBC | mart `crawl_reliability_daily`, `source_coverage_daily` khớp với bản đọc JDBC |
+| D7c | `audit.marketplace_speed_batch`, `marketplace_stream_progress`, `storage_snapshot` chuyển sang lake; `ops` đọc theo | test của `ops` |
+
+Thứ tự: sau D2 (khi `LakeIO.merge` đã có). **Cần người dùng quyết định:** `audit.crawl_frontier` là hàng đợi công việc của crawler (`FOR UPDATE SKIP LOCKED`, nhiều worker cùng lấy việc), không phải dữ liệu phân tích; Delta không làm được hàng đợi khoá theo dòng. Giữ nó trong Postgres như trạng thái vận hành, hay chuyển sang Redis (đã có trong stack)?
