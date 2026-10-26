@@ -5,7 +5,8 @@ measures and the shared ids; the descriptive attributes that only some sources
 publish (seller badges, SKUs, origin, delivery flags) and the category names
 and breadcrumbs come from each source's ``<source>_listing_wide`` table and
 from ``page_context``, read by that source's normaliser module
-(``listing_attributes``, ``category_names``, ``category_paths``).
+(``listing_attributes``, ``category_names``, ``category_paths``,
+``listed_product_counts``).
 
 Every builder takes the observations through :func:`with_listing_columns`, so
 a frame without the wide-table columns (an older fixture, a source without a
@@ -48,6 +49,7 @@ class StarInputs:
     observations: DataFrame
     category_names: DataFrame
     category_paths: DataFrame
+    listed_counts: DataFrame
 
 
 def _union(frames: list[DataFrame], spark: SparkSession, columns: tuple[tuple[str, str], ...]) -> DataFrame:
@@ -70,13 +72,14 @@ def star_inputs(
     contributes no attributes.
     """
     spark = observations.sparkSession
-    attributes, names, paths = [], [], []
+    attributes, names, paths, listed = [], [], [], []
     for code, frame in sorted(wide.items()):
         module = registry.normalizer(code)
         source_contexts = contexts.filter(F.col("source_code") == code)
         attributes.append(module.listing_attributes(frame))
         names.append(module.category_names(frame, source_contexts))
         paths.append(module.category_paths(source_contexts))
+        listed.append(module.listed_product_counts(source_contexts))
     by_record = _union(attributes, spark, common.LISTING_ATTRIBUTE_COLUMNS)
     base = observations.drop(*[n for n, _ in ATTRIBUTE_COLUMNS if n in observations.columns])
     if "record_id" not in base.columns:
@@ -86,4 +89,5 @@ def star_inputs(
         observations=enriched,
         category_names=_union(names, spark, common.CATEGORY_NAME_COLUMNS),
         category_paths=_union(paths, spark, common.CATEGORY_PATH_COLUMNS),
+        listed_counts=_union(listed, spark, common.LISTED_COUNT_COLUMNS),
     )

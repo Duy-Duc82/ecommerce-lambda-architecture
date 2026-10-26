@@ -1,4 +1,4 @@
-"""DAG ``marketplace_batch``: one hourly run of the six batch stages.
+"""DAG ``marketplace_batch``: one hourly run of the seven batch stages.
 
 Each stage is a ``DockerOperator`` task in the Spark image; the stages talk to
 each other only through storage (Silver v2, the star, Gold, the manifest) and the run's

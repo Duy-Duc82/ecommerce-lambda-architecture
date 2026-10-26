@@ -68,7 +68,8 @@ def chain():
     return [
         StubStage("silver", {S.CREATED}, S.SILVER_BUILT),
         StubStage("dimensions", {S.SILVER_BUILT}, S.DIMENSIONS_BUILT),
-        StubStage("marts", {S.DIMENSIONS_BUILT}, S.GOLD_WRITTEN),
+        StubStage("facts", {S.DIMENSIONS_BUILT}, S.FACTS_BUILT),
+        StubStage("marts", {S.FACTS_BUILT}, S.GOLD_WRITTEN),
         StubStage("quality", {S.GOLD_WRITTEN}, S.QUALITY_PASSED),
         StubStage("publish", {S.QUALITY_PASSED, S.HELD}, S.PUBLISHED),
         StubStage("promote", {S.PUBLISHED, S.HELD}, S.PROMOTED),
@@ -111,10 +112,10 @@ def test_all_stages_walk_the_state_machine_in_order():
     report = run_batch(context(), deps=d, stages=chain())
 
     assert [status for _, status in d.audit.history] == [
-        S.CREATED, S.SILVER_BUILT, S.DIMENSIONS_BUILT, S.GOLD_WRITTEN, S.QUALITY_PASSED, S.PUBLISHED, S.PROMOTED,
+        S.CREATED, S.SILVER_BUILT, S.DIMENSIONS_BUILT, S.FACTS_BUILT, S.GOLD_WRITTEN, S.QUALITY_PASSED, S.PUBLISHED, S.PROMOTED,
     ]  # fmt: skip
     assert report.result().status == "PROMOTED"
-    assert [item.stage for item in report.stages] == ["silver", "dimensions", "marts", "quality", "publish", "promote"]
+    assert [item.stage for item in report.stages] == ["silver", "dimensions", "facts", "marts", "quality", "publish", "promote"]
 
 
 def test_each_stage_runs_alone_and_the_run_keeps_its_place():
@@ -124,6 +125,8 @@ def test_each_stage_runs_alone_and_the_run_keeps_its_place():
     assert d.audit.get("run-1").status is S.SILVER_BUILT
     run_batch(context(), deps=d, stages=select_stages(["dimensions"], stages))
     assert d.audit.get("run-1").status is S.DIMENSIONS_BUILT
+    run_batch(context(), deps=d, stages=select_stages(["facts"], stages))
+    assert d.audit.get("run-1").status is S.FACTS_BUILT
     run_batch(context(), deps=d, stages=select_stages(["marts"], stages))
     assert d.audit.get("run-1").status is S.GOLD_WRITTEN
 
@@ -141,7 +144,7 @@ def test_running_a_finished_stage_again_is_a_noop():
 
     report = run_batch(context(), deps=d, stages=stages)
 
-    assert [stage.runs for stage in stages] == [1] * 6
+    assert [stage.runs for stage in stages] == [1] * 7
     assert all(item.skipped for item in report.stages)
 
 
@@ -151,13 +154,13 @@ def test_force_runs_the_stage_again_without_moving_the_status():
 
     run_batch(context(), deps=d, stages=select_stages(["marts"], stages), options=RunOptions(force=True))
 
-    assert stages[2].runs == 2
+    assert stages[3].runs == 2
     assert d.audit.get("run-1").status is S.PROMOTED
 
 
 def test_a_crash_marks_the_run_failed_and_needs_resume():
     d, stages = deps(), chain()
-    stages[3].fail = RuntimeError("spark died")
+    stages[4].fail = RuntimeError("spark died")
 
     with pytest.raises(RuntimeError, match="spark died"):
         run_batch(context(), deps=d, stages=stages)
@@ -168,19 +171,19 @@ def test_a_crash_marks_the_run_failed_and_needs_resume():
     with pytest.raises(RunNeedsResume):
         run_batch(context(), deps=d, stages=stages)
 
-    stages[3].fail = None
+    stages[4].fail = None
     run_batch(context(), deps=d, stages=stages, resume=True)
     # Only the stage that crashed (and those after it) ran again.
-    assert [stage.runs for stage in stages] == [1, 1, 1, 2, 1, 1]
+    assert [stage.runs for stage in stages] == [1, 1, 1, 1, 2, 1, 1]
     assert d.audit.get("run-1").status is S.PROMOTED
 
 
 def test_a_refused_run_is_recorded_before_the_refusal_propagates():
     d, stages = deps(), chain()
     decision = QualityDecision("run-1", False, "quality-rules.v2", AS_OF, 14, 2, 0, 0)
-    stages[3].target = S.QUALITY_FAILED
-    stages[3].failure = QualityGateFailure(decision, ())
-    stages[3].columns = {"quality_status": "FAIL", "mandatory_failure_count": 2}
+    stages[4].target = S.QUALITY_FAILED
+    stages[4].failure = QualityGateFailure(decision, ())
+    stages[4].columns = {"quality_status": "FAIL", "mandatory_failure_count": 2}
 
     with pytest.raises(QualityGateFailure):
         run_batch(context(), deps=d, stages=stages)
@@ -188,7 +191,7 @@ def test_a_refused_run_is_recorded_before_the_refusal_propagates():
     record = d.audit.get("run-1")
     assert record.status is S.QUALITY_FAILED
     assert (record.quality_status, record.mandatory_failure_count) == ("FAIL", 2)
-    assert [stage.runs for stage in stages] == [1, 1, 1, 1, 0, 0]
+    assert [stage.runs for stage in stages] == [1, 1, 1, 1, 1, 0, 0]
     # Publication is not reachable from a refused run, and a stage after it is refused, not skipped.
     with pytest.raises(StageNotAllowed):
         run_batch(context(), deps=d, stages=select_stages(["publish"], stages))
@@ -196,30 +199,30 @@ def test_a_refused_run_is_recorded_before_the_refusal_propagates():
 
 def test_a_refused_run_can_be_resumed_to_judge_again():
     d, stages = deps(), chain()
-    stages[3].target, stages[3].failure = S.QUALITY_FAILED, QualityGateFailure(
+    stages[4].target, stages[4].failure = S.QUALITY_FAILED, QualityGateFailure(
         QualityDecision("run-1", False, "quality-rules.v2", AS_OF, 14, 1, 0, 0), ()
     )
     with pytest.raises(QualityGateFailure):
         run_batch(context(), deps=d, stages=stages)
 
-    stages[3].target, stages[3].failure = S.QUALITY_PASSED, None
+    stages[4].target, stages[4].failure = S.QUALITY_PASSED, None
     run_batch(context(), deps=d, stages=stages, resume=True)
 
     assert d.audit.get("run-1").status is S.PROMOTED
-    assert [stage.runs for stage in stages] == [1, 1, 1, 2, 1, 1]
+    assert [stage.runs for stage in stages] == [1, 1, 1, 1, 2, 1, 1]
 
 
 def test_a_held_run_goes_no_further_in_this_invocation():
     d, stages = deps(), chain()
-    stages[3].target = S.HELD
-    stages[3].via = (S.QUALITY_PASSED,)
-    stages[3].columns = {"held_reason": QUALITY_ONLY}
+    stages[4].target = S.HELD
+    stages[4].via = (S.QUALITY_PASSED,)
+    stages[4].columns = {"held_reason": QUALITY_ONLY}
 
     report = run_batch(context(), deps=d, stages=stages)
 
     assert d.audit.get("run-1").status is S.HELD
     assert d.audit.get("run-1").held_reason == QUALITY_ONLY
-    assert [stage.runs for stage in stages] == [1, 1, 1, 1, 0, 0]
+    assert [stage.runs for stage in stages] == [1, 1, 1, 1, 1, 0, 0]
     assert report.result().promotion_reason == QUALITY_ONLY
 
 
@@ -266,7 +269,7 @@ def test_a_run_refused_by_the_lock_starts_nothing():
         run_batch(context(), deps=d, stages=stages)
 
     assert d.audit.runs == {}
-    assert [stage.runs for stage in stages] == [0] * 6
+    assert [stage.runs for stage in stages] == [0] * 7
 
 
 def test_unknown_stage_names_are_refused():
@@ -274,12 +277,13 @@ def test_unknown_stage_names_are_refused():
         select_stages(["bogus"])
 
 
-def test_the_default_pipeline_is_silver_dimensions_marts_quality_publish_promote():
-    assert [stage.name for stage in default_stages()] == ["silver", "dimensions", "marts", "quality", "publish", "promote"]
+def test_the_default_pipeline_is_silver_dimensions_facts_marts_quality_publish_promote():
+    assert [stage.name for stage in default_stages()] == ["silver", "dimensions", "facts", "marts", "quality", "publish", "promote"]
     stages = default_stages()
     # Each stage starts where the previous one ends: the chain has no gap.
     assert [stage.milestone for stage in stages] == [
-        S.SILVER_BUILT, S.DIMENSIONS_BUILT, S.GOLD_WRITTEN, S.QUALITY_PASSED, S.PUBLISHED, S.PROMOTED,
+        S.SILVER_BUILT, S.DIMENSIONS_BUILT, S.FACTS_BUILT, S.GOLD_WRITTEN, S.QUALITY_PASSED, S.PUBLISHED,
+        S.PROMOTED,
     ]  # fmt: skip
 
 
@@ -345,7 +349,7 @@ def prepared(run_id="run-1", as_of=AS_OF, *, log=None, previous_pointer=None, pa
     pointer = read_current_manifest(reader=store.get)
     audit.open_run(ctx, LATER, expected_current_run_id=None if pointer is None else pointer.run_id)
     uri = store.put(GOLD_ZONE, run_manifest_path(run_id), serialize_manifest(manifest(run_id, as_of, passed=passed)))
-    for status in (S.SILVER_BUILT, S.DIMENSIONS_BUILT, S.GOLD_WRITTEN, S.QUALITY_PASSED):
+    for status in (S.SILVER_BUILT, S.DIMENSIONS_BUILT, S.FACTS_BUILT, S.GOLD_WRITTEN, S.QUALITY_PASSED):
         audit.advance(run_id, status, LATER, **({"manifest_uri": uri} if status is S.QUALITY_PASSED else {}))
     log.clear()
     d = deps(store=store, audit=audit, publisher=FakePublisher(log), io=FakeIO())

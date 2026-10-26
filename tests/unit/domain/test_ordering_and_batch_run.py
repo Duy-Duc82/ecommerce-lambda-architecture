@@ -35,7 +35,7 @@ def test_missing_fetched_at_sorts_as_observed_at():
     assert order_key(T0, None, "x") == (T0, T0, "x")
 
 
-HAPPY = [S.CREATED, S.SILVER_BUILT, S.DIMENSIONS_BUILT, S.GOLD_WRITTEN, S.QUALITY_PASSED, S.PUBLISHED, S.PROMOTED]
+HAPPY = [S.CREATED, S.SILVER_BUILT, S.DIMENSIONS_BUILT, S.FACTS_BUILT, S.GOLD_WRITTEN, S.QUALITY_PASSED, S.PUBLISHED, S.PROMOTED]
 
 
 def test_the_happy_path_is_a_chain_of_valid_transitions():

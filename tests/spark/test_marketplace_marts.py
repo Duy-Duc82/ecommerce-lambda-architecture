@@ -585,7 +585,7 @@ def test_the_counter_mart_never_names_a_proxy_as_sale_or_demand(spark):
 # path that has to resolve a marketplace from the real schema was never
 # exercised and shipped broken.
 ATTEMPT_SCHEMA = (
-    "crawl_run_id string, task_id string, attempt_number int, "
+    "attempt_id bigint, crawl_run_id string, task_id string, attempt_number int, "
     "started_at timestamp, completed_at timestamp, status string, "
     "http_status int, latency_ms bigint, raw_artifact_id string, raw_uri string, "
     "raw_bytes bigint, parsed_count bigint, rejected_count bigint, error_kind string"
@@ -615,6 +615,7 @@ def _audit_frames(spark, attempt_rows):
         task_id = f"task-{run_id}"
         attempts.append(
             (
+                index + 1,
                 run_id,
                 task_id,
                 index + 1,

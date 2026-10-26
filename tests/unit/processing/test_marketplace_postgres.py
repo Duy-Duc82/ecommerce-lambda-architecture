@@ -375,7 +375,7 @@ def test_advance_checks_the_state_machine_under_a_row_lock():
 
 
 def test_advance_records_the_status_the_milestone_and_the_columns():
-    cursor = FakeCursor(rows=run_row("DIMENSIONS_BUILT", "DIMENSIONS_BUILT"))
+    cursor = FakeCursor(rows=run_row("FACTS_BUILT", "FACTS_BUILT"))
     audit = MarketplaceBatchAudit(_factory(cursor))
 
     audit.advance(

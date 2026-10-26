@@ -24,6 +24,7 @@ from ecomdata.domain.sources import LAZADA
 from ecomdata.processing.normalize.common import (
     CATEGORY_NAME_COLUMNS,
     CATEGORY_PATH_COLUMNS,
+    LISTED_COUNT_COLUMNS,
     LISTING_ATTRIBUTE_COLUMNS,
     SourceFields,
     availability_expr,
@@ -194,13 +195,16 @@ def _slug(url: Column) -> Column:
 def _breadcrumb_slugs(contexts: DataFrame) -> DataFrame:
     """Per page: its breadcrumb entries below the home page (slug, title), top first."""
     crumbs = contexts.select(
-        F.from_json("payload_json", BREADCRUMB_SCHEMA)["mods"]["breadcrumb"].alias("crumbs"), "fetched_at"
+        F.from_json("payload_json", BREADCRUMB_SCHEMA)["mods"]["breadcrumb"].alias("crumbs"),
+        json_path("$.mainInfo.totalResults").try_cast("bigint").alias("total"),
+        "fetched_at",
     )
     entries = crumbs.select(
         F.filter(
             F.transform("crumbs", lambda c: F.struct(_slug(c["url"]).alias("slug"), c["title"].alias("title"))),
             lambda e: e["slug"].isNotNull(),
         ).alias("entries"),
+        "total",
         "fetched_at",
     ).filter(F.size("entries") > 0)
     return entries
@@ -227,3 +231,18 @@ def category_paths(contexts: DataFrame) -> DataFrame:
         F.col("fetched_at").alias("observed_at"),
     )
     return typed(paths, CATEGORY_PATH_COLUMNS)
+
+
+def listed_product_counts(contexts: DataFrame) -> DataFrame:
+    """The category size a page states: ``mainInfo.totalResults``, for the node its breadcrumb ends on."""
+    counts = (
+        _breadcrumb_slugs(contexts)
+        .select(
+            F.lit(LAZADA.code).alias("marketplace"),
+            F.element_at("entries", -1)["slug"].alias("category_id"),
+            F.col("total").alias("listed_product_count"),
+            F.col("fetched_at").alias("observed_at"),
+        )
+        .filter(F.col("listed_product_count").isNotNull())
+    )
+    return typed(counts, LISTED_COUNT_COLUMNS)

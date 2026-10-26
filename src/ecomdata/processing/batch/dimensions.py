@@ -18,7 +18,6 @@ from pyspark.sql import functions as F
 
 from ecomdata.domain.sources import SOURCES, SourceRegistry
 from ecomdata.processing.batch.dim_date import build_dim_date
-from ecomdata.processing.batch.star_inputs import with_listing_columns
 from ecomdata.processing.batch.keys import (
     OPEN_VALID_TO,
     UNKNOWN_KEY,
@@ -30,6 +29,7 @@ from ecomdata.processing.batch.keys import (
     surrogate_key,
     with_unknown_member,
 )
+from ecomdata.processing.batch.star_inputs import with_listing_columns
 
 __all__ = [
     "build_dim_date",

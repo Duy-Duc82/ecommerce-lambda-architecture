@@ -1,0 +1,84 @@
+"""Stage ``facts``: Silver and the dimensions to the star's facts in the lake.
+
+Reads what the ``dimensions`` stage read (``offer_observations_v2`` as it stood
+at the run's ``as_of``, the wide tables, ``page_context``), the built
+``dim_product_listing`` from ``dw/`` (the facts take their ``listing_key`` from
+its versions) and the crawl audit as it stood at ``as_of``. It builds the six
+facts (``processing/batch/facts.py``) and merges each into
+``gold/marketplace/dw/<table>/``, partitioned by ``date_key``. Like the
+dimensions, the facts are rebuilt whole from Silver on every run, so a rerun
+on the same Silver leaves them as they were; the run's summary records the
+Delta version each table reached.
+"""
+from __future__ import annotations
+
+import json
+
+from ecomdata.domain.batch_run import BatchRunStatus as S
+from ecomdata.domain.datasets import FACT, datasets_of_kind
+from ecomdata.domain.sources import SOURCES, SourceRegistry
+from ecomdata.processing.batch.facts import FactRules, build_marketplace_facts
+from ecomdata.processing.batch.inputs import (
+    crawl_audit_as_of,
+    deduplicate_observations,
+    fetched_as_of,
+    observations_as_of,
+)
+from ecomdata.processing.batch.stages.base import Outcome, Stage, StageContext
+from ecomdata.processing.batch.stages.silver import OBSERVATIONS, PAGE_CONTEXT, RUNS_DIRECTORY, SILVER_ZONE, wide_name
+from ecomdata.processing.batch.star_inputs import star_inputs
+
+FACT_NAMES = tuple(d.name for d in datasets_of_kind(FACT))
+
+
+def summary_key(run_id: str) -> str:
+    return f"marketplace/{RUNS_DIRECTORY}/run_id={run_id}/facts.json"
+
+
+class FactsStage(Stage):
+    name = "facts"
+    requires = (
+        f"silver/{OBSERVATIONS}",
+        f"silver/{PAGE_CONTEXT}",
+        "silver/<source>_listing_wide",
+        "gold/marketplace/dw/dim_product_listing",
+    )
+    produces = tuple(f"gold/marketplace/dw/{name}" for name in FACT_NAMES) + ("silver/_runs/<run>/facts.json",)
+    allowed_from = frozenset({S.DIMENSIONS_BUILT})
+    milestone = S.FACTS_BUILT
+
+    def __init__(self, registry: SourceRegistry = SOURCES) -> None:
+        self.registry = registry
+
+    def execute(self, ctx: StageContext) -> Outcome:
+        run = ctx.run
+        observations = deduplicate_observations(observations_as_of(ctx.io.read_silver(OBSERVATIONS), run.as_of))
+        observations = observations.cache()
+        try:
+            present = {row.source_code for row in observations.select("source_code").distinct().collect()}
+            codes = [spec.code for spec in self.registry if spec.code in present]
+            wide = {code: ctx.io.read_silver(wide_name(code)) for code in codes}
+            contexts = fetched_as_of(ctx.io.read_silver(PAGE_CONTEXT), run.as_of)
+            inputs = star_inputs(observations, wide, contexts, self.registry)
+            attempts, _ = crawl_audit_as_of(*ctx.crawl_audit(ctx.spark), run.as_of)
+            facts = build_marketplace_facts(
+                inputs.observations,
+                ctx.io.read_dw(run, "dim_product_listing"),
+                inputs.listed_counts,
+                attempts,
+                FactRules.from_context(run),
+            )
+            writes = {name: ctx.io.merge_dw(run, name, facts[name]) for name in FACT_NAMES}
+        finally:
+            observations.unpersist()
+        summary = {
+            "run_id": run.run_id,
+            "as_of": run.as_of.isoformat(),
+            "sources": codes,
+            "tables": {
+                name: {"uri": result.uri, "rows": result.row_count, "version": result.version}
+                for name, result in writes.items()
+            },
+        }
+        ctx.store.put(SILVER_ZONE, summary_key(run.run_id), json.dumps(summary, sort_keys=True).encode("utf-8"))
+        return Outcome(S.FACTS_BUILT, detail=summary)

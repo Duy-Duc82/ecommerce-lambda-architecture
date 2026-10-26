@@ -28,6 +28,7 @@ from ecomdata.domain.sources import TIKI
 from ecomdata.processing.normalize.common import (
     CATEGORY_NAME_COLUMNS,
     CATEGORY_PATH_COLUMNS,
+    LISTED_COUNT_COLUMNS,
     LISTING_ATTRIBUTE_COLUMNS,
     SourceFields,
     any_true,
@@ -344,3 +345,14 @@ def category_names(wide: DataFrame, contexts: DataFrame) -> DataFrame:
 def category_paths(contexts: DataFrame) -> DataFrame:
     """Tiki's pages do not state a whole path (``ancestors`` stops short of the root); the rows' paths are used."""
     return empty(contexts.sparkSession, CATEGORY_PATH_COLUMNS)
+
+
+def listed_product_counts(contexts: DataFrame) -> DataFrame:
+    """The category size a page states: ``paging.total`` of the page's own category."""
+    counts = contexts.select(
+        F.lit(TIKI.code).alias("marketplace"),
+        json_path("$.categoryData.id").alias("category_id"),
+        json_path("$.paging.total").try_cast("bigint").alias("listed_product_count"),
+        F.col("fetched_at").alias("observed_at"),
+    ).filter(F.col("category_id").isNotNull() & F.col("listed_product_count").isNotNull())
+    return typed(counts, LISTED_COUNT_COLUMNS)

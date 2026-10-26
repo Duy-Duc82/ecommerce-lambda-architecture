@@ -14,7 +14,7 @@ Tiki, Lazada (trang công khai, robots.txt, ≥ 2 s/request, một tab trình du
    -> Bronze/raw (phản hồi nguyên vẹn) + Bronze/records (JSONL.gz theo trang)
    -> Kafka marketplace.records.v1
         |-- speed: normalizer -> trạng thái theo offer -> change event -> Elasticsearch, Redis
-        '-- batch (Airflow @hourly): silver -> dimensions -> marts -> quality -> publish -> promote
+        '-- batch (Airflow @hourly): silver -> dimensions -> facts -> marts -> quality -> publish -> promote
                                      Silver v2 Parquet   Gold theo run   PostgreSQL cache.*   Superset
 ```
 
@@ -61,7 +61,7 @@ Cấu hình ghép lớp: `env/base.env`, rồi `env/ports.<stack>.env`, rồi `e
 Chạy một stage của batch bằng tay:
 
 ```powershell
-python -m ecomdata.processing.batch run --run-id <id> --as-of <ISO> --stage silver|dimensions|marts|quality|publish|promote   # hoặc --all
+python -m ecomdata.processing.batch run --run-id <id> --as-of <ISO> --stage silver|dimensions|facts|marts|quality|publish|promote   # hoặc --all
 ```
 
 ## Kiểm thử

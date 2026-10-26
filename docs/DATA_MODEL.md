@@ -800,6 +800,16 @@ with them:
 | prices, `rating_value`, `pct_change`, `in_stock_ratio`, ratios | nothing: average, min, max or median only |
 | `sold_count`, `review_count`, `rating_count` (the counters themselves) | nothing: they are running totals the site displays |
 
+**Which sightings each fact judges (D3).** `fact_offer_observation` keeps every
+sighting, sponsored ones marked by `is_advertisement`. `fact_price_snapshot_daily`,
+`fact_price_change` and `fact_counter_daily` are built from the **organic**
+sightings only, as the marts are: a sponsored placement rotates between loads and
+would make an offer's price jump. So the reconciliations of 4.8 compare them with
+`fact_offer_observation WHERE NOT coalesce(is_advertisement, false)` (the column is NULL for a source that does not say). `fact_category_page_daily`
+counts every sighting a page showed (`observation_count`, `advertisement_count`)
+and judges prices and discounts over its organic offers. A pair of sightings in
+two currencies is a price change with `pct_change` NULL and never a large drop.
+
 ### 4.8 Model checks
 
 Added to the quality gate (`config/quality_rules.py`) alongside the existing

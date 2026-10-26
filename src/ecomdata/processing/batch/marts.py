@@ -268,7 +268,14 @@ def attach_marketplace_code(attempts: DataFrame, frontier: DataFrame) -> DataFra
             raise ValueError(f"{name} must expose task_id to resolve a marketplace code")
     if "marketplace_code" not in frontier.columns:
         raise ValueError("frontier must expose marketplace_code")
-    codes = frontier.select("task_id", F.col("marketplace_code").alias("_frontier_marketplace")).distinct()
+    # The page an attempt fetched and what kind of page it was come along when
+    # the frontier has them (fact_crawl_attempt reads both).
+    carried = [
+        F.col(source).alias(alias)
+        for source, alias in (("target", "request_target"), ("resource_type", "resource_type"))
+        if source in frontier.columns and alias not in attempts.columns
+    ]
+    codes = frontier.select("task_id", F.col("marketplace_code").alias("_frontier_marketplace"), *carried).distinct()
     return (
         attempts.join(codes, "task_id", "left")
         .withColumn(

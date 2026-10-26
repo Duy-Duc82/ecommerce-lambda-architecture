@@ -354,8 +354,8 @@ ALTER TABLE audit.marketplace_batch_run
     ADD COLUMN IF NOT EXISTS held_reason TEXT;
 ALTER TABLE audit.marketplace_batch_run DROP CONSTRAINT IF EXISTS marketplace_batch_run_status_check;
 ALTER TABLE audit.marketplace_batch_run ADD CONSTRAINT marketplace_batch_run_status_check
-    CHECK (status IN ('CREATED','SILVER_BUILT','DIMENSIONS_BUILT','GOLD_WRITTEN','QUALITY_PASSED','QUALITY_FAILED',
-                      'PUBLISHED','PROMOTED','HELD','FAILED','RUNNING','SUCCEEDED'));
+    CHECK (status IN ('CREATED','SILVER_BUILT','DIMENSIONS_BUILT','FACTS_BUILT','GOLD_WRITTEN','QUALITY_PASSED',
+                      'QUALITY_FAILED','PUBLISHED','PROMOTED','HELD','FAILED','RUNNING','SUCCEEDED'));
 
 -- The serving cache names the manifest and the rule version that admitted it,
 -- so "which Gold version is live, under which rules" needs no object listing.

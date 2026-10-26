@@ -8,14 +8,14 @@ Trạng thái: chấp nhận (2026-10-24), hiện thực 2026-10-25.
 
 ## Quyết định
 
-Pipeline gồm 6 stage (stage `dimensions` thêm ở Phase 10, xem mục cuối), mỗi stage là một lớp hiện thực `Stage` (`processing/batch/stages/base.py`) với `name`, `requires`, `produces`, `allowed_from` và `milestone`:
+Pipeline gồm 7 stage (stage `dimensions` và `facts` thêm ở Phase 10, xem mục cuối), mỗi stage là một lớp hiện thực `Stage` (`processing/batch/stages/base.py`) với `name`, `requires`, `produces`, `allowed_from` và `milestone`:
 
 ```
-silver -> dimensions -> marts -> quality -> publish -> promote
+silver -> dimensions -> facts -> marts -> quality -> publish -> promote
 ```
 
 - Stage đọc đầu vào từ storage và ghi đầu ra vào storage (Silver v2, Gold theo run `gold/marketplace/runs/run_id=<id>/`, manifest), không truyền DataFrame cho stage sau; chạy lại là idempotent.
-- `domain/batch_run.py` có `BatchRunStatus` và bảng chuyển trạng thái: `CREATED → SILVER_BUILT → DIMENSIONS_BUILT → GOLD_WRITTEN → QUALITY_PASSED | QUALITY_FAILED → PUBLISHED → PROMOTED`, cùng `HELD` và `FAILED`. Runner (`processing/batch/runner.py`) kiểm `allowed_from`, chạy lại stage đã xong là no-op trừ `--force`, đánh dấu `FAILED` khi stage lỗi, và chỉ `--resume` mới cho tiếp tục run đã `FAILED` hoặc `QUALITY_FAILED`.
+- `domain/batch_run.py` có `BatchRunStatus` và bảng chuyển trạng thái: `CREATED → SILVER_BUILT → DIMENSIONS_BUILT → FACTS_BUILT → GOLD_WRITTEN → QUALITY_PASSED | QUALITY_FAILED → PUBLISHED → PROMOTED`, cùng `HELD` và `FAILED`. Runner (`processing/batch/runner.py`) kiểm `allowed_from`, chạy lại stage đã xong là no-op trừ `--force`, đánh dấu `FAILED` khi stage lỗi, và chỉ `--resume` mới cho tiếp tục run đã `FAILED` hoặc `QUALITY_FAILED`.
 - `expected_current_run_id` (token compare-and-swap của pointer) được ghi vào audit row lúc tạo run.
 - Advisory lock (`processing/batch/lock.py`) giữ suốt một lần gọi runner, nên `--all` và từng stage dùng lock như nhau.
 - Phụ thuộc inject qua `BatchDependencies` (Protocol trong `ports.py`); `bootstrap.py` là composition root. Không còn `from_settings()` trong `stages/`.
@@ -33,4 +33,8 @@ Plan liệt kê `promote → publish`. Giữ đúng ngữ nghĩa cũ: cache Post
 
 ## Bổ sung Phase 10 (2026-10-26): stage `dimensions`
 
-Stage `dimensions` chạy giữa `silver` và `marts`, đưa run từ `SILVER_BUILT` sang `DIMENSIONS_BUILT`; `marts` giờ bắt đầu từ `DIMENSIONS_BUILT`. Stage dựng 7 dimension và bridge từ Silver rồi `MERGE` vào `gold/marketplace/dw/<bảng>/`. Khác Gold theo run, các bảng này nằm ngoài thư mục run và giữ qua các run; mỗi run dựng lại toàn bộ từ Silver, nên chạy lại trên cùng Silver không đổi bảng, và tóm tắt `_runs/<run>/dimensions.json` ghi phiên bản Delta mà run để lại. Constraint `status` của `audit.marketplace_batch_run` thêm `DIMENSIONS_BUILT` (16 ký tự, vừa `VARCHAR(16)`). `FACTS_BUILT` thêm ở D3 cùng stage `facts`.
+Stage `dimensions` chạy giữa `silver` và `marts`, đưa run từ `SILVER_BUILT` sang `DIMENSIONS_BUILT`; `marts` giờ bắt đầu từ `DIMENSIONS_BUILT`. Stage dựng 7 dimension và bridge từ Silver rồi `MERGE` vào `gold/marketplace/dw/<bảng>/`. Khác Gold theo run, các bảng này nằm ngoài thư mục run và giữ qua các run; mỗi run dựng lại toàn bộ từ Silver, nên chạy lại trên cùng Silver không đổi bảng, và tóm tắt `_runs/<run>/dimensions.json` ghi phiên bản Delta mà run để lại. Constraint `status` của `audit.marketplace_batch_run` thêm `DIMENSIONS_BUILT` (16 ký tự, vừa `VARCHAR(16)`). 
+
+## Bổ sung Phase 10 D3 (2026-10-26): stage `facts`
+
+Stage `facts` chạy giữa `dimensions` và `marts`, đưa run từ `DIMENSIONS_BUILT` sang `FACTS_BUILT`; `marts` giờ bắt đầu từ `FACTS_BUILT`. Stage đọc Silver, `dw/dim_product_listing` (để lấy `listing_key` theo phiên bản SCD2) và crawl audit, dựng 6 fact (`processing/batch/facts.py`) rồi `MERGE` vào `gold/marketplace/dw/<bảng>/`, partition theo `date_key`. Tóm tắt ở `_runs/<run>/facts.json`. Constraint `status` thêm `FACTS_BUILT` (11 ký tự).

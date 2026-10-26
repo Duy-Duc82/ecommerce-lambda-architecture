@@ -248,6 +248,7 @@ STAR: tuple[MarketplaceDataset, ...] = (
                  shipping_price discount_amount discount_percent rating_value rating_scale rating_count review_count
                  sold_count ranking_position search_rank request_page is_advertisement crawl_run_id raw_uri raw_sha256
                  adapter_version"""),
+        partition_columns=("date_key",),
     ),
     MarketplaceDataset(
         "fact_price_snapshot_daily",
@@ -257,6 +258,7 @@ STAR: tuple[MarketplaceDataset, ...] = (
         _cols("""date_key offer_key currency listing_key marketplace_key seller_key brand_key category_key
                  listing_flags_key first_observed_at last_observed_at last_observation_id open_price close_price min_price max_price
                  avg_price first_list_price last_list_price observation_count distinct_price_count in_stock_ratio"""),
+        partition_columns=("date_key",),
     ),
     MarketplaceDataset(
         "fact_price_change",
@@ -266,6 +268,7 @@ STAR: tuple[MarketplaceDataset, ...] = (
         _cols("""observation_id previous_observation_id date_key marketplace_key listing_key offer_key seller_key
                  brand_key category_key changed_at previous_observed_at currency previous_currency old_price new_price price_delta
                  pct_change minutes_since_previous direction is_large_drop change_rule_version"""),
+        partition_columns=("date_key",),
     ),
     MarketplaceDataset(
         "fact_counter_daily",
@@ -275,6 +278,7 @@ STAR: tuple[MarketplaceDataset, ...] = (
         _cols("""date_key offer_key counter_name listing_key marketplace_key first_value last_value raw_delta_sum
                  valid_delta_sum valid_transition_count invalid_transition_count elapsed_seconds_valid
                  velocity_proxy_per_hour counter_reset_or_invalid invalid_reasons_json counter_rule_version"""),
+        partition_columns=("date_key",),
     ),
     MarketplaceDataset(
         "fact_category_page_daily",
@@ -285,6 +289,7 @@ STAR: tuple[MarketplaceDataset, ...] = (
                  observation_count observed_offer_count advertisement_count seller_count brand_count min_price p25_price
                  median_price p75_price max_price avg_price discounted_offer_count discounted_offer_ratio
                  median_discount_percent in_stock_ratio"""),
+        partition_columns=("date_key",),
     ),
     MarketplaceDataset(
         "fact_crawl_attempt",
@@ -294,6 +299,7 @@ STAR: tuple[MarketplaceDataset, ...] = (
         _cols("""attempt_id date_key marketplace_key category_key crawl_run_id task_id resource_type attempt_number
                  started_at completed_at status http_status error_kind latency_ms raw_bytes parsed_count rejected_count
                  raw_uri"""),
+        partition_columns=("date_key",),
     ),
 )
 

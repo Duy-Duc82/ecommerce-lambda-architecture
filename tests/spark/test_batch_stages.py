@@ -19,9 +19,11 @@ from ecomdata.processing.batch.memory import MemoryAudit, MemoryQuality, MemoryS
 from ecomdata.processing.batch.quality import QualityGateFailure
 from ecomdata.processing.batch.runner import BatchDependencies, default_stages, run_batch, select_stages
 from ecomdata.processing.batch.stages import dimensions as dimensions_stage
+from ecomdata.processing.batch.stages import facts as facts_stage
 from ecomdata.processing.batch.stages import marts as marts_stage
 from ecomdata.processing.batch.stages.base import RunOptions, StageNotAllowed
 from ecomdata.processing.batch.stages.dimensions import DIMENSION_NAMES
+from ecomdata.processing.batch.stages.facts import FACT_NAMES
 from tests.spark.lake_support import MemoryLake, lines_of
 from tests.spark.test_marketplace_marts import _audit
 from tests.spark.test_normalize import lazada_records, tiki_records
@@ -88,8 +90,8 @@ def test_the_six_stages_take_a_run_from_bronze_records_to_a_promoted_gold(spark)
     record = audit.get("run-1")
     assert record.status is S.PROMOTED
     assert [(name, status) for name, status in audit.history[1:]] == [
-        ("run-1", S.SILVER_BUILT), ("run-1", S.DIMENSIONS_BUILT), ("run-1", S.GOLD_WRITTEN), ("run-1", S.QUALITY_PASSED),
-        ("run-1", S.PUBLISHED), ("run-1", S.PROMOTED),
+        ("run-1", S.SILVER_BUILT), ("run-1", S.DIMENSIONS_BUILT), ("run-1", S.FACTS_BUILT), ("run-1", S.GOLD_WRITTEN),
+        ("run-1", S.QUALITY_PASSED), ("run-1", S.PUBLISHED), ("run-1", S.PROMOTED),
     ]  # fmt: skip
     # 4 organic rows reach the marts; the sponsored one stays in Silver only.
     assert record.silver_rows == 4
@@ -116,7 +118,7 @@ def test_each_stage_run_alone_leaves_the_same_gold_manifest_and_audit_as_all_of_
 
     context, deps, lake, store, audit, _ = pipeline(spark, lines)
     options = RunOptions(serving_gold_root_uri="memory://gold")
-    for name in ("silver", "dimensions", "marts", "quality", "publish", "promote"):
+    for name in ("silver", "dimensions", "facts", "marts", "quality", "publish", "promote"):
         run_batch(context, deps=deps, stages=select_stages([name]), options=options)
 
     assert audit.get("run-1") == all_audit.get("run-1")
@@ -170,7 +172,7 @@ def test_the_marts_summary_records_the_repeats_counted_before_dedup(spark):
     ]
     context, deps, lake, store, audit, _ = pipeline(spark, lines + twins, parsed=10)
 
-    run_batch(context, deps=deps, stages=select_stages(["silver", "dimensions", "marts"]))
+    run_batch(context, deps=deps, stages=select_stages(["silver", "dimensions", "facts", "marts"]))
 
     summary = json.loads(store.get("silver", marts_stage.summary_key("run-1")))
     assert summary["duplicates_before_dedup"] == {"observation_id": 4, "identical_content": 4}
@@ -206,7 +208,7 @@ def test_a_scratch_gold_root_judges_the_run_but_writes_no_manifest(spark):
 def test_the_dimensions_stage_merges_every_dimension_into_the_star_outside_the_run(spark):
     report, context, deps, lake, store, audit, _ = run_all(spark, lines_of([*tiki_records(), *lazada_records()]), parsed=10)
 
-    assert set(name for _, name in lake.dw) == set(DIMENSION_NAMES)
+    assert set(name for _, name in lake.dw) == set(DIMENSION_NAMES) | set(FACT_NAMES)
     assert {root for root, _ in lake.dw} == {"memory://gold/dw"}
     summary = json.loads(store.get("silver", dimensions_stage.summary_key("run-1")))
     assert set(summary["sources"]) == {"tiki", "lazada"}
@@ -216,6 +218,41 @@ def test_the_dimensions_stage_merges_every_dimension_into_the_star_outside_the_r
     # Sponsored sightings are in the star too: 10 listings, 1 sponsored on each page.
     listings = lake.read_dw(context, "dim_product_listing").filter("listing_key != -1")
     assert listings.count() == 10
+
+
+def test_the_facts_stage_merges_every_fact_and_keeps_the_sponsored_sightings(spark):
+    report, context, deps, lake, store, audit, _ = run_all(spark, lines_of([*tiki_records(), *lazada_records()]), parsed=10)
+
+    assert {name for _, name in lake.dw if name.startswith("fact_")} == set(FACT_NAMES)
+    summary = json.loads(store.get("silver", facts_stage.summary_key("run-1")))
+    assert set(summary["tables"]) == set(FACT_NAMES)
+    observations = lake.read_dw(context, "fact_offer_observation")
+    assert observations.count() == 10 and observations.filter("is_advertisement").count() == 2
+    # Every sighting found a listing version, and the category pages were seen.
+    assert observations.filter("listing_key = -1").count() == 0
+    assert lake.read_dw(context, "fact_category_page_daily").count() > 0
+    assert lake.read_dw(context, "fact_crawl_attempt").count() == 1
+
+
+def test_a_second_run_on_the_same_silver_leaves_the_facts_as_they_were(spark):
+    lines = lines_of(tiki_records())
+    context, deps, lake, store, audit, _ = pipeline(spark, lines)
+    stages = ["silver", "dimensions", "facts"]
+    run_batch(context, deps=deps, stages=select_stages(stages))
+    first = {name: rows(frame) for (_, name), frame in lake.dw.items()}
+
+    later = MarketplaceBatchContext("run-2", AS_OF, "memory://silver", "memory://gold")
+    run_batch(later, deps=deps, stages=select_stages(stages))
+
+    assert {name: rows(frame) for (_, name), frame in lake.dw.items()} == first
+
+
+def test_facts_run_after_the_dimensions_and_before_the_marts(spark):
+    context, deps, *_ = pipeline(spark, lines_of(tiki_records()))
+    run_batch(context, deps=deps, stages=select_stages(["silver", "dimensions"]))
+
+    with pytest.raises(StageNotAllowed, match="marts cannot run on a DIMENSIONS_BUILT run"):
+        run_batch(context, deps=deps, stages=select_stages(["marts"]))
 
 
 def test_a_second_run_on_the_same_silver_leaves_the_star_as_it_was(spark):
@@ -239,3 +276,11 @@ def test_marts_cannot_run_before_the_dimensions(spark):
 
     with pytest.raises(StageNotAllowed, match="marts cannot run on a SILVER_BUILT run"):
         run_batch(context, deps=deps, stages=select_stages(["marts"]))
+
+
+def test_facts_cannot_run_before_the_dimensions(spark):
+    context, deps, *_ = pipeline(spark, lines_of(tiki_records()))
+    run_batch(context, deps=deps, stages=select_stages(["silver"]))
+
+    with pytest.raises(StageNotAllowed, match="facts cannot run on a SILVER_BUILT run"):
+        run_batch(context, deps=deps, stages=select_stages(["facts"]))

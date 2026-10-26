@@ -28,7 +28,7 @@ def spark_factory(settings: Settings, app_name: str | None = None):
 def context_for(settings: Settings, *, run_id: str, as_of: datetime, silver_uri: str, gold_root_uri: str):
     from ecomdata.processing.batch.context import MarketplaceBatchContext
 
-    batch, quality = settings.batch, settings.quality
+    batch, quality, speed = settings.batch, settings.quality, settings.speed
     return MarketplaceBatchContext(
         run_id,
         as_of,
@@ -38,6 +38,9 @@ def context_for(settings: Settings, *, run_id: str, as_of: datetime, silver_uri:
         freshness_rule_version=batch.freshness_rule_version,
         counter_rule_version=batch.counter_rule_version,
         counter_max_gap_seconds=batch.counter_max_gap_seconds,
+        change_rule_version=speed.change_rule_version,
+        large_drop_absolute=speed.large_drop_absolute,
+        large_drop_relative=speed.large_drop_relative,
         anomaly_window_days=batch.anomaly_window_days,
         anomaly_min_samples=batch.anomaly_min_samples,
         anomaly_mad_threshold=batch.anomaly_mad_threshold,

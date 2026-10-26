@@ -17,7 +17,7 @@ from ecomdata.domain.sources import SOURCES
 from ecomdata.processing.batch.scheduler import run_id_for
 
 # The batch stages, in pipeline order (the stage names of ``ecomdata.processing.batch``).
-BATCH_STAGES = ("silver", "dimensions", "marts", "quality", "publish", "promote")
+BATCH_STAGES = ("silver", "dimensions", "facts", "marts", "quality", "publish", "promote")
 
 # Variables the task containers inherit from the Airflow container, by prefix: the stack's
 # service addresses and credentials, and the tunables the services read.

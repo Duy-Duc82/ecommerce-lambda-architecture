@@ -31,6 +31,7 @@ from ecomdata.processing.batch.ports import (
 )
 from ecomdata.processing.batch.stages.base import RunOptions, Stage, StageContext, StageNotAllowed, StageResult
 from ecomdata.processing.batch.stages.dimensions import DimensionsStage
+from ecomdata.processing.batch.stages.facts import FactsStage
 from ecomdata.processing.batch.stages.marts import MartsStage
 from ecomdata.processing.batch.stages.promote import PromoteStage
 from ecomdata.processing.batch.stages.publish import PublishStage
@@ -43,7 +44,7 @@ class RunNeedsResume(RuntimeError):
 
 
 def default_stages() -> tuple[Stage, ...]:
-    return (SilverStage(), DimensionsStage(), MartsStage(), QualityStage(), PublishStage(), PromoteStage())
+    return (SilverStage(), DimensionsStage(), FactsStage(), MartsStage(), QualityStage(), PublishStage(), PromoteStage())
 
 
 @dataclass

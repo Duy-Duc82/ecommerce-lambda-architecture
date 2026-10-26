@@ -145,6 +145,13 @@ CATEGORY_PATH_COLUMNS: tuple[tuple[str, str], ...] = (
     ("category_path", "string"),
     ("observed_at", "timestamp"),
 )
+# The size of a category as a page states it ("N products"), for the page's own category.
+LISTED_COUNT_COLUMNS: tuple[tuple[str, str], ...] = (
+    ("marketplace", "string"),
+    ("category_id", "string"),
+    ("listed_product_count", "bigint"),
+    ("observed_at", "timestamp"),
+)
 
 
 def typed(frame: DataFrame, columns: tuple[tuple[str, str], ...]) -> DataFrame:
@@ -460,6 +467,7 @@ __all__ = [
     "CANONICAL_NAMES",
     "CATEGORY_NAME_COLUMNS",
     "CATEGORY_PATH_COLUMNS",
+    "LISTED_COUNT_COLUMNS",
     "LISTING_ATTRIBUTE_COLUMNS",
     "any_true",
     "empty",
