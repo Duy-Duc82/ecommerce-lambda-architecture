@@ -1,4 +1,4 @@
-# Báo cáo hằng ngày — thu thập `mp-live`
+﻿# Báo cáo hằng ngày — thu thập `mp-live`
 
 Nhánh này chỉ chứa báo cáo tự động, sinh bởi Claude Code chạy headless từ
 Windows Task Scheduler trên máy thu thập. Nhánh không chung lịch sử với code.
@@ -17,6 +17,7 @@ Lịch:
 
 ## Báo cáo (mới nhất trước)
 
+- [2026-10-26 19:40](reports/2026-10-26.md) — CẦN XEM: mp-live vẫn tắt (0/10); Docker tắt, máy mới bật 19:34; không batch; ổ C còn 225.3 GiB (−9.5)
 - [2026-10-25 10:38](reports/2026-10-25.md) — CẦN XEM: mp-live vẫn tắt (0/10); Docker tắt lúc kiểm (dừng 00:44 10-25), stack thử mp-tikihtml đã dừng; ổ C giảm 22.8 GiB
 - [2026-10-24 07:47](reports/2026-10-24.md) — CẦN XEM: mp-live vẫn tắt (0/10); Docker bật, đang chạy stack thử mp-tikihtml (crawl trang danh mục, batch mỗi giờ, SUCCEEDED)
 - [2026-10-23 22:20](reports/2026-10-23.md) — CẦN XEM: Docker tắt lúc kiểm; tối 10-22 có mở Docker 20:55-00:43, 5 container chạy ~2h10m (không rõ project); không batch
