@@ -338,7 +338,11 @@ def main(argv: list[str] | None = None) -> None:
         query = start_query(
             spark,
             config=change_config(settings.speed),
-            read=lambda session: layer.read_marketplace_observations(session, settings.kafka.bootstrap_servers),
+            read=lambda session: layer.read_marketplace_observations(
+                session,
+                settings.kafka.bootstrap_servers,
+                max_offsets_per_trigger=settings.speed.max_offsets_per_trigger,
+            ),
             write_batch=layer.make_batch_writer(sink_wiring(settings)),
             checkpoint=settings.speed.checkpoint_path(),
             trigger=settings.speed.trigger,
