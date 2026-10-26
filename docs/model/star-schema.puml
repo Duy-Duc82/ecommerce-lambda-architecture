@@ -47,8 +47,20 @@ entity "dim_seller" as dim_seller <<dimension>> {
   --
   seller_id : varchar <<UK>>
   marketplace_key : bigint <<FK>>
+  seller_name / seller_type : varchar (SCD1)
+  is_official_store / is_trusted_store : boolean (SCD1)
   first_seen_at : timestamptz
   last_seen_at : timestamptz
+  observed_listing_count : int
+}
+
+entity "dim_brand" as dim_brand <<dimension>> {
+  * brand_key : bigint <<PK>> xxhash64(marketplace, brand_id)
+  --
+  marketplace_key : bigint <<FK>>
+  brand_id : varchar <<UK with marketplace>>
+  brand_name : varchar (SCD1)
+  first_seen_at / last_seen_at : timestamptz
   observed_listing_count : int
 }
 
@@ -56,12 +68,14 @@ entity "dim_category" as dim_category <<dimension>> {
   * category_key : bigint <<PK>>
   --
   marketplace_key : bigint <<FK>>
-  category_id : varchar <<UK with marketplace>>
+  category_id : varchar <<UK with marketplace>> Tiki id, Lazada slug
   category_name : varchar
   category_slug : varchar
   parent_key : bigint <<FK>>
   level : smallint
   full_path : varchar
+  breadcrumb : varchar
+  category_l1_name .. category_l4_name : varchar
   is_leaf : boolean
 }
 
@@ -79,10 +93,13 @@ entity "dim_product_listing" as dim_listing <<dimension>> {
   offer_id : varchar
   marketplace_key : bigint <<FK>>
   platform_listing_id : varchar
+  sku / master_product_sku : varchar (SCD1)
   product_title : text <<SCD2>>
-  brand : varchar <<SCD2>>
+  brand_key : bigint <<FK, SCD2>>
   category_key : bigint <<FK, SCD2>>
   seller_key : bigint <<FK, SCD2>>
+  origin : varchar (SCD1)
+  is_authentic / is_platform_verified : boolean (SCD1)
   source_url : text (SCD1)
   valid_from : timestamptz
   valid_to : timestamptz
@@ -90,13 +107,15 @@ entity "dim_product_listing" as dim_listing <<dimension>> {
   version : int
 }
 
-entity "dim_offer_status" as dim_status <<dimension>> {
-  * offer_status_key : smallint <<PK>>
+entity "dim_listing_flags" as dim_flags <<dimension>> {
+  * listing_flags_key : bigint <<PK>> xxhash64 of the flags
   --
   availability : varchar
   active_status : varchar
-  has_discount : boolean
-  has_rating : boolean
+  has_discount / has_rating : boolean
+  has_free_shipping : boolean (null = unknown)
+  is_express_delivery / is_next_day_delivery : boolean
+  is_flash_deal / is_gift_available : boolean
 }
 
 entity "fact_offer_observation" as f_obs <<fact>> {
@@ -107,15 +126,19 @@ entity "fact_offer_observation" as f_obs <<fact>> {
   listing_key : bigint <<FK>> version at observed_at
   offer_key : bigint (durable)
   seller_key : bigint <<FK>>
-  category_key : bigint <<FK>>
-  offer_status_key : smallint <<FK>>
+  brand_key : bigint <<FK>>
+  category_key : bigint <<FK>> the listing's category
+  page_category_key : bigint <<FK>> the page it was found on
+  listing_flags_key : bigint <<FK>>
   observed_at / fetched_at : timestamptz
   currency : char(3)
   current_price / list_price / shipping_price : numeric
   discount_amount / discount_percent : numeric
   rating_value / rating_scale : numeric
   rating_count / review_count / sold_count : bigint
-  ranking_position : int
+  ranking_position / search_rank : bigint
+  request_page : int
+  is_advertisement : boolean
   crawl_run_id / raw_uri / raw_sha256 / adapter_version
 }
 
@@ -127,8 +150,9 @@ entity "fact_price_snapshot_daily" as f_snap <<fact>> {
   listing_key : bigint <<FK>> at the day's last sighting
   marketplace_key : bigint <<FK>>
   seller_key : bigint <<FK>>
+  brand_key : bigint <<FK>>
   category_key : bigint <<FK>>
-  offer_status_key : smallint <<FK>>
+  listing_flags_key : bigint <<FK>>
   first_observed_at / last_observed_at : timestamptz
   last_observation_id : varchar
   open_price / close_price : numeric
@@ -148,6 +172,7 @@ entity "fact_price_change" as f_change <<fact>> {
   listing_key : bigint <<FK>>
   offer_key : bigint (durable)
   seller_key : bigint <<FK>>
+  brand_key : bigint <<FK>>
   category_key : bigint <<FK>>
   changed_at / previous_observed_at : timestamptz
   currency / previous_currency : char(3)
@@ -176,6 +201,22 @@ entity "fact_counter_daily" as f_counter <<fact>> {
   counter_rule_version : varchar
 }
 
+entity "fact_category_page_daily" as f_page <<fact>> {
+  * date_key : int <<PK,FK>>
+  * category_key : bigint <<PK,FK>> the crawled page
+  * currency : char(3) <<PK>>
+  --
+  marketplace_key : bigint <<FK>>
+  crawled_page_count : int
+  listed_product_count : bigint (site's total)
+  observation_count / observed_offer_count : int
+  advertisement_count / seller_count / brand_count : int
+  min / p25 / median / p75 / max / avg price : numeric
+  discounted_offer_count : int
+  discounted_offer_ratio / median_discount_percent : numeric
+  in_stock_ratio : numeric
+}
+
 entity "fact_crawl_attempt" as f_crawl <<fact>> {
   * attempt_id : bigint <<PK>>
   --
@@ -197,6 +238,7 @@ entity "fact_crawl_attempt" as f_crawl <<fact>> {
 
 ' dimension-to-dimension
 dim_marketplace ||--o{ dim_seller
+dim_marketplace ||--o{ dim_brand
 dim_marketplace ||--o{ dim_category
 dim_marketplace ||--o{ dim_listing
 dim_category ||--o{ dim_category : parent
@@ -204,34 +246,44 @@ dim_category ||--o{ bridge : ancestor
 dim_category ||--o{ bridge : descendant
 dim_category ||--o{ dim_listing
 dim_seller ||--o{ dim_listing
+dim_brand ||--o{ dim_listing
 
 ' fact_offer_observation
 dim_date ||--o{ f_obs
 dim_marketplace ||--o{ f_obs
 dim_listing ||--o{ f_obs
 dim_seller ||--o{ f_obs
-dim_category ||--o{ f_obs
-dim_status ||--o{ f_obs
+dim_brand ||--o{ f_obs
+dim_category ||--o{ f_obs : listing
+dim_category ||--o{ f_obs : page
+dim_flags ||--o{ f_obs
 
 ' fact_price_snapshot_daily
 dim_date ||--o{ f_snap
 dim_marketplace ||--o{ f_snap
 dim_listing ||--o{ f_snap
 dim_seller ||--o{ f_snap
+dim_brand ||--o{ f_snap
 dim_category ||--o{ f_snap
-dim_status ||--o{ f_snap
+dim_flags ||--o{ f_snap
 
 ' fact_price_change
 dim_date ||--o{ f_change
 dim_marketplace ||--o{ f_change
 dim_listing ||--o{ f_change
 dim_seller ||--o{ f_change
+dim_brand ||--o{ f_change
 dim_category ||--o{ f_change
 
 ' fact_counter_daily
 dim_date ||--o{ f_counter
 dim_marketplace ||--o{ f_counter
 dim_listing ||--o{ f_counter
+
+' fact_category_page_daily
+dim_date ||--o{ f_page
+dim_marketplace ||--o{ f_page
+dim_category ||--o{ f_page
 
 ' fact_crawl_attempt
 dim_date ||--o{ f_crawl

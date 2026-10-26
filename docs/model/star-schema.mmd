@@ -1,5 +1,6 @@
 erDiagram
     DIM_MARKETPLACE ||--o{ DIM_SELLER : hosts
+    DIM_MARKETPLACE ||--o{ DIM_BRAND : carries
     DIM_MARKETPLACE ||--o{ DIM_CATEGORY : owns
     DIM_MARKETPLACE ||--o{ DIM_PRODUCT_LISTING : lists
     DIM_CATEGORY ||--o{ DIM_CATEGORY : parent_of
@@ -7,30 +8,39 @@ erDiagram
     DIM_CATEGORY ||--o{ BRIDGE_CATEGORY_ANCESTRY : descendant
     DIM_CATEGORY ||--o{ DIM_PRODUCT_LISTING : version_category
     DIM_SELLER ||--o{ DIM_PRODUCT_LISTING : version_seller
+    DIM_BRAND ||--o{ DIM_PRODUCT_LISTING : version_brand
 
     DIM_DATE ||--o{ FACT_OFFER_OBSERVATION : observed_on
     DIM_MARKETPLACE ||--o{ FACT_OFFER_OBSERVATION : listed_on
     DIM_PRODUCT_LISTING ||--o{ FACT_OFFER_OBSERVATION : version_seen
     DIM_SELLER ||--o{ FACT_OFFER_OBSERVATION : sold_by
+    DIM_BRAND ||--o{ FACT_OFFER_OBSERVATION : branded
     DIM_CATEGORY ||--o{ FACT_OFFER_OBSERVATION : classified_as
-    DIM_OFFER_STATUS ||--o{ FACT_OFFER_OBSERVATION : status
+    DIM_CATEGORY ||--o{ FACT_OFFER_OBSERVATION : found_on_page
+    DIM_LISTING_FLAGS ||--o{ FACT_OFFER_OBSERVATION : flags
 
     DIM_DATE ||--o{ FACT_PRICE_SNAPSHOT_DAILY : day
     DIM_MARKETPLACE ||--o{ FACT_PRICE_SNAPSHOT_DAILY : listed_on
     DIM_PRODUCT_LISTING ||--o{ FACT_PRICE_SNAPSHOT_DAILY : version_at_close
     DIM_SELLER ||--o{ FACT_PRICE_SNAPSHOT_DAILY : sold_by
+    DIM_BRAND ||--o{ FACT_PRICE_SNAPSHOT_DAILY : branded
     DIM_CATEGORY ||--o{ FACT_PRICE_SNAPSHOT_DAILY : classified_as
-    DIM_OFFER_STATUS ||--o{ FACT_PRICE_SNAPSHOT_DAILY : status_at_close
+    DIM_LISTING_FLAGS ||--o{ FACT_PRICE_SNAPSHOT_DAILY : flags_at_close
 
     DIM_DATE ||--o{ FACT_PRICE_CHANGE : changed_on
     DIM_MARKETPLACE ||--o{ FACT_PRICE_CHANGE : listed_on
     DIM_PRODUCT_LISTING ||--o{ FACT_PRICE_CHANGE : version_seen
     DIM_SELLER ||--o{ FACT_PRICE_CHANGE : sold_by
+    DIM_BRAND ||--o{ FACT_PRICE_CHANGE : branded
     DIM_CATEGORY ||--o{ FACT_PRICE_CHANGE : classified_as
 
     DIM_DATE ||--o{ FACT_COUNTER_DAILY : day
     DIM_MARKETPLACE ||--o{ FACT_COUNTER_DAILY : listed_on
     DIM_PRODUCT_LISTING ||--o{ FACT_COUNTER_DAILY : version_at_close
+
+    DIM_DATE ||--o{ FACT_CATEGORY_PAGE_DAILY : day
+    DIM_MARKETPLACE ||--o{ FACT_CATEGORY_PAGE_DAILY : listed_on
+    DIM_CATEGORY ||--o{ FACT_CATEGORY_PAGE_DAILY : page
 
     DIM_DATE ||--o{ FACT_CRAWL_ATTEMPT : requested_on
     DIM_MARKETPLACE ||--o{ FACT_CRAWL_ATTEMPT : source
@@ -52,7 +62,7 @@ erDiagram
     }
     DIM_MARKETPLACE {
         bigint marketplace_key PK
-        string marketplace_code UK "tiki"
+        string marketplace_code UK "tiki, lazada"
         string marketplace_id
         string marketplace_name
         string platform_type
@@ -64,6 +74,19 @@ erDiagram
         bigint seller_key PK
         string seller_id UK "already marketplace-scoped"
         bigint marketplace_key FK
+        string seller_name "SCD1"
+        string seller_type "SCD1, as the source names it"
+        boolean is_official_store "SCD1"
+        boolean is_trusted_store "SCD1, null if the source has no such badge"
+        timestamp first_seen_at
+        timestamp last_seen_at
+        int observed_listing_count
+    }
+    DIM_BRAND {
+        bigint brand_key PK "xxhash64(marketplace, brand_id)"
+        bigint marketplace_key FK
+        string brand_id "UK with marketplace"
+        string brand_name "SCD1"
         timestamp first_seen_at
         timestamp last_seen_at
         int observed_listing_count
@@ -71,12 +94,17 @@ erDiagram
     DIM_CATEGORY {
         bigint category_key PK
         bigint marketplace_key FK
-        string category_id "UK with marketplace"
+        string category_id "UK with marketplace; Tiki id, Lazada slug"
         string category_name "nullable"
         string category_slug "nullable"
         bigint parent_key FK
         smallint level "root = 1"
         string full_path "1/2/1789/1795"
+        string breadcrumb "named ancestors, top first"
+        string category_l1_name
+        string category_l2_name
+        string category_l3_name
+        string category_l4_name
         boolean is_leaf
     }
     BRIDGE_CATEGORY_ANCESTRY {
@@ -90,22 +118,32 @@ erDiagram
         string offer_id "UK with valid_from"
         bigint marketplace_key FK
         string platform_listing_id
+        string sku "SCD1"
+        string master_product_sku "SCD1, Tiki only"
         string product_title "SCD2"
-        string brand "SCD2, nullable"
+        bigint brand_key FK "SCD2"
         bigint category_key FK "SCD2"
         bigint seller_key FK "SCD2"
+        string origin "SCD1, Tiki only"
+        boolean is_authentic "SCD1, Tiki only"
+        boolean is_platform_verified "SCD1, Tiki only"
         string source_url "SCD1"
         timestamp valid_from
         timestamp valid_to "exclusive, 9999-12-31 if current"
         boolean is_current
         int version
     }
-    DIM_OFFER_STATUS {
-        smallint offer_status_key PK
+    DIM_LISTING_FLAGS {
+        bigint listing_flags_key PK "xxhash64 of the flags"
         string availability
         string active_status
         boolean has_discount
         boolean has_rating
+        boolean has_free_shipping "null = source does not say"
+        boolean is_express_delivery "null = source does not say"
+        boolean is_next_day_delivery "null = source does not say"
+        boolean is_flash_deal "null = source does not say"
+        boolean is_gift_available "null = source does not say"
     }
     FACT_OFFER_OBSERVATION {
         string observation_id PK "degenerate"
@@ -114,8 +152,10 @@ erDiagram
         bigint listing_key FK "version valid at observed_at"
         bigint offer_key "durable"
         bigint seller_key FK
-        bigint category_key FK
-        smallint offer_status_key FK
+        bigint brand_key FK
+        bigint category_key FK "the listing's category"
+        bigint page_category_key FK "the page it was found on"
+        bigint listing_flags_key FK
         timestamp observed_at
         timestamp fetched_at
         string currency "degenerate"
@@ -129,7 +169,10 @@ erDiagram
         bigint rating_count
         bigint review_count
         bigint sold_count
-        int ranking_position
+        bigint ranking_position "organic rank, null for ads"
+        bigint search_rank "display rank, ads included"
+        int request_page
+        boolean is_advertisement
         string crawl_run_id "lineage"
         string raw_uri "lineage"
         string raw_sha256 "lineage"
@@ -142,8 +185,9 @@ erDiagram
         bigint listing_key FK "version at the day's last sighting"
         bigint marketplace_key FK
         bigint seller_key FK
+        bigint brand_key FK
         bigint category_key FK
-        smallint offer_status_key FK
+        bigint listing_flags_key FK
         timestamp first_observed_at
         timestamp last_observed_at
         string last_observation_id
@@ -166,6 +210,7 @@ erDiagram
         bigint listing_key FK
         bigint offer_key "durable"
         bigint seller_key FK
+        bigint brand_key FK
         bigint category_key FK
         timestamp changed_at "when we saw it"
         timestamp previous_observed_at
@@ -197,6 +242,29 @@ erDiagram
         boolean counter_reset_or_invalid
         string invalid_reasons_json
         string counter_rule_version
+    }
+    FACT_CATEGORY_PAGE_DAILY {
+        int date_key PK, FK
+        bigint category_key PK, FK "the crawled page's category"
+        string currency PK
+        bigint marketplace_key FK
+        int crawled_page_count
+        bigint listed_product_count "the site's own total, last of the day"
+        int observation_count
+        int observed_offer_count
+        int advertisement_count
+        int seller_count
+        int brand_count
+        decimal min_price
+        decimal p25_price
+        decimal median_price
+        decimal p75_price
+        decimal max_price
+        decimal avg_price
+        int discounted_offer_count
+        decimal discounted_offer_ratio
+        decimal median_discount_percent
+        decimal in_stock_ratio
     }
     FACT_CRAWL_ATTEMPT {
         bigint attempt_id PK "audit sequence"

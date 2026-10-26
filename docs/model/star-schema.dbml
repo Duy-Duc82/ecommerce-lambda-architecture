@@ -3,17 +3,18 @@
 
 Project marketplace_dw {
   database_type: 'PostgreSQL'
-  Note: 'Kimball star for the marketplace price branch. Surrogate keys are deterministic xxhash64; -1 is the unknown member.'
+  Note: 'Kimball star for the marketplace price branch (Tiki, Lazada). Stored as Delta tables in the lake (gold/marketplace/dw/), never in PostgreSQL; the PostgreSQL types are for drawing only. Surrogate keys are deterministic xxhash64; -1 is the unknown member.'
 }
 
 TableGroup dimensions {
   dw.dim_date
   dw.dim_marketplace
   dw.dim_seller
+  dw.dim_brand
   dw.dim_category
   dw.bridge_category_ancestry
   dw.dim_product_listing
-  dw.dim_offer_status
+  dw.dim_listing_flags
 }
 
 TableGroup facts {
@@ -21,6 +22,7 @@ TableGroup facts {
   dw.fact_price_snapshot_daily
   dw.fact_price_change
   dw.fact_counter_daily
+  dw.fact_category_page_daily
   dw.fact_crawl_attempt
 }
 
@@ -42,7 +44,7 @@ Table dw.dim_date {
 
 Table dw.dim_marketplace {
   marketplace_key bigint [pk]
-  marketplace_code varchar [unique, not null, note: 'tiki']
+  marketplace_code varchar [unique, not null, note: 'tiki | lazada']
   marketplace_id varchar
   marketplace_name varchar
   platform_type varchar [note: 'marketplace | retailer | classifieds | price_comparison']
@@ -56,21 +58,44 @@ Table dw.dim_seller {
   seller_key bigint [pk]
   seller_id varchar [unique, not null, note: 'already marketplace-scoped (make_seller_id)']
   marketplace_key bigint [ref: > dw.dim_marketplace.marketplace_key]
+  seller_name varchar
+  seller_type varchar [note: 'as the source names it: OFFICIAL_STORE, NONE, LAZMALL ...']
+  is_official_store boolean
+  is_trusted_store boolean [null, note: 'NULL when the source has no such badge (Lazada)']
   first_seen_at timestamptz
   last_seen_at timestamptz
   observed_listing_count int
-  Note: 'SCD1.'
+  Note: 'SCD1: descriptive columns from the latest sighting in <source>_listing_wide.'
+}
+
+Table dw.dim_brand {
+  brand_key bigint [pk, note: 'xxhash64(marketplace_code, brand_id)']
+  marketplace_key bigint [ref: > dw.dim_marketplace.marketplace_key]
+  brand_id varchar [not null, note: 'the marketplace\'s own id']
+  brand_name varchar
+  first_seen_at timestamptz
+  last_seen_at timestamptz
+  observed_listing_count int
+  indexes {
+    (marketplace_key, brand_id) [unique]
+  }
+  Note: 'SCD1. A listing without a brand id points to -1.'
 }
 
 Table dw.dim_category {
   category_key bigint [pk, note: 'xxhash64(marketplace_code, category_id)']
   marketplace_key bigint [ref: > dw.dim_marketplace.marketplace_key]
-  category_id varchar [not null]
-  category_name varchar [null]
-  category_slug varchar [null, note: 'from a frontier target <slug>/c<id>']
+  category_id varchar [not null, note: 'Tiki numeric id, Lazada URL slug']
+  category_name varchar [null, note: 'NULL where no page named the node']
+  category_slug varchar [null, note: 'Tiki categoryData.url_key or frontier target; Lazada = category_id']
   parent_key bigint [ref: > dw.dim_category.category_key]
   level smallint [note: 'root = 1']
   full_path varchar [note: '1/2/1789/1795']
+  breadcrumb varchar [note: 'names of the named ancestors and the node, top first, joined by > ']
+  category_l1_name varchar
+  category_l2_name varchar
+  category_l3_name varchar
+  category_l4_name varchar
   is_leaf boolean
   indexes {
     (marketplace_key, category_id) [unique]
@@ -94,10 +119,15 @@ Table dw.dim_product_listing {
   offer_id varchar [not null]
   marketplace_key bigint [ref: > dw.dim_marketplace.marketplace_key]
   platform_listing_id varchar
+  sku varchar [note: 'SCD1']
+  master_product_sku varchar [null, note: 'SCD1; Tiki only']
   product_title text [note: 'SCD2']
-  brand varchar [null, note: 'SCD2; empty for 13.9% of products']
+  brand_key bigint [ref: > dw.dim_brand.brand_key, note: 'SCD2; -1 for 13.9% of Tiki products']
   category_key bigint [ref: > dw.dim_category.category_key, note: 'SCD2']
   seller_key bigint [ref: > dw.dim_seller.seller_key, note: 'SCD2']
+  origin varchar [null, note: 'SCD1; Tiki only, as written']
+  is_authentic boolean [null, note: 'SCD1; Tiki only']
+  is_platform_verified boolean [null, note: 'SCD1; Tiki tiki_verified']
   source_url text [note: 'SCD1']
   valid_from timestamptz [not null]
   valid_to timestamptz [note: 'exclusive; 9999-12-31 for the current row']
@@ -109,13 +139,18 @@ Table dw.dim_product_listing {
   }
 }
 
-Table dw.dim_offer_status {
-  offer_status_key smallint [pk]
-  availability varchar
-  active_status varchar
+Table dw.dim_listing_flags {
+  listing_flags_key bigint [pk, note: 'xxhash64 of the nine flags']
+  availability varchar [note: 'IN_STOCK | OUT_OF_STOCK | UNKNOWN']
+  active_status varchar [note: 'ACTIVE | INACTIVE | UNKNOWN']
   has_discount boolean
   has_rating boolean
-  Note: 'Junk dimension: 3 x 3 x 2 x 2 = 36 rows, plus the unknown row.'
+  has_free_shipping boolean [null]
+  is_express_delivery boolean [null]
+  is_next_day_delivery boolean [null]
+  is_flash_deal boolean [null]
+  is_gift_available boolean [null]
+  Note: 'Junk dimension, replaces dim_offer_status: 3 x 3 x 2 x 2 x 3^5 = 8748 rows generated up front, plus the unknown row. NULL = the source does not publish the flag.'
 }
 
 Table dw.fact_offer_observation {
@@ -125,8 +160,10 @@ Table dw.fact_offer_observation {
   listing_key bigint [ref: > dw.dim_product_listing.listing_key, note: 'version valid at observed_at']
   offer_key bigint [note: 'durable']
   seller_key bigint [ref: > dw.dim_seller.seller_key]
-  category_key bigint [ref: > dw.dim_category.category_key]
-  offer_status_key smallint [ref: > dw.dim_offer_status.offer_status_key]
+  brand_key bigint [ref: > dw.dim_brand.brand_key]
+  category_key bigint [ref: > dw.dim_category.category_key, note: 'the listing\'s own category; the page\'s where the source has none']
+  page_category_key bigint [ref: > dw.dim_category.category_key, note: 'the category page it was found on']
+  listing_flags_key bigint [ref: > dw.dim_listing_flags.listing_flags_key]
   observed_at timestamptz
   fetched_at timestamptz
   currency char(3)
@@ -140,7 +177,10 @@ Table dw.fact_offer_observation {
   rating_count bigint
   review_count bigint
   sold_count bigint
-  ranking_position int
+  ranking_position bigint [note: 'organic rank; NULL for a sponsored row']
+  search_rank bigint [note: 'rank as displayed, sponsored rows included']
+  request_page int
+  is_advertisement boolean
   crawl_run_id varchar [note: 'lineage']
   raw_uri text [note: 'lineage to Bronze body.bin']
   raw_sha256 char(64) [note: 'lineage']
@@ -155,8 +195,9 @@ Table dw.fact_price_snapshot_daily {
   listing_key bigint [ref: > dw.dim_product_listing.listing_key, note: 'version at the day\'s last sighting']
   marketplace_key bigint [ref: > dw.dim_marketplace.marketplace_key]
   seller_key bigint [ref: > dw.dim_seller.seller_key]
+  brand_key bigint [ref: > dw.dim_brand.brand_key]
   category_key bigint [ref: > dw.dim_category.category_key]
-  offer_status_key smallint [ref: > dw.dim_offer_status.offer_status_key, note: 'end of day']
+  listing_flags_key bigint [ref: > dw.dim_listing_flags.listing_flags_key, note: 'end of day']
   first_observed_at timestamptz
   last_observed_at timestamptz
   last_observation_id varchar
@@ -184,6 +225,7 @@ Table dw.fact_price_change {
   listing_key bigint [ref: > dw.dim_product_listing.listing_key]
   offer_key bigint [note: 'durable']
   seller_key bigint [ref: > dw.dim_seller.seller_key]
+  brand_key bigint [ref: > dw.dim_brand.brand_key]
   category_key bigint [ref: > dw.dim_category.category_key]
   changed_at timestamptz [note: 'when the crawler saw it']
   previous_observed_at timestamptz
@@ -221,6 +263,34 @@ Table dw.fact_counter_daily {
     (date_key, offer_key, counter_name) [pk]
   }
   Note: 'Periodic snapshot (sparse). Public counters; a proxy, not sales.'
+}
+
+Table dw.fact_category_page_daily {
+  date_key int [ref: > dw.dim_date.date_key]
+  category_key bigint [ref: > dw.dim_category.category_key, note: 'the crawled page\'s category']
+  currency char(3)
+  marketplace_key bigint [ref: > dw.dim_marketplace.marketplace_key]
+  crawled_page_count int
+  listed_product_count bigint [note: 'the site\'s own total for the category, last of the day']
+  observation_count int
+  observed_offer_count int
+  advertisement_count int
+  seller_count int
+  brand_count int
+  min_price numeric(38,6)
+  p25_price numeric(38,6)
+  median_price numeric(38,6)
+  p75_price numeric(38,6)
+  max_price numeric(38,6)
+  avg_price numeric(38,6)
+  discounted_offer_count int
+  discounted_offer_ratio numeric(5,4)
+  median_discount_percent numeric(9,4)
+  in_stock_ratio numeric(5,4)
+  indexes {
+    (date_key, category_key, currency) [pk]
+  }
+  Note: 'Periodic snapshot (sparse). Grain: one crawled category page x UTC day x currency. Prices over offers (each offer\'s last price of the day), not sightings.'
 }
 
 Table dw.fact_crawl_attempt {

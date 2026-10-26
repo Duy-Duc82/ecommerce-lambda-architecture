@@ -150,12 +150,17 @@ A replay reads the star at those versions. Readers keep accepting v1.
 ## 4. Gold: the dimensional model and the serving marts
 
 > **Status.** This section is the Phase 10 design
-> ([plan](PLAN_PHASE10_DIMENSIONAL_MODEL.md)), approved in P0 and built in
-> P1–P5. Until then the batch builds the ten marts of 4.9 straight from Silver
-> (`batch_layer/marketplace_marts.py`), and the mart tables in 4.9 describe
-> what runs today. The column-level definitions live in
-> [`model/star-schema.dbml`](model/star-schema.dbml); the PostgreSQL DDL in
-> [`model/star-schema.sql`](model/star-schema.sql).
+> ([plan](PLAN_PHASE10_DIMENSIONAL_MODEL.md)), approved in P0, revised for two
+> sources and the wide Silver tables
+> ([revised plan](PLAN_PHASE10_REVISED.md) §3.4, D0 of
+> [the plan on the refactor](PLAN_PHASE10_ON_REFACTOR.md)), and built in
+> D1–D5. Until then the batch builds the ten marts of 4.9 straight from Silver
+> (`processing/batch/marts.py`), and the mart tables in 4.9 describe what runs
+> today. The column-level definitions live in
+> [`model/star-schema.dbml`](model/star-schema.dbml). The star lives only in
+> the lake as Delta tables (4.10);
+> [`model/star-schema.sql`](model/star-schema.sql) is a PostgreSQL-dialect
+> copy kept for drawing the diagram in a database tool, not a deployed schema.
 
 ### 4.1 Why a dimensional layer
 
@@ -169,9 +174,10 @@ that much" had no answer.
 Phase 10 puts a Kimball star between Silver and the marts:
 
 ```
-Silver observations ─┐
-                     ├─► dimensions ─► facts ─► marts (cache.marketplace_*)
-audit crawl tables  ─┘        (dw.*, Delta)        (run-scoped, Postgres)
+Silver observations ──────┐
+<source>_listing_wide ────┼─► dimensions ─► facts ─► marts (cache.marketplace_*)
+page_context ─────────────┤        (dw/, Delta, lake only)   (run-scoped, Postgres)
+audit crawl tables ───────┘
 ```
 
 Every mart is then a query over facts and dimensions, and a grain, a key or a
@@ -182,6 +188,7 @@ history rule is written down once, here, instead of once per mart.
 ```mermaid
 erDiagram
     DIM_MARKETPLACE ||--o{ DIM_SELLER : hosts
+    DIM_MARKETPLACE ||--o{ DIM_BRAND : carries
     DIM_MARKETPLACE ||--o{ DIM_CATEGORY : owns
     DIM_MARKETPLACE ||--o{ DIM_PRODUCT_LISTING : lists
     DIM_CATEGORY ||--o{ DIM_CATEGORY : parent_of
@@ -189,30 +196,39 @@ erDiagram
     DIM_CATEGORY ||--o{ BRIDGE_CATEGORY_ANCESTRY : descendant
     DIM_CATEGORY ||--o{ DIM_PRODUCT_LISTING : version_category
     DIM_SELLER ||--o{ DIM_PRODUCT_LISTING : version_seller
+    DIM_BRAND ||--o{ DIM_PRODUCT_LISTING : version_brand
 
     DIM_DATE ||--o{ FACT_OFFER_OBSERVATION : observed_on
     DIM_MARKETPLACE ||--o{ FACT_OFFER_OBSERVATION : listed_on
     DIM_PRODUCT_LISTING ||--o{ FACT_OFFER_OBSERVATION : version_seen
     DIM_SELLER ||--o{ FACT_OFFER_OBSERVATION : sold_by
+    DIM_BRAND ||--o{ FACT_OFFER_OBSERVATION : branded
     DIM_CATEGORY ||--o{ FACT_OFFER_OBSERVATION : classified_as
-    DIM_OFFER_STATUS ||--o{ FACT_OFFER_OBSERVATION : status
+    DIM_CATEGORY ||--o{ FACT_OFFER_OBSERVATION : found_on_page
+    DIM_LISTING_FLAGS ||--o{ FACT_OFFER_OBSERVATION : flags
 
     DIM_DATE ||--o{ FACT_PRICE_SNAPSHOT_DAILY : day
     DIM_MARKETPLACE ||--o{ FACT_PRICE_SNAPSHOT_DAILY : listed_on
     DIM_PRODUCT_LISTING ||--o{ FACT_PRICE_SNAPSHOT_DAILY : version_at_close
     DIM_SELLER ||--o{ FACT_PRICE_SNAPSHOT_DAILY : sold_by
+    DIM_BRAND ||--o{ FACT_PRICE_SNAPSHOT_DAILY : branded
     DIM_CATEGORY ||--o{ FACT_PRICE_SNAPSHOT_DAILY : classified_as
-    DIM_OFFER_STATUS ||--o{ FACT_PRICE_SNAPSHOT_DAILY : status_at_close
+    DIM_LISTING_FLAGS ||--o{ FACT_PRICE_SNAPSHOT_DAILY : flags_at_close
 
     DIM_DATE ||--o{ FACT_PRICE_CHANGE : changed_on
     DIM_MARKETPLACE ||--o{ FACT_PRICE_CHANGE : listed_on
     DIM_PRODUCT_LISTING ||--o{ FACT_PRICE_CHANGE : version_seen
     DIM_SELLER ||--o{ FACT_PRICE_CHANGE : sold_by
+    DIM_BRAND ||--o{ FACT_PRICE_CHANGE : branded
     DIM_CATEGORY ||--o{ FACT_PRICE_CHANGE : classified_as
 
     DIM_DATE ||--o{ FACT_COUNTER_DAILY : day
     DIM_MARKETPLACE ||--o{ FACT_COUNTER_DAILY : listed_on
     DIM_PRODUCT_LISTING ||--o{ FACT_COUNTER_DAILY : version_at_close
+
+    DIM_DATE ||--o{ FACT_CATEGORY_PAGE_DAILY : day
+    DIM_MARKETPLACE ||--o{ FACT_CATEGORY_PAGE_DAILY : listed_on
+    DIM_CATEGORY ||--o{ FACT_CATEGORY_PAGE_DAILY : page
 
     DIM_DATE ||--o{ FACT_CRAWL_ATTEMPT : requested_on
     DIM_MARKETPLACE ||--o{ FACT_CRAWL_ATTEMPT : source
@@ -234,7 +250,7 @@ erDiagram
     }
     DIM_MARKETPLACE {
         bigint marketplace_key PK
-        string marketplace_code UK "tiki"
+        string marketplace_code UK "tiki, lazada"
         string marketplace_id
         string marketplace_name
         string platform_type
@@ -246,6 +262,19 @@ erDiagram
         bigint seller_key PK
         string seller_id UK "already marketplace-scoped"
         bigint marketplace_key FK
+        string seller_name "SCD1"
+        string seller_type "SCD1, as the source names it"
+        boolean is_official_store "SCD1"
+        boolean is_trusted_store "SCD1, null if the source has no such badge"
+        timestamp first_seen_at
+        timestamp last_seen_at
+        int observed_listing_count
+    }
+    DIM_BRAND {
+        bigint brand_key PK "xxhash64(marketplace, brand_id)"
+        bigint marketplace_key FK
+        string brand_id "UK with marketplace"
+        string brand_name "SCD1"
         timestamp first_seen_at
         timestamp last_seen_at
         int observed_listing_count
@@ -253,12 +282,17 @@ erDiagram
     DIM_CATEGORY {
         bigint category_key PK
         bigint marketplace_key FK
-        string category_id "UK with marketplace"
+        string category_id "UK with marketplace; Tiki id, Lazada slug"
         string category_name "nullable"
         string category_slug "nullable"
         bigint parent_key FK
         smallint level "root = 1"
         string full_path "1/2/1789/1795"
+        string breadcrumb "named ancestors, top first"
+        string category_l1_name
+        string category_l2_name
+        string category_l3_name
+        string category_l4_name
         boolean is_leaf
     }
     BRIDGE_CATEGORY_ANCESTRY {
@@ -272,22 +306,32 @@ erDiagram
         string offer_id "UK with valid_from"
         bigint marketplace_key FK
         string platform_listing_id
+        string sku "SCD1"
+        string master_product_sku "SCD1, Tiki only"
         string product_title "SCD2"
-        string brand "SCD2, nullable"
+        bigint brand_key FK "SCD2"
         bigint category_key FK "SCD2"
         bigint seller_key FK "SCD2"
+        string origin "SCD1, Tiki only"
+        boolean is_authentic "SCD1, Tiki only"
+        boolean is_platform_verified "SCD1, Tiki only"
         string source_url "SCD1"
         timestamp valid_from
         timestamp valid_to "exclusive, 9999-12-31 if current"
         boolean is_current
         int version
     }
-    DIM_OFFER_STATUS {
-        smallint offer_status_key PK
+    DIM_LISTING_FLAGS {
+        bigint listing_flags_key PK "xxhash64 of the flags"
         string availability
         string active_status
         boolean has_discount
         boolean has_rating
+        boolean has_free_shipping "null = source does not say"
+        boolean is_express_delivery "null = source does not say"
+        boolean is_next_day_delivery "null = source does not say"
+        boolean is_flash_deal "null = source does not say"
+        boolean is_gift_available "null = source does not say"
     }
     FACT_OFFER_OBSERVATION {
         string observation_id PK "degenerate"
@@ -296,8 +340,10 @@ erDiagram
         bigint listing_key FK "version valid at observed_at"
         bigint offer_key "durable"
         bigint seller_key FK
-        bigint category_key FK
-        smallint offer_status_key FK
+        bigint brand_key FK
+        bigint category_key FK "the listing's category"
+        bigint page_category_key FK "the page it was found on"
+        bigint listing_flags_key FK
         timestamp observed_at
         timestamp fetched_at
         string currency "degenerate"
@@ -311,7 +357,10 @@ erDiagram
         bigint rating_count
         bigint review_count
         bigint sold_count
-        int ranking_position
+        bigint ranking_position "organic rank, null for ads"
+        bigint search_rank "display rank, ads included"
+        int request_page
+        boolean is_advertisement
         string crawl_run_id "lineage"
         string raw_uri "lineage"
         string raw_sha256 "lineage"
@@ -324,8 +373,9 @@ erDiagram
         bigint listing_key FK "version at the day's last sighting"
         bigint marketplace_key FK
         bigint seller_key FK
+        bigint brand_key FK
         bigint category_key FK
-        smallint offer_status_key FK
+        bigint listing_flags_key FK
         timestamp first_observed_at
         timestamp last_observed_at
         string last_observation_id
@@ -348,6 +398,7 @@ erDiagram
         bigint listing_key FK
         bigint offer_key "durable"
         bigint seller_key FK
+        bigint brand_key FK
         bigint category_key FK
         timestamp changed_at "when we saw it"
         timestamp previous_observed_at
@@ -380,6 +431,29 @@ erDiagram
         string invalid_reasons_json
         string counter_rule_version
     }
+    FACT_CATEGORY_PAGE_DAILY {
+        int date_key PK, FK
+        bigint category_key PK, FK "the crawled page's category"
+        string currency PK
+        bigint marketplace_key FK
+        int crawled_page_count
+        bigint listed_product_count "the site's own total, last of the day"
+        int observation_count
+        int observed_offer_count
+        int advertisement_count
+        int seller_count
+        int brand_count
+        decimal min_price
+        decimal p25_price
+        decimal median_price
+        decimal p75_price
+        decimal max_price
+        decimal avg_price
+        int discounted_offer_count
+        decimal discounted_offer_ratio
+        decimal median_discount_percent
+        decimal in_stock_ratio
+    }
     FACT_CRAWL_ATTEMPT {
         bigint attempt_id PK "audit sequence"
         int date_key FK
@@ -404,14 +478,21 @@ erDiagram
 
 ### 4.3 Bus matrix
 
-| Business process \ Dimension | `dim_date` | `dim_marketplace` | `dim_product_listing` | `dim_seller` | `dim_category` | `dim_offer_status` |
-|---|:-:|:-:|:-:|:-:|:-:|:-:|
-| Offer sighting — `fact_offer_observation` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| Daily price — `fact_price_snapshot_daily` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| Price change — `fact_price_change` | ✓ | ✓ | ✓ | ✓ | ✓ | |
-| Public counters — `fact_counter_daily` | ✓ | ✓ | ✓ | | | |
-| Crawling — `fact_crawl_attempt` | ✓ | ✓ | | | ✓ | |
-| Kaggle behaviour — `fact_behavior_event` (section 9) | ✓ | | | | | |
+| Business process \ Dimension | `dim_date` | `dim_marketplace` | `dim_product_listing` | `dim_seller` | `dim_brand` | `dim_category` | `dim_listing_flags` |
+|---|:-:|:-:|:-:|:-:|:-:|:-:|:-:|
+| Offer sighting — `fact_offer_observation` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ (listing and page) | ✓ |
+| Daily price — `fact_price_snapshot_daily` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| Price change — `fact_price_change` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | |
+| Public counters — `fact_counter_daily` | ✓ | ✓ | ✓ | | | | |
+| Category page — `fact_category_page_daily` | ✓ | ✓ | | | | ✓ (page) | |
+| Crawling — `fact_crawl_attempt` | ✓ | ✓ | | | | ✓ (page) | |
+| Kaggle behaviour — `fact_behavior_event` (section 9) | ✓ | | | | | | |
+
+`dim_category` plays two roles on `fact_offer_observation`: `category_key` is
+the category the listing itself declares, `page_category_key` the category
+page the crawler found it on. They differ when a listing shows up on a parent
+page or in another category's results, so "what is on this page" and "what
+category is this product" stay two questions.
 
 `dim_date` is the only dimension the marketplace star shares with the Kaggle
 star. A Kaggle product (a Russian store, 2019–2020) and a Tiki listing are two
@@ -421,15 +502,22 @@ other.
 
 ### 4.4 Dimensions
 
-| Dimension | Natural key | History | Rows (8-hour run of 24/10) |
+| Dimension | Natural key | History | Rows (8-hour Tiki run of 24/10) |
 |---|---|---|---|
 | `dim_date` | `full_date` | static | one per day of a fixed calendar, 2019-01-01 to 2030-12-31 |
-| `dim_marketplace` | `marketplace_code` | SCD1 | 1 (Tiki) |
+| `dim_marketplace` | `marketplace_code` | SCD1 | 2 (Tiki, Lazada) |
 | `dim_seller` | `seller_id` | SCD1 | about 1 155 |
-| `dim_category` | (`marketplace_code`, `category_id`) | SCD1, rebuilt | every node on the 633 observed paths |
+| `dim_brand` | (`marketplace_code`, `brand_id`) | SCD1 | one per brand id seen |
+| `dim_category` | (`marketplace_code`, `category_id`) | SCD1, rebuilt | every node on the 633 observed paths, plus Lazada's breadcrumb nodes |
 | `bridge_category_ancestry` | (`ancestor_key`, `descendant_key`) | rebuilt | one per node and each of its ancestors, itself included |
 | `dim_product_listing` | (`offer_id`, `valid_from`) | **SCD2** | about 8 530 current versions |
-| `dim_offer_status` | (`availability`, `active_status`, `has_discount`, `has_rating`) | static | 36 |
+| `dim_listing_flags` | the nine flags | static | 8 748, generated up front |
+
+The descriptive attributes that are not in the canonical observation (seller
+name and type, store badges, brand id, SKUs, origin, delivery flags, category
+names) come from Silver's `<source>_listing_wide` and `page_context` tables.
+Each one is mapped per source below; a source that does not publish a field
+leaves it `NULL`, which means *unknown*, never *false*.
 
 Every dimension also holds an **unknown member** with key `-1` (section 4.5).
 
@@ -443,15 +531,36 @@ same meanings for both stars, so the Kaggle star moves to this builder in P1
 instead of keeping its own.
 
 **`dim_marketplace`** comes from the registered marketplaces in configuration,
-plus `first_crawled_at` from the first observation. It is designed for many
-marketplaces even though Phase 10 loads only Tiki: adding a marketplace is a
-new row, not a new column.
+plus `first_crawled_at` from the first observation. It has two real rows,
+Tiki and Lazada; adding a marketplace is a new row, not a new column.
 
 **`dim_seller`.** `seller_id` is already scoped to its marketplace
 (`make_seller_id(marketplace, platform_seller_id)`), so it is the natural key
 on its own. `first_seen_at`, `last_seen_at` and `observed_listing_count` are
-overwritten each run (SCD1); they are what `seller_current` publishes. An
-observation without a seller points to `-1`.
+overwritten each run (SCD1); they are what `seller_current` publishes. The
+descriptive columns take the seller's **latest** sighting (SCD1):
+
+| Column | Tiki (`tiki_listing_wide`) | Lazada (`lazada_listing_wide`) |
+|---|---|---|
+| `seller_name` | `seller_name` | `sellerName` |
+| `seller_type` | `visible_impression_info.amplitude.seller_type` (`OFFICIAL_STORE`, `NONE`, …) | `LAZMALL` when an `icons[].bizType` is `lazMall`, else `NULL` |
+| `is_official_store` | `is_from_official_store`, or `seller_type = 'OFFICIAL_STORE'` | an `icons[].bizType` is `lazMall` |
+| `is_trusted_store` | `impression_info[].metadata.is_trusted_store = 1` | `NULL`: Lazada has no such badge |
+
+Tiki's two official-store signals disagree on the sample page (4 of 5 rows
+say `OFFICIAL_STORE` in `amplitude`, none in `is_from_official_store`), so
+either one sets the flag and `seller_type` keeps the raw value. An observation
+without a seller points to `-1`.
+
+**`dim_brand`.** Brand ids are each marketplace's own numbers (Tiki
+`brand_id`, Lazada `brandId`), so the natural key is (`marketplace_code`,
+`brand_id`) and `brand_key = xxhash64(marketplace_code, brand_id)`.
+`brand_name` is the latest name seen for the id (SCD1); `first_seen_at`,
+`last_seen_at` and `observed_listing_count` are maintained like the seller's.
+A listing without a brand id points to `-1`, even when it has a brand name:
+a name alone is not a stable key, and 13.9 % of Tiki products carry no brand
+at all. The same brand on two marketplaces is two rows; matching them is the
+cross-marketplace work this phase does not take on.
 
 **`dim_category` and `bridge_category_ancestry`.** A Tiki `category_path` such
 as `1/2/1846/8095/2458` is a list of node ids from the root. Measured on
@@ -460,40 +569,93 @@ as `1/2/1846/8095/2458` is a list of node ids from the root. Measured on
 `level` (the root is 1), `full_path` and `is_leaf` (no observed child). The
 bridge is a closure table: one row per (ancestor, descendant) pair, including
 the node itself at `depth = 0`, so "every listing anywhere under node X" is a
-single join. Category ids are Tiki's own numbers, so the natural key includes
-the marketplace. `category_name` and `category_slug` may be empty: the path
-carries only ids, the slug is known only for the category pages the frontier
-crawls (`<slug>/c<id>`), and a breadcrumb in the page's `__NEXT_DATA__` is not
-yet confirmed to carry names (plan risk R1). If one node is ever seen under two
-parents, the most recently observed path wins and an advisory check reports it.
+single join. Category ids are each marketplace's own, so the natural key
+includes the marketplace. If one node is ever seen under two parents, the most
+recently observed path wins and an advisory check reports it.
+
+The two sources describe their trees differently:
+
+| | Tiki | Lazada |
+|---|---|---|
+| Node id (`category_id`) | the numeric id (`1789`) | the URL slug (`dien-thoai-di-dong`) |
+| Path of a listing | `primary_category_path` of the row (`1/2/1789/1795`) | none: the listing takes its page's category |
+| Path of a page | `page_context.categoryData` (`id`, `parent_id`, `ancestors[]`) | `page_context.mods.breadcrumb[]`, home entry dropped |
+| Names | `categoryData.name` and `ancestors[].name` for the crawled pages, `primary_category_name` for a row's leaf | `breadcrumb[].title` |
+| Slug | `categoryData.url_key`, and the frontier target `<slug>/c<id>` | the id itself |
+
+Lazada's rows do carry numeric `categories` ids, but nothing on the page names
+them or orders them into a path, so they stay in Silver (`category_ids`) and
+the Lazada tree is the breadcrumb tree.
+
+`category_name` and `category_slug` stay `NULL` where no page named the node:
+Tiki's structural nodes `1` and `2` above every path, and nodes that appear
+only inside other listings' paths. `breadcrumb` joins the names of the node's
+**named** ancestors and itself, top first, with ` > `
+(`Điện Thoại - Máy Tính Bảng > Máy tính bảng`); `category_l1_name` …
+`category_l4_name` are the first four entries of that same list, for
+dashboards that want fixed columns. Unnamed nodes are skipped rather than
+shown as gaps, so `category_l1_name` is the top named level on both sources
+even though Tiki's `level` counts the two structural nodes.
 
 **`dim_product_listing`** is one row per *version* of an offer; section 4.6
 gives the rules. It carries two keys: `listing_key` names one version, and
 `offer_key = xxhash64(offer_id)` names the offer across all its versions (a
-*durable key*). Tracked as SCD2: `product_title`, `brand`, `category_key`,
-`seller_key`. Overwritten in every version (SCD1): `source_url`.
-`platform_listing_id` is part of the offer's identity and never changes.
-`brand` is nullable: 13.9 % of products have none.
+*durable key*). Tracked as SCD2: `product_title`, `brand_key`,
+`category_key`, `seller_key`. Overwritten in every version (SCD1): the
+columns below and `source_url`. `platform_listing_id` is part of the offer's
+identity and never changes. The brand's name lives in `dim_brand`; the
+listing keeps only the key, so a brand renamed by the site is one SCD1 update
+there instead of a new version of every listing.
 
-**`dim_offer_status`** is a junk dimension. It folds four low-cardinality flags
-into one key instead of four columns on every fact row: `availability`
-(`IN_STOCK`, `OUT_OF_STOCK`, `UNKNOWN`) × `active_status` (`ACTIVE`,
-`INACTIVE`, `UNKNOWN`) × `has_discount` × `has_rating` = 36 rows, all
-generated up front. `has_discount` is `list_price > current_price` or
-`discount_percent > 0`. `has_rating` is `rating_count > 0`: 47 % of products
-show a rating count of 0, which means *not yet rated*, not *rated zero*.
+| Column | Tiki | Lazada |
+|---|---|---|
+| `sku` | `sku` | `sku` |
+| `master_product_sku` | `master_product_sku` | `NULL` |
+| `origin` | `origin` (free text: `China`, `Trung Quốc`, `Việt Nam`) | `NULL` (`location` is the seller's shipping place, not the product's origin) |
+| `is_authentic` | `is_authentic = 1` | `NULL` |
+| `is_platform_verified` | `tiki_verified = 1` | `NULL` |
+
+`origin` is kept as the site writes it; the sample already spells China two
+ways, and normalising it is a mart's job, not the dimension's.
+
+**`dim_listing_flags`** is a junk dimension; it replaces `dim_offer_status`
+and keeps its four flags. It folds the low-cardinality flags of a sighting
+into one key instead of a column each on every fact row:
+
+| Flag | Values | Tiki | Lazada |
+|---|---|---|---|
+| `availability` | `IN_STOCK`, `OUT_OF_STOCK`, `UNKNOWN` | canonical | canonical |
+| `active_status` | `ACTIVE`, `INACTIVE`, `UNKNOWN` | canonical | canonical |
+| `has_discount` | true, false | `list_price > current_price` or `discount_percent > 0` | same |
+| `has_rating` | true, false | `rating_count > 0` | same |
+| `has_free_shipping` | true, false, `NULL` | `freeship_campaign` set, or `amplitude.is_freeship_xtra` | an `icons[].bizType` is `Freeshipping` |
+| `is_express_delivery` | true, false, `NULL` | `is_tikinow_delivery` | `NULL` |
+| `is_next_day_delivery` | true, false, `NULL` | `is_nextday_delivery` | `NULL` |
+| `is_flash_deal` | true, false, `NULL` | `amplitude.is_flash_deal` | `NULL` |
+| `is_gift_available` | true, false, `NULL` | `isGiftAvailable` | `NULL` |
+
+`has_rating` is `rating_count > 0` because 47 % of Tiki products show a
+rating count of 0, which means *not yet rated*, not *rated zero*. A `NULL`
+delivery flag means the source does not publish it, so a Lazada row is never
+counted as "no express delivery". All 3 × 3 × 2 × 2 × 3⁵ = 8 748 combinations
+are generated up front, so the table never changes and no fact can point at a
+missing row. `listing_flags_key` is `xxhash64` of the nine values, with
+`NULL` hashed as its own value. `is_advertisement` is **not** in this
+dimension: it describes the placement of one sighting on one page, and the
+fact keeps it next to `search_rank`.
 
 ### 4.5 Keys
 
 - **Surrogate keys are deterministic:** `xxhash64` of the natural key, the
   same function the Kaggle star uses (`batch_layer/warehouse_job.py`).
   `listing_key = xxhash64(offer_id, valid_from)`;
-  `category_key = xxhash64(marketplace_code, category_id)`. Rebuilding the
+  `category_key = xxhash64(marketplace_code, category_id)`;
+  `brand_key = xxhash64(marketplace_code, brand_id)`. Rebuilding the
   same data produces the same keys, so a replay, a backfill and an incremental
   run all agree, and the facts can be loaded without first reading the
   dimension's key assignments back.
-- `date_key` is the readable `yyyymmdd` integer; `offer_status_key` is the
-  ordinal of the combination (1–36).
+- `date_key` is the readable `yyyymmdd` integer; `listing_flags_key` is the
+  `xxhash64` of the nine flags (4.4).
 - **Unknown member.** Every dimension has a row with key `-1` and the label
   `Unknown`. A fact whose seller or category is missing points there, so **no
   foreign key in a fact is ever `NULL`** and an inner join never silently
@@ -513,7 +675,7 @@ show a rating count of 0, which means *not yet rated*, not *rated zero*.
    of them before versions are cut: a version never opens and closes at the
    same instant, and (`offer_id`, `valid_from`) stays unique.
 2. The first observation opens version 1 with `valid_from = observed_at`.
-3. Each later observation whose tuple (`product_title`, `brand`,
+3. Each later observation whose tuple (`product_title`, `brand_key`,
    `category_key`, `seller_key`) differs from the open version — `NULL`
    compared null-safely — closes it at that observation's `observed_at` and
    opens the next version from the same instant.
@@ -543,15 +705,29 @@ and a uniqueness check enforces it on every run.
 | `fact_price_snapshot_daily` | periodic snapshot (sparse) | **one offer, one UTC day, one currency, on which the offer was sighted at least once** | (`date_key`, `offer_key`, `currency`) |
 | `fact_price_change` | transaction, derived | **one sighting whose price differs from the same offer's previous sighting** | `observation_id` |
 | `fact_counter_daily` | periodic snapshot (sparse) | **one offer, one UTC day, one public counter** (`rating_count`, `review_count`, `sold_count`) | (`date_key`, `offer_key`, `counter_name`) |
+| `fact_category_page_daily` | periodic snapshot (sparse) | **one crawled category page, one UTC day, one currency** | (`date_key`, `category_key`, `currency`) |
 | `fact_crawl_attempt` | transaction | **one HTTP attempt to fetch one page** (one `audit.crawl_request_attempt` row) | `attempt_id` |
 
 **`fact_offer_observation`** is the atomic fact; every price mart can be
 derived from it. Besides the foreign keys it keeps the observation's measures
 (`current_price`, `list_price`, `shipping_price`, `discount_amount`,
-`discount_percent`, `rating_value`, `rating_scale`, the three counters,
-`ranking_position`), `currency` and `fetched_at` as degenerate attributes, and
-the raw lineage (`crawl_run_id`, `raw_uri`, `raw_sha256`, `adapter_version`),
-so any row still leads back to the Bronze body it was parsed from.
+`discount_percent`, `rating_value`, `rating_scale`, the three counters),
+the placement of the sighting on its page, `currency` and `fetched_at` as
+degenerate attributes, and the raw lineage (`crawl_run_id`, `raw_uri`,
+`raw_sha256`, `adapter_version`), so any row still leads back to the Bronze
+body it was parsed from.
+
+The placement columns come from the canonical observation:
+`search_rank` is the position on the result list as displayed, sponsored rows
+included; `ranking_position` is the organic position, `NULL` for a sponsored
+row; `request_page` is the result page; `is_advertisement` marks a sponsored
+row. The revised plan's `row_index` is `search_rank` and its `quantity_sold`
+is `sold_count`, so neither gets a second column.
+
+`category_key` is the listing's own category where the source declares one
+(Tiki's `primary_category_path`, leaf node) and the page's category where it
+does not (Lazada); `page_category_key` is always the page's category, parsed
+from the request target (Tiki `<slug>/c<id>`, Lazada `<slug>`), or `-1`.
 
 **`fact_price_snapshot_daily`** has open, close, min, max and average price,
 first and last list price, `observation_count`, `distinct_price_count` and
@@ -580,18 +756,44 @@ affected offer from the fact itself.
 judged over the offer's whole ordered history, a negative delta is kept and
 flagged (`counter_reset_or_invalid`, `invalid_reasons_json`), never clamped.
 
+**`fact_category_page_daily`** describes what a category page showed on a
+day, by the page's category (`page_category_key` of the sightings), not by the
+listings' own categories. It is built from `fact_offer_observation` and
+`page_context`:
+
+- `crawled_page_count`: distinct (`request_target`, `request_page`) fetched
+  that day; `observation_count`: sightings on those pages;
+- `observed_offer_count`, `advertisement_count`, `seller_count`,
+  `brand_count`: distinct offers, sponsored offers, sellers and brands (the
+  `-1` members not counted);
+- `listed_product_count`: the size of the category as the site states it on
+  the page (Tiki `paging.total`, Lazada `mainInfo.totalResults`), the day's
+  last value;
+- prices and discounts over **offers, not sightings**: each offer contributes
+  its last price of the day on this category's pages, so an offer seen twelve
+  times does not weigh twelve times. `discounted_offer_count` and
+  `discounted_offer_ratio` use `has_discount`; `median_discount_percent` is
+  over the discounted offers only; `in_stock_ratio` is the share of offers
+  whose last sighting was `IN_STOCK`.
+
+Like the price snapshot it is sparse: a page not crawled on a day has no row.
+`observed_offer_count` against `listed_product_count` is how much of the
+category the crawl actually saw.
+
 **`fact_crawl_attempt`** takes its marketplace through the frontier task (the
 attempt table carries none, see `attach_marketplace_code`). Its
 `category_key` is parsed from the frontier target of a `LISTING_PAGE` task
-(`<slug>/c<id>`, or a bare id for the JSON adapter); any other page points to
-`-1`.
+(Tiki `<slug>/c<id>`, Lazada `<slug>`), the same rule as `page_category_key`;
+any other page points to `-1`.
 
 **Additivity.** Which measures may be summed decides what a dashboard may do
 with them:
 
 | Measure | Additive across |
 |---|---|
-| `observation_count`, `parsed_count`, `rejected_count`, `raw_bytes`, row counts | every dimension |
+| `observation_count`, `parsed_count`, `rejected_count`, `raw_bytes`, `crawled_page_count`, row counts | every dimension |
+| `observed_offer_count`, `advertisement_count`, `seller_count`, `brand_count` (distinct counts) | nothing: an offer on two pages or two days is counted on each |
+| `listed_product_count` | categories that do not overlap only, never days or a node and its ancestor |
 | `raw_delta_sum`, `valid_delta_sum`, `price_delta` | days, within one offer and counter |
 | prices, `rating_value`, `pct_change`, `in_stock_ratio`, ratios | nothing: average, min, max or median only |
 | `sold_count`, `review_count`, `rating_count` (the counters themselves) | nothing: they are running totals the site displays |
@@ -605,14 +807,17 @@ other check.
 Mandatory — any failure refuses the run:
 
 - **Referential integrity:** every foreign key of every fact exists in its
-  dimension (the `-1` row included).
+  dimension (the `-1` row included), `page_category_key` and `brand_key`
+  included.
 - **Grain:** the primary key of every fact and dimension is unique.
 - **SCD2:** each `offer_id` has exactly one current version; its versions do
   not overlap and leave no gap; `version` counts up from 1 without holes.
 - **Reconciliation:** per day, `sum(fact_price_snapshot_daily.observation_count)`
   equals the number of `fact_offer_observation` rows, and the number of
   `fact_price_change` rows equals the sum of `price_change_count` in
-  `offer_change_daily`.
+  `offer_change_daily`, and `sum(fact_category_page_daily.observation_count)`
+  equals the number of `fact_offer_observation` rows whose
+  `page_category_key` is not `-1`.
 - **Closure:** every category node has a depth-0 row in the bridge, and one row
   per ancestor on its path.
 
@@ -672,13 +877,13 @@ that a price is wrong, dishonest or a bargain.
 
 | Mart | Built from | Notes |
 |---|---|---|
-| `offer_current` | `dim_product_listing` (current version) + the offer's last `fact_offer_observation` row + `dim_offer_status`, `dim_marketplace`, `dim_category` | `category_path` is the leaf's `full_path` |
+| `offer_current` | `dim_product_listing` (current version) + the offer's last `fact_offer_observation` row + `dim_listing_flags`, `dim_marketplace`, `dim_category`, `dim_brand` | `category_path` is the leaf's `full_path`; `brand` is `dim_brand.brand_name` |
 | `seller_current` | `dim_seller` | already holds first/last seen and the count |
 | `offer_price_history_daily` | `fact_price_snapshot_daily` | `first_price`/`last_price` are `open_price`/`close_price` |
 | `offer_change_daily` | `fact_price_change` for the price columns; `fact_offer_observation` (previous sighting per offer) for the rating, counter and availability columns | a price-only fact cannot supply the other three change counts |
 | `offer_freshness` | the offer's last `fact_offer_observation` row, judged at `as_of` | stays a mart: a verdict that depends on `as_of` is not a fact |
 | `category_price_daily` | `fact_offer_observation` × `dim_category` | percentiles over sightings, as today; `__UNKNOWN__` is the `-1` member |
-| `source_coverage_daily` | `fact_offer_observation` + `dim_offer_status` (`active_status`) + `fact_crawl_attempt` | eligibility calendar unchanged |
+| `source_coverage_daily` | `fact_offer_observation` + `dim_listing_flags` (`active_status`) + `fact_crawl_attempt` | eligibility calendar unchanged |
 | `crawl_reliability_daily` | `fact_crawl_attempt` | |
 | `counter_delta_daily` | `fact_counter_daily` | |
 | `price_anomaly_daily` | `fact_price_snapshot_daily` | it already read the daily price table; it keeps reading the same numbers |
@@ -692,7 +897,7 @@ matches the old one row for row; any difference is listed with its reason.
 |---|---|---|---|
 | `category_price_index_daily` | marketplace × category node (any level) × day × currency | `fact_price_snapshot_daily` × `bridge_category_ancestry` | median close price of the offers under the node, as an index with the node's first day = 100 |
 | `listing_price_volatility` | offer × window (7 and 30 days) × day | `fact_price_snapshot_daily`, `fact_price_change` | standard deviation and coefficient of variation of the daily close price, number of price changes |
-| `discount_daily` | marketplace × category node × day | `fact_price_snapshot_daily` × `dim_offer_status` × bridge | share of offers on discount, p25/median/p75 of the discount percentage |
+| `discount_daily` | marketplace × category node × day | `fact_price_snapshot_daily` × `dim_listing_flags` × bridge | share of offers on discount, p25/median/p75 of the discount percentage |
 
 The category index compares price *levels* by category without matching
 products across marketplaces, which per-product comparison would require.
@@ -704,10 +909,10 @@ offer count next to the index so that can be read.
 
 | Layer | Where | Format and write |
 |---|---|---|
-| Silver, compacted | `silver/marketplace/offer_observations_delta/` (partitioned by `observed_date`, `hour`) | Delta; the per-observation JSON stays the idempotent original |
-| Star | `gold/marketplace/dw/<table>/` | Delta, `MERGE` on the primary key; daily facts replace the affected days |
+| Silver | `silver/marketplace/offer_observations_v2/` (partitioned by `source_code`, `observed_date`), `silver/marketplace/<source>_listing_wide/`, `silver/marketplace/page_context/` | written by the `silver` stage; the day partitions it covers are replaced whole |
+| Star | `gold/marketplace/dw/<table>/`, outside the run directories | Delta, `MERGE` on the primary key; daily facts replace the affected days. Lake only: never copied to PostgreSQL |
 | Marts | `gold/marketplace/runs/run_id=<run>/marts/<mart>/` | one directory per run, as before |
-| PostgreSQL | schema `dw` (the star) and schema `cache` (the marts) | published in one transaction, as before |
+| PostgreSQL | schema `cache` (the marts) only | published in one transaction, as before; a serving cache, rebuilt from the lake at any time |
 
 Delta keeps every version of a `dw` table, so a run can be replayed against
 exactly the star it read: manifest v2 (section 3) records the Delta version of
@@ -753,10 +958,13 @@ pipeline's replayability (section 1.1) already relies on.
 from an inner join without a trace. A `-1` row keeps the fact in every total,
 labels it `Unknown` on a dashboard, and can be counted.
 
-**Why a junk dimension.** Four flags with 3 × 3 × 2 × 2 = 36 combinations as
-four separate dimensions would add four joins for almost no content; as columns
-on the fact they would be repeated on every row. One small static table keeps
-both the fact and the queries narrow.
+**Why a junk dimension.** Nine flags as nine dimensions would add nine joins
+for almost no content; as columns on the fact they would be repeated on every
+row. One static table of 8 748 rows keeps both the fact and the queries narrow,
+and a new source fills the flags it has and leaves the rest `NULL` without a
+schema change. A flag that turns out to need history or many values is the
+sign it belongs somewhere else: `is_advertisement` stays on the fact for that
+reason.
 
 ## 5. Audit — `audit.*`
 
