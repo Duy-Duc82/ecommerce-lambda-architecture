@@ -26,11 +26,18 @@ from pyspark.sql.types import (
 
 from ecomdata.domain.sources import TIKI
 from ecomdata.processing.normalize.common import (
+    CATEGORY_NAME_COLUMNS,
+    CATEGORY_PATH_COLUMNS,
+    LISTING_ATTRIBUTE_COLUMNS,
     SourceFields,
+    any_true,
     availability_expr,
     canonical,
+    clean_text,
+    empty,
     json_path,
     listing_rows,
+    typed,
 )
 
 PAYLOAD_SCHEMA = StructType([
@@ -248,3 +255,92 @@ def fields() -> SourceFields:
 def to_offer_observation(records: DataFrame) -> DataFrame:
     """Canonical columns of Tiki's listing rows, and reason for a row that cannot be an observation."""
     return canonical(listing_rows(records), TIKI, fields())
+
+
+# ------------------------------------------------------------------ the star's attributes
+# The part of a page context the category dimension reads.
+CATEGORY_DATA_SCHEMA = StructType([
+    StructField("categoryData", StructType([
+        StructField("id", LongType()),
+        StructField("name", StringType()),
+        StructField("url_key", StringType()),
+        StructField("ancestors", ArrayType(StructType([
+            StructField("id", LongType()),
+            StructField("name", StringType()),
+            StructField("url_key", StringType()),
+        ]))),
+    ])),
+])
+
+OFFICIAL_STORE = "OFFICIAL_STORE"
+
+
+def listing_attributes(wide: DataFrame) -> DataFrame:
+    """``LISTING_ATTRIBUTE_COLUMNS`` of each wide row (docs/DATA_MODEL.md 4.4).
+
+    Tiki states some facts twice, at the top of the row and again in
+    ``visible_impression_info.amplitude``; the top-level value is read first.
+    Its two official-store signals disagree on real pages, so either sets the flag.
+    """
+    p = F.col("p")
+    amplitude = p["visible_impression_info"]["amplitude"]
+    metadata = F.transform(p["impression_info"], lambda i: i["metadata"])
+    seller_type = clean_text(amplitude["seller_type"])
+    frame = wide.select(
+        "record_id",
+        seller_type.alias("seller_type"),
+        any_true(
+            p["is_from_official_store"],
+            seller_type == OFFICIAL_STORE,
+            F.exists(metadata, lambda m: m["is_official_store"] == 1),
+        ).alias("is_official_store"),
+        F.exists(metadata, lambda m: m["is_trusted_store"] == 1).alias("is_trusted_store"),
+        clean_text(F.coalesce(p["master_product_sku"], amplitude["master_product_sku"])).alias("master_product_sku"),
+        clean_text(F.coalesce(p["origin"], amplitude["origin"])).alias("origin"),
+        (F.coalesce(p["is_authentic"], amplitude["is_authentic"]) == 1).alias("is_authentic"),
+        (F.coalesce(p["tiki_verified"], amplitude["tiki_verified"]) == 1).alias("is_platform_verified"),
+        any_true(
+            F.when(clean_text(p["freeship_campaign"]).isNotNull(), True), amplitude["is_freeship_xtra"]
+        ).alias("has_free_shipping"),
+        p["is_tikinow_delivery"].alias("is_express_delivery"),
+        p["is_nextday_delivery"].alias("is_next_day_delivery"),
+        amplitude["is_flash_deal"].alias("is_flash_deal"),
+        F.coalesce(p["isGiftAvailable"], amplitude["is_gift_available"]).alias("is_gift_available"),
+    )
+    return typed(frame, LISTING_ATTRIBUTE_COLUMNS)
+
+
+def category_names(wide: DataFrame, contexts: DataFrame) -> DataFrame:
+    """Names and slugs of category nodes: the crawled page and its ancestors, and each row's leaf."""
+    data = contexts.select(
+        F.from_json("payload_json", CATEGORY_DATA_SCHEMA)["categoryData"].alias("c"), F.col("fetched_at")
+    ).filter(F.col("c").isNotNull())
+    nodes = data.select(
+        F.concat(F.array(F.struct(F.col("c.id").alias("id"), F.col("c.name").alias("name"),
+                                  F.col("c.url_key").alias("url_key"))),
+                 F.coalesce(F.col("c.ancestors"), F.array())).alias("nodes"),
+        "fetched_at",
+    ).select(F.explode("nodes").alias("n"), "fetched_at")
+    from_pages = nodes.select(
+        F.col("n.id").cast("string").alias("category_id"),
+        clean_text(F.col("n.name")).alias("category_name"),
+        clean_text(F.col("n.url_key")).alias("category_slug"),
+        F.col("fetched_at").alias("observed_at"),
+    )
+    p = F.col("p")
+    leaf_ids = F.filter(F.split(p["primary_category_path"], "/"), lambda part: part != "")
+    from_rows = wide.select(
+        F.try_element_at(leaf_ids, F.lit(-1)).alias("category_id"),
+        clean_text(p["primary_category_name"]).alias("category_name"),
+        F.lit(None).cast("string").alias("category_slug"),
+        F.col("fetched_at").alias("observed_at"),
+    )
+    named = from_pages.unionByName(from_rows).filter(
+        F.col("category_id").isNotNull() & (F.col("category_name").isNotNull() | F.col("category_slug").isNotNull())
+    )
+    return typed(named.withColumn("marketplace", F.lit(TIKI.code)), CATEGORY_NAME_COLUMNS)
+
+
+def category_paths(contexts: DataFrame) -> DataFrame:
+    """Tiki's pages do not state a whole path (``ancestors`` stops short of the root); the rows' paths are used."""
+    return empty(contexts.sparkSession, CATEGORY_PATH_COLUMNS)

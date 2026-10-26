@@ -1,20 +1,24 @@
-"""Dimensions of the marketplace star, built from Silver observations.
+"""Dimensions of the marketplace star, built from Silver.
 
 ``docs/DATA_MODEL.md`` sections 4.4–4.6. Every builder is a pure function of
 its input frames: the same observations give the same rows and the same keys,
 which is what lets a replay, a backfill and an incremental run agree.
 
-Input is the flattened observation frame of
-``marketplace_warehouse.flatten_marketplace_observations``.
+Input is Silver's canonical observations joined to their listing attributes
+(``star_inputs.star_inputs``), plus the category names and paths the pages
+state. A frame without the attribute columns reads them as NULL.
 """
 
 from __future__ import annotations
+
+import itertools
 
 from pyspark.sql import Column, DataFrame, SparkSession, Window
 from pyspark.sql import functions as F
 
 from ecomdata.domain.sources import SOURCES, SourceRegistry
 from ecomdata.processing.batch.dim_date import build_dim_date
+from ecomdata.processing.batch.star_inputs import with_listing_columns
 from ecomdata.processing.batch.keys import (
     OPEN_VALID_TO,
     UNKNOWN_KEY,
@@ -31,15 +35,18 @@ __all__ = [
     "build_dim_date",
     "build_dim_marketplace",
     "build_dim_seller",
+    "build_dim_brand",
     "build_dim_category",
     "build_bridge_category_ancestry",
     "build_dim_product_listing",
-    "build_dim_offer_status",
+    "build_dim_listing_flags",
     "marketplace_key",
     "seller_key",
+    "brand_key",
     "category_key",
+    "page_category_key",
     "offer_key",
-    "offer_status_key",
+    "listing_flags_key",
     "date_key",
 ]
 
@@ -55,13 +62,39 @@ def known_marketplaces(registry: SourceRegistry = SOURCES) -> dict[str, dict[str
                         "default_currency": spec.currency} for spec in registry}
 
 # Attributes that open a new dim_product_listing version (section 4.6).
-SCD2_ATTRIBUTES = ("product_title", "brand", "category_key", "seller_key")
+SCD2_ATTRIBUTES = ("product_title", "brand_key", "category_key", "seller_key")
+# Overwritten on every version with the latest value seen (SCD1).
+LISTING_SCD1_ATTRIBUTES = (
+    "platform_listing_id",
+    "sku",
+    "master_product_sku",
+    "origin",
+    "is_authentic",
+    "is_platform_verified",
+    "source_url",
+)
+# The order of the sightings of one offer; the marts' tie-break.
+SIGHTING_ORDER = ("observed_at", "fetched_at", "observation_id")
 
 AVAILABILITY_VALUES = ("IN_STOCK", "OUT_OF_STOCK", "UNKNOWN")
 ACTIVE_STATUS_VALUES = ("ACTIVE", "INACTIVE", "UNKNOWN")
+# dim_listing_flags beyond the four of the old dim_offer_status; NULL means the
+# source does not publish the flag.
+NULLABLE_FLAGS = (
+    "has_free_shipping",
+    "is_express_delivery",
+    "is_next_day_delivery",
+    "is_flash_deal",
+    "is_gift_available",
+)
+BREADCRUMB_SEPARATOR = " > "
+NAMED_LEVELS = 4
 
 # A frontier target of the HTML adapter: <slug>/c<id>.
 _TARGET_SLUG_ID = r"^([^/]+)/c(\d+)$"
+# Any other request target that names a category page is a slug path (Lazada:
+# dien-thoai-di-dong, or a/b), whose node is its last slug, as category_key reads it.
+_TARGET_SLUG_PATH = r"^[a-z0-9]+(?:-[a-z0-9]+)*(?:/[a-z0-9]+(?:-[a-z0-9]+)*)*$"
 
 
 # ---------- keys a fact computes the same way the dimension does ----------
@@ -87,8 +120,32 @@ def category_key(marketplace: str | Column = "marketplace", category_path: str |
     return key_or_unknown(marketplace, leaf)
 
 
+def page_category_id(request_target: str | Column = "request_target") -> Column:
+    """The category id a request target names, or NULL for any other target."""
+    target = F.col(request_target) if isinstance(request_target, str) else request_target
+    tiki_id = F.regexp_extract(target, _TARGET_SLUG_ID, 2)
+    slug = F.try_element_at(_path_ids(target), F.lit(-1))
+    return F.when(tiki_id != "", tiki_id).when(target.rlike(_TARGET_SLUG_PATH), slug)
+
+
+def page_category_key(
+    marketplace: str | Column = "marketplace", request_target: str | Column = "request_target"
+) -> Column:
+    """Key of the category page a sighting was found on; ``-1`` for any other page."""
+    return key_or_unknown(marketplace, page_category_id(request_target))
+
+
+def brand_key(marketplace: str | Column = "marketplace", brand_id: str | Column = "brand_id") -> Column:
+    return key_or_unknown(marketplace, brand_id)
+
+
 def offer_key(offer_id: str | Column = "offer_id") -> Column:
     return key_or_unknown(offer_id)
+
+
+def latest(column: str, order: tuple[str, ...] = SIGHTING_ORDER) -> Column:
+    """Aggregate: the value of ``column`` on the latest sighting that has one."""
+    return F.max_by(column, F.when(F.col(column).isNotNull(), F.struct(*order)))
 
 
 def has_discount(
@@ -104,22 +161,40 @@ def has_rating(rating_count: str = "rating_count") -> Column:
     return F.coalesce(F.col(rating_count) > 0, F.lit(False))
 
 
-def offer_status_key(
+def _flag_token(flag: Column) -> Column:
+    # xxhash64 skips NULL inputs, so NULL is hashed as a token of its own.
+    return F.when(flag, "t").when(~flag, "f").otherwise("n")
+
+
+def listing_flags_key(
     availability: str | Column = "availability",
     active_status: str | Column = "active_status",
     discount: Column | None = None,
     rating: Column | None = None,
+    **flags: Column,
 ) -> Column:
-    """Ordinal 1-36 of the combination, as ``build_dim_offer_status`` numbers it."""
+    """``xxhash64`` of the nine flags, as ``build_dim_listing_flags`` keys them; ``-1`` if a fixed flag is unknown.
+
+    ``flags`` overrides the column of a nullable flag (``NULLABLE_FLAGS``).
+    """
     availability = F.col(availability) if isinstance(availability, str) else availability
     active_status = F.col(active_status) if isinstance(active_status, str) else active_status
     discount = has_discount() if discount is None else discount
     rating = has_rating() if rating is None else rating
-    a = F.array_position(F.array(*[F.lit(v) for v in AVAILABILITY_VALUES]), availability)
-    s = F.array_position(F.array(*[F.lit(v) for v in ACTIVE_STATUS_VALUES]), active_status)
-    ordinal = 1 + (a - 1) * 12 + (s - 1) * 4 + discount.cast("int") * 2 + rating.cast("int")
-    known = (a > 0) & (s > 0) & discount.isNotNull() & rating.isNotNull()
-    return F.when(F.coalesce(known, F.lit(False)), ordinal).otherwise(F.lit(UNKNOWN_KEY)).cast("smallint")
+    unknown = set(flags) - set(NULLABLE_FLAGS)
+    if unknown:
+        raise ValueError(f"not a nullable listing flag: {sorted(unknown)}")
+    nullable = [flags.get(name, F.col(name)) for name in NULLABLE_FLAGS]
+    known = (
+        availability.isin(*AVAILABILITY_VALUES)
+        & active_status.isin(*ACTIVE_STATUS_VALUES)
+        & discount.isNotNull()
+        & rating.isNotNull()
+    )
+    hashed = surrogate_key(
+        availability, active_status, _flag_token(discount), _flag_token(rating), *[_flag_token(f) for f in nullable]
+    )
+    return F.when(F.coalesce(known, F.lit(False)), hashed).otherwise(F.lit(UNKNOWN_KEY).cast("bigint"))
 
 
 # ---------- dimensions ----------
@@ -154,6 +229,7 @@ def build_dim_marketplace(observations: DataFrame) -> DataFrame:
 
 
 def build_dim_seller(observations: DataFrame) -> DataFrame:
+    observations = with_listing_columns(observations)
     built = (
         observations.filter(F.col("seller_id").isNotNull())
         .groupBy("seller_id")
@@ -161,6 +237,10 @@ def build_dim_seller(observations: DataFrame) -> DataFrame:
         # seller has one marketplace; max() only makes that explicit.
         .agg(
             F.max("marketplace").alias("marketplace"),
+            latest("seller_name").alias("seller_name"),
+            latest("seller_type").alias("seller_type"),
+            latest("is_official_store").alias("is_official_store"),
+            latest("is_trusted_store").alias("is_trusted_store"),
             F.min("observed_at").alias("first_seen_at"),
             F.max("observed_at").alias("last_seen_at"),
             F.countDistinct("offer_id").cast("int").alias("observed_listing_count"),
@@ -169,43 +249,116 @@ def build_dim_seller(observations: DataFrame) -> DataFrame:
             seller_key().alias("seller_key"),
             "seller_id",
             marketplace_key().alias("marketplace_key"),
+            "seller_name",
+            "seller_type",
+            "is_official_store",
+            "is_trusted_store",
             "first_seen_at",
             "last_seen_at",
             "observed_listing_count",
         )
     )
     return with_unknown_member(
-        built, {"seller_key": UNKNOWN_KEY, "seller_id": UNKNOWN_NATURAL_KEY, "marketplace_key": UNKNOWN_KEY}
+        built,
+        {
+            "seller_key": UNKNOWN_KEY,
+            "seller_id": UNKNOWN_NATURAL_KEY,
+            "marketplace_key": UNKNOWN_KEY,
+            "seller_name": UNKNOWN_LABEL,
+        },
     )
 
 
-def build_dim_category(observations: DataFrame, frontier: DataFrame | None = None) -> DataFrame:
-    """One row per node on any observed category path.
+def build_dim_brand(observations: DataFrame) -> DataFrame:
+    """One row per (marketplace, brand id); a name without an id makes no row (section 4.4)."""
+    observations = with_listing_columns(observations)
+    built = (
+        observations.filter(F.col("brand_id").isNotNull())
+        .groupBy("marketplace", "brand_id")
+        .agg(
+            latest("brand").alias("brand_name"),
+            F.min("observed_at").alias("first_seen_at"),
+            F.max("observed_at").alias("last_seen_at"),
+            F.countDistinct("offer_id").cast("int").alias("observed_listing_count"),
+        )
+        .select(
+            brand_key().alias("brand_key"),
+            marketplace_key().alias("marketplace_key"),
+            "brand_id",
+            "brand_name",
+            "first_seen_at",
+            "last_seen_at",
+            "observed_listing_count",
+        )
+    )
+    return with_unknown_member(
+        built,
+        {
+            "brand_key": UNKNOWN_KEY,
+            "marketplace_key": UNKNOWN_KEY,
+            "brand_id": UNKNOWN_NATURAL_KEY,
+            "brand_name": UNKNOWN_LABEL,
+        },
+    )
 
-    If a node shows up under two different paths, the path observed most
-    recently wins (ties: the greater path string), so the tree stays a tree.
-    ``frontier`` (``marketplace_code``, ``target``) supplies slugs for the
-    category pages it crawls.
+
+def _latest_names(names: DataFrame) -> DataFrame:
+    """(``_nm``, ``_nid``) -> the latest name and slug any page gave the node."""
+    return names.groupBy(F.col("marketplace").alias("_nm"), F.col("category_id").alias("_nid")).agg(
+        latest("category_name", ("observed_at",)).alias("_name"),
+        latest("category_slug", ("observed_at",)).alias("_name_slug"),
+    )
+
+
+def build_dim_category(
+    observations: DataFrame,
+    frontier: DataFrame | None = None,
+    names: DataFrame | None = None,
+    page_paths: DataFrame | None = None,
+) -> DataFrame:
+    """One row per node on any observed category path (section 4.4).
+
+    Paths come from the observations and, where a source states them, from its
+    pages (``page_paths``, ``CATEGORY_PATH_COLUMNS``). If a node shows up under
+    two different paths, a path a page states wins over one a listing implies,
+    then the path observed most recently, then the greater path string, so the
+    tree stays a tree. ``frontier`` (``marketplace_code``, ``target``) and
+    ``names`` (``CATEGORY_NAME_COLUMNS``) supply names and slugs.
     """
-    paths = (
+    from_rows = (
         observations.filter(F.size(_path_ids("category_path")) > 0)
         .groupBy("marketplace", "category_path")
         .agg(F.max("observed_at").alias("_last_seen"))
-        .withColumn("_ids", _path_ids("category_path"))
+        .withColumn("_stated", F.lit(0))
     )
-    nodes = paths.select("marketplace", "_last_seen", "_ids", F.posexplode("_ids").alias("_pos", "category_id"))
+    paths = from_rows
+    if page_paths is not None:
+        stated = (
+            page_paths.filter(F.size(_path_ids("category_path")) > 0)
+            .groupBy("marketplace", "category_path")
+            .agg(F.max("observed_at").alias("_last_seen"))
+            .withColumn("_stated", F.lit(1))
+        )
+        paths = paths.unionByName(stated)
+    paths = paths.withColumn("_ids", _path_ids("category_path"))
+    nodes = paths.select(
+        "marketplace", "_last_seen", "_stated", "_ids", F.posexplode("_ids").alias("_pos", "category_id")
+    )
     nodes = nodes.select(
         "marketplace",
         "category_id",
         "_last_seen",
+        "_stated",
         F.array_join(F.slice("_ids", 1, F.col("_pos") + 1), "/").alias("full_path"),
         F.when(F.col("_pos") > 0, F.element_at("_ids", F.col("_pos"))).alias("_parent_id"),
         (F.col("_pos") + 1).cast("smallint").alias("level"),
     )
     winner = Window.partitionBy("marketplace", "category_id").orderBy(
-        F.col("_last_seen").desc(), F.col("full_path").desc()
+        F.col("_stated").desc(), F.col("_last_seen").desc(), F.col("full_path").desc()
     )
-    chosen = nodes.withColumn("_rn", F.row_number().over(winner)).filter("_rn = 1").drop("_rn", "_last_seen")
+    chosen = (
+        nodes.withColumn("_rn", F.row_number().over(winner)).filter("_rn = 1").drop("_rn", "_last_seen", "_stated")
+    )
     parents = (
         chosen.filter(F.col("_parent_id").isNotNull())
         .select(F.col("marketplace").alias("_pm"), F.col("_parent_id").alias("_pid"))
@@ -225,23 +378,50 @@ def build_dim_category(observations: DataFrame, frontier: DataFrame | None = Non
             )
             .filter(F.col("_sid") != "")
             .groupBy("_sm", "_sid")
-            .agg(F.max("_slug").alias("category_slug"))
+            .agg(F.max("_slug").alias("_frontier_slug"))
         )
         chosen = chosen.join(
             slugs, (chosen.marketplace == slugs._sm) & (chosen.category_id == slugs._sid), "left"
         ).drop("_sm", "_sid")
     else:
-        chosen = chosen.withColumn("category_slug", F.lit(None).cast("string"))
+        chosen = chosen.withColumn("_frontier_slug", F.lit(None).cast("string"))
+    if names is not None:
+        named = _latest_names(names)
+        chosen = chosen.join(
+            named, (chosen.marketplace == named._nm) & (chosen.category_id == named._nid), "left"
+        ).drop("_nm", "_nid")
+        # The names of the node's named ancestors and itself, top first.
+        ancestry = chosen.select(
+            "marketplace", "category_id", F.posexplode(_path_ids("full_path")).alias("_pos", "_aid")
+        )
+        lookup = named.filter(F.col("_name").isNotNull()).select("_nm", "_nid", "_name")
+        trail = (
+            ancestry.join(lookup, (ancestry.marketplace == lookup._nm) & (ancestry._aid == lookup._nid))
+            .groupBy(F.col("marketplace").alias("_tm"), F.col("category_id").alias("_tid"))
+            .agg(F.sort_array(F.collect_list(F.struct("_pos", "_name"))).alias("_trail"))
+            .withColumn("_trail", F.transform("_trail", lambda step: step["_name"]))
+        )
+        chosen = chosen.join(
+            trail, (chosen.marketplace == trail._tm) & (chosen.category_id == trail._tid), "left"
+        ).drop("_tm", "_tid")
+    else:
+        chosen = chosen.select(
+            "*",
+            F.lit(None).cast("string").alias("_name"),
+            F.lit(None).cast("string").alias("_name_slug"),
+            F.lit(None).cast("array<string>").alias("_trail"),
+        )
     built = chosen.select(
         key_or_unknown("marketplace", "category_id").alias("category_key"),
         marketplace_key().alias("marketplace_key"),
         "category_id",
-        # Names are not on the path, only ids (plan risk R1).
-        F.lit(None).cast("string").alias("category_name"),
-        "category_slug",
+        F.col("_name").alias("category_name"),
+        F.coalesce("_frontier_slug", "_name_slug").alias("category_slug"),
         F.when(F.col("_parent_id").isNotNull(), surrogate_key("marketplace", "_parent_id")).alias("parent_key"),
         "level",
         "full_path",
+        F.array_join("_trail", BREADCRUMB_SEPARATOR).alias("breadcrumb"),
+        *[F.try_element_at("_trail", F.lit(n)).alias(f"category_l{n}_name") for n in range(1, NAMED_LEVELS + 1)],
         "is_leaf",
     )
     return with_unknown_member(
@@ -253,6 +433,7 @@ def build_dim_category(observations: DataFrame, frontier: DataFrame | None = Non
             "category_name": UNKNOWN_LABEL,
             "level": 0,
             "full_path": UNKNOWN_NATURAL_KEY,
+            "breadcrumb": UNKNOWN_LABEL,
             "is_leaf": True,
         },
     )
@@ -288,26 +469,33 @@ def build_bridge_category_ancestry(dim_category: DataFrame) -> DataFrame:
     return closure
 
 
-def build_dim_offer_status(spark: SparkSession) -> DataFrame:
-    rows = []
-    for a, availability in enumerate(AVAILABILITY_VALUES):
-        for s, active_status in enumerate(ACTIVE_STATUS_VALUES):
-            for discount in (False, True):
-                for rating in (False, True):
-                    rows.append(
-                        (
-                            1 + a * 12 + s * 4 + int(discount) * 2 + int(rating),
-                            availability,
-                            active_status,
-                            discount,
-                            rating,
-                        )
-                    )
-    rows.append((UNKNOWN_KEY, UNKNOWN_NATURAL_KEY, UNKNOWN_NATURAL_KEY, None, None))
-    return spark.createDataFrame(
-        rows,
-        "offer_status_key smallint, availability string, active_status string, "
-        "has_discount boolean, has_rating boolean",
+def build_dim_listing_flags(spark: SparkSession) -> DataFrame:
+    """Every combination of the nine flags, keyed as ``listing_flags_key`` computes it (section 4.4)."""
+    fixed = [
+        (availability, active_status, discount, rating)
+        for availability in AVAILABILITY_VALUES
+        for active_status in ACTIVE_STATUS_VALUES
+        for discount in (False, True)
+        for rating in (False, True)
+    ]
+    rows = [
+        (*combination, *values)
+        for combination in fixed
+        for values in itertools.product((False, True, None), repeat=len(NULLABLE_FLAGS))
+    ]
+    schema = "availability string, active_status string, has_discount boolean, has_rating boolean, " + ", ".join(
+        f"{name} boolean" for name in NULLABLE_FLAGS
+    )
+    flags = spark.createDataFrame(rows, schema)
+    key = listing_flags_key(
+        discount=F.col("has_discount"),
+        rating=F.col("has_rating"),
+        **{name: F.col(name) for name in NULLABLE_FLAGS},
+    )
+    built = flags.select(key.alias("listing_flags_key"), *flags.columns)
+    return with_unknown_member(
+        built,
+        {"listing_flags_key": UNKNOWN_KEY, "availability": UNKNOWN_NATURAL_KEY, "active_status": UNKNOWN_NATURAL_KEY},
     )
 
 
@@ -322,15 +510,15 @@ def build_dim_product_listing(observations: DataFrame) -> DataFrame:
     marts' tie-break, so no version can open and close at the same instant and
     ``(offer_id, valid_from)`` stays unique.
     """
-    order = ["observed_at", "fetched_at", "observation_id"]
+    observations = with_listing_columns(observations)
+    order = list(SIGHTING_ORDER)
     tracked = observations.select(
         "offer_id",
         "marketplace",
-        "platform_listing_id",
-        "source_url",
         *order,
+        *LISTING_SCD1_ATTRIBUTES,
         "product_title",
-        "brand",
+        brand_key().alias("brand_key"),
         category_key().alias("category_key"),
         seller_key().alias("seller_key"),
     )
@@ -349,12 +537,9 @@ def build_dim_product_listing(observations: DataFrame) -> DataFrame:
     starts = instants.withColumn("_opens", first | ~unchanged).filter("_opens")
 
     versions = Window.partitionBy("offer_id").orderBy("observed_at")
-    latest = Window.partitionBy("offer_id").orderBy(F.col("observed_at").desc())
-    # SCD1 attributes: the latest sighting's value, on every version.
-    scd1 = (
-        instants.withColumn("_rn", F.row_number().over(latest))
-        .filter("_rn = 1")
-        .select("offer_id", F.col("source_url").alias("_latest_url"), F.col("platform_listing_id").alias("_latest_pid"))
+    # SCD1 attributes: the latest value seen, on every version.
+    scd1 = tracked.groupBy(F.col("offer_id").alias("_oid")).agg(
+        *[latest(name).alias(f"_latest_{name}") for name in LISTING_SCD1_ATTRIBUTES]
     )
     built = (
         starts.withColumn("valid_from", F.col("observed_at"))
@@ -363,18 +548,23 @@ def build_dim_product_listing(observations: DataFrame) -> DataFrame:
         )
         .withColumn("version", F.row_number().over(versions))
         .withColumn("is_current", F.lead("observed_at").over(versions).isNull())
-        .join(scd1, "offer_id")
+        .join(scd1, F.col("offer_id") == F.col("_oid"))
         .select(
             surrogate_key("offer_id", "valid_from").alias("listing_key"),
             offer_key().alias("offer_key"),
             "offer_id",
             marketplace_key().alias("marketplace_key"),
-            F.col("_latest_pid").alias("platform_listing_id"),
+            F.col("_latest_platform_listing_id").alias("platform_listing_id"),
+            F.col("_latest_sku").alias("sku"),
+            F.col("_latest_master_product_sku").alias("master_product_sku"),
             "product_title",
-            "brand",
+            "brand_key",
             "category_key",
             "seller_key",
-            F.col("_latest_url").alias("source_url"),
+            F.col("_latest_origin").alias("origin"),
+            F.col("_latest_is_authentic").alias("is_authentic"),
+            F.col("_latest_is_platform_verified").alias("is_platform_verified"),
+            F.col("_latest_source_url").alias("source_url"),
             "valid_from",
             "valid_to",
             "is_current",
@@ -389,6 +579,7 @@ def build_dim_product_listing(observations: DataFrame) -> DataFrame:
             "offer_id": UNKNOWN_NATURAL_KEY,
             "marketplace_key": UNKNOWN_KEY,
             "product_title": UNKNOWN_LABEL,
+            "brand_key": UNKNOWN_KEY,
             "category_key": UNKNOWN_KEY,
             "seller_key": UNKNOWN_KEY,
             "valid_from": UNKNOWN_VALID_FROM,
@@ -399,15 +590,28 @@ def build_dim_product_listing(observations: DataFrame) -> DataFrame:
     )
 
 
-def build_marketplace_dimensions(observations: DataFrame, frontier: DataFrame | None = None) -> dict[str, DataFrame]:
+def build_marketplace_dimensions(
+    observations: DataFrame,
+    frontier: DataFrame | None = None,
+    category_names: DataFrame | None = None,
+    category_paths: DataFrame | None = None,
+) -> dict[str, DataFrame]:
+    """Every dimension and the bridge, in registry order.
+
+    ``observations`` is ``StarInputs.observations`` (or bare canonical
+    observations, whose attributes then read as unknown); ``category_names``
+    and ``category_paths`` are the matching ``StarInputs`` frames.
+    """
     spark = observations.sparkSession
-    dim_category = build_dim_category(observations, frontier)
+    observations = with_listing_columns(observations)
+    dim_category = build_dim_category(observations, frontier, category_names, category_paths)
     return {
         "dim_date": build_dim_date(spark),
         "dim_marketplace": build_dim_marketplace(observations),
         "dim_seller": build_dim_seller(observations),
+        "dim_brand": build_dim_brand(observations),
         "dim_category": dim_category,
         "bridge_category_ancestry": build_bridge_category_ancestry(dim_category),
         "dim_product_listing": build_dim_product_listing(observations),
-        "dim_offer_status": build_dim_offer_status(spark),
+        "dim_listing_flags": build_dim_listing_flags(spark),
     }

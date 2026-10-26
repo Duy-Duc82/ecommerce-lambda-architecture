@@ -24,7 +24,8 @@ FACT = "fact"
 MART = "mart"
 KINDS = (DIM, BRIDGE, FACT, MART)
 
-# PostgreSQL schemas: the star is published to dw, the marts to cache.
+# The star lives only in the lake (gold/<GOLD_DATASET>/dw/, Delta); dw is its
+# namespace there. The marts are published to the PostgreSQL schema cache.
 # The Gold dataset root: run-scoped marts, manifests and the serving pointer
 # all live under gold/<GOLD_DATASET>/.
 GOLD_DATASET = "marketplace"
@@ -195,16 +196,23 @@ STAR: tuple[MarketplaceDataset, ...] = (
         DIM,
         "one seller",
         ("seller_key",),
-        _cols("seller_key seller_id marketplace_key first_seen_at last_seen_at observed_listing_count"),
+        _cols("""seller_key seller_id marketplace_key seller_name seller_type is_official_store is_trusted_store
+                 first_seen_at last_seen_at observed_listing_count"""),
+    ),
+    MarketplaceDataset(
+        "dim_brand",
+        DIM,
+        "one brand of one marketplace",
+        ("brand_key",),
+        _cols("brand_key marketplace_key brand_id brand_name first_seen_at last_seen_at observed_listing_count"),
     ),
     MarketplaceDataset(
         "dim_category",
         DIM,
         "one node of a marketplace's category tree",
         ("category_key",),
-        _cols(
-            "category_key marketplace_key category_id category_name category_slug parent_key level full_path is_leaf"
-        ),
+        _cols("""category_key marketplace_key category_id category_name category_slug parent_key level full_path
+                 breadcrumb category_l1_name category_l2_name category_l3_name category_l4_name is_leaf"""),
     ),
     MarketplaceDataset(
         "bridge_category_ancestry",
@@ -218,33 +226,36 @@ STAR: tuple[MarketplaceDataset, ...] = (
         DIM,
         "one version of one offer's descriptive attributes",
         ("listing_key",),
-        _cols("""listing_key offer_key offer_id marketplace_key platform_listing_id product_title brand category_key
-                 seller_key source_url valid_from valid_to is_current version"""),
+        _cols("""listing_key offer_key offer_id marketplace_key platform_listing_id sku master_product_sku
+                 product_title brand_key category_key seller_key origin is_authentic is_platform_verified source_url
+                 valid_from valid_to is_current version"""),
     ),
     MarketplaceDataset(
-        "dim_offer_status",
+        "dim_listing_flags",
         DIM,
-        "one combination of availability, active status, discount and rating flags",
-        ("offer_status_key",),
-        _cols("offer_status_key availability active_status has_discount has_rating"),
+        "one combination of a sighting's stock, status, discount, rating, delivery and promotion flags",
+        ("listing_flags_key",),
+        _cols("""listing_flags_key availability active_status has_discount has_rating has_free_shipping
+                 is_express_delivery is_next_day_delivery is_flash_deal is_gift_available"""),
     ),
     MarketplaceDataset(
         "fact_offer_observation",
         FACT,
         "one sighting of one offer by the crawler at one instant",
         ("observation_id",),
-        _cols("""observation_id date_key marketplace_key listing_key offer_key seller_key category_key offer_status_key
-                 observed_at fetched_at currency current_price list_price shipping_price discount_amount discount_percent
-                 rating_value rating_scale rating_count review_count sold_count ranking_position crawl_run_id raw_uri
-                 raw_sha256 adapter_version"""),
+        _cols("""observation_id date_key marketplace_key listing_key offer_key seller_key brand_key category_key
+                 page_category_key listing_flags_key observed_at fetched_at currency current_price list_price
+                 shipping_price discount_amount discount_percent rating_value rating_scale rating_count review_count
+                 sold_count ranking_position search_rank request_page is_advertisement crawl_run_id raw_uri raw_sha256
+                 adapter_version"""),
     ),
     MarketplaceDataset(
         "fact_price_snapshot_daily",
         FACT,
         "one offer, one UTC day, one currency, on which the offer was sighted at least once",
         ("date_key", "offer_key", "currency"),
-        _cols("""date_key offer_key currency listing_key marketplace_key seller_key category_key offer_status_key
-                 first_observed_at last_observed_at last_observation_id open_price close_price min_price max_price
+        _cols("""date_key offer_key currency listing_key marketplace_key seller_key brand_key category_key
+                 listing_flags_key first_observed_at last_observed_at last_observation_id open_price close_price min_price max_price
                  avg_price first_list_price last_list_price observation_count distinct_price_count in_stock_ratio"""),
     ),
     MarketplaceDataset(
@@ -253,7 +264,7 @@ STAR: tuple[MarketplaceDataset, ...] = (
         "one sighting whose price differs from the same offer's previous sighting",
         ("observation_id",),
         _cols("""observation_id previous_observation_id date_key marketplace_key listing_key offer_key seller_key
-                 category_key changed_at previous_observed_at currency previous_currency old_price new_price price_delta
+                 brand_key category_key changed_at previous_observed_at currency previous_currency old_price new_price price_delta
                  pct_change minutes_since_previous direction is_large_drop change_rule_version"""),
     ),
     MarketplaceDataset(
@@ -264,6 +275,16 @@ STAR: tuple[MarketplaceDataset, ...] = (
         _cols("""date_key offer_key counter_name listing_key marketplace_key first_value last_value raw_delta_sum
                  valid_delta_sum valid_transition_count invalid_transition_count elapsed_seconds_valid
                  velocity_proxy_per_hour counter_reset_or_invalid invalid_reasons_json counter_rule_version"""),
+    ),
+    MarketplaceDataset(
+        "fact_category_page_daily",
+        FACT,
+        "one crawled category page, one UTC day, one currency",
+        ("date_key", "category_key", "currency"),
+        _cols("""date_key category_key currency marketplace_key crawled_page_count listed_product_count
+                 observation_count observed_offer_count advertisement_count seller_count brand_count min_price p25_price
+                 median_price p75_price max_price avg_price discounted_offer_count discounted_offer_ratio
+                 median_discount_percent in_stock_ratio"""),
     ),
     MarketplaceDataset(
         "fact_crawl_attempt",

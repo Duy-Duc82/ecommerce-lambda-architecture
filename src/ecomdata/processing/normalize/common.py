@@ -112,6 +112,61 @@ CANONICAL_COLUMNS: tuple[tuple[str, str], ...] = (
     ("request_page", "int"),
 )
 CANONICAL_NAMES = tuple(name for name, _ in CANONICAL_COLUMNS)
+
+# What the star reads from a source's wide table besides the canonical columns,
+# one row per listing record (docs/DATA_MODEL.md 4.4). A source that does not
+# publish a field leaves it NULL: unknown, never false.
+LISTING_ATTRIBUTE_COLUMNS: tuple[tuple[str, str], ...] = (
+    ("record_id", "string"),
+    ("seller_type", "string"),
+    ("is_official_store", "boolean"),
+    ("is_trusted_store", "boolean"),
+    ("master_product_sku", "string"),
+    ("origin", "string"),
+    ("is_authentic", "boolean"),
+    ("is_platform_verified", "boolean"),
+    ("has_free_shipping", "boolean"),
+    ("is_express_delivery", "boolean"),
+    ("is_next_day_delivery", "boolean"),
+    ("is_flash_deal", "boolean"),
+    ("is_gift_available", "boolean"),
+)
+# A name or slug some page gave a category node.
+CATEGORY_NAME_COLUMNS: tuple[tuple[str, str], ...] = (
+    ("marketplace", "string"),
+    ("category_id", "string"),
+    ("category_name", "string"),
+    ("category_slug", "string"),
+    ("observed_at", "timestamp"),
+)
+# A whole category path, top first, as a page states it ("a/b/c").
+CATEGORY_PATH_COLUMNS: tuple[tuple[str, str], ...] = (
+    ("marketplace", "string"),
+    ("category_path", "string"),
+    ("observed_at", "timestamp"),
+)
+
+
+def typed(frame: DataFrame, columns: tuple[tuple[str, str], ...]) -> DataFrame:
+    """``frame`` reduced to ``columns``, in order and cast; a missing column is NULL."""
+    present = set(frame.columns)
+    return frame.select(
+        *[(F.col(name) if name in present else F.lit(None)).cast(dtype).alias(name) for name, dtype in columns]
+    )
+
+
+def empty(spark: SparkSession, columns: tuple[tuple[str, str], ...]) -> DataFrame:
+    return spark.createDataFrame([], ", ".join(f"{name} {dtype}" for name, dtype in columns))
+
+
+def any_true(*flags: Column) -> Column:
+    """True if any flag is true, false if none is but one is known, NULL if all are unknown."""
+    known = F.lit(False)
+    hit = F.lit(False)
+    for flag in flags:
+        known = known | flag.isNotNull()
+        hit = hit | F.coalesce(flag, F.lit(False))
+    return F.when(hit, True).when(known, False)
 OBSERVATION_SCHEMA_VERSION = "marketplace-observation.v1"
 OBSERVATION_EVENT_TYPE = "OFFER_OBSERVED"
 
@@ -403,6 +458,12 @@ def payload_drift(rows: DataFrame, schema: StructType) -> DataFrame:
 __all__ = [
     "CANONICAL_COLUMNS",
     "CANONICAL_NAMES",
+    "CATEGORY_NAME_COLUMNS",
+    "CATEGORY_PATH_COLUMNS",
+    "LISTING_ATTRIBUTE_COLUMNS",
+    "any_true",
+    "empty",
+    "typed",
     "ENVELOPE_SCHEMA",
     "KIND_CONTEXT",
     "KIND_ROW",

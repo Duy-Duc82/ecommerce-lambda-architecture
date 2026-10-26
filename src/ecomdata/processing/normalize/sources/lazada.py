@@ -22,11 +22,16 @@ from pyspark.sql.types import (
 
 from ecomdata.domain.sources import LAZADA
 from ecomdata.processing.normalize.common import (
+    CATEGORY_NAME_COLUMNS,
+    CATEGORY_PATH_COLUMNS,
+    LISTING_ATTRIBUTE_COLUMNS,
     SourceFields,
     availability_expr,
     canonical,
+    clean_text,
     json_path,
     listing_rows,
+    typed,
 )
 
 PAYLOAD_SCHEMA = StructType([
@@ -141,3 +146,84 @@ def fields() -> SourceFields:
 def to_offer_observation(records: DataFrame) -> DataFrame:
     """Canonical columns of Lazada's listing rows, and reason for a row that cannot be an observation."""
     return canonical(listing_rows(records), LAZADA, fields())
+
+
+# ------------------------------------------------------------------ the star's attributes
+# The part of a page context the category dimension reads.
+BREADCRUMB_SCHEMA = StructType([
+    StructField("mods", StructType([
+        StructField("breadcrumb", ArrayType(StructType([
+            StructField("url", StringType()),
+            StructField("title", StringType()),
+        ]))),
+    ])),
+])
+
+LAZMALL = "lazMall"
+FREE_SHIPPING = "Freeshipping"
+SELLER_TYPE_LAZMALL = "LAZMALL"
+
+
+def _has_icon(biz_type: str) -> Column:
+    # Lazada lists every badge a row has, so a missing badge is a no, not unknown.
+    return F.coalesce(F.exists(F.col("p")["icons"], lambda icon: icon["bizType"] == biz_type), F.lit(False))
+
+
+def listing_attributes(wide: DataFrame) -> DataFrame:
+    """``LISTING_ATTRIBUTE_COLUMNS`` of each wide row (docs/DATA_MODEL.md 4.4).
+
+    Lazada's only seller badge is LazMall, its official-store programme, and the
+    only delivery badge is free shipping; every other attribute stays NULL.
+    """
+    lazmall = _has_icon(LAZMALL)
+    frame = wide.select(
+        "record_id",
+        F.when(lazmall, F.lit(SELLER_TYPE_LAZMALL)).alias("seller_type"),
+        lazmall.alias("is_official_store"),
+        _has_icon(FREE_SHIPPING).alias("has_free_shipping"),
+    )
+    return typed(frame, LISTING_ATTRIBUTE_COLUMNS)
+
+
+def _slug(url: Column) -> Column:
+    """``/dien-thoai-di-dong/`` -> ``dien-thoai-di-dong``; the home entry, a bare host, has none."""
+    path = F.regexp_replace(url, r"^(https?:)?//[^/]+|[?#].*$", "")
+    return F.try_element_at(F.filter(F.split(path, "/"), lambda part: part != ""), F.lit(-1))
+
+
+def _breadcrumb_slugs(contexts: DataFrame) -> DataFrame:
+    """Per page: its breadcrumb entries below the home page (slug, title), top first."""
+    crumbs = contexts.select(
+        F.from_json("payload_json", BREADCRUMB_SCHEMA)["mods"]["breadcrumb"].alias("crumbs"), "fetched_at"
+    )
+    entries = crumbs.select(
+        F.filter(
+            F.transform("crumbs", lambda c: F.struct(_slug(c["url"]).alias("slug"), c["title"].alias("title"))),
+            lambda e: e["slug"].isNotNull(),
+        ).alias("entries"),
+        "fetched_at",
+    ).filter(F.size("entries") > 0)
+    return entries
+
+
+def category_names(wide: DataFrame, contexts: DataFrame) -> DataFrame:
+    """Each breadcrumb node's title; its slug is its id."""
+    entries = _breadcrumb_slugs(contexts).select(F.explode("entries").alias("e"), "fetched_at")
+    named = entries.select(
+        F.lit(LAZADA.code).alias("marketplace"),
+        F.col("e.slug").alias("category_id"),
+        clean_text(F.col("e.title")).alias("category_name"),
+        F.col("e.slug").alias("category_slug"),
+        F.col("fetched_at").alias("observed_at"),
+    )
+    return typed(named, CATEGORY_NAME_COLUMNS)
+
+
+def category_paths(contexts: DataFrame) -> DataFrame:
+    """The page's breadcrumb as a path of slugs, top first."""
+    paths = _breadcrumb_slugs(contexts).select(
+        F.lit(LAZADA.code).alias("marketplace"),
+        F.array_join(F.transform("entries", lambda e: e["slug"]), "/").alias("category_path"),
+        F.col("fetched_at").alias("observed_at"),
+    )
+    return typed(paths, CATEGORY_PATH_COLUMNS)

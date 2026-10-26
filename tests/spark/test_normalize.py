@@ -238,3 +238,6 @@ def test_the_registry_resolves_each_normaliser_module(spark):
     assert SOURCES.normalizer("lazada") is lazada_norm
     for module in (tiki_norm, lazada_norm):
         assert callable(module.to_wide) and callable(module.to_offer_observation) and module.PAYLOAD_SCHEMA.fields
+        # What the star reads from each source (processing/batch/star_inputs.py).
+        assert callable(module.listing_attributes) and callable(module.category_names)
+        assert callable(module.category_paths)

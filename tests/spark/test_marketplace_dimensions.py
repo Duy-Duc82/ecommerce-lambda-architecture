@@ -1,7 +1,8 @@
 """Dimensions of the marketplace star, docs/DATA_MODEL.md sections 4.4-4.6.
 
 Local Spark over small frozen observation fixtures, the same ones the mart
-tests use. No MinIO, PostgreSQL or network.
+tests use, and over the Tiki and Lazada page fixtures taken through the real
+extractors and normalisers. No MinIO, PostgreSQL or network.
 """
 
 from datetime import UTC, date, datetime, timedelta
@@ -13,17 +14,30 @@ from pyspark.sql import functions as F
 from ecomdata.domain.datasets import dataset
 from ecomdata.processing.batch.dim_date import build_dim_date, vn_holidays
 from ecomdata.processing.batch.dimensions import (
+    NULLABLE_FLAGS,
     build_bridge_category_ancestry,
+    build_dim_brand,
     build_dim_category,
+    build_dim_listing_flags,
     build_dim_marketplace,
-    build_dim_offer_status,
     build_dim_product_listing,
     build_dim_seller,
     build_marketplace_dimensions,
-    offer_status_key,
+    listing_flags_key,
+    page_category_key,
 )
 from ecomdata.processing.batch.keys import OPEN_VALID_TO, UNKNOWN_KEY, UNKNOWN_NATURAL_KEY
-from tests.spark.test_marketplace_marts import DAY, observation, observations
+from ecomdata.processing.batch.star_inputs import (
+    ATTRIBUTE_COLUMNS,
+    OBSERVATION_EXTRA_COLUMNS,
+    star_inputs,
+    with_listing_columns,
+)
+from ecomdata.processing.normalize import common
+from ecomdata.processing.normalize.sources import lazada as lazada_norm
+from ecomdata.processing.normalize.sources import tiki as tiki_norm
+from tests.spark.test_marketplace_marts import _FIELDS, DAY, OBSERVATION_SCHEMA, observation, observations
+from tests.spark.test_normalize import lazada_records, records_frame, tiki_records
 from tests.spark_support import requires_spark
 
 pytestmark = requires_spark
@@ -52,8 +66,26 @@ def collectable(frame):
     )
 
 
+EXTRA_COLUMNS = OBSERVATION_EXTRA_COLUMNS + ATTRIBUTE_COLUMNS
+
+
+def sighting(offer="offer-1", minute=0, **fields):
+    """``observation`` plus the Silver v2 and wide-table columns the star reads."""
+    extras = {name: fields.pop(name) for name, _ in EXTRA_COLUMNS if name in fields}
+    return (*observation(offer, minute, **fields), *(extras.get(name) for name, _ in EXTRA_COLUMNS))
+
+
+def frame(spark, rows):
+    """Observations of either shape: ``observation`` tuples or ``sighting`` tuples."""
+    rows = list(rows)
+    if rows and len(rows[0]) == len(_FIELDS):
+        return observations(spark, rows)
+    schema = OBSERVATION_SCHEMA + ", " + ", ".join(f"{name} {dtype}" for name, dtype in EXTRA_COLUMNS)
+    return spark.createDataFrame(rows, schema)
+
+
 def versions(spark, rows, offer="offer-1"):
-    dim = collectable(build_dim_product_listing(observations(spark, rows)))
+    dim = collectable(build_dim_product_listing(frame(spark, rows)))
     return sorted((r.asDict() for r in dim.filter(f"offer_id = '{offer}'").collect()), key=lambda r: r["version"])
 
 
@@ -92,10 +124,11 @@ def test_every_dimension_has_the_registry_columns_and_one_unknown_row(mixed_dime
         "dim_date",
         "dim_marketplace",
         "dim_seller",
+        "dim_brand",
         "dim_category",
         "bridge_category_ancestry",
         "dim_product_listing",
-        "dim_offer_status",
+        "dim_listing_flags",
     }
     for name, frame in dims.items():
         entry = dataset(name)
@@ -115,7 +148,7 @@ def test_building_again_from_reordered_input_gives_the_same_rows(spark, mixed_di
         return {
             name: sorted((tuple(r) for r in collectable(frame).collect()), key=repr)
             for name, frame in dims.items()
-            if name != "dim_date"
+            if name not in ("dim_date", "dim_listing_flags")
         }
 
     again = build_marketplace_dimensions(observations(spark, list(reversed(MIXED))))
@@ -248,36 +281,50 @@ def test_an_observation_without_a_path_adds_no_node(spark):
     assert known(build_dim_category(observations(spark, rows)), "category_key").count() == 0
 
 
-# ---------- dim_offer_status ----------
+# ---------- dim_listing_flags ----------
 
 
-def test_offer_status_is_36_combinations_and_the_expression_agrees(spark):
-    dim = build_dim_offer_status(spark)
-    real = known(dim, "offer_status_key")
-    assert real.count() == 36
-    assert sorted(r.offer_status_key for r in real.collect()) == list(range(1, 37))
+def test_listing_flags_are_every_combination_and_the_expression_agrees(spark):
+    dim = build_dim_listing_flags(spark)
+    real = known(dim, "listing_flags_key")
+    assert real.count() == 3 * 3 * 2 * 2 * 3 ** len(NULLABLE_FLAGS) == 8748
+    assert real.select("listing_flags_key").distinct().count() == 8748
     computed = real.select(
-        "offer_status_key",
-        offer_status_key("availability", "active_status", discount=real.has_discount, rating=real.has_rating).alias(
-            "k"
-        ),
+        "listing_flags_key",
+        listing_flags_key(
+            discount=real.has_discount, rating=real.has_rating, **{name: real[name] for name in NULLABLE_FLAGS}
+        ).alias("k"),
     )
-    assert computed.filter("offer_status_key != k").count() == 0
+    assert computed.filter("listing_flags_key != k").count() == 0
 
 
-def test_offer_status_flags_come_from_the_observation(spark):
+def test_listing_flags_come_from_the_observation(spark):
     rows = [
         observation(minute=0, availability="IN_STOCK", list_price=Decimal("120"), rating_count=0),
         observation(minute=1, availability="OUT_OF_STOCK", rating_count=5, active_status="INACTIVE"),
         observation(minute=2, availability=None),
     ]
     keys = [
-        r.k for r in observations(spark, rows).orderBy("observed_at").select(offer_status_key().alias("k")).collect()
+        r.k
+        for r in with_listing_columns(observations(spark, rows))
+        .orderBy("observed_at")
+        .select(listing_flags_key().alias("k"))
+        .collect()
     ]
-    dim = {r.offer_status_key: r for r in build_dim_offer_status(spark).collect()}
+    dim = {r.listing_flags_key: r for r in build_dim_listing_flags(spark).collect()}
     assert (dim[keys[0]].availability, dim[keys[0]].has_discount, dim[keys[0]].has_rating) == ("IN_STOCK", True, False)
     assert (dim[keys[1]].active_status, dim[keys[1]].has_discount, dim[keys[1]].has_rating) == ("INACTIVE", False, True)
+    # Without the wide table every delivery flag is unknown, never false.
+    assert all(dim[keys[0]][name] is None for name in NULLABLE_FLAGS)
     assert keys[2] == UNKNOWN_KEY
+
+
+def test_an_unknown_flag_and_a_false_flag_get_different_keys(spark):
+    frame = spark.createDataFrame([(True,), (False,), (None,)], "f boolean")
+    others = {name: F.lit(None).cast("boolean") for name in NULLABLE_FLAGS}
+    others["has_free_shipping"] = F.col("f")
+    keys = frame.select(listing_flags_key(F.lit("IN_STOCK"), F.lit("ACTIVE"), F.lit(False), F.lit(False), **others).alias("k"))
+    assert keys.distinct().count() == 3
 
 
 # ---------- dim_product_listing: SCD2 ----------
@@ -306,8 +353,13 @@ def test_a_renamed_title_opens_a_version_that_closes_the_last(spark):
 
 
 def test_a_brand_appearing_opens_a_version(spark):
-    rows = [observation(minute=0, brand=None), observation(minute=5, brand="Acme")]
-    assert [v["brand"] for v in versions(spark, rows)] == [None, "Acme"]
+    rows = [sighting(minute=0, brand=None), sighting(minute=5, brand="Acme", brand_id="77")]
+    assert [v["brand_key"] for v in versions(spark, rows)] == [UNKNOWN_KEY, xxhash64(spark, "tiki", "77")]
+
+
+def test_a_brand_renamed_under_the_same_id_opens_no_version(spark):
+    rows = [sighting(minute=0, brand="Acme", brand_id="77"), sighting(minute=5, brand="ACME", brand_id="77")]
+    assert len(versions(spark, rows)) == 1
 
 
 def test_a_new_seller_opens_a_version(spark):
@@ -378,3 +430,201 @@ def test_offers_are_versioned_independently(spark):
     dim = known(build_dim_product_listing(observations(spark, rows)), "listing_key")
     counts = {r.offer_id: r["count"] for r in dim.groupBy("offer_id").count().collect()}
     assert counts == {"a": 2, "b": 1}
+
+
+def test_scd1_attributes_take_the_latest_value_seen_on_every_version(spark):
+    rows = [
+        sighting(minute=0, product_title="A", sku="S1", origin="China", is_authentic=True),
+        sighting(minute=5, product_title="B", sku="S2", origin=None, is_authentic=None),
+    ]
+    vs = versions(spark, rows)
+    assert len(vs) == 2
+    # A sighting that lacks a value does not erase the one seen before it.
+    assert {(v["sku"], v["origin"], v["is_authentic"]) for v in vs} == {("S2", "China", True)}
+
+
+# ---------- dim_seller attributes, dim_brand ----------
+
+
+def test_seller_attributes_are_the_latest_value_seen(spark):
+    rows = [
+        sighting(offer="a", minute=0, seller_id="s1", seller_name="Old", seller_type="NONE", is_official_store=False),
+        sighting(offer="a", minute=5, seller_id="s1", seller_name="New", seller_type=None, is_official_store=True),
+    ]
+    (seller,) = known(build_dim_seller(frame(spark, rows)), "seller_key").collect()
+    assert (seller.seller_name, seller.seller_type, seller.is_official_store) == ("New", "NONE", True)
+    assert seller.is_trusted_store is None
+
+
+def test_dim_brand_is_keyed_by_marketplace_and_id_and_keeps_the_latest_name(spark):
+    rows = [
+        sighting(offer="a", minute=0, brand="Acme", brand_id="77"),
+        sighting(offer="b", minute=5, brand="ACME Corp", brand_id="77"),
+        sighting(offer="c", minute=9, brand="NoId", brand_id=None),
+    ]
+    dim = build_dim_brand(frame(spark, rows))
+    (brand,) = known(dim, "brand_key").collect()
+    assert (brand.brand_id, brand.brand_name, brand.observed_listing_count) == ("77", "ACME Corp", 2)
+    assert brand.brand_key == xxhash64(spark, "tiki", "77")
+    assert dim.filter(f"brand_key = {UNKNOWN_KEY}").count() == 1
+
+
+# ---------- category names, breadcrumbs and page paths ----------
+
+
+def names_frame(spark, rows):
+    return spark.createDataFrame(
+        [(m, i, n, s, DAY + timedelta(minutes=k)) for k, (m, i, n, s) in enumerate(rows)],
+        "marketplace string, category_id string, category_name string, category_slug string, observed_at timestamp",
+    )
+
+
+def test_breadcrumb_skips_unnamed_nodes_and_fills_the_named_levels(spark):
+    rows = [observation(minute=0, category_path="1/2/1789/1795")]
+    names = names_frame(
+        spark, [("tiki", "1789", "Phones & Tablets", "dien-thoai"), ("tiki", "1795", "Smartphones", None)]
+    )
+    nodes = {r.category_id: r for r in build_dim_category(observations(spark, rows), names=names).collect()}
+    leaf = nodes["1795"]
+    assert leaf.category_name == "Smartphones" and leaf.level == 4
+    assert leaf.breadcrumb == "Phones & Tablets > Smartphones"
+    assert (leaf.category_l1_name, leaf.category_l2_name, leaf.category_l3_name) == (
+        "Phones & Tablets",
+        "Smartphones",
+        None,
+    )
+    assert nodes["1789"].category_slug == "dien-thoai"
+    assert nodes["1"].category_name is None and nodes["1"].breadcrumb is None
+
+
+def test_the_latest_name_wins(spark):
+    rows = [observation(minute=0, category_path="1/9")]
+    names = names_frame(spark, [("tiki", "9", "Old", None), ("tiki", "9", "New", None)])
+    nodes = {r.category_id: r for r in build_dim_category(observations(spark, rows), names=names).collect()}
+    assert nodes["9"].category_name == "New"
+
+
+def test_a_path_a_page_states_wins_over_the_one_a_listing_implies(spark):
+    # A Lazada listing carries only its page's slug; the breadcrumb places it.
+    rows = [observation(minute=30, marketplace="lazada", category_path="dien-thoai-di-dong")]
+    paths = spark.createDataFrame(
+        [("lazada", "dien-thoai-may-tinh-bang/dien-thoai-di-dong", DAY)],
+        "marketplace string, category_path string, observed_at timestamp",
+    )
+    nodes = {r.category_id: r for r in build_dim_category(observations(spark, rows), page_paths=paths).collect()}
+    leaf = nodes["dien-thoai-di-dong"]
+    assert leaf.level == 2 and leaf.full_path == "dien-thoai-may-tinh-bang/dien-thoai-di-dong"
+    assert leaf.parent_key == nodes["dien-thoai-may-tinh-bang"].category_key
+    assert leaf.category_key == xxhash64(spark, "lazada", "dien-thoai-di-dong")
+
+
+@pytest.mark.parametrize(
+    ("marketplace", "target", "category_id"),
+    [
+        ("tiki", "dien-thoai-may-tinh-bang/c1789", "1789"),
+        ("tiki", "1789", "1789"),
+        ("lazada", "dien-thoai-di-dong", "dien-thoai-di-dong"),
+        ("lazada", "phu-kien/op-lung", "op-lung"),
+        ("tiki", None, None),
+        ("tiki", "https://tiki.vn/p/123", None),
+    ],
+)
+def test_page_category_key_reads_the_request_target(spark, marketplace, target, category_id):
+    row = spark.createDataFrame([(marketplace, target)], "marketplace string, request_target string")
+    key = row.select(page_category_key().alias("k")).first().k
+    assert key == (UNKNOWN_KEY if category_id is None else xxhash64(spark, marketplace, category_id))
+
+
+# ---------- from the real Tiki and Lazada pages ----------
+
+
+@pytest.fixture(scope="module")
+def page_star(spark):
+    """The dimensions of one Tiki and one Lazada fixture page, through extractor, normaliser and star_inputs."""
+    records = records_frame(spark, [*tiki_records(), *lazada_records()])
+    observed = []
+    for code, module in (("tiki", tiki_norm), ("lazada", lazada_norm)):
+        valid, quarantined = common.split_quarantine(module.to_offer_observation(records.filter(f"source_code = '{code}'")))
+        assert quarantined.count() == 0
+        observed.append(valid)
+    wide = {
+        "tiki": tiki_norm.to_wide(records.filter("source_code = 'tiki'")),
+        "lazada": lazada_norm.to_wide(records.filter("source_code = 'lazada'")),
+    }
+    inputs = star_inputs(observed[0].unionByName(observed[1]), wide, common.page_contexts(records))
+    dims = build_marketplace_dimensions(inputs.observations, None, inputs.category_names, inputs.category_paths)
+    return inputs, dims
+
+
+def test_pages_give_every_dimension_its_registry_columns_and_unique_keys(page_star):
+    _, dims = page_star
+    for name, built in dims.items():
+        entry = dataset(name)
+        assert tuple(built.columns) == entry.columns, name
+        assert built.groupBy(*entry.key).count().filter("count > 1").count() == 0, name
+
+
+def test_both_marketplaces_are_real_rows(page_star):
+    _, dims = page_star
+    codes = {r.marketplace_code for r in known(dims["dim_marketplace"], "marketplace_key").collect()}
+    assert codes == {"tiki", "lazada"}
+
+
+def test_every_observation_finds_its_attributes(page_star):
+    inputs, _ = page_star
+    assert inputs.observations.count() == 10
+    assert inputs.observations.filter("is_official_store IS NULL").count() == 0
+
+
+def test_tiki_seller_badges_and_listing_attributes(page_star):
+    inputs, dims = page_star
+    tiki = inputs.observations.filter("marketplace = 'tiki'").collect()
+    assert {r.seller_type for r in tiki} == {"OFFICIAL_STORE", "NONE"}
+    assert all(r.is_official_store == (r.seller_type == "OFFICIAL_STORE") for r in tiki)
+    assert all(r.is_trusted_store is False for r in tiki)
+    assert {r.origin for r in tiki} >= {"China", "Việt Nam"}
+    listings = collectable(known(dims["dim_product_listing"], "listing_key")).collect()
+    assert {r.origin for r in listings if r.origin is not None} >= {"China", "Việt Nam"}
+
+
+def test_lazada_badges_and_unknown_flags(page_star):
+    inputs, dims = page_star
+    lazada = inputs.observations.filter("marketplace = 'lazada'")
+    first = lazada.orderBy("search_rank").first()
+    assert (first.seller_type, first.is_official_store, first.has_free_shipping) == ("LAZMALL", True, True)
+    assert first.is_trusted_store is None and first.is_express_delivery is None and first.origin is None
+    assert lazada.filter("is_flash_deal IS NOT NULL OR is_authentic IS NOT NULL").count() == 0
+    flag_keys = inputs.observations.select(listing_flags_key().alias("k")).distinct()
+    real_keys = known(dims["dim_listing_flags"], "listing_flags_key").select(F.col("listing_flags_key").alias("k"))
+    assert flag_keys.join(real_keys, "k", "left_anti").count() == 0
+
+
+def test_tiki_categories_are_named_from_the_page_and_the_rows(page_star):
+    _, dims = page_star
+    nodes = {r.category_id: r for r in dims["dim_category"].filter("category_id RLIKE '^[0-9]+$'").collect()}
+    assert nodes["1789"].category_name == "Điện Thoại - Máy Tính Bảng"
+    assert nodes["1789"].category_slug == "dien-thoai-may-tinh-bang"
+    assert nodes["1794"].category_name == "Máy tính bảng"
+    assert nodes["1794"].breadcrumb == "Điện Thoại - Máy Tính Bảng > Máy tính bảng"
+    assert nodes["1794"].category_l1_name == "Điện Thoại - Máy Tính Bảng"
+    assert nodes["1"].category_name is None and nodes["2"].category_name is None
+
+
+def test_lazada_categories_follow_the_breadcrumb(page_star):
+    inputs, dims = page_star
+    lazada_key = xxhash64(inputs.observations.sparkSession, "lazada")
+    nodes = {r.category_id: r for r in dims["dim_category"].filter(f"marketplace_key = {lazada_key}").collect()}
+    assert set(nodes) == {"dien-thoai-may-tinh-bang", "dien-thoai-di-dong"}
+    leaf = nodes["dien-thoai-di-dong"]
+    assert leaf.full_path == "dien-thoai-may-tinh-bang/dien-thoai-di-dong" and leaf.is_leaf
+    assert leaf.breadcrumb == "Điện thoại & Máy tính bảng > Smartphones"
+    listings = known(dims["dim_product_listing"], "listing_key").filter(f"marketplace_key = {lazada_key}")
+    assert {r.category_key for r in listings.select("category_key").collect()} == {leaf.category_key}
+
+
+def test_brands_of_both_marketplaces(page_star):
+    _, dims = page_star
+    brands = known(dims["dim_brand"], "brand_key").collect()
+    assert any(b.brand_name == "HUAWEI" and b.brand_id == "127198865" for b in brands)
+    listings = known(dims["dim_product_listing"], "listing_key")
+    assert listings.join(dims["dim_brand"], "brand_key", "left_anti").count() == 0

@@ -46,7 +46,7 @@ Thay thế phần "thứ tự W2–W4" của `docs/PLAN_PHASE10_REVISED.md`: ing
 
 Mỗi gói: test viết cùng mã, chạy toàn bộ suite, một PR vào `develop`. Mốc test hiện tại: 1505 passed.
 
-**D0 (2026-10-26): xong phần tài liệu, chờ người dùng duyệt.** `DATA_MODEL.md` §4, `docs/model/star-schema.{mmd,dbml,puml}`: 14 bảng, 40 khoá ngoại (parse bằng `@dbml/core` 3.14.1 và `mermaid` 11.4.1). Registry `domain/datasets.py` và `star-schema.sql` chuyển sang D1: test ràng chúng với builder, đổi riêng sẽ làm đỏ suite. Các chỗ D0 tự chọn, cần duyệt:
+**D0 (2026-10-26): người dùng duyệt cả 5 điểm dưới đây.** `DATA_MODEL.md` §4, `docs/model/star-schema.{mmd,dbml,puml}`: 14 bảng, 40 khoá ngoại (parse bằng `@dbml/core` 3.14.1 và `mermaid` 11.4.1). Registry `domain/datasets.py` và `star-schema.sql` chuyển sang D1: test ràng chúng với builder, đổi riêng sẽ làm đỏ suite. Các chỗ D0 tự chọn, cần duyệt:
 
 1. **Danh mục Lazada** theo slug của breadcrumb (`category_id` là slug); listing Lazada lấy danh mục của trang. Id số trong `categories` của Lazada không có tên, chỉ giữ ở Silver.
 2. **`dim_listing_flags`** gồm cả 4 cờ của `dim_offer_status` cùng 5 cờ giao hàng/khuyến mãi; cờ nguồn không có là `NULL`; sinh sẵn 8 748 tổ hợp. `is_advertisement` để trên fact.

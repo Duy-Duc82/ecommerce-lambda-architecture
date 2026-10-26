@@ -538,7 +538,8 @@ Tiki and Lazada; adding a marketplace is a new row, not a new column.
 (`make_seller_id(marketplace, platform_seller_id)`), so it is the natural key
 on its own. `first_seen_at`, `last_seen_at` and `observed_listing_count` are
 overwritten each run (SCD1); they are what `seller_current` publishes. The
-descriptive columns take the seller's **latest** sighting (SCD1):
+descriptive columns take the **latest value seen** (SCD1): the value on the
+latest sighting that has one, so a sighting missing a field does not erase it:
 
 | Column | Tiki (`tiki_listing_wide`) | Lazada (`lazada_listing_wide`) |
 |---|---|---|
@@ -570,8 +571,9 @@ as `1/2/1846/8095/2458` is a list of node ids from the root. Measured on
 bridge is a closure table: one row per (ancestor, descendant) pair, including
 the node itself at `depth = 0`, so "every listing anywhere under node X" is a
 single join. Category ids are each marketplace's own, so the natural key
-includes the marketplace. If one node is ever seen under two parents, the most
-recently observed path wins and an advisory check reports it.
+includes the marketplace. If one node is ever seen under two paths, a path a
+page states (Lazada's breadcrumb) wins over one a listing implies, then the
+most recently observed path; an advisory check reports the conflict.
 
 The two sources describe their trees differently:
 
@@ -601,8 +603,8 @@ even though Tiki's `level` counts the two structural nodes.
 gives the rules. It carries two keys: `listing_key` names one version, and
 `offer_key = xxhash64(offer_id)` names the offer across all its versions (a
 *durable key*). Tracked as SCD2: `product_title`, `brand_key`,
-`category_key`, `seller_key`. Overwritten in every version (SCD1): the
-columns below and `source_url`. `platform_listing_id` is part of the offer's
+`category_key`, `seller_key`. Overwritten in every version (SCD1) with the
+latest value seen: the columns below and `source_url`. `platform_listing_id` is part of the offer's
 identity and never changes. The brand's name lives in `dim_brand`; the
 listing keeps only the key, so a brand renamed by the site is one SCD1 update
 there instead of a new version of every listing.
