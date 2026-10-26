@@ -1,274 +1,174 @@
-# Architecture
+# Kiến trúc: pipeline ELT đa nguồn (Tiki, Lazada)
 
-A **Lambda architecture** over a multi-marketplace price crawler. One crawl
-feeds a **batch path** (accurate, replayable, versioned) and a **speed path**
-(low-latency change events), each with its own serving store and dashboard.
+Hệ thống quan sát **trạng thái công khai của catalog và giá** trên sàn thương mại điện tử. Nó không thấy đơn hàng, thanh toán, giỏ hàng hay người dùng. Một bộ đếm mà sàn hiển thị (đã bán, số đánh giá) là một con số trên trang; thay đổi của nó không phải là một đơn hàng và không được mô tả như vậy.
 
-The system observes **public catalog and price state**. It cannot see orders,
-payments, carts, or any user. A counter the marketplace displays — sold count,
-review count — is a number on a page; a change in it is not a sale and not a
-demand signal, and nothing here describes it as one.
+Cấu trúc là Lambda: một lần crawl nuôi **đường batch** (chính xác, chạy lại được, có phiên bản) và **đường speed** (sự kiện thay đổi độ trễ thấp). Pipeline thu thập theo kiểu **ELT**: crawler lưu nguyên vẹn dòng dữ liệu của nguồn, Spark chuẩn hoá ở phía sau (ADR-0001).
 
-A second, older pipeline over a Kaggle behavior dataset still lives in the
-repository as a demo. It is described at the end and runs only under the
-`legacy` profile.
+Pipeline Kaggle cũ (dữ liệu hành vi) nằm trong `legacy/kaggle/`, chạy bằng `compose/docker-compose.legacy.yml`; `ecomdata` không import nó.
 
-## 1. The data flow
+Quyết định kiến trúc nằm trong `docs/adr/`:
 
-```text
-                      a marketplace listing API (or ops/stub_source.py)
-                                        │
-                    crawler/service.py ─┴─ frontier lease, robots, rate limit
-                                        │
-                    Bronze  raw body + metadata sidecar      ← append-only truth
-                                        │
-                       Kafka  marketplace.observations.v1
-                 ┌──────────────────────┴───────────────────────┐
-        SPEED    │                                               │   BATCH
- ┌───────────────┴─────────────────┐        ┌───────────────────┴──────────────┐
- │ speed_layer/                     │        │ data_ingestion/                  │
- │  marketplace_speed_service.py    │        │  marketplace_silver_service.py   │
- │  (Spark Structured Streaming)    │        │   → Silver, one object per       │
- │  observation → change event      │        │     observation (+ DLQ)          │
- │   7 frozen change types          │        │                                  │
- │  → Kafka marketplace.changes.v1  │        │ batch_layer/                     │
- │  → Elasticsearch  changes/offers │        │  marketplace_scheduler.py        │
- │  → Redis  rt:*                   │        │   → marketplace_warehouse.py     │
- └───────────────┬─────────────────┘        │     Silver →(as_of)→ Gold run    │
-                 │                           │     → quality gate → cache      │
-                 │                           │     → promote current.json      │
-                 │                           └───────────────────┬──────────────┘
-                 │                                               │
-     ops/es_projector.py ── audit + DLQ ──► Elasticsearch   MinIO gold (authoritative)
-                 │                                               │
-              Kibana                              PostgreSQL `cache` (BI marts)
-                                                                 │
-                                                             Superset
+| ADR | Nội dung |
+|---|---|
+| 0001 | ELT và envelope `marketplace-record.v1` |
+| 0002 | Airflow thay scheduler vòng lặp (đảo D2) |
+| 0003 | Ports & Adapters và luật import |
+| 0004 | Một `SourceRegistry` |
+| 0005 | Batch theo stage và state machine |
+| 0006 | Shopee: không crawl, chỉ Affiliate API |
+
+## 1. Sơ đồ tầng
+
+```mermaid
+flowchart TB
+    subgraph L1["Tầng 1: điều phối, vận hành, trình bày"]
+        orchestration["orchestration (DAG Airflow)"]
+        ops["ops (CLI, drill, bench)"]
+        serving["serving (projector, Kibana, Superset)"]
+    end
+    subgraph L2["Tầng 2: ứng dụng (độc lập nhau)"]
+        ingestion["ingestion (thu thập)"]
+        processing["processing (Spark: normalize, batch, speed)"]
+    end
+    infra["Tầng 3: infra (adapter: Spark, Postgres, Kafka, object store, HTTP, trình duyệt)"]
+    settings["Tầng 4: settings (dataclass frozen, load_settings)"]
+    domain["Tầng 5: domain (thuần: không I/O)"]
+    L1 --> L2 --> infra --> settings --> domain
 ```
 
-Two things are worth reading twice:
+Luật được `import-linter` kiểm trong `pyproject.toml` (4 contract) và `tests/architecture/`:
 
-- **Bronze is written before Kafka.** A publish failure after a good fetch and
-  parse is audited as `PUBLISH_ERROR` with `parsed_count = acknowledged`, and
-  the raw body stays in Bronze. Nothing that was fetched is ever lost because
-  a downstream was down.
-- **The speed path and the batch path never share state.** They read the same
-  Kafka topic and agree only through the frozen contracts, so neither can
-  corrupt the other.
+- tầng trên import tầng dưới, không ngược lại; `ingestion` và `processing` **không import lẫn nhau**;
+- `ecomdata.domain` không import `pyspark`, `requests`, `psycopg2`, `kafka`, `minio`, `boto3`, `playwright`, `redis`, `elasticsearch`, `ecomdata.settings`, `ecomdata.infra`;
+- `ecomdata` không import `legacy`;
+- settings chỉ được đọc ở composition root (`bootstrap.py`, `cli.py`, `service.py`, `dags/*`);
+- literal riêng của site (`"tiki"`, `"lazada"`, `tiki.vn`, `lazada.vn`) chỉ nằm trong `ingestion/sources/<site>/`, `processing/normalize/sources/<site>.py`, `domain/sources.py` (cùng tests, ops/drills, env, docs).
 
-## 2. Components and profiles
+## 2. Luồng dữ liệu
 
-`docker compose up -d` starts only the core. Everything else is behind a
-profile, so a laptop runs what it needs and nothing more.
-
-| Profile | Service | What it is |
-|---|---|---|
-| *(none)* | `kafka`, `kafka-init`, `minio`, `minio-init`, `postgres-dw`, `redis`, `elasticsearch` | the core: brokers and stores |
-| `crawl` | `crawl-worker` | `crawler/service.py`, leases frontier tasks and crawls them |
-| `ingest` | `silver-sink` | `data_ingestion/marketplace_silver_service.py`, Kafka → Silver |
-| `speed` | `speed` | `speed_layer/marketplace_speed_service.py`, the streaming query |
-| `batch` | `batch-scheduler`, `batch-once` | the scheduled batch, and the operator's one-shot |
-| `serve` | `kibana`, `kibana-marketplace-setup`, `superset`, `superset-init` | dashboards and their importers |
-| `ops` | `ops`, `es-projector` | the `run --rm` tool container, and the operational projector |
-| `smoke` | `stub-source` | an offline stand-in for the listing API |
-| `legacy` | `spark`, `spark-worker`, `kibana`, `kibana-setup` | the Kaggle demo |
-| `jobs` | `warehouse-job` | the Kaggle demo's batch job |
-
-Two images, deliberately: `ecommerce/marketplace-python` for the plain-Python
-services and the ops tools, `ecommerce/spark-marketplace` for anything that
-needs a Spark session. Every image and jar is pinned to an exact version.
-
-Each long-running service touches a heartbeat file once per loop, and its
-container healthcheck fails when that file goes stale — so a loop that *hangs*
-goes unhealthy while a process that is merely waiting out an outage does not.
-
-## 3. The `as_of` cut
-
-A batch run is defined by one instant. `as_of` closes the window; the run reads
-only Silver rows **observed at or before** it, and audits only crawl runs that
-finished at or before it.
-
-Two consequences that are easy to get wrong:
-
-- A rebuild of the same `as_of` is not guaranteed to produce the same row
-  counts. A row observed *inside* the window can land in Silver *after* the
-  run read it, and a later rebuild legitimately sees more. Anything that
-  asserts an exact count across two runs of the same window is wrong.
-- The scheduler cuts a window only once the **lag** has passed
-  (`MARKETPLACE_BATCH_AS_OF_LAG_SECONDS`), which leaves crawl runs time to
-  settle before the reconciliation gate compares them against Silver.
-
-The reconciliation lookback must exceed the batch interval plus the settle
-delay, or a crawl run could settle and age out between two batches without
-ever being reconciled. `validate_marketplace_settings()` refuses a
-configuration where it does not.
-
-## 4. The quality gate and the manifest pointer
-
-Every run writes a Gold run directory of its own and a **run manifest** — even
-a run the gate refuses. A refused run that left no inspectable record cannot
-be told apart from a crash.
-
-```text
-gold/marketplace/runs/run_id=<run>/<dataset>/...      the run's own Gold
-gold/marketplace/manifests/run_id=<run>/manifest.json the record of that run
-gold/marketplace/current.json                          the serving pointer
+```mermaid
+flowchart LR
+    frontier[(Frontier + audit<br/>PostgreSQL)] --> worker["crawl-worker<br/>Fetcher → Extractor"]
+    worker --> raw[("Bronze/raw<br/>part-N.bin.gz + metadata.json")]
+    worker --> rec[("Bronze/records<br/>JSONL.gz theo trang")]
+    rec --> kafka{{"Kafka<br/>marketplace.records.v1"}}
+    kafka --> norm["speed: normalizer<br/>(foreachBatch)"]
+    norm --> obs{{"marketplace.observations.v1<br/>(dẫn xuất)"}}
+    obs --> speed["speed: truy vấn có trạng thái"]
+    speed --> chg{{"marketplace.changes.v1"}}
+    speed --> es[(Elasticsearch)]
+    speed --> redis[(Redis rt:*)]
+    rec --> silver["batch: silver"]
+    silver --> sv[("Silver v2<br/>Parquet")]
+    sv --> marts["marts"] --> gold[("Gold theo run<br/>Parquet")]
+    gold --> quality["quality"] --> man[("manifest")]
+    man --> publish["publish"] --> cache[("PostgreSQL cache.*")]
+    publish --> promote["promote"] --> cur[("current.json")]
+    cache --> superset[Superset]
+    es --> kibana[Kibana]
+    airflow["Airflow: marketplace_batch (@hourly)"] -. lập lịch .-> silver
 ```
 
-Seventeen rules run against Silver, the audit and the Gold datasets: thirteen
-**mandatory**, and a failure in any one of them refuses publication; four
-**advisory**, stored as evidence but never blocking. A mandatory failure gives
-the run status
-`QUALITY_FAILED`, which is deliberately distinct from `FAILED`: Gold exists,
-is complete and is inspectable, and publication was refused.
+Hai điểm cần đọc kỹ:
 
-The pointer is the single definition of "the last good published version". It
-is replaced by one write of the whole manifest document, never a reference to
-another object, so a reader never sees a torn pointer and `current.json` is
-byte-identical to the run manifest it promoted. Promotion is a
-compare-and-swap: a promoter whose pointer moved underneath it returns
-`PROMOTION_CONFLICT` and writes nothing.
+1. **Bronze là sự thật**. `bronze/raw` giữ phản hồi nguyên vẹn (gzip, có manifest); `bronze/marketplace/records` giữ từng dòng nguồn với toàn bộ trường (trừ danh sách PII khai báo trong spec). Mọi bảng phía sau dựng lại được từ đó.
+2. **Batch là bản đúng, speed là bản nhanh.** Cả hai chuẩn hoá bằng cùng một normalizer theo nguồn (`processing/normalize/sources/<site>.py`) và cùng quy tắc: thứ tự `domain/ordering.py`, luật thay đổi `domain/change_rules.py`.
 
-**The pointer is promoted after the cache is published, never before.**
-Promoting first means a failed publish rolls the cache back correctly while
-the pointer has already moved to a broken run.
+## 3. Các module
 
-Two batch runs can never interleave: a PostgreSQL session advisory lock is
-held for the whole run, and a run refused by it writes no audit row and exits
-75.
+### `domain/` (thuần)
 
-## 5. Failure boundaries
+| Module | Nội dung |
+|---|---|
+| `validation.py` | một bộ helper kiểm giá trị (`require_text`, `aware_utc`, ...) |
+| `identity.py` | `deterministic_id`, `make_offer_id`, `make_observation_id`, `make_seller_id`, `make_change_id` |
+| `sources.py` | `SourceSpec`, `SourceRegistry`, `SOURCES`, `TIKI`, `LAZADA` (ADR-0004) |
+| `records.py` | `SourceRecord` (`marketplace-record.v1`), `build_records`, wire encode/decode |
+| `acquisition.py` | `ListingPageRequest`, `FetchPart`, `FetchBundle`, `ExtractedPage`, report, cây lỗi, `FailureKind` |
+| `observations.py` | `MarketplaceOffer`, `OfferObservation`, `MarketplaceObservationV1`, `MarketplaceChangeV1` |
+| `ordering.py` | thứ tự `(observed_at, fetched_at, observation_id)` |
+| `change_rules.py` | luật so sánh hai observation của một offer |
+| `datasets.py`, `quality_rules.py`, `counter_semantics.py`, `topics.py`, `dlq.py` | registry dataset Gold, luật chất lượng, counter tin cậy, tên topic, bản ghi quarantine |
+| `batch_run.py` | `BatchRunStatus` và bảng chuyển trạng thái |
 
-What each component does when its dependency goes away, and what its restart
-repairs. Every row was established by running it — the drill that proves it is
-named, and `PROGRESS.md` sections 17 and 18 carry the measurements.
+### `settings/`, `infra/`
 
-| Component | Dependency lost | What happens | What the restart does | Drill |
-|---|---|---|---|---|
-| crawl-worker | the source errors or rate-limits | attempt audited with its `error_kind`; the circuit opens after N consecutive failures and the source is left alone until `opened_until` | tasks come back when the circuit closes | D1 |
-| crawl-worker | Kafka | attempts settle `PUBLISH_ERROR` with `parsed_count = acknowledged`; **the raw body is still in Bronze** | the window reconciles with no mismatch | D2 |
-| silver-sink | MinIO | the sink stops committing offsets, consumer lag grows, **no DLQ record is produced** — a storage outage is not a bad record | lag returns to 0 and Silver matches the acknowledged count | D3 |
-| speed | Elasticsearch or Redis | the micro-batch audit records `FAILED`; the query retries the same batch | the batch succeeds; ES change IDs stay unique and Redis has no duplicate member | D4 |
-| speed | killed mid-stream | the checkpoint holds the offsets | no change event lost or duplicated; a fresh checkpoint version replays from `earliest` to the same document set | D5 |
-| crawl-worker | killed holding leases | tasks stay `LEASED` until `lease_expires_at` | another worker recovers them; a late completion from the dead worker raises `LeaseLostError` | D6 |
-| crawler | the page shape drifts | attempt `PARSE_ERROR`, terminal, raw kept in Bronze, **the circuit does not move** — drift is not an outage | `crawler.reparse` reports `PARSE_FAILED` and writes nothing | D7 |
-| batch | Silver and the audit disagree | run `QUALITY_FAILED`; cache version and pointer unchanged; the 17 results stored | resume the same run once the discrepancy is gone | D8 |
-| batch | the cache publish is refused | run `FAILED` at publish; the previous cache version and pointer both intact, because publish truncates and refills in one transaction | resume → the pointer and cache move together | D9 |
-| batch | a second run starts | exactly one runs; the other exits 75 with `ALREADY_RUNNING` and writes **no audit row** | nothing to repair | D10 |
-| es-projector | anything | the pass is logged and the loop carries on | the overlap window re-reads whatever the outage hid | — |
+`settings/__init__.py`: `Settings` gồm các dataclass frozen theo concern (kafka, storage, postgres, redis, es, crawl, spark, batch, quality, speed, service, airflow); `load_settings(env, dotenv=False)` không có side effect lúc import. `infra/`: `spark.py` (`SparkSessionFactory`: UTC, shuffle, `spark.driver.memory`, S3A), `postgres.py` (`connection_factory`, `jdbc_url`), `kafka.py` (producer duy nhất, gửi có ack), `object_store.py` (MinIO/S3/local, gzip), `http.py` (`HttpClient`, `RobotsPolicy` cache theo host, `Throttle`), `browser.py` (`BrowserSession`, Playwright, một lần mỗi worker).
 
-Two invariants hold across all of them:
+### `ingestion/`
 
-- **a valid observation can never reach the DLQ.** The DLQ is for a record
-  that could not be decoded or failed its contract. A write that failed is
-  retried at the same offset, forever if need be;
-- **an offset is committed only after its record was processed.** A crash
-  between the write and the commit re-delivers the record, which is safe
-  because the Silver path is a function of `observation_id`.
+`fetchers/{base,http,browser}.py` (Strategy: `HttpFetcher`, `BrowserFetcher`), `sources/<site>/{extractor,discovery}.py`, `pipeline.py` (Template Method: robots → throttle → fetch → lưu raw → extract → lưu records → report), `raw_store.py` (Bronze/raw v2, đọc được v1), `record_store.py`, `publisher.py` (Kafka sau khi ghi file), `reparse.py`, `frontier.py`, `scheduling.py`, `audit.py`, `worker.py`, `service.py`, `seed.py`, `cli.py`, `bootstrap.py`.
 
-## 6. Storage roles
+### `processing/`
 
-- **MinIO (S3A)** — the authoritative warehouse. Bronze is raw truth and
-  cannot be recreated; Silver is canonical observations; Gold is one directory
-  per run plus the manifests and the pointer.
-- **PostgreSQL** — two roles, neither of them "system of record". `cache` is
-  the compact BI marts Superset reads; `audit` is the operational record —
-  the crawl frontier, run and attempt history, the batch runs, the quality
-  results, the speed micro-batches and the cache version.
-- **Elasticsearch** — recent operational and realtime state, read by Kibana.
-  Two indices from the speed layer (changes, current offers) and four written
-  by `ops/es_projector.py` (source health, crawl attempts, speed batches, the
-  DLQ).
-- **Redis** — the latest realtime state: recent changes, per-offer state, and
-  each source's last observation instant.
+- `normalize/`: `common.py` (đọc envelope, cột canonical, quarantine, drift), `sources/{tiki,lazada}.py` (`PAYLOAD_SCHEMA`, `to_wide`, `to_offer_observation`), `wire.py` (cột canonical → event `marketplace-observation.v1`).
+- `batch/`: `stages/{base,silver,marts,quality,publish,promote}.py`, `runner.py`, `ports.py`, `context.py`, `lake.py` (`SparkLakeIO`), `inputs.py`, `memory.py` (bản trong bộ nhớ của các port), `marts.py`, `anomaly.py`, `quality.py`, `manifest.py`, `repositories.py`, `lock.py`, `scheduler.py` (vòng lặp cũ, profile `legacy-scheduler`), `cli.py`, `bootstrap.py`, `dimensions.py`, `keys.py`, `dim_date.py` (star Phase 10, chưa nối vào stage).
+- `speed/`: `normalizer.py`, `stream.py`, `service.py`, `sinks.py`, `change_producer.py`.
 
-Gold-level freshness and coverage stay in **Superset**, on the cache marts.
-Kibana holds recent operational state. The two are not interchangeable, and
-the dashboards say which is which.
+### `orchestration/`, `serving/`, `ops/`
 
-## 7. Design patterns
+`orchestration/tasks.py` (lệnh và môi trường của task container) và `orchestration/dags/{marketplace_batch,marketplace_maintenance,source_discovery}.py`. `serving/`: `es_projector.py`, `kibana/`, `superset/`. `ops/`: CLI vận hành `python -m ecomdata.ops` (subcommand: `migrate`, `seed`, `evaluate`, `validate`, `backup`, `restore`, `backups`, `prune-raw`, `storage-snapshot`, `status`, ...), drill, bench, evidence.
 
-- **Frozen contracts, defined once.** `config/marketplace_schema.py` and
-  `config/marketplace_wire.py` own the observation, change and DLQ shapes, and
-  validate them field for field. A wire record with an unexpected field is
-  refused, so the contract cannot drift without a schema version bump.
-- **Deterministic identity everywhere.** `observation_id`, `offer_id`,
-  `event_id`, `dlq_id` and every projected Elasticsearch `_id` are derived
-  from the thing they name. Reprocessing overwrites rather than duplicates,
-  which is what makes replay and restore safe.
-- **Pipeline of pure stages.** `marketplace_warehouse.py` is a sequence of
-  small testable functions orchestrated by one runner; the Spark session is a
-  parameter, not a global.
-- **Ports and adapters at every edge.** `ops/validate.py`, `ops/backup.py` and
-  `ops/es_projector.py` each define a small `Protocol` for the stack and a
-  `Live*` implementation. The default test suite drives them with fakes, which
-  is how it stays offline.
-- **Atomic publish (staging → swap).** Spark writes each mart to `staging`,
-  then one transaction truncates and refills `cache`. Superset sees the last
-  good version or the complete new one, never half of either.
-- **Audit before action.** The frontier, the attempt, the batch run and the
-  micro-batch are all recorded before and after the work, so every claim in
-  this document is checkable against a table.
+## 4. Các pattern
 
-## 8. Configuration
+| Pattern | Chỗ dùng |
+|---|---|
+| Ports & Adapters | `processing/batch/ports.py` (Protocol `ObjectStore`, `AuditRepo`, `QualityRepo`, `CachePublisher`, `LakeIO`), `infra/*`. Logic nhận Protocol; composition root inject bản thật; test inject `processing/batch/memory.py` |
+| Strategy | `ingestion/fetchers/` (`HttpFetcher`, `BrowserFetcher`; sau này `ApiFetcher`), extractor theo site, normalizer Spark theo site |
+| Registry + Factory | `domain/sources.py` (`SourceRegistry`: mã nguồn → `SourceSpec`), `domain/datasets.py` |
+| Template Method | `ingestion/pipeline.py`: các bước thu thập cố định, các bước đổi được inject vào |
+| Pipeline of Stages + State Machine | `processing/batch/stages/`, `runner.py`, `domain/batch_run.py` (ADR-0005) |
+| Repository | frontier, crawl audit, batch audit, quality, cache publisher (sau Protocol) |
+| Decorator | `ingestion/publisher.py` bọc executor của pipeline; `non_decreasing_clock` |
+| Value Object | dataclass `frozen=True`, kiểm bằng `domain/validation.py` |
+| Composition Root | mỗi entrypoint có `bootstrap.py` hoặc `cli.py`; không gọi `from_settings()` trong logic |
 
-`config/settings.py` reads everything from the environment with safe local
-defaults, and `validate_marketplace_settings()` refuses a configuration that
-cannot work — a reconciliation lookback that does not exceed the interval plus
-the settle delay, a projector overlap that does not exceed its interval, a
-currency code that is not ISO-4217.
+## 5. Batch theo stage
 
-Host ports come from `*_HOST_PORT` in `.env`, so a machine whose ports are
-taken needs no override file. Container-side addresses stay literal in
-`docker-compose.yml`: a developer's `.env` holds host-side values such as
-`localhost:9010`, which must never reach a container.
+```
+silver -> marts -> quality -> publish -> promote
+```
 
-`DATA_LAKE_PROFILE` chooses between a local parquet root (tests, dev) and
-MinIO. The Compose services always run against MinIO.
+| Stage | Đọc | Ghi | Trạng thái sau |
+|---|---|---|---|
+| `silver` | Bronze/records (đến `as_of`) | `offer_observations_v2`, `<source>_listing_wide`, `page_context`, `quarantine`, tóm tắt `_runs/<run>/silver.json` (drift, bản trùng) | `SILVER_BUILT` |
+| `marts` | Silver v2, crawl audit (cắt tại `as_of`, bỏ quảng cáo) | 10 mart Gold theo run, `_runs/<run>/marts.json` | `GOLD_WRITTEN` |
+| `quality` | Silver, Gold, audit | kết quả quality, manifest của run | `QUALITY_PASSED`, `QUALITY_FAILED` hoặc `HELD` |
+| `publish` | Gold, manifest | PostgreSQL `cache.marketplace_*` | `PUBLISHED` (hoặc `HELD`) |
+| `promote` | manifest | `current.json` (compare-and-swap) | `PROMOTED` (hoặc `HELD`) |
 
-## 9. Operations
+`publish` đứng trước `promote` để pointer không bao giờ trỏ vào Gold mà cache chưa ghi (ADR-0005). Lệnh:
 
-`scripts/mp.ps1` is the one command. Docker itself (up, down, the Spark jobs)
-is driven from the host; everything that reads or writes the stack runs as
-`python -m ops ...` inside the `ops` container, so it works from any shell.
+```
+python -m ecomdata.processing.batch run --run-id <id> --as-of <ISO> --stage <tên>|--all \
+    [--resume] [--allow-backfill] [--quality-only] [--force] [--silver-since YYYY-MM-DD] [--skip-postgres]
+```
 
-- `mp smoke` runs the whole slice against `stub-source` — it never contacts a
-  live marketplace;
-- `mp validate` is eleven read-only checks over the running stack, each
-  derived from data the stack recorded itself rather than from a wall clock;
-- `mp drill d1 … d10` injects each failure above and asserts what it leaves
-  behind, restoring a passing `validate` before it exits;
-- `mp backup` / `mp restore` copy the stack into a directory and load it into
-  a separate Compose project.
+## 6. Thêm một nguồn mới
 
-See [RUNBOOK.md](RUNBOOK.md).
+1. `ingestion/sources/<site>/extractor.py`: tìm mảng dòng trong phần tải về và `page_context`; không ép kiểu, không chọn trường. `discovery.py` nếu nguồn có danh sách category công khai.
+2. `processing/normalize/sources/<site>.py`: `PAYLOAD_SCHEMA` khai báo đủ các trường đã thấy, `to_wide`, `to_offer_observation`.
+3. Một `SourceSpec` trong `domain/sources.py` (id, URL gốc, loại fetcher `http`/`browser`/`api`, extractor, normalizer, tiền tệ, counter, discovery, danh sách PII, mức politeness tối thiểu) và đăng ký vào `SOURCES`.
+4. Fixture nhỏ (tối đa 5 sản phẩm, đã cắt bớt, không PII) trong `tests/fixtures/sources/<site>/`; test extractor, normalizer, và một dòng trong test parity.
+5. Danh sách category cấu hình (`ingestion/sources/<site>/categories.json`, nằm trong package để image đã cài tìm thấy) nếu chưa có discovery; không cần sửa `ops`, `batch`, `speed`.
 
-## 10. What Phase 8 established, and what it did not
+## 7. Hạ tầng
 
-Established by running it: the four services run unattended and stop
-gracefully; the batch runs against MinIO through `s3a://`; ten failure drills
-pass against the real stack; a backup restores into a fresh project with
-pointer and cache in agreement and a reparse sample `IDENTICAL`.
+| Thành phần | Vị trí |
+|---|---|
+| Image | `docker/python` (`ecommerce/marketplace-python:2`), `docker/spark` (`ecommerce/spark-marketplace:4.0.1-r2`), `docker/crawler-browser` (`ecommerce/crawler-browser:1`, nền Playwright `v1.55.0-noble`), `docker/airflow` (`ecommerce/airflow:3.3.2-r1`) |
+| Compose | `compose/docker-compose.yml` (lõi và profile `crawl`, `crawl-browser`, `speed`, `batch`, `orchestration`, `legacy-scheduler`, `serve`, `ops`, `smoke`), `compose/docker-compose.legacy.yml`, `compose/docker-compose.observability.yml`; `docker-compose.yml` ở gốc include file chính |
+| Môi trường | `env/base.env` + `env/ports.<stack>.env` + `env/<stack>.env`; mỗi stack có project, prefix container và port riêng (`tests/unit/ops/test_compose_isolation.py`) |
+| Phiên bản | `constraints.txt` là nơi duy nhất pin phiên bản chính xác; `pyproject.toml` giữ khoảng phiên bản |
 
-Not established, deliberately:
+## 8. Sinh lại các file sinh tự động
 
-- **no performance number is a Phase 8 result.** Throughput and latency belong
-  to Phase 9, measured on purpose;
-- **"micro-batch duration" is not end-to-end latency.** The change contract
-  carries no processed time and Phase 8 did not add one;
-- **nothing here contacted a live marketplace.** Every Phase 8 run used the
-  stub source.
+| File | Lệnh |
+|---|---|
+| `observability/grafana/dashboards/lambda-logs.json` | `python observability/build_grafana_dashboard.py` |
+| dashboard Kibana (`marketplace_dashboards.ndjson`) | `python observability/build_kibana_demo_dashboard.py` |
+| dashboard Superset `marketplace-batch-gold` | `python observability/build_superset_batch_dashboard.py` |
 
-## 11. Legacy: the Kaggle behavior demo
+## 9. Pipeline Kaggle cũ
 
-The original pipeline over the Kaggle Multi-Category Store dataset is kept as
-a demo and runs only under the `legacy` and `jobs` profiles: `producer.py` →
-Kafka `ecommerce_events` → `speed_layer/speed_layer.py` (Elasticsearch, Redis)
-and `batch_layer/warehouse_job.py` (Bronze → Silver → a star schema and marts
-→ `cache`), plus `batch_layer/ml_job.py` for a revenue forecast and anomaly
-detection. Its data model is in [DATA_MODEL.md](DATA_MODEL.md) section 9.
-
-It pins `apache/spark:3.5.1` in `docker/spark-warehouse/Dockerfile`. That pin
-does **not** apply to the marketplace branch, which uses
-`ecommerce/spark-marketplace:4.0.1` to match pyspark 4.0.4. The two images
-exist side by side on purpose.
+`legacy/kaggle/` giữ producer, speed layer 3.5.1, warehouse job, ML, serving và notebook. Chạy bằng `docker compose -f compose/docker-compose.yml -f compose/docker-compose.legacy.yml --profile legacy up`. Test nằm ở `tests/legacy/` (marker `legacy`).

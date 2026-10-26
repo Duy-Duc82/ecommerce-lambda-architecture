@@ -1,0 +1,241 @@
+@startuml marketplace_star_schema
+' Phase 10 marketplace star schema (docs/DATA_MODEL.md section 4).
+' Render with https://www.plantuml.com/plantuml or the VS Code "PlantUML" extension.
+' PK = primary key, FK = foreign key, SCD2 = versioned attribute.
+
+hide circle
+skinparam linetype ortho
+skinparam shadowing false
+skinparam class {
+  BackgroundColor<<dimension>> #E2EFEB
+  BorderColor<<dimension>> #1F6F62
+  BackgroundColor<<fact>> #FBEFD6
+  BorderColor<<fact>> #946000
+  BackgroundColor<<bridge>> #EEF1EF
+}
+
+entity "dim_date" as dim_date <<dimension>> {
+  * date_key : int <<PK>> yyyymmdd
+  --
+  full_date : date <<UK>>
+  day_of_week : smallint
+  day_name : varchar
+  week_of_year : smallint (ISO)
+  month : smallint
+  month_name : varchar
+  quarter : smallint
+  year : smallint
+  is_weekend : boolean
+  is_double_day_sale : boolean
+  is_vn_holiday : boolean
+}
+
+entity "dim_marketplace" as dim_marketplace <<dimension>> {
+  * marketplace_key : bigint <<PK>>
+  --
+  marketplace_code : varchar <<UK>>
+  marketplace_id : varchar
+  marketplace_name : varchar
+  platform_type : varchar
+  country : char(2)
+  default_currency : char(3)
+  first_crawled_at : timestamptz
+}
+
+entity "dim_seller" as dim_seller <<dimension>> {
+  * seller_key : bigint <<PK>>
+  --
+  seller_id : varchar <<UK>>
+  marketplace_key : bigint <<FK>>
+  first_seen_at : timestamptz
+  last_seen_at : timestamptz
+  observed_listing_count : int
+}
+
+entity "dim_category" as dim_category <<dimension>> {
+  * category_key : bigint <<PK>>
+  --
+  marketplace_key : bigint <<FK>>
+  category_id : varchar <<UK with marketplace>>
+  category_name : varchar
+  category_slug : varchar
+  parent_key : bigint <<FK>>
+  level : smallint
+  full_path : varchar
+  is_leaf : boolean
+}
+
+entity "bridge_category_ancestry" as bridge <<bridge>> {
+  * ancestor_key : bigint <<PK,FK>>
+  * descendant_key : bigint <<PK,FK>>
+  --
+  depth : smallint (0 = itself)
+}
+
+entity "dim_product_listing" as dim_listing <<dimension>> {
+  * listing_key : bigint <<PK>> xxhash64(offer_id, valid_from)
+  --
+  offer_key : bigint (durable)
+  offer_id : varchar
+  marketplace_key : bigint <<FK>>
+  platform_listing_id : varchar
+  product_title : text <<SCD2>>
+  brand : varchar <<SCD2>>
+  category_key : bigint <<FK, SCD2>>
+  seller_key : bigint <<FK, SCD2>>
+  source_url : text (SCD1)
+  valid_from : timestamptz
+  valid_to : timestamptz
+  is_current : boolean
+  version : int
+}
+
+entity "dim_offer_status" as dim_status <<dimension>> {
+  * offer_status_key : smallint <<PK>>
+  --
+  availability : varchar
+  active_status : varchar
+  has_discount : boolean
+  has_rating : boolean
+}
+
+entity "fact_offer_observation" as f_obs <<fact>> {
+  * observation_id : varchar <<PK>> degenerate
+  --
+  date_key : int <<FK>>
+  marketplace_key : bigint <<FK>>
+  listing_key : bigint <<FK>> version at observed_at
+  offer_key : bigint (durable)
+  seller_key : bigint <<FK>>
+  category_key : bigint <<FK>>
+  offer_status_key : smallint <<FK>>
+  observed_at / fetched_at : timestamptz
+  currency : char(3)
+  current_price / list_price / shipping_price : numeric
+  discount_amount / discount_percent : numeric
+  rating_value / rating_scale : numeric
+  rating_count / review_count / sold_count : bigint
+  ranking_position : int
+  crawl_run_id / raw_uri / raw_sha256 / adapter_version
+}
+
+entity "fact_price_snapshot_daily" as f_snap <<fact>> {
+  * date_key : int <<PK,FK>>
+  * offer_key : bigint <<PK>> durable
+  * currency : char(3) <<PK>>
+  --
+  listing_key : bigint <<FK>> at the day's last sighting
+  marketplace_key : bigint <<FK>>
+  seller_key : bigint <<FK>>
+  category_key : bigint <<FK>>
+  offer_status_key : smallint <<FK>>
+  first_observed_at / last_observed_at : timestamptz
+  last_observation_id : varchar
+  open_price / close_price : numeric
+  min_price / max_price / avg_price : numeric
+  first_list_price / last_list_price : numeric
+  observation_count : int
+  distinct_price_count : int
+  in_stock_ratio : numeric
+}
+
+entity "fact_price_change" as f_change <<fact>> {
+  * observation_id : varchar <<PK>>
+  --
+  previous_observation_id : varchar
+  date_key : int <<FK>>
+  marketplace_key : bigint <<FK>>
+  listing_key : bigint <<FK>>
+  offer_key : bigint (durable)
+  seller_key : bigint <<FK>>
+  category_key : bigint <<FK>>
+  changed_at / previous_observed_at : timestamptz
+  currency / previous_currency : char(3)
+  old_price / new_price : numeric
+  price_delta / pct_change : numeric
+  minutes_since_previous : numeric
+  direction : varchar
+  is_large_drop : boolean
+  change_rule_version : varchar
+}
+
+entity "fact_counter_daily" as f_counter <<fact>> {
+  * date_key : int <<PK,FK>>
+  * offer_key : bigint <<PK>> durable
+  * counter_name : varchar <<PK>>
+  --
+  listing_key : bigint <<FK>> at the day's last sighting
+  marketplace_key : bigint <<FK>>
+  first_value / last_value : bigint
+  raw_delta_sum / valid_delta_sum : bigint
+  valid_ / invalid_transition_count : int
+  elapsed_seconds_valid : bigint
+  velocity_proxy_per_hour : double
+  counter_reset_or_invalid : boolean
+  invalid_reasons_json : text
+  counter_rule_version : varchar
+}
+
+entity "fact_crawl_attempt" as f_crawl <<fact>> {
+  * attempt_id : bigint <<PK>>
+  --
+  date_key : int <<FK>>
+  marketplace_key : bigint <<FK>>
+  category_key : bigint <<FK>> -1 if not a category page
+  crawl_run_id / task_id : varchar
+  resource_type : varchar
+  attempt_number : int
+  started_at / completed_at : timestamptz
+  status : varchar
+  http_status : int
+  error_kind : varchar
+  latency_ms : bigint
+  raw_bytes : bigint
+  parsed_count / rejected_count : bigint
+  raw_uri : text
+}
+
+' dimension-to-dimension
+dim_marketplace ||--o{ dim_seller
+dim_marketplace ||--o{ dim_category
+dim_marketplace ||--o{ dim_listing
+dim_category ||--o{ dim_category : parent
+dim_category ||--o{ bridge : ancestor
+dim_category ||--o{ bridge : descendant
+dim_category ||--o{ dim_listing
+dim_seller ||--o{ dim_listing
+
+' fact_offer_observation
+dim_date ||--o{ f_obs
+dim_marketplace ||--o{ f_obs
+dim_listing ||--o{ f_obs
+dim_seller ||--o{ f_obs
+dim_category ||--o{ f_obs
+dim_status ||--o{ f_obs
+
+' fact_price_snapshot_daily
+dim_date ||--o{ f_snap
+dim_marketplace ||--o{ f_snap
+dim_listing ||--o{ f_snap
+dim_seller ||--o{ f_snap
+dim_category ||--o{ f_snap
+dim_status ||--o{ f_snap
+
+' fact_price_change
+dim_date ||--o{ f_change
+dim_marketplace ||--o{ f_change
+dim_listing ||--o{ f_change
+dim_seller ||--o{ f_change
+dim_category ||--o{ f_change
+
+' fact_counter_daily
+dim_date ||--o{ f_counter
+dim_marketplace ||--o{ f_counter
+dim_listing ||--o{ f_counter
+
+' fact_crawl_attempt
+dim_date ||--o{ f_crawl
+dim_marketplace ||--o{ f_crawl
+dim_category ||--o{ f_crawl
+
+@enduml

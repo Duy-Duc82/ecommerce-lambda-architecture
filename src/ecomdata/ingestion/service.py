@@ -1,0 +1,243 @@
+"""The long-running crawl service: lease, fetch, store raw, parse, publish.
+
+Phase 8 plan section 6.1. ``CrawlWorker.run_once`` owns one polling cycle and
+never sleeps; this module owns the loop around it, the wait between cycles,
+graceful shutdown and the one step Phase 3 left out — publishing every parsed
+observation to ``marketplace.observations.v1``.
+
+The loop decides only *when* to work. Every timestamp that reaches an
+observation, an audit row or a crawl run ID still comes from the injected
+clock and the task itself, never from the loop.
+
+Importing this module opens nothing: PostgreSQL, Kafka and the HTTP adapter
+are all built inside :func:`main`.
+"""
+
+from __future__ import annotations
+
+import argparse
+import dataclasses
+import json
+import os
+import random
+import socket
+from collections.abc import Callable, Sequence
+from datetime import datetime
+from decimal import Decimal
+from typing import Any
+
+from ecomdata.domain.acquisition import AcquisitionStatus, RecordPublishError
+from ecomdata.domain.identity import deterministic_id
+from ecomdata.domain.records import RecordKind
+
+# Re-exported: the crawl service was their first home, and callers import them here.
+from ecomdata.infra.lifecycle import StopSignal, install_signal_handlers  # noqa: F401
+from ecomdata.ingestion.scheduling import CrawlTask
+
+
+def crawl_run_id_for(task: CrawlTask) -> str:
+    """One crawl run per attempt.
+
+    The attempt number separates retries; the lease expiry separates a
+    re-lease after a crash, which can carry the same attempt number. A reused
+    run ID would merge two attempts' parsed counts in Phase 7 check 8.
+    """
+    return deterministic_id("crawl_run", task.task_id, task.attempts, task.lease_expires_at)
+
+
+def default_worker_id() -> str:
+    # The PID keeps two processes on one host from sharing a lease owner,
+    # which would let one complete a task the other is still working on.
+    return f"{socket.gethostname()}:{os.getpid()}"
+
+
+def publishing_executor(inner: Callable[..., Any], *, publish: Callable[[Any], Any]) -> Callable[..., Any]:
+    """Wrap an acquisition executor so every extracted listing row is published.
+
+    ``inner`` keeps the raw-first order (raw Bronze, then records in Bronze) and
+    this adds the step after it. Rows are published one at a time, each waiting
+    for its acknowledgement, in page order, so a failure at position ``k`` means
+    exactly ``k`` rows are in Kafka. A failed acquisition is returned untouched
+    and publishes nothing.
+    """
+
+    def execute(*, task: CrawlTask, crawl_run_id: str):
+        report = inner(task=task, crawl_run_id=crawl_run_id)
+        if report.status is AcquisitionStatus.FAILED:
+            return report
+        acknowledged = 0
+        for record in report.records:
+            if record.record_kind is not RecordKind.LISTING_ROW:
+                continue
+            try:
+                publish(record)
+            except Exception as error:
+                raise RecordPublishError(report=report, acknowledged=acknowledged, cause=error) from error
+            acknowledged += 1
+        return report
+
+    return execute
+
+
+def run_service(
+    worker: Any,
+    *,
+    stop: Any,
+    idle_seconds: float,
+    poll_seconds: float,
+    max_cycles: int | None = None,
+    log: Callable[[str], None] = print,
+    run_id_for: Callable[[CrawlTask], str] = crawl_run_id_for,
+    beat: Callable[[], None] = lambda: None,
+) -> int:
+    """Run cycles until stopped, or until ``max_cycles``; return the cycle count.
+
+    A stop request is honoured between cycles, never inside one: the cycle
+    leased its tasks up front, and a task leased but never started would sit
+    ``LEASED`` until its lease expired.
+    """
+    if idle_seconds <= 0:
+        raise ValueError("idle_seconds must be positive")
+    if poll_seconds <= 0:
+        raise ValueError("poll_seconds must be positive")
+    if max_cycles is not None and max_cycles <= 0:
+        raise ValueError("max_cycles must be positive")
+    cycles = 0
+    while not stop.is_set():
+        beat()
+        result = worker.run_once(crawl_run_id_for=run_id_for)
+        cycles += 1
+        log(json.dumps({"event": "crawl_cycle", "cycle": cycles, **dataclasses.asdict(result)}, sort_keys=True))
+        if max_cycles is not None and cycles >= max_cycles:
+            break
+        if stop.is_set():
+            break
+        if stop.wait(idle_seconds if result.leased == 0 else poll_seconds):
+            break
+    return cycles
+
+
+def non_decreasing_clock(source: Callable[[], datetime]) -> Callable[[], datetime]:
+    """Wrap a wall clock so that no reading is earlier than the one before it.
+
+    The Docker (WSL2) VM clock steps backwards when it resyncs with the host
+    (seen 2026-10-12: twice in 90 minutes). A step between an attempt's
+    ``started_at`` and ``completed_at`` broke the acquisition report's and the
+    attempt audit's ordering checks, and the audit error killed the worker
+    process mid-task. After a backward step this clock holds the last reading
+    until the wall clock passes it again, so timestamps inside one process
+    never go backwards; for that interval they run behind real time by at most
+    the size of the step.
+    """
+    last: list[datetime | None] = [None]
+
+    def clock() -> datetime:
+        now = source()
+        if last[0] is not None and now < last[0]:
+            return last[0]
+        last[0] = now
+        return now
+
+    return clock
+
+
+def build_worker(
+    *,
+    runtime: Any,
+    worker_id: str,
+    publish: Callable[[Any], Any],
+    connection_factory: Callable[[], Any],
+    writer: Callable[[str, str, bytes], str],
+    crawl: Any,
+    marketplace_ids: Sequence[str] | None = None,
+):
+    """Wire one crawl worker from the crawl settings (``CrawlSettings``)."""
+    from ecomdata.ingestion.audit import CrawlAuditRepository
+    from ecomdata.ingestion.frontier import PostgresCrawlFrontier
+    from ecomdata.ingestion.runtime import listing_page_executor
+    from ecomdata.ingestion.scheduling import RetryPolicy
+    from ecomdata.ingestion.worker import CrawlWorker
+
+    return CrawlWorker(
+        frontier=PostgresCrawlFrontier(connection_factory),
+        audit=CrawlAuditRepository(connection_factory),
+        executor=publishing_executor(listing_page_executor(runtime, writer=writer), publish=publish),
+        clock=runtime.clock,
+        policy=RetryPolicy(
+            crawl.max_attempts, crawl.retry_base_seconds, crawl.retry_max_seconds, crawl.retry_jitter_ratio
+        ),
+        worker_id=worker_id,
+        lease_seconds=crawl.lease_seconds,
+        batch_size=crawl.worker_batch_size,
+        circuit_threshold=crawl.circuit_failure_threshold,
+        circuit_open_seconds=crawl.circuit_open_seconds,
+        jitter=lambda: Decimal(str(random.random())),
+        cadence_minutes=crawl.cadence_minutes,
+        marketplace_ids=marketplace_ids,
+    )
+
+
+def selected_sources(registry: Any, sources: Sequence[str] | None, source_list: str | None) -> tuple[str, ...]:
+    """The source codes named by ``--source`` and ``--sources`` (every source when none is named)."""
+    named = list(sources or [])
+    if source_list:
+        named += [code.strip() for code in source_list.split(",") if code.strip()]
+    return tuple(dict.fromkeys(registry.get(code).code for code in named)) or registry.codes()
+
+
+def main(argv: list[str] | None = None) -> None:
+    parser = argparse.ArgumentParser(description="Long-running marketplace crawl service")
+    parser.add_argument(
+        "--source", action="append", dest="sources", help="source code to crawl (repeatable); default: every source"
+    )
+    parser.add_argument("--sources", dest="source_list", default=None, help="comma-separated source codes")
+    parser.add_argument(
+        "--worker-id", default=None, help="lease owner; defaults to CRAWL_SERVICE_WORKER_ID, then <hostname>:<pid>"
+    )
+    parser.add_argument("--max-cycles", type=int, default=None, help="stop after N cycles (tests and smoke only)")
+    args = parser.parse_args(argv)
+
+    from ecomdata.domain.sources import SOURCES
+    from ecomdata.infra.heartbeat import heartbeat
+    from ecomdata.infra.kafka import create_producer
+    from ecomdata.infra.object_store import object_store_for
+    from ecomdata.infra.postgres import connection_factory
+    from ecomdata.ingestion.bootstrap import build_runtime
+    from ecomdata.ingestion.publisher import publish_record
+    from ecomdata.settings import load_settings
+
+    codes = selected_sources(SOURCES, args.sources, args.source_list)
+    settings = load_settings(dotenv=True)
+    stop = StopSignal()
+    install_signal_handlers(stop)
+    producer = create_producer(settings.kafka.bootstrap_servers)
+    ack = settings.kafka.producer_ack_timeout_seconds
+    runtime = build_runtime(settings, codes)
+    try:
+        worker = build_worker(
+            runtime=runtime,
+            worker_id=args.worker_id or settings.crawl.service_worker_id or default_worker_id(),
+            publish=lambda record: publish_record(producer, record, ack_timeout_seconds=ack),
+            connection_factory=connection_factory(settings.postgres),
+            writer=object_store_for(settings.storage).put,
+            crawl=settings.crawl,
+            marketplace_ids=[SOURCES.get(code).marketplace_id for code in codes],
+        )
+        run_service(
+            worker,
+            stop=stop,
+            idle_seconds=settings.crawl.service_idle_seconds,
+            poll_seconds=settings.crawl.worker_poll_seconds,
+            max_cycles=args.max_cycles,
+            log=lambda line: print(line, flush=True),
+            beat=heartbeat(settings.service.heartbeat_file),
+        )
+    finally:
+        # Closing the runtime also closes the browser session, once, on the stop signal.
+        runtime.close()
+        producer.flush()
+        producer.close()
+
+
+if __name__ == "__main__":
+    main()

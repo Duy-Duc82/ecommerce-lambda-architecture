@@ -1,7 +1,7 @@
 """Phase 8 plan section 10: failure drills D1-D11 (test 32), marker `drill`.
 
 Each drill runs in its own process, so the lake profile below is in effect
-before config.settings is first imported; the rest of the host-side
+before ecomdata.settings is first imported; the rest of the host-side
 addresses come from .env. The stack must already have passed `mp smoke`:
 a drill fails, never skips, when its baseline validate does not pass.
 """
@@ -25,7 +25,7 @@ pytestmark = pytest.mark.drill
 @pytest.mark.parametrize("name", ["d1", "d2", "d3", "d4", "d5", "d6", "d7", "d8", "d9", "d10", "d11"])
 def test_drill(name):
     env = {**os.environ, "DATA_LAKE_PROFILE": "minio"}
-    result = subprocess.run([sys.executable, "-m", "ops.drills", name], cwd=ROOT, env=env,
+    result = subprocess.run([sys.executable, "-m", "ecomdata.ops.drills", name], cwd=ROOT, env=env,
                             capture_output=True, text=True, timeout=5400)
     record = json.loads((ROOT / "data" / "ops" / "drills" / f"{name}.json").read_text(encoding="utf-8"))
 

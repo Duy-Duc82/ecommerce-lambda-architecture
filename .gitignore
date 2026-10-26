@@ -16,3 +16,7 @@ docker-compose.override.yml
 
 # ops validate/smoke reports (scripts/mp.ps1)
 data/ops/
+*.egg-info/
+.ruff_cache/
+.import_linter_cache/
+.import_linter_cache/

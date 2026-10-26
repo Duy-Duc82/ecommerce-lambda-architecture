@@ -1,0 +1,220 @@
+erDiagram
+    DIM_MARKETPLACE ||--o{ DIM_SELLER : hosts
+    DIM_MARKETPLACE ||--o{ DIM_CATEGORY : owns
+    DIM_MARKETPLACE ||--o{ DIM_PRODUCT_LISTING : lists
+    DIM_CATEGORY ||--o{ DIM_CATEGORY : parent_of
+    DIM_CATEGORY ||--o{ BRIDGE_CATEGORY_ANCESTRY : ancestor
+    DIM_CATEGORY ||--o{ BRIDGE_CATEGORY_ANCESTRY : descendant
+    DIM_CATEGORY ||--o{ DIM_PRODUCT_LISTING : version_category
+    DIM_SELLER ||--o{ DIM_PRODUCT_LISTING : version_seller
+
+    DIM_DATE ||--o{ FACT_OFFER_OBSERVATION : observed_on
+    DIM_MARKETPLACE ||--o{ FACT_OFFER_OBSERVATION : listed_on
+    DIM_PRODUCT_LISTING ||--o{ FACT_OFFER_OBSERVATION : version_seen
+    DIM_SELLER ||--o{ FACT_OFFER_OBSERVATION : sold_by
+    DIM_CATEGORY ||--o{ FACT_OFFER_OBSERVATION : classified_as
+    DIM_OFFER_STATUS ||--o{ FACT_OFFER_OBSERVATION : status
+
+    DIM_DATE ||--o{ FACT_PRICE_SNAPSHOT_DAILY : day
+    DIM_MARKETPLACE ||--o{ FACT_PRICE_SNAPSHOT_DAILY : listed_on
+    DIM_PRODUCT_LISTING ||--o{ FACT_PRICE_SNAPSHOT_DAILY : version_at_close
+    DIM_SELLER ||--o{ FACT_PRICE_SNAPSHOT_DAILY : sold_by
+    DIM_CATEGORY ||--o{ FACT_PRICE_SNAPSHOT_DAILY : classified_as
+    DIM_OFFER_STATUS ||--o{ FACT_PRICE_SNAPSHOT_DAILY : status_at_close
+
+    DIM_DATE ||--o{ FACT_PRICE_CHANGE : changed_on
+    DIM_MARKETPLACE ||--o{ FACT_PRICE_CHANGE : listed_on
+    DIM_PRODUCT_LISTING ||--o{ FACT_PRICE_CHANGE : version_seen
+    DIM_SELLER ||--o{ FACT_PRICE_CHANGE : sold_by
+    DIM_CATEGORY ||--o{ FACT_PRICE_CHANGE : classified_as
+
+    DIM_DATE ||--o{ FACT_COUNTER_DAILY : day
+    DIM_MARKETPLACE ||--o{ FACT_COUNTER_DAILY : listed_on
+    DIM_PRODUCT_LISTING ||--o{ FACT_COUNTER_DAILY : version_at_close
+
+    DIM_DATE ||--o{ FACT_CRAWL_ATTEMPT : requested_on
+    DIM_MARKETPLACE ||--o{ FACT_CRAWL_ATTEMPT : source
+    DIM_CATEGORY ||--o{ FACT_CRAWL_ATTEMPT : target_page
+
+    DIM_DATE {
+        int date_key PK "yyyymmdd, -1 unknown"
+        date full_date UK
+        smallint day_of_week
+        string day_name
+        smallint week_of_year "ISO week"
+        smallint month
+        string month_name
+        smallint quarter
+        smallint year
+        boolean is_weekend
+        boolean is_double_day_sale "1/1 ... 12/12"
+        boolean is_vn_holiday
+    }
+    DIM_MARKETPLACE {
+        bigint marketplace_key PK
+        string marketplace_code UK "tiki"
+        string marketplace_id
+        string marketplace_name
+        string platform_type
+        string country
+        string default_currency
+        timestamp first_crawled_at
+    }
+    DIM_SELLER {
+        bigint seller_key PK
+        string seller_id UK "already marketplace-scoped"
+        bigint marketplace_key FK
+        timestamp first_seen_at
+        timestamp last_seen_at
+        int observed_listing_count
+    }
+    DIM_CATEGORY {
+        bigint category_key PK
+        bigint marketplace_key FK
+        string category_id "UK with marketplace"
+        string category_name "nullable"
+        string category_slug "nullable"
+        bigint parent_key FK
+        smallint level "root = 1"
+        string full_path "1/2/1789/1795"
+        boolean is_leaf
+    }
+    BRIDGE_CATEGORY_ANCESTRY {
+        bigint ancestor_key PK, FK
+        bigint descendant_key PK, FK
+        smallint depth "0 = the node itself"
+    }
+    DIM_PRODUCT_LISTING {
+        bigint listing_key PK "xxhash64(offer_id, valid_from)"
+        bigint offer_key "durable: xxhash64(offer_id)"
+        string offer_id "UK with valid_from"
+        bigint marketplace_key FK
+        string platform_listing_id
+        string product_title "SCD2"
+        string brand "SCD2, nullable"
+        bigint category_key FK "SCD2"
+        bigint seller_key FK "SCD2"
+        string source_url "SCD1"
+        timestamp valid_from
+        timestamp valid_to "exclusive, 9999-12-31 if current"
+        boolean is_current
+        int version
+    }
+    DIM_OFFER_STATUS {
+        smallint offer_status_key PK
+        string availability
+        string active_status
+        boolean has_discount
+        boolean has_rating
+    }
+    FACT_OFFER_OBSERVATION {
+        string observation_id PK "degenerate"
+        int date_key FK
+        bigint marketplace_key FK
+        bigint listing_key FK "version valid at observed_at"
+        bigint offer_key "durable"
+        bigint seller_key FK
+        bigint category_key FK
+        smallint offer_status_key FK
+        timestamp observed_at
+        timestamp fetched_at
+        string currency "degenerate"
+        decimal current_price
+        decimal list_price
+        decimal shipping_price
+        decimal discount_amount
+        decimal discount_percent
+        decimal rating_value
+        decimal rating_scale
+        bigint rating_count
+        bigint review_count
+        bigint sold_count
+        int ranking_position
+        string crawl_run_id "lineage"
+        string raw_uri "lineage"
+        string raw_sha256 "lineage"
+        string adapter_version "lineage"
+    }
+    FACT_PRICE_SNAPSHOT_DAILY {
+        int date_key PK, FK
+        bigint offer_key PK "durable"
+        string currency PK
+        bigint listing_key FK "version at the day's last sighting"
+        bigint marketplace_key FK
+        bigint seller_key FK
+        bigint category_key FK
+        smallint offer_status_key FK
+        timestamp first_observed_at
+        timestamp last_observed_at
+        string last_observation_id
+        decimal open_price
+        decimal close_price
+        decimal min_price
+        decimal max_price
+        decimal avg_price
+        decimal first_list_price
+        decimal last_list_price
+        int observation_count
+        int distinct_price_count
+        decimal in_stock_ratio
+    }
+    FACT_PRICE_CHANGE {
+        string observation_id PK "the sighting that showed the new price"
+        string previous_observation_id
+        int date_key FK
+        bigint marketplace_key FK
+        bigint listing_key FK
+        bigint offer_key "durable"
+        bigint seller_key FK
+        bigint category_key FK
+        timestamp changed_at "when we saw it"
+        timestamp previous_observed_at
+        string currency
+        string previous_currency
+        decimal old_price
+        decimal new_price
+        decimal price_delta
+        decimal pct_change
+        decimal minutes_since_previous
+        string direction "UP or DOWN"
+        boolean is_large_drop
+        string change_rule_version
+    }
+    FACT_COUNTER_DAILY {
+        int date_key PK, FK
+        bigint offer_key PK "durable"
+        string counter_name PK
+        bigint listing_key FK "version at the day's last sighting"
+        bigint marketplace_key FK
+        bigint first_value
+        bigint last_value
+        bigint raw_delta_sum
+        bigint valid_delta_sum
+        int valid_transition_count
+        int invalid_transition_count
+        bigint elapsed_seconds_valid
+        double velocity_proxy_per_hour
+        boolean counter_reset_or_invalid
+        string invalid_reasons_json
+        string counter_rule_version
+    }
+    FACT_CRAWL_ATTEMPT {
+        bigint attempt_id PK "audit sequence"
+        int date_key FK
+        bigint marketplace_key FK
+        bigint category_key FK "-1 if not a category page"
+        string crawl_run_id
+        string task_id
+        string resource_type
+        int attempt_number
+        timestamp started_at
+        timestamp completed_at
+        string status
+        int http_status
+        string error_kind
+        bigint latency_ms
+        bigint raw_bytes
+        bigint parsed_count
+        bigint rejected_count
+        string raw_uri "lineage"
+    }

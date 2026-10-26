@@ -15,8 +15,9 @@ orders, no payments, no carts, no users, and the model never invents them.
 > keeps the raw delta *and* the validity verdict side by side, and never
 > calls the result demand.
 
-The Kaggle behavior model the project started from is still here, in
-section 9, and belongs to the `legacy` profile only.
+Section 4 is the Gold model: a star schema (dimensions and facts) and the
+serving marts built from it. The Kaggle behavior model the project started
+from is still here, in section 9, and belongs to the `legacy` profile only.
 
 ## 1. The three frozen contracts
 
@@ -100,6 +101,8 @@ not be decoded or failed its contract is quarantined.
 | Bronze | `bronze/marketplace/raw/marketplace=<m>/observed_date=<d>/hour=<h>/crawl_run_id=<r>/raw_artifact_id=<a>/{body.bin,metadata.json}` | append-only; never rewritten |
 | Silver | `silver/marketplace/offer_observations/marketplace=<m>/observed_date=<d>/observation_id=<o>.json` | one object per observation, idempotent by path |
 | Silver quarantine | `silver/quarantine/offer_observations/observed_date=<d>/source_topic=<t>/partition=<p>/offset=<n>.json` | append-only |
+| Silver, compacted (Phase 10) | `silver/marketplace/offer_observations_delta/observed_date=<d>/hour=<h>/` | Delta; rebuilt from the JSON objects, which stay the original |
+| Gold star (Phase 10) | `gold/marketplace/dw/<table>/` | Delta; `MERGE` on the primary key, every version kept |
 | Gold run | `gold/marketplace/runs/run_id=<run>/<dataset>/...` | one directory per run; never overwritten |
 | Gold manifest | `gold/marketplace/manifests/run_id=<run>/manifest.json` | one per run, refused runs included |
 | Gold pointer | `gold/marketplace/current.json` | replaced whole, by promotion only |
@@ -138,10 +141,494 @@ replay can be checked by comparing files. Wall-clock times live in
 `current.json` is byte-identical to the run manifest it promoted. One write
 replaces the whole document, so a reader never observes a torn pointer.
 
-## 4. Serving marts — `cache.marketplace_*`
+**Manifest v2 (Phase 10).** The star in `gold/marketplace/dw` is shared by
+all runs rather than written per run, so a manifest alone no longer pins what a
+run read. Version 2 adds, for each `dw` table, its Delta table version at the
+time of the run, and the observation watermark (`max(observed_at)` loaded).
+A replay reads the star at those versions. Readers keep accepting v1.
+
+## 4. Gold: the dimensional model and the serving marts
+
+> **Status.** This section is the Phase 10 design
+> ([plan](PLAN_PHASE10_DIMENSIONAL_MODEL.md)), approved in P0 and built in
+> P1–P5. Until then the batch builds the ten marts of 4.9 straight from Silver
+> (`batch_layer/marketplace_marts.py`), and the mart tables in 4.9 describe
+> what runs today. The column-level definitions live in
+> [`model/star-schema.dbml`](model/star-schema.dbml); the PostgreSQL DDL in
+> [`model/star-schema.sql`](model/star-schema.sql).
+
+### 4.1 Why a dimensional layer
+
+Before Phase 10 the Gold zone was ten aggregate tables joined to each other on
+natural keys. Each one fixed its grain inside its own code, nothing kept the
+history of a listing's descriptive attributes, and every run reprocessed all of
+Silver. A title, brand or seller that changed was simply overwritten in
+`offer_current`, so the question "what was this listing called when it cost
+that much" had no answer.
+
+Phase 10 puts a Kimball star between Silver and the marts:
+
+```
+Silver observations ─┐
+                     ├─► dimensions ─► facts ─► marts (cache.marketplace_*)
+audit crawl tables  ─┘        (dw.*, Delta)        (run-scoped, Postgres)
+```
+
+Every mart is then a query over facts and dimensions, and a grain, a key or a
+history rule is written down once, here, instead of once per mart.
+
+### 4.2 Entity-relationship diagram
+
+```mermaid
+erDiagram
+    DIM_MARKETPLACE ||--o{ DIM_SELLER : hosts
+    DIM_MARKETPLACE ||--o{ DIM_CATEGORY : owns
+    DIM_MARKETPLACE ||--o{ DIM_PRODUCT_LISTING : lists
+    DIM_CATEGORY ||--o{ DIM_CATEGORY : parent_of
+    DIM_CATEGORY ||--o{ BRIDGE_CATEGORY_ANCESTRY : ancestor
+    DIM_CATEGORY ||--o{ BRIDGE_CATEGORY_ANCESTRY : descendant
+    DIM_CATEGORY ||--o{ DIM_PRODUCT_LISTING : version_category
+    DIM_SELLER ||--o{ DIM_PRODUCT_LISTING : version_seller
+
+    DIM_DATE ||--o{ FACT_OFFER_OBSERVATION : observed_on
+    DIM_MARKETPLACE ||--o{ FACT_OFFER_OBSERVATION : listed_on
+    DIM_PRODUCT_LISTING ||--o{ FACT_OFFER_OBSERVATION : version_seen
+    DIM_SELLER ||--o{ FACT_OFFER_OBSERVATION : sold_by
+    DIM_CATEGORY ||--o{ FACT_OFFER_OBSERVATION : classified_as
+    DIM_OFFER_STATUS ||--o{ FACT_OFFER_OBSERVATION : status
+
+    DIM_DATE ||--o{ FACT_PRICE_SNAPSHOT_DAILY : day
+    DIM_MARKETPLACE ||--o{ FACT_PRICE_SNAPSHOT_DAILY : listed_on
+    DIM_PRODUCT_LISTING ||--o{ FACT_PRICE_SNAPSHOT_DAILY : version_at_close
+    DIM_SELLER ||--o{ FACT_PRICE_SNAPSHOT_DAILY : sold_by
+    DIM_CATEGORY ||--o{ FACT_PRICE_SNAPSHOT_DAILY : classified_as
+    DIM_OFFER_STATUS ||--o{ FACT_PRICE_SNAPSHOT_DAILY : status_at_close
+
+    DIM_DATE ||--o{ FACT_PRICE_CHANGE : changed_on
+    DIM_MARKETPLACE ||--o{ FACT_PRICE_CHANGE : listed_on
+    DIM_PRODUCT_LISTING ||--o{ FACT_PRICE_CHANGE : version_seen
+    DIM_SELLER ||--o{ FACT_PRICE_CHANGE : sold_by
+    DIM_CATEGORY ||--o{ FACT_PRICE_CHANGE : classified_as
+
+    DIM_DATE ||--o{ FACT_COUNTER_DAILY : day
+    DIM_MARKETPLACE ||--o{ FACT_COUNTER_DAILY : listed_on
+    DIM_PRODUCT_LISTING ||--o{ FACT_COUNTER_DAILY : version_at_close
+
+    DIM_DATE ||--o{ FACT_CRAWL_ATTEMPT : requested_on
+    DIM_MARKETPLACE ||--o{ FACT_CRAWL_ATTEMPT : source
+    DIM_CATEGORY ||--o{ FACT_CRAWL_ATTEMPT : target_page
+
+    DIM_DATE {
+        int date_key PK "yyyymmdd, -1 unknown"
+        date full_date UK
+        smallint day_of_week
+        string day_name
+        smallint week_of_year "ISO week"
+        smallint month
+        string month_name
+        smallint quarter
+        smallint year
+        boolean is_weekend
+        boolean is_double_day_sale "1/1 ... 12/12"
+        boolean is_vn_holiday
+    }
+    DIM_MARKETPLACE {
+        bigint marketplace_key PK
+        string marketplace_code UK "tiki"
+        string marketplace_id
+        string marketplace_name
+        string platform_type
+        string country
+        string default_currency
+        timestamp first_crawled_at
+    }
+    DIM_SELLER {
+        bigint seller_key PK
+        string seller_id UK "already marketplace-scoped"
+        bigint marketplace_key FK
+        timestamp first_seen_at
+        timestamp last_seen_at
+        int observed_listing_count
+    }
+    DIM_CATEGORY {
+        bigint category_key PK
+        bigint marketplace_key FK
+        string category_id "UK with marketplace"
+        string category_name "nullable"
+        string category_slug "nullable"
+        bigint parent_key FK
+        smallint level "root = 1"
+        string full_path "1/2/1789/1795"
+        boolean is_leaf
+    }
+    BRIDGE_CATEGORY_ANCESTRY {
+        bigint ancestor_key PK, FK
+        bigint descendant_key PK, FK
+        smallint depth "0 = the node itself"
+    }
+    DIM_PRODUCT_LISTING {
+        bigint listing_key PK "xxhash64(offer_id, valid_from)"
+        bigint offer_key "durable: xxhash64(offer_id)"
+        string offer_id "UK with valid_from"
+        bigint marketplace_key FK
+        string platform_listing_id
+        string product_title "SCD2"
+        string brand "SCD2, nullable"
+        bigint category_key FK "SCD2"
+        bigint seller_key FK "SCD2"
+        string source_url "SCD1"
+        timestamp valid_from
+        timestamp valid_to "exclusive, 9999-12-31 if current"
+        boolean is_current
+        int version
+    }
+    DIM_OFFER_STATUS {
+        smallint offer_status_key PK
+        string availability
+        string active_status
+        boolean has_discount
+        boolean has_rating
+    }
+    FACT_OFFER_OBSERVATION {
+        string observation_id PK "degenerate"
+        int date_key FK
+        bigint marketplace_key FK
+        bigint listing_key FK "version valid at observed_at"
+        bigint offer_key "durable"
+        bigint seller_key FK
+        bigint category_key FK
+        smallint offer_status_key FK
+        timestamp observed_at
+        timestamp fetched_at
+        string currency "degenerate"
+        decimal current_price
+        decimal list_price
+        decimal shipping_price
+        decimal discount_amount
+        decimal discount_percent
+        decimal rating_value
+        decimal rating_scale
+        bigint rating_count
+        bigint review_count
+        bigint sold_count
+        int ranking_position
+        string crawl_run_id "lineage"
+        string raw_uri "lineage"
+        string raw_sha256 "lineage"
+        string adapter_version "lineage"
+    }
+    FACT_PRICE_SNAPSHOT_DAILY {
+        int date_key PK, FK
+        bigint offer_key PK "durable"
+        string currency PK
+        bigint listing_key FK "version at the day's last sighting"
+        bigint marketplace_key FK
+        bigint seller_key FK
+        bigint category_key FK
+        smallint offer_status_key FK
+        timestamp first_observed_at
+        timestamp last_observed_at
+        string last_observation_id
+        decimal open_price
+        decimal close_price
+        decimal min_price
+        decimal max_price
+        decimal avg_price
+        decimal first_list_price
+        decimal last_list_price
+        int observation_count
+        int distinct_price_count
+        decimal in_stock_ratio
+    }
+    FACT_PRICE_CHANGE {
+        string observation_id PK "the sighting that showed the new price"
+        string previous_observation_id
+        int date_key FK
+        bigint marketplace_key FK
+        bigint listing_key FK
+        bigint offer_key "durable"
+        bigint seller_key FK
+        bigint category_key FK
+        timestamp changed_at "when we saw it"
+        timestamp previous_observed_at
+        string currency
+        string previous_currency
+        decimal old_price
+        decimal new_price
+        decimal price_delta
+        decimal pct_change
+        decimal minutes_since_previous
+        string direction "UP or DOWN"
+        boolean is_large_drop
+        string change_rule_version
+    }
+    FACT_COUNTER_DAILY {
+        int date_key PK, FK
+        bigint offer_key PK "durable"
+        string counter_name PK
+        bigint listing_key FK "version at the day's last sighting"
+        bigint marketplace_key FK
+        bigint first_value
+        bigint last_value
+        bigint raw_delta_sum
+        bigint valid_delta_sum
+        int valid_transition_count
+        int invalid_transition_count
+        bigint elapsed_seconds_valid
+        double velocity_proxy_per_hour
+        boolean counter_reset_or_invalid
+        string invalid_reasons_json
+        string counter_rule_version
+    }
+    FACT_CRAWL_ATTEMPT {
+        bigint attempt_id PK "audit sequence"
+        int date_key FK
+        bigint marketplace_key FK
+        bigint category_key FK "-1 if not a category page"
+        string crawl_run_id
+        string task_id
+        string resource_type
+        int attempt_number
+        timestamp started_at
+        timestamp completed_at
+        string status
+        int http_status
+        string error_kind
+        bigint latency_ms
+        bigint raw_bytes
+        bigint parsed_count
+        bigint rejected_count
+        string raw_uri "lineage"
+    }
+```
+
+### 4.3 Bus matrix
+
+| Business process \ Dimension | `dim_date` | `dim_marketplace` | `dim_product_listing` | `dim_seller` | `dim_category` | `dim_offer_status` |
+|---|:-:|:-:|:-:|:-:|:-:|:-:|
+| Offer sighting — `fact_offer_observation` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| Daily price — `fact_price_snapshot_daily` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| Price change — `fact_price_change` | ✓ | ✓ | ✓ | ✓ | ✓ | |
+| Public counters — `fact_counter_daily` | ✓ | ✓ | ✓ | | | |
+| Crawling — `fact_crawl_attempt` | ✓ | ✓ | | | ✓ | |
+| Kaggle behaviour — `fact_behavior_event` (section 9) | ✓ | | | | | |
+
+`dim_date` is the only dimension the marketplace star shares with the Kaggle
+star. A Kaggle product (a Russian store, 2019–2020) and a Tiki listing are two
+different populations, so no product, user or category dimension can be
+conformed across them, and the model never draws one fact joining into the
+other.
+
+### 4.4 Dimensions
+
+| Dimension | Natural key | History | Rows (8-hour run of 24/10) |
+|---|---|---|---|
+| `dim_date` | `full_date` | static | one per day of a fixed calendar, 2019-01-01 to 2030-12-31 |
+| `dim_marketplace` | `marketplace_code` | SCD1 | 1 (Tiki) |
+| `dim_seller` | `seller_id` | SCD1 | about 1 155 |
+| `dim_category` | (`marketplace_code`, `category_id`) | SCD1, rebuilt | every node on the 633 observed paths |
+| `bridge_category_ancestry` | (`ancestor_key`, `descendant_key`) | rebuilt | one per node and each of its ancestors, itself included |
+| `dim_product_listing` | (`offer_id`, `valid_from`) | **SCD2** | about 8 530 current versions |
+| `dim_offer_status` | (`availability`, `active_status`, `has_discount`, `has_rating`) | static | 36 |
+
+Every dimension also holds an **unknown member** with key `-1` (section 4.5).
+
+**`dim_date`** is one builder shared by both stars. It carries the columns the
+Kaggle star already had (`day_of_week`, `day_name`, `week_of_year`, `month`,
+`month_name`, `quarter`, `year`, `is_weekend`) and three more that matter for
+Vietnamese retail prices: `is_double_day_sale` (1/1, 2/2 … 12/12, the
+marketplace sale days), `is_vn_holiday` (a fixed list in code, lunar holidays
+included) and the ISO week. A conformed dimension means the same rows and the
+same meanings for both stars, so the Kaggle star moves to this builder in P1
+instead of keeping its own.
+
+**`dim_marketplace`** comes from the registered marketplaces in configuration,
+plus `first_crawled_at` from the first observation. It is designed for many
+marketplaces even though Phase 10 loads only Tiki: adding a marketplace is a
+new row, not a new column.
+
+**`dim_seller`.** `seller_id` is already scoped to its marketplace
+(`make_seller_id(marketplace, platform_seller_id)`), so it is the natural key
+on its own. `first_seen_at`, `last_seen_at` and `observed_listing_count` are
+overwritten each run (SCD1); they are what `seller_current` publishes. An
+observation without a seller points to `-1`.
+
+**`dim_category` and `bridge_category_ancestry`.** A Tiki `category_path` such
+as `1/2/1846/8095/2458` is a list of node ids from the root. Measured on
+14 117 products (17/08) the depth varies from 4 to 8 levels, all under node
+`1`. Each id on every observed path becomes one node row with `parent_key`,
+`level` (the root is 1), `full_path` and `is_leaf` (no observed child). The
+bridge is a closure table: one row per (ancestor, descendant) pair, including
+the node itself at `depth = 0`, so "every listing anywhere under node X" is a
+single join. Category ids are Tiki's own numbers, so the natural key includes
+the marketplace. `category_name` and `category_slug` may be empty: the path
+carries only ids, the slug is known only for the category pages the frontier
+crawls (`<slug>/c<id>`), and a breadcrumb in the page's `__NEXT_DATA__` is not
+yet confirmed to carry names (plan risk R1). If one node is ever seen under two
+parents, the most recently observed path wins and an advisory check reports it.
+
+**`dim_product_listing`** is one row per *version* of an offer; section 4.6
+gives the rules. It carries two keys: `listing_key` names one version, and
+`offer_key = xxhash64(offer_id)` names the offer across all its versions (a
+*durable key*). Tracked as SCD2: `product_title`, `brand`, `category_key`,
+`seller_key`. Overwritten in every version (SCD1): `source_url`.
+`platform_listing_id` is part of the offer's identity and never changes.
+`brand` is nullable: 13.9 % of products have none.
+
+**`dim_offer_status`** is a junk dimension. It folds four low-cardinality flags
+into one key instead of four columns on every fact row: `availability`
+(`IN_STOCK`, `OUT_OF_STOCK`, `UNKNOWN`) × `active_status` (`ACTIVE`,
+`INACTIVE`, `UNKNOWN`) × `has_discount` × `has_rating` = 36 rows, all
+generated up front. `has_discount` is `list_price > current_price` or
+`discount_percent > 0`. `has_rating` is `rating_count > 0`: 47 % of products
+show a rating count of 0, which means *not yet rated*, not *rated zero*.
+
+### 4.5 Keys
+
+- **Surrogate keys are deterministic:** `xxhash64` of the natural key, the
+  same function the Kaggle star uses (`batch_layer/warehouse_job.py`).
+  `listing_key = xxhash64(offer_id, valid_from)`;
+  `category_key = xxhash64(marketplace_code, category_id)`. Rebuilding the
+  same data produces the same keys, so a replay, a backfill and an incremental
+  run all agree, and the facts can be loaded without first reading the
+  dimension's key assignments back.
+- `date_key` is the readable `yyyymmdd` integer; `offer_status_key` is the
+  ordinal of the combination (1–36).
+- **Unknown member.** Every dimension has a row with key `-1` and the label
+  `Unknown`. A fact whose seller or category is missing points there, so **no
+  foreign key in a fact is ever `NULL`** and an inner join never silently
+  drops a row. The share of `-1` references is itself monitored (4.8).
+- A hash could in principle collide or land on `-1`. The uniqueness check on
+  every dimension key (4.8) turns that from a silent merge into a failed run.
+- `date_key` on every marketplace fact is the **UTC** day: the batch runs with
+  `spark.sql.session.timeZone=UTC`, and the existing marts already cut days
+  that way.
+
+### 4.6 SCD2 rules for `dim_product_listing`
+
+1. Order the observations of one `offer_id` by `observed_at`, then
+   `fetched_at`, then `observation_id` — the same tie-break the marts use
+   (`marketplace_marts._ordered`), so two sightings at the same instant have a
+   fixed order. Sightings that share an `observed_at` are reduced to the last
+   of them before versions are cut: a version never opens and closes at the
+   same instant, and (`offer_id`, `valid_from`) stays unique.
+2. The first observation opens version 1 with `valid_from = observed_at`.
+3. Each later observation whose tuple (`product_title`, `brand`,
+   `category_key`, `seller_key`) differs from the open version — `NULL`
+   compared null-safely — closes it at that observation's `observed_at` and
+   opens the next version from the same instant.
+4. A value that changes and later changes back (A → B → A) makes **three**
+   versions. History records what was seen, not a set of distinct values.
+5. `valid_to` is exclusive; the open version has `valid_to = 9999-12-31` and
+   `is_current = true`. The versions of one offer never overlap and leave no
+   gaps.
+6. A fact row takes the version whose `[valid_from, valid_to)` contains its
+   `observed_at` (for daily facts: the day's last sighting).
+7. **Incremental runs** recompute the versions of every `offer_id` that has a
+   new observation, from that offer's *whole* history, then `MERGE` the result.
+   Recomputing only the new rows would mishandle an observation that arrives
+   late, with an `observed_at` older than the current version.
+
+Only these four attributes open a version. Price, rating and counters change
+almost every sighting; they are measures on the facts, not attributes.
+
+### 4.7 Facts and their grain
+
+Every fact has a one-sentence grain. A row that does not match it is a defect,
+and a uniqueness check enforces it on every run.
+
+| Fact | Type | Grain | Primary key |
+|---|---|---|---|
+| `fact_offer_observation` | transaction | **one sighting of one offer by the crawler at one instant** (one Silver observation) | `observation_id` |
+| `fact_price_snapshot_daily` | periodic snapshot (sparse) | **one offer, one UTC day, one currency, on which the offer was sighted at least once** | (`date_key`, `offer_key`, `currency`) |
+| `fact_price_change` | transaction, derived | **one sighting whose price differs from the same offer's previous sighting** | `observation_id` |
+| `fact_counter_daily` | periodic snapshot (sparse) | **one offer, one UTC day, one public counter** (`rating_count`, `review_count`, `sold_count`) | (`date_key`, `offer_key`, `counter_name`) |
+| `fact_crawl_attempt` | transaction | **one HTTP attempt to fetch one page** (one `audit.crawl_request_attempt` row) | `attempt_id` |
+
+**`fact_offer_observation`** is the atomic fact; every price mart can be
+derived from it. Besides the foreign keys it keeps the observation's measures
+(`current_price`, `list_price`, `shipping_price`, `discount_amount`,
+`discount_percent`, `rating_value`, `rating_scale`, the three counters,
+`ranking_position`), `currency` and `fetched_at` as degenerate attributes, and
+the raw lineage (`crawl_run_id`, `raw_uri`, `raw_sha256`, `adapter_version`),
+so any row still leads back to the Bronze body it was parsed from.
+
+**`fact_price_snapshot_daily`** has open, close, min, max and average price,
+first and last list price, `observation_count`, `distinct_price_count` and
+`in_stock_ratio`. Its dimension keys are those of the day's **last** sighting.
+It is keyed by the durable `offer_key`, not by `listing_key`: a title can
+change at noon, and keying by version would split one offer-day into two rows
+or make the grain depend on which version was chosen. The snapshot is
+**sparse on purpose**: a day without a sighting has no row. Filling it forward
+would invent observations, and "not seen today" is exactly what
+`source_coverage_daily` measures.
+
+**`fact_price_change`** holds `old_price`, `new_price`, `price_delta`,
+`pct_change`, `minutes_since_previous`, `direction` (`UP`/`DOWN`) and
+`is_large_drop`, computed with the speed layer's rule (drop ≥
+`MARKETPLACE_LARGE_DROP_ABSOLUTE` or ratio ≥ `MARKETPLACE_LARGE_DROP_RELATIVE`)
+and stamped with `change_rule_version`, so the batch and the speed layer cannot
+disagree on what a large drop is. `changed_at` is when the crawler **saw** the
+new price, not when the site changed it; the change happened somewhere in
+`(previous_observed_at, changed_at]`. When the currency differs between the two
+sightings, `pct_change` is `NULL` rather than a meaningless ratio. A
+sighting's previous one is looked up across the whole history of the offer,
+not within one run, so an incremental run reads the last known sighting of each
+affected offer from the fact itself.
+
+**`fact_counter_daily`** keeps the counter rules unchanged: transitions are
+judged over the offer's whole ordered history, a negative delta is kept and
+flagged (`counter_reset_or_invalid`, `invalid_reasons_json`), never clamped.
+
+**`fact_crawl_attempt`** takes its marketplace through the frontier task (the
+attempt table carries none, see `attach_marketplace_code`). Its
+`category_key` is parsed from the frontier target of a `LISTING_PAGE` task
+(`<slug>/c<id>`, or a bare id for the JSON adapter); any other page points to
+`-1`.
+
+**Additivity.** Which measures may be summed decides what a dashboard may do
+with them:
+
+| Measure | Additive across |
+|---|---|
+| `observation_count`, `parsed_count`, `rejected_count`, `raw_bytes`, row counts | every dimension |
+| `raw_delta_sum`, `valid_delta_sum`, `price_delta` | days, within one offer and counter |
+| prices, `rating_value`, `pct_change`, `in_stock_ratio`, ratios | nothing: average, min, max or median only |
+| `sold_count`, `review_count`, `rating_count` (the counters themselves) | nothing: they are running totals the site displays |
+
+### 4.8 Model checks
+
+Added to the quality gate (`config/quality_rules.py`) alongside the existing
+rules, and stored per run in `audit.marketplace_quality_result` like every
+other check.
+
+Mandatory — any failure refuses the run:
+
+- **Referential integrity:** every foreign key of every fact exists in its
+  dimension (the `-1` row included).
+- **Grain:** the primary key of every fact and dimension is unique.
+- **SCD2:** each `offer_id` has exactly one current version; its versions do
+  not overlap and leave no gap; `version` counts up from 1 without holes.
+- **Reconciliation:** per day, `sum(fact_price_snapshot_daily.observation_count)`
+  equals the number of `fact_offer_observation` rows, and the number of
+  `fact_price_change` rows equals the sum of `price_change_count` in
+  `offer_change_daily`.
+- **Closure:** every category node has a depth-0 row in the bridge, and one row
+  per ancestor on its path.
+
+Advisory — reported, not blocking:
+
+- the share of fact rows pointing at a `-1` member exceeds its threshold;
+- a category node was seen under more than one parent;
+- during the migration only: a mart rebuilt from the facts differs from the
+  mart built the old way from Silver.
+
+### 4.9 Serving marts — `cache.marketplace_*`
 
 Ten tables. The lake holds every run; PostgreSQL holds exactly one version,
-the one `current.json` names.
+the one `current.json` names. Their names and columns do not change in
+Phase 10: dashboards, `ops/*` and the tests keep reading the same tables, and
+only the source behind them moves from Silver to the star.
 
 | Table | Grain | What it carries |
 |---|---|---|
@@ -160,7 +647,7 @@ Four of them carry a rule version in every row — `freshness_rule_version` on
 freshness and coverage, `counter_rule_version`, `anomaly_rule_version` — so a
 stored verdict stays checkable after the configuration moves on.
 
-### Three gradings that are easy to misread
+#### Three gradings that are easy to misread
 
 **Freshness** is judged at the run's `as_of`, not at query time. A `FUTURE`
 row is a clock problem, not a fresh one.
@@ -180,6 +667,96 @@ currency mid-day yields one row per currency rather than one nonsense row.
 The row carries its own `window_days`, `min_samples`, `mad_threshold` and
 `iqr_multiplier`. It is a statistical statement about a series, not a claim
 that a price is wrong, dishonest or a bargain.
+
+#### Where each mart comes from
+
+| Mart | Built from | Notes |
+|---|---|---|
+| `offer_current` | `dim_product_listing` (current version) + the offer's last `fact_offer_observation` row + `dim_offer_status`, `dim_marketplace`, `dim_category` | `category_path` is the leaf's `full_path` |
+| `seller_current` | `dim_seller` | already holds first/last seen and the count |
+| `offer_price_history_daily` | `fact_price_snapshot_daily` | `first_price`/`last_price` are `open_price`/`close_price` |
+| `offer_change_daily` | `fact_price_change` for the price columns; `fact_offer_observation` (previous sighting per offer) for the rating, counter and availability columns | a price-only fact cannot supply the other three change counts |
+| `offer_freshness` | the offer's last `fact_offer_observation` row, judged at `as_of` | stays a mart: a verdict that depends on `as_of` is not a fact |
+| `category_price_daily` | `fact_offer_observation` × `dim_category` | percentiles over sightings, as today; `__UNKNOWN__` is the `-1` member |
+| `source_coverage_daily` | `fact_offer_observation` + `dim_offer_status` (`active_status`) + `fact_crawl_attempt` | eligibility calendar unchanged |
+| `crawl_reliability_daily` | `fact_crawl_attempt` | |
+| `counter_delta_daily` | `fact_counter_daily` | |
+| `price_anomaly_daily` | `fact_price_snapshot_daily` | it already read the daily price table; it keeps reading the same numbers |
+
+P4 accepts this rebuild only if, on the same `as_of`, every rebuilt mart
+matches the old one row for row; any difference is listed with its reason.
+
+#### Three new marts
+
+| Mart | Grain | Built from | Answers |
+|---|---|---|---|
+| `category_price_index_daily` | marketplace × category node (any level) × day × currency | `fact_price_snapshot_daily` × `bridge_category_ancestry` | median close price of the offers under the node, as an index with the node's first day = 100 |
+| `listing_price_volatility` | offer × window (7 and 30 days) × day | `fact_price_snapshot_daily`, `fact_price_change` | standard deviation and coefficient of variation of the daily close price, number of price changes |
+| `discount_daily` | marketplace × category node × day | `fact_price_snapshot_daily` × `dim_offer_status` × bridge | share of offers on discount, p25/median/p75 of the discount percentage |
+
+The category index compares price *levels* by category without matching
+products across marketplaces, which per-product comparison would require.
+It is a median over whichever offers were seen that day, so a change in the
+mix of offers moves it as well as a change in prices; the mart publishes the
+offer count next to the index so that can be read.
+
+### 4.10 Storage and publication
+
+| Layer | Where | Format and write |
+|---|---|---|
+| Silver, compacted | `silver/marketplace/offer_observations_delta/` (partitioned by `observed_date`, `hour`) | Delta; the per-observation JSON stays the idempotent original |
+| Star | `gold/marketplace/dw/<table>/` | Delta, `MERGE` on the primary key; daily facts replace the affected days |
+| Marts | `gold/marketplace/runs/run_id=<run>/marts/<mart>/` | one directory per run, as before |
+| PostgreSQL | schema `dw` (the star) and schema `cache` (the marts) | published in one transaction, as before |
+
+Delta keeps every version of a `dw` table, so a run can be replayed against
+exactly the star it read: manifest v2 (section 3) records the Delta version of
+each `dw` table the run used.
+
+### 4.11 Why this design
+
+**Why a star.** The questions are all "a measure, sliced by date, listing,
+seller, category". A star answers each with one join per dimension, BI tools
+model it directly, and every mart becomes a short query over shared, tested
+tables instead of its own pass over Silver. The ten existing marts stay as the
+serving layer; the star is what they are built from.
+
+**Why the category tree is the one snowflake.** Snowflaking for its own sake
+buys nothing here: Parquet's dictionary encoding already makes repeated
+strings nearly free, and the dimensions are rebuilt, not updated in place, so
+there is no update anomaly to avoid. The Tiki category tree is different: it
+is a ragged hierarchy, 4 to 8 levels deep, which does not fit fixed
+`category_level_1 … N` columns. A node table with a parent key plus a closure
+table is the standard answer; it lets one query aggregate at any level. The
+facts still carry `category_key` directly, so the common query stays one join.
+
+**Why SCD2 for the listing, SCD1 elsewhere.** A listing's title, brand,
+category and seller change while we watch, and a price only means something
+next to what was being sold at that moment. Overwriting would rewrite past
+facts with today's description. Sellers and categories have no history we
+could observe — only aggregates and a name — so SCD1 is enough. The Kaggle
+star is SCD1 for the same reason in the opposite direction: it is a closed
+historical file, nothing changes after the fact.
+
+**Why a durable key next to the version key.** `listing_key` answers "which
+description applied to this sighting"; `offer_key` answers "the same offer,
+across all its descriptions". Daily facts are keyed by `offer_key`, so their
+grain does not depend on when a version opened.
+
+**Why deterministic surrogate keys.** A sequence would make keys depend on
+load order: a replay or a backfill would number rows differently, and every
+fact would have to look keys up in the dimension before loading. A hash of the
+natural key gives the same key in every run, in any order, which is what the
+pipeline's replayability (section 1.1) already relies on.
+
+**Why an unknown member instead of `NULL`.** A `NULL` foreign key disappears
+from an inner join without a trace. A `-1` row keeps the fact in every total,
+labels it `Unknown` on a dashboard, and can be counted.
+
+**Why a junk dimension.** Four flags with 3 × 3 × 2 × 2 = 36 combinations as
+four separate dimensions would add four joins for almost no content; as columns
+on the fact they would be repeated on every row. One small static table keeps
+both the fact and the queries narrow.
 
 ## 5. Audit — `audit.*`
 
@@ -281,7 +858,8 @@ duplicating anything: the same event written twice is the same member.
 What a backup carries, and why, is in [RUNBOOK.md](RUNBOOK.md). The short
 version for this document: Bronze and Silver whole, the Gold manifests and
 pointer, the Gold run the pointer names, and `pg_dump` of `audit` and `cache`.
-Kafka, Elasticsearch, Redis and the speed checkpoints are **not** backed up —
+Phase 10 adds the star — `gold/marketplace/dw` and the `dw` schema — to that
+list, since the marts of every later run are built from it. Kafka, Elasticsearch, Redis and the speed checkpoints are **not** backed up —
 they are derived, and they refill from new crawls.
 
 ## 9. Legacy: the Kaggle behavior model
@@ -351,7 +929,14 @@ erDiagram
 
 `fact_behavior_event` has one row per valid source event; `event_key` is
 `SHA-256(event_type ‖ user_id ‖ product_id ‖ session_id ‖ event_time)`, so
-reprocessing never duplicates a fact. Dimensions are SCD Type 1.
+reprocessing never duplicates a fact.
+
+The dimensions of **this** star are SCD Type 1: every run rebuilds them from
+Silver and keeps the latest value. That fits a closed historical file, where
+nothing changes after the fact. It does not fit the marketplace, whose listings
+change while they are watched, which is why `dim_product_listing` (section 4.6)
+is SCD Type 2. `dim_date` is the one dimension both stars share; from Phase 10
+it is built by one builder with the columns of section 4.4.
 
 Marts in `cache`: `funnel_daily`, `product_daily`, `category_daily`,
 `session_daily`, `daily_revenue`. `revenue` sums `price` over purchase events

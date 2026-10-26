@@ -332,6 +332,21 @@ ALTER TABLE audit.marketplace_batch_run DROP CONSTRAINT IF EXISTS marketplace_ba
 ALTER TABLE audit.marketplace_batch_run ADD CONSTRAINT marketplace_batch_run_status_check
     CHECK (status IN ('RUNNING','GOLD_WRITTEN','QUALITY_FAILED','SUCCEEDED','FAILED'));
 
+-- Refactor: a batch run is a state machine over stages (ecomdata.domain.batch_run).
+-- RUNNING and SUCCEEDED stay valid so a row written before the refactor still
+-- reads (they mean CREATED and PROMOTED). The two columns make a run resumable
+-- and its promotion a compare-and-swap: last_completed_status is where a FAILED
+-- run picks up, expected_current_run_id is the serving pointer's run when the
+-- run was created.
+ALTER TABLE audit.marketplace_batch_run
+    ADD COLUMN IF NOT EXISTS last_completed_status VARCHAR(16),
+    ADD COLUMN IF NOT EXISTS expected_current_run_id VARCHAR(64),
+    ADD COLUMN IF NOT EXISTS held_reason TEXT;
+ALTER TABLE audit.marketplace_batch_run DROP CONSTRAINT IF EXISTS marketplace_batch_run_status_check;
+ALTER TABLE audit.marketplace_batch_run ADD CONSTRAINT marketplace_batch_run_status_check
+    CHECK (status IN ('CREATED','SILVER_BUILT','GOLD_WRITTEN','QUALITY_PASSED','QUALITY_FAILED','PUBLISHED',
+                      'PROMOTED','HELD','FAILED','RUNNING','SUCCEEDED'));
+
 -- The serving cache names the manifest and the rule version that admitted it,
 -- so "which Gold version is live, under which rules" needs no object listing.
 ALTER TABLE audit.marketplace_cache_version
@@ -349,7 +364,7 @@ CREATE TABLE IF NOT EXISTS audit.crawl_frontier (
     marketplace_id VARCHAR(128) NOT NULL,
     target TEXT NOT NULL CHECK (length(btrim(target)) > 0),
     resource_type VARCHAR(32) NOT NULL CHECK (resource_type IN ('LISTING_PAGE', 'PRODUCT_DETAIL')),
-    tier VARCHAR(16) NOT NULL CHECK (tier IN ('ACTIVE', 'NORMAL', 'COLD')),
+    tier VARCHAR(16) NOT NULL CHECK (tier IN ('ACTIVE', 'NORMAL', 'COLD', 'HOT', 'SWEEP')),
     priority INTEGER NOT NULL DEFAULT 0 CHECK (priority >= 0),
     scheduled_for TIMESTAMPTZ NOT NULL,
     status VARCHAR(16) NOT NULL CHECK (status IN ('READY', 'LEASED', 'RETRY_WAIT', 'SUCCEEDED', 'FAILED', 'DISABLED')),
@@ -422,12 +437,16 @@ ALTER TABLE audit.crawl_frontier DROP CONSTRAINT IF EXISTS crawl_frontier_last_e
 ALTER TABLE audit.crawl_frontier
     ADD CONSTRAINT crawl_frontier_last_error_kind_check CHECK (last_error_kind IS NULL OR last_error_kind IN (
         'RATE_LIMITED', 'TRANSIENT_NETWORK', 'SERVER_ERROR', 'CLIENT_ERROR',
-        'ROBOTS_DENIED', 'STORAGE_ERROR', 'PARSE_ERROR', 'VALIDATION_ERROR', 'PUBLISH_ERROR', 'UNKNOWN'));
+        'ROBOTS_DENIED', 'STORAGE_ERROR', 'PARSE_ERROR', 'VALIDATION_ERROR', 'PUBLISH_ERROR', 'BLOCKED', 'UNKNOWN'));
+-- Refactor: the HOT and SWEEP tiers of long-term collection.
+ALTER TABLE audit.crawl_frontier DROP CONSTRAINT IF EXISTS crawl_frontier_tier_check;
+ALTER TABLE audit.crawl_frontier
+    ADD CONSTRAINT crawl_frontier_tier_check CHECK (tier IN ('ACTIVE', 'NORMAL', 'COLD', 'HOT', 'SWEEP'));
 ALTER TABLE audit.crawl_request_attempt DROP CONSTRAINT IF EXISTS crawl_request_attempt_error_kind_check;
 ALTER TABLE audit.crawl_request_attempt
     ADD CONSTRAINT crawl_request_attempt_error_kind_check CHECK (error_kind IS NULL OR error_kind IN (
         'RATE_LIMITED', 'TRANSIENT_NETWORK', 'SERVER_ERROR', 'CLIENT_ERROR',
-        'ROBOTS_DENIED', 'STORAGE_ERROR', 'PARSE_ERROR', 'VALIDATION_ERROR', 'PUBLISH_ERROR', 'UNKNOWN'));
+        'ROBOTS_DENIED', 'STORAGE_ERROR', 'PARSE_ERROR', 'VALIDATION_ERROR', 'PUBLISH_ERROR', 'BLOCKED', 'UNKNOWN'));
 
 CREATE TABLE IF NOT EXISTS audit.crawl_source_state (
     marketplace_code VARCHAR(32) PRIMARY KEY CHECK (marketplace_code = lower(marketplace_code)),

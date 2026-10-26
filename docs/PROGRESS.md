@@ -48,7 +48,7 @@ Chi tiết đầy đủ + audit gốc: `C:\Users\Admin\.claude\plans\shimmering-
 ## 3. Trạng thái từng phase
 
 > ⚠️ **Bảng dưới đây đã LỖI THỜI (đánh số từ trước khi có Brief).**
-> Nguồn chân lý về việc chia phase là `docs/PHASE_INDEX.md` trên `master`,
+> Nguồn chân lý về việc chia phase là `docs/archive/PHASE_INDEX.md` trên `master`,
 > suy từ Brief §21 (12 tuần) và §22 (backlog P0–P3). Cách đánh số ở đây
 > (Phase 3 = "Speed layer hardening") KHÔNG khớp với cách đánh số chuẩn
 > (Phase 3 = Tuần 3 = Scheduler/retry/audit). Giữ lại làm lịch sử; đừng
@@ -719,12 +719,12 @@ phase-<n>-<tên>  --PR-->  develop  --PR (chỉ khi thầy hướng dẫn duyệ
   Đã thử xếp chồng một lần và PR thứ hai hiện luôn diff của PR thứ nhất,
   không review được.
 
-Chi tiết ở `docs/PHASE_INDEX.md` §3b. Ba PR đã chạy qua quy trình này:
+Chi tiết ở `docs/archive/PHASE_INDEX.md` §3b. Ba PR đã chạy qua quy trình này:
 **#1** (test phase 4/5/6), **#2** (Phase 3), **#3** (bug clock tiki).
 
 ### 8.3 Nguồn chân lý
 
-`docs/PHASE_INDEX.md` là nguồn chân lý về chia phase: bảng Tuần ↔ Phase ↔
+`docs/archive/PHASE_INDEX.md` là nguồn chân lý về chia phase: bảng Tuần ↔ Phase ↔
 Backlog ID suy thẳng từ Brief §21/§22, các hợp đồng đóng băng (3 Kafka topic,
 7 change type, Kafka key, `observation_id`, cột mart, counter delta), ràng buộc
 môi trường và mô hình nhánh.
@@ -824,7 +824,7 @@ test — cần Docker.
 ### 9.1 Bắt đầu từ đâu
 
 Mở session với yêu cầu "tiếp tục ở phase 7". Không có
-`docs/PHASE_7_*.md` — đã tìm trên `develop`, `master`, `phase-5-6-speed-gold`
+`docs/archive/PHASE_7_*.md` — đã tìm trên `develop`, `master`, `phase-5-6-speed-gold`
 và toàn bộ lịch sử (`git log --all --diff-filter=A`): chưa từng tồn tại.
 `PHASE_INDEX.md` §4.3 nói rõ "thiếu plan thì dừng lại và hỏi", nên đã dừng và
 hỏi thay vì tự suy ra.
@@ -838,7 +838,7 @@ develop                            19b1568  docs: adopt the phase 7 plan
 phase-7-quality-anomaly-replay     8ce42fa  10 commit, PR #4 -> develop (MERGED 2026-09-30)
 ```
 
-Plan nằm ở `docs/PHASE_7_QUALITY_ANOMALY_REPLAY_IMPLEMENTATION_PLAN.md`
+Plan nằm ở `docs/archive/PHASE_7_QUALITY_ANOMALY_REPLAY_IMPLEMENTATION_PLAN.md`
 (1334 dòng), **commit vào `develop` trước khi viết dòng code nào** — đúng
 §4.2, quy tắc thêm sau sự cố 2026-09.
 
@@ -987,7 +987,7 @@ P1-12 + nửa Kibana của P1-11.
 `crawler/reparse.py` là bước verify read-only trong runbook hồi phục của
 Phase 8.
 
-**Chưa có `docs/PHASE_8_*.md`.** Theo `PHASE_INDEX.md` §4.3: đọc file đó lấy
+**Chưa có `docs/archive/PHASE_8_*.md`.** Theo `PHASE_INDEX.md` §4.3: đọc file đó lấy
 đúng backlog ID, thấy thiếu plan thì **dừng lại và hỏi**, không tự viết.
 
 ### 9.10 Ghi chú môi trường
@@ -2197,8 +2197,8 @@ record JSON).
 | `docs/ARCHITECTURE.md` | Viết lại: luồng dữ liệu, 10 profile và service, cắt `as_of`, quality gate + con trỏ manifest, **bảng ranh giới hỏng** (mỗi component mất dependency thì sao, restart sửa gì, drill nào chứng minh), vai trò từng kho, pattern, vận hành, và một mục cuối nói rõ Phase 8 **không** chứng minh điều gì. Kaggle còn lại một mục "legacy demo" |
 | `docs/DATA_MODEL.md` | Viết lại: ba contract đóng băng (observation / change / DLQ), layout bốn zone, manifest + con trỏ, **mười** bảng `cache.marketplace_*` kèm ba chỗ dễ đọc nhầm, toàn bộ bảng `audit.*`, sáu index Elasticsearch với luật `_id`, bốn khoá Redis, và mô hình Kaggle dồn vào §9 |
 | `docs/RUNBOOK.md` | Thêm: seeding (kèm cảnh báo park task của smoke), **kiểm tra vận hành hằng ngày** ánh xạ Brief §20 sang 11 check của `validate`, backfill, và hai ràng buộc hay cắn (`--skip-postgres`, lookback vs interval) |
-| `docs/PHASE_6_…md` §16, `docs/PHASE_7_…md` §18 | Thay câu "offline smoke với `--skip-postgres`" bằng ghi chú **Superseded by Phase 8** chỉ sang `mp smoke`, kèm lý do smoke đó không chạy được |
-| `docs/PHASE_INDEX.md` | §1 thêm ranh giới **D5** (Phase 8 làm profile *vận hành*; Phase 9 giữ đóng gói *demo*); §5 đổi đoạn "Phase 4/5 chưa từng chạy như dịch vụ" thành phần nối đã xong ở WP1–WP3 (**D1**) |
+| `docs/archive/PHASE_6_…md` §16, `docs/archive/PHASE_7_…md` §18 | Thay câu "offline smoke với `--skip-postgres`" bằng ghi chú **Superseded by Phase 8** chỉ sang `mp smoke`, kèm lý do smoke đó không chạy được |
+| `docs/archive/PHASE_INDEX.md` | §1 thêm ranh giới **D5** (Phase 8 làm profile *vận hành*; Phase 9 giữ đóng gói *demo*); §5 đổi đoạn "Phase 4/5 chưa từng chạy như dịch vụ" thành phần nối đã xong ở WP1–WP3 (**D1**) |
 | `docs/PROGRESS.md` §5 | Ghi **đảo ngược quyết định Airflow** (**D2**): không Airflow, thay bằng scheduler vòng lặp + advisory lock, kèm lý do và hệ quả kiểm được. Dòng Phase 6 trong bảng §3 cũng sửa theo |
 
 ### 21.2 Những gì cố ý KHÔNG viết ở đây
@@ -2406,7 +2406,7 @@ xanh và offline.
 
 ## 24. Session 2026-10-04 (tiếp) — Phase 9: plan, và WP0 thu thập thật
 
-Plan: `docs/PHASE_9_EVALUATION_FEATURE_FREEZE_IMPLEMENTATION_PLAN.md`, user
+Plan: `docs/archive/PHASE_9_EVALUATION_FEATURE_FREEZE_IMPLEMENTATION_PLAN.md`, user
 duyệt cả sáu quyết định D1–D6 ngày 2026-10-04. Nhánh `phase-9-evaluation-plan`.
 
 ### 24.1 Vì sao WP0 đi trước mọi thứ
@@ -2879,3 +2879,20 @@ mở lại.
 **Còn phải làm:** chạy lại `bench ingest` và `bench speed` bằng bench đã sửa để
 có latency đã hiệu chỉnh, rồi thay các cột latency của §27.2. Stack phải chạy
 trên host có đủ RAM.
+
+## 34. 2026-10-25 — Refactor kiến trúc (`refactor/architecture`): R0–R9 xong
+
+Plan: `docs/PLAN_REFACTOR_ARCHITECTURE.md`. Nhật ký và bảng AC1–AC14: `docs/REFACTOR_REPORT.md`. Bàn giao: `docs/HANDOFF_REFACTOR.md`.
+
+| Phase | Trạng thái | Nội dung |
+|---|---|---|
+| R0–R5 | xong | Đóng gói `src/ecomdata`, `domain/`, `settings/`, `infra/`, luật import, ingestion ELT (Tiki, Lazada), Silver v2 có quarantine và drift. |
+| R6 | xong | Batch theo stage (`silver`, `marts`, `quality`, `publish`, `promote`), `runner.py` và CLI `python -m ecomdata.processing.batch`; `warehouse.py` đã xoá; ordering dùng chung (`domain/ordering.py`). |
+| R7 | xong | Speed đọc `marketplace.records.v1` qua normalizer chung; `silver-sink` đã gỡ. |
+| R8 | xong | Dockerfile mới (python, spark, crawler-browser, airflow), compose tách lớp, env theo lớp, `mp-refactor`; Airflow lên được, 3 DAG parse. Hoãn: gộp `Stack` của ops. |
+| R9 | xong | E2E thật trên `mp-refactor` (Tiki + Lazada, 84 phút crawl, 2 DAG run, speed ~70 phút, Superset 13 chart); `ARCHITECTURE.md`, 6 ADR, README, `docs/archive/`. Bằng chứng: `docs/evidence/refactor-20261025/`. |
+
+**Kiểm tại R9:** 1505 passed, 2 skipped, 11 deselected (drill); `ruff` sạch; `lint-imports` 4 kept.
+
+**Còn nợ:** `build_offer_change_daily` chưa dùng `domain/change_rules.py`; `docs/ARCHITECTURE.md` là bản nháp chưa rà; AC8 chưa chạy trên Parquet/MinIO thật; Shopee chờ AppID Affiliate của người dùng.
+
