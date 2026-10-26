@@ -12,7 +12,7 @@ from typing import Any
 
 from ecomdata.domain.change_rules import offer_state_from_json
 from ecomdata.domain.wire import marketplace_change_from_wire
-from ecomdata.processing.speed.change_producer import publish_change
+from ecomdata.processing.speed.change_producer import publish_changes
 
 
 @dataclass(frozen=True)
@@ -250,10 +250,7 @@ class MarketplaceSpeedSinks:
                 for r in rows
                 if r.output_kind == "CHANGE" and r.change_json
             ]
-            for event in changes:
-                publish_change(self.producer, event, ack_timeout_seconds=self.change_ack_timeout_seconds)
-            if hasattr(self.producer, "flush"):
-                self.producer.flush()
+            publish_changes(self.producer, changes, ack_timeout_seconds=self.change_ack_timeout_seconds)
             kafka_ms, began = _elapsed_ms(began), time.monotonic()
             es_actions = []
             change_rows = [r for r in rows if r.output_kind == "CHANGE" and r.change_json]
