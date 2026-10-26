@@ -5,7 +5,7 @@ the micro-batch sink; this module assembles them into one checkpointed
 Structured Streaming query and runs it until stopped.
 
 Invalid records are carried in the query's output next to the state and
-change rows, so ``write_marketplace_batch`` sees them and the batch audit can
+change rows, so the batch writer (``stream.BatchWriter``) sees them and the batch audit can
 count them. Without that they would vanish inside the stream.
 
 Run inside the Spark 4 image, where the Kafka connector is on the classpath:
@@ -327,6 +327,7 @@ def main(argv: list[str] | None = None) -> None:
     spark = spark_factory(settings).create()
     recorder = ProgressRecorder(connection_factory(settings.postgres), query_name=settings.speed.query_name)
     normalizer = None
+    writer = layer.make_batch_writer(sink_wiring(settings))
     try:
         normalizer = start_normalizer(
             spark,
@@ -343,7 +344,7 @@ def main(argv: list[str] | None = None) -> None:
                 settings.kafka.bootstrap_servers,
                 max_offsets_per_trigger=settings.speed.max_offsets_per_trigger,
             ),
-            write_batch=layer.make_batch_writer(sink_wiring(settings)),
+            write_batch=writer,
             checkpoint=settings.speed.checkpoint_path(),
             trigger=settings.speed.trigger,
             query_name=settings.speed.query_name,
@@ -359,6 +360,7 @@ def main(argv: list[str] | None = None) -> None:
     finally:
         if normalizer is not None and normalizer.isActive:
             normalizer.stop()
+        writer.close()
         spark.stop()
 
 

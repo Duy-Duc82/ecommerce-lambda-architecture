@@ -69,7 +69,7 @@ class BatchStages:
     ``clients_ms`` opens the Kafka, Elasticsearch and Redis clients and
     ``collect_ms`` is Spark computing the batch, the stateful comparison
     included, and handing it to the driver; both are measured by
-    ``write_marketplace_batch``. The three sink stages are measured here.
+    ``stream.BatchWriter``. The three sink stages are measured here.
     The audit writes themselves are the rest of Spark's ``addBatch``.
     """
 

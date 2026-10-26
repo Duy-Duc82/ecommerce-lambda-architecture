@@ -295,10 +295,28 @@ class SinkWiring:
     sink_options: Mapping[str, Any] = field(default_factory=dict)
 
 
-def make_batch_writer(wiring: SinkWiring) -> Callable[[DataFrame, int], None]:
-    """The ``foreachBatch`` function: one micro-batch to Kafka, ES, Redis and the audit."""
+class BatchWriter:
+    """The ``foreachBatch`` function: one micro-batch to Kafka, ES, Redis and the audit.
 
-    def write_marketplace_batch(batch_df: DataFrame, batch_id: int) -> None:
+    The query writes one micro-batch per trigger, for days, and
+    ``foreachBatch`` runs on the driver one batch at a time, so one set of
+    clients serves every batch. Reopening them cost ~110 ms a batch.
+    """
+
+    def __init__(self, wiring: SinkWiring) -> None:
+        self._wiring = wiring
+        self._clients: tuple[Any, Any, Any] | None = None
+
+    def close(self) -> None:
+        """Close and forget the kept clients. Closing a closed client is a no-op."""
+        clients, self._clients = self._clients, None
+        for client in clients or ():
+            try:
+                client.close()
+            except Exception:
+                pass
+
+    def __call__(self, batch_df: DataFrame, batch_id: int) -> None:
         from ecomdata.processing.speed.sinks import BatchStages, MarketplaceSpeedAudit, MarketplaceSpeedSinks
 
         # Spark sets the query id, which lives in the checkpoint, as a local
@@ -307,25 +325,26 @@ def make_batch_writer(wiring: SinkWiring) -> Callable[[DataFrame, int], None]:
         if not query_id:
             raise ValueError("micro-batch carries no streaming query id; refusing to audit it as another run's batch")
         began = time.monotonic()
-        producer, es, redis = wiring.clients()
+        if self._clients is None:
+            self._clients = self._wiring.clients()
+        producer, es, redis = self._clients
         clients_ms, began = round((time.monotonic() - began) * 1000), time.monotonic()
         try:
             # A closing factory: the query runs for days, one micro-batch every
             # trigger, and a bare psycopg2 connection would leak on every audit call.
-            audit = MarketplaceSpeedAudit(wiring.connection_factory)
+            audit = MarketplaceSpeedAudit(self._wiring.connection_factory)
             outputs = [SpeedOutput(**row.asDict()) for row in batch_df.collect()]
             stages = BatchStages(clients_ms=clients_ms, collect_ms=round((time.monotonic() - began) * 1000))
             MarketplaceSpeedSinks(
-                producer=producer, es=es, redis=redis, audit=audit, **dict(wiring.sink_options)
+                producer=producer, es=es, redis=redis, audit=audit, **dict(self._wiring.sink_options)
             ).write_batch(outputs, batch_id, query_id=query_id, stages=stages)
-        finally:
-            # The same holds for the three sink clients: a producer left open per
-            # batch keeps its network thread and sockets alive. Closing an
-            # already closed client (the sink closes them on failure) is a no-op.
-            for client in (producer, es, redis):
-                try:
-                    client.close()
-                except Exception:
-                    pass
+        except BaseException:
+            # The sink closes its clients on failure, and a client that failed
+            # may be in any state: the next batch starts from new ones.
+            self.close()
+            raise
 
-    return write_marketplace_batch
+
+def make_batch_writer(wiring: SinkWiring) -> BatchWriter:
+    """The ``foreachBatch`` function; ``close()`` it when the query stops."""
+    return BatchWriter(wiring)
