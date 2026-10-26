@@ -306,12 +306,21 @@ class MarketplaceSpeedSinks:
                     },
                 )
                 pipe.expire(f"rt:offer:{state.offer_id}", self.offer_ttl_seconds)
-                source_key = f"rt:source:{state.marketplace}:last_observation"
+            # One read per marketplace, against the batch's latest: the queued
+            # sets only land at execute, so comparing each state with the
+            # stored value let an older state queued last win.
+            latest: dict[str, str] = {}
+            for state in states:
+                observed = state.observed_at.isoformat()
+                if observed > latest.get(state.marketplace, ""):
+                    latest[state.marketplace] = observed
+            for marketplace, observed in latest.items():
+                source_key = f"rt:source:{marketplace}:last_observation"
                 previous = self.redis.get(source_key) if hasattr(self.redis, "get") else None
                 if isinstance(previous, bytes):
                     previous = previous.decode("utf-8")
-                if previous is None or previous < state.observed_at.isoformat():
-                    pipe.set(source_key, state.observed_at.isoformat(), nx=False)
+                if previous is None or previous < observed:
+                    pipe.set(source_key, observed, nx=False)
             if changes:
                 pipe.zremrangebyrank("rt:changes:recent", 0, -(self.recent_changes_max + 1))
             if hasattr(pipe, "execute"):
