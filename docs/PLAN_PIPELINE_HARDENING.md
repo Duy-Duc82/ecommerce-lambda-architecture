@@ -63,3 +63,26 @@ Mỗi gói: test viết cùng mã, chạy toàn bộ suite, `ruff`, `lint-import
 2. Cửa sổ theo ngày `observed_date`, trễ cho phép 1 ngày.
 3. Run hỏng chất lượng: `RESTORE` các bảng `dw` về version của manifest hiện hành.
 4. Docker: được bật khi tới H1 (smoke) và H7 (E2E), tắt sau khi xong.
+
+## 7. Tiến độ (cập nhật 2026-10-27 23:30)
+
+| Gói | Trạng thái | Commit |
+|---|---|---|
+| H0 | xong: mart dựng từ fact, parity 10 mart; sửa lỗi hết heap của suite test (lineage, status store) | `d150731`, `12bef19` |
+| H1 | xong ở mức code và test Spark; **chưa** smoke Delta trên MinIO | `a27a0f3` |
+| H3 | xong: 4 luật star, manifest v2 `dw_versions`, `VERSION AS OF`, `RESTORE` khi trượt cổng, inferred member cho `dim_category` | `12bef19` |
+| H4 | xong ở mức unit; **chưa** chạy `tests/airflow` trong image Airflow | `c8c4e6e` |
+| docs | ADR-0007, `DATA_MODEL.md` §4.10, ADR-0005, `ARCHITECTURE.md` | `03fd4d7` |
+| H2, H5, H6 (phần còn lại), H7 | chưa làm | |
+
+**Việc tiếp theo:**
+1. Chạy toàn bộ suite tại `03fd4d7` trên worktree `C:\code\data-refactor-verify` (`PYTHONPATH=<worktree>/src`, khoảng 1,5–2 giờ, không chạy Spark nào khác cùng lúc). Lượt chạy tối 27/10 bị dừng vì tắt máy.
+   - Lỗi `Net.bind0` hoặc "Python worker failed to connect back" là do cạn cổng tạm trên Windows; chạy lại riêng các test đó.
+2. Bật Docker và chạy E2E trên `mp-refactor` với Bronze có sẵn của ngày 25/10:
+   - `batch run --all --rebuild` (lake cũ là Parquet);
+   - một run theo cửa sổ;
+   - một run có `as_of` cũ hơn;
+   - `tests/airflow` trong image `ecommerce/airflow:3.3.2-r1`.
+   Ghi kết quả vào `docs/evidence/hardening-<ngày>/`.
+3. Sang H2 (tăng dần), rồi H5, H6, H7.
+
