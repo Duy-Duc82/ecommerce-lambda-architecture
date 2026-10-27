@@ -33,7 +33,7 @@ Plan liệt kê `promote → publish`. Giữ đúng ngữ nghĩa cũ: cache Post
 
 ## Bổ sung Phase 10 (2026-10-26): stage `dimensions`
 
-Stage `dimensions` chạy giữa `silver` và `marts`, đưa run từ `SILVER_BUILT` sang `DIMENSIONS_BUILT`; `marts` giờ bắt đầu từ `DIMENSIONS_BUILT`. Stage dựng 7 dimension và bridge từ Silver rồi `MERGE` vào `gold/marketplace/dw/<bảng>/`. Khác Gold theo run, các bảng này nằm ngoài thư mục run và giữ qua các run; mỗi run dựng lại toàn bộ từ Silver, nên chạy lại trên cùng Silver không đổi bảng, và tóm tắt `_runs/<run>/dimensions.json` ghi phiên bản Delta mà run để lại. Constraint `status` của `audit.marketplace_batch_run` thêm `DIMENSIONS_BUILT` (16 ký tự, vừa `VARCHAR(16)`). 
+Stage `dimensions` chạy giữa `silver` và `marts`, đưa run từ `SILVER_BUILT` sang `DIMENSIONS_BUILT` (từ D3, `marts` bắt đầu từ `FACTS_BUILT`, xem mục dưới). Stage dựng 7 dimension và bridge từ Silver rồi `MERGE` vào `gold/marketplace/dw/<bảng>/`. Khác Gold theo run, các bảng này nằm ngoài thư mục run và giữ qua các run; mỗi run dựng lại toàn bộ từ Silver, nên chạy lại trên cùng Silver không đổi bảng, và tóm tắt `_runs/<run>/dimensions.json` ghi phiên bản Delta mà run để lại. Constraint `status` của `audit.marketplace_batch_run` thêm `DIMENSIONS_BUILT` (16 ký tự, vừa `VARCHAR(16)`). 
 
 ## Bổ sung Phase 10 D3 (2026-10-26): stage `facts`
 

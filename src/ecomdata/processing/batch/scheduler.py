@@ -1,8 +1,9 @@
-"""The marketplace batch scheduler — Phase 8 plan section 6.4.
+"""The marketplace batch scheduler of Phase 8 (plan section 6.4), kept as profile ``legacy-scheduler``.
 
-A plain loop, not Airflow (decision D2): every tick cuts the newest closed
-window, runs the temporal warehouse on it unless that window already
-succeeded, and sleeps until the next window closes.
+Airflow's DAG ``marketplace_batch`` replaced it (ADR-0002); this loop remains
+for a stack without Airflow. Every tick cuts the newest closed window, runs the
+batch stages on it unless that window already succeeded, and sleeps until the
+next window closes. ``run_id_for`` is shared with the DAG.
 
 Windows close on interval boundaries counted from the Unix epoch in UTC, and
 a window is cut only ``lag`` after it closes, so crawl runs inside it have

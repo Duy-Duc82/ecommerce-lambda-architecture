@@ -921,14 +921,15 @@ offer count next to the index so that can be read.
 
 | Layer | Where | Format and write |
 |---|---|---|
-| Silver | `silver/marketplace/offer_observations_v2/` (partitioned by `source_code`, `observed_date`), `silver/marketplace/<source>_listing_wide/`, `silver/marketplace/page_context/` | written by the `silver` stage; the day partitions it covers are replaced whole |
-| Star | `gold/marketplace/dw/<table>/`, outside the run directories | Delta, `MERGE` on the primary key; daily facts replace the affected days. Lake only: never copied to PostgreSQL |
+| Silver | `silver/marketplace/offer_observations_v2/`, `quarantine/`, `<source>_listing_wide/`, `page_context/`, all partitioned by `source_code`, `observed_date` | Delta, written by the `silver` stage: the day partitions of the run's window (its day and the late days before it, `--silver-since`, or `--rebuild`) are replaced whole from all the Bronze of those days; `as_of` never cuts a write (ADR-0007) |
+| Star | `gold/marketplace/dw/<table>/`, outside the run directories | Delta, `MERGE` on the registry key, rebuilt from all of Silver on every run (incremental: plan H2). Judged by the quality gate at the versions the run built; a refused run restores the certified versions. Lake only: never copied to PostgreSQL |
 | Marts | `gold/marketplace/runs/run_id=<run>/marts/<mart>/` | one directory per run, as before |
 | PostgreSQL | schema `cache` (the marts) only | published in one transaction, as before; a serving cache, rebuilt from the lake at any time |
 
 Delta keeps every version of a `dw` table, so a run can be replayed against
-exactly the star it read: manifest v2 (section 3) records the Delta version of
-each `dw` table the run used.
+exactly the star it read: manifest v2 records the Delta version of each `dw`
+table the run built and judged (`dw_versions`), and the marts and the gate read
+the star at those versions (`VERSION AS OF`).
 
 ### 4.11 Why this design
 

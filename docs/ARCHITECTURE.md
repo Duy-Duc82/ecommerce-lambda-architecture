@@ -102,7 +102,7 @@ Hai điểm cần đọc kỹ:
 ### `processing/`
 
 - `normalize/`: `common.py` (đọc envelope, cột canonical, quarantine, drift), `sources/{tiki,lazada}.py` (`PAYLOAD_SCHEMA`, `to_wide`, `to_offer_observation`), `wire.py` (cột canonical → event `marketplace-observation.v1`).
-- `batch/`: `stages/{base,silver,dimensions,facts,marts,quality,publish,promote}.py`, `runner.py`, `ports.py`, `context.py`, `lake.py` (`SparkLakeIO`), `inputs.py`, `memory.py` (bản trong bộ nhớ của các port), `marts.py`, `anomaly.py`, `quality.py`, `manifest.py`, `repositories.py`, `lock.py`, `scheduler.py` (vòng lặp cũ, profile `legacy-scheduler`), `cli.py`, `bootstrap.py`, `dimensions.py`, `star_inputs.py`, `keys.py`, `dim_date.py`, `facts.py` (star Phase 10: dimension và fact đã nối vào stage `dimensions`, `facts`; mart chưa dựng từ fact).
+- `batch/`: `stages/{base,silver,dimensions,facts,marts,quality,publish,promote}.py`, `runner.py`, `ports.py`, `context.py`, `lake.py` (`SparkLakeIO`), `inputs.py`, `memory.py` (bản trong bộ nhớ của các port), `marts.py`, `anomaly.py`, `quality.py`, `manifest.py`, `repositories.py`, `lock.py`, `scheduler.py` (vòng lặp cũ, profile `legacy-scheduler`), `cli.py`, `bootstrap.py`, `dimensions.py`, `star_inputs.py`, `keys.py`, `dim_date.py`, `facts.py` (star Phase 10: dimension và fact ở stage `dimensions`, `facts`; mart dựng từ fact qua `star_sightings.py`; cửa sổ ngày và star đã chứng nhận theo ADR-0007).
 - `speed/`: `normalizer.py`, `stream.py`, `service.py`, `sinks.py`, `change_producer.py`.
 
 ### `orchestration/`, `serving/`, `ops/`
