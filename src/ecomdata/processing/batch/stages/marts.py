@@ -25,6 +25,7 @@ from ecomdata.processing.batch.inputs import (
 )
 from ecomdata.processing.batch.marts import build_marketplace_marts
 from ecomdata.processing.batch.stages.base import Outcome, Stage, StageContext
+from ecomdata.processing.batch.stages.facts import built_star_versions
 from ecomdata.processing.batch.stages.silver import OBSERVATIONS, RUNS_DIRECTORY, SILVER_ZONE
 from ecomdata.processing.batch.star_sightings import sightings_from_facts
 
@@ -59,8 +60,11 @@ class MartsStage(Stage):
             duplicates = duplicate_counts(judged)
         finally:
             judged.unpersist()
-        dims = {d.name: ctx.io.read_dw(run, d.name) for d in datasets_of_kind(DIM, BRIDGE)}
-        fact = observations_as_of(ctx.io.read_dw(run, "fact_offer_observation"), run.as_of)
+        versions = built_star_versions(ctx)
+        dims = {d.name: ctx.io.read_dw(run, d.name, versions.get(d.name)) for d in datasets_of_kind(DIM, BRIDGE)}
+        fact = observations_as_of(
+            ctx.io.read_dw(run, "fact_offer_observation", versions.get("fact_offer_observation")), run.as_of
+        )
         observations = organic_only(sightings_from_facts(fact, dims)).cache()
         try:
             marts = build_marketplace_marts(observations, attempts, runs, run)

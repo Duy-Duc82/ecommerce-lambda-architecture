@@ -126,8 +126,16 @@ class SparkLakeIO:
         history = self.spark.sql(f"DESCRIBE HISTORY delta.`{uri}` LIMIT 1").first()
         return DwWriteResult(name, uri, self.read_dw(context, name).count(), int(history["version"]))
 
-    def read_dw(self, context: MarketplaceBatchContext, name: str) -> DataFrame:
-        return self.spark.read.format(self.table_format).load(context.dw_dataset_uri(name))
+    def read_dw(self, context: MarketplaceBatchContext, name: str, version: int | None = None) -> DataFrame:
+        reader = self.spark.read.format(self.table_format)
+        if version is not None:
+            reader = reader.option("versionAsOf", int(version))
+        return reader.load(context.dw_dataset_uri(name))
+
+    def restore_dw(self, context: MarketplaceBatchContext, name: str, version: int) -> int:
+        uri = context.dw_dataset_uri(name)
+        self.spark.sql(f"RESTORE TABLE delta.`{uri}` TO VERSION AS OF {int(version)}")
+        return int(self.spark.sql(f"DESCRIBE HISTORY delta.`{uri}` LIMIT 1").first()["version"])
 
     def _existing_delta(self, uri: str) -> DataFrame | None:
         from pyspark.errors import AnalysisException

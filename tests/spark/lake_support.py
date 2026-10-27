@@ -21,9 +21,8 @@ class MemoryLake:
         self.written: dict[str, object] = {}
         self.partitions: dict[str, tuple[str, ...]] = {}
         self.gold: dict[tuple[str, str], object] = {}
-        # The star: one frame per table, kept across runs, and how many merges each took.
-        self.dw: dict[tuple[str, str], object] = {}
-        self.dw_versions: dict[tuple[str, str], int] = {}
+        # The star: every version of every table, kept across runs (version n is history[n]).
+        self.dw_history: dict[tuple[str, str], list] = {}
 
     def read_records(self, *, days=None):
         frame = common.decode_records(self.spark.createDataFrame([(line,) for line in self.lines], "value string"))
@@ -62,13 +61,24 @@ class MemoryLake:
 
         key = (context.dw_root_uri, name)
         cached = stored(frame.select(*dataset(name).columns))
-        self.dw[key] = cached
         # Like a Delta table, every merge is a new version, numbered from 0.
-        self.dw_versions[key] = self.dw_versions.get(key, -1) + 1
-        return DwWriteResult(name, context.dw_dataset_uri(name), cached.count(), self.dw_versions[key])
+        history = self.dw_history.setdefault(key, [])
+        history.append(cached)
+        return DwWriteResult(name, context.dw_dataset_uri(name), cached.count(), len(history) - 1)
 
-    def read_dw(self, context, name):
-        return self.dw[(context.dw_root_uri, name)]
+    def read_dw(self, context, name, version=None):
+        history = self.dw_history[(context.dw_root_uri, name)]
+        return history[-1] if version is None else history[version]
+
+    def restore_dw(self, context, name, version):
+        history = self.dw_history[(context.dw_root_uri, name)]
+        history.append(history[version])
+        return len(history) - 1
+
+    @property
+    def dw(self):
+        """Each star table's latest version, by (dw root, table)."""
+        return {key: history[-1] for key, history in self.dw_history.items()}
 
 
 def stored(frame):

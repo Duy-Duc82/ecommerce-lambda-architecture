@@ -324,6 +324,13 @@ def build_dim_category(
     then the path observed most recently, then the greater path string, so the
     tree stays a tree. ``frontier`` (``marketplace_code``, ``target``) and
     ``names`` (``CATEGORY_NAME_COLUMNS``) supply names and slugs.
+
+    A category page that was requested (a sighting's ``request_target``, or a
+    frontier target such as a crawl attempt that failed) but whose node no path
+    names yet is an **inferred member**: a row with its natural key, its slug,
+    and NULL ``level`` and ``parent_key``, so every fact that points at the page
+    resolves. Once a page states the node's path, the full row replaces it under
+    the same key.
     """
     from_rows = (
         observations.filter(F.size(_path_ids("category_path")) > 0)
@@ -359,6 +366,28 @@ def build_dim_category(
     chosen = (
         nodes.withColumn("_rn", F.row_number().over(winner)).filter("_rn = 1").drop("_rn", "_last_seen", "_stated")
     )
+    if "request_target" in observations.columns:
+        requested = observations.select("marketplace", F.col("request_target").alias("_target"))
+    else:
+        requested = observations.select("marketplace", F.lit(None).cast("string").alias("_target"))
+    if frontier is not None:
+        requested = requested.unionByName(
+            frontier.select(F.col("marketplace_code").alias("marketplace"), F.col("target").alias("_target"))
+        )
+    inferred = (
+        requested.select("marketplace", page_category_id("_target").alias("category_id"))
+        .filter(F.col("marketplace").isNotNull() & F.col("category_id").isNotNull())
+        .distinct()
+        .join(chosen.select("marketplace", "category_id"), ["marketplace", "category_id"], "left_anti")
+        .select(
+            "marketplace",
+            "category_id",
+            F.col("category_id").alias("full_path"),
+            F.lit(None).cast("string").alias("_parent_id"),
+            F.lit(None).cast("smallint").alias("level"),
+        )
+    )
+    chosen = chosen.unionByName(inferred)
     parents = (
         chosen.filter(F.col("_parent_id").isNotNull())
         .select(F.col("marketplace").alias("_pm"), F.col("_parent_id").alias("_pid"))
@@ -587,6 +616,21 @@ def build_dim_product_listing(observations: DataFrame) -> DataFrame:
             "is_current": True,
             "version": 0,
         },
+    )
+
+
+def requested_category_pages(attempts: DataFrame | None) -> DataFrame | None:
+    """The category pages the crawler asked for (``marketplace_code``, ``target``), from the crawl attempts.
+
+    ``attempts`` carries the frontier's ``request_target`` and ``resource_type``
+    (``marts.attach_marketplace_code``); without them there is nothing to add.
+    """
+    if attempts is None or not {"marketplace_code", "request_target", "resource_type"} <= set(attempts.columns):
+        return None
+    return (
+        attempts.filter(F.col("resource_type") == "LISTING_PAGE")
+        .select("marketplace_code", F.col("request_target").alias("target"))
+        .distinct()
     )
 
 

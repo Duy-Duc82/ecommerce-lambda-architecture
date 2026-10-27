@@ -13,12 +13,17 @@ Nothing here reads a wall clock. ``created_at`` is the run's ``as_of``, so two
 runs of the same context serialise to the same bytes and a replay can be
 checked by comparing files. Wall-clock timestamps belong in
 ``audit.marketplace_batch_run``.
+
+Schema v2 adds ``dw_versions``: the Delta version of every star table the run
+built and judged. The pointer therefore also names the last certified star, and
+a run that fails the gate restores the star to it. A v1 manifest still parses,
+with no versions.
 """
 from __future__ import annotations
 
 import json
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 from urllib.parse import quote
@@ -30,7 +35,8 @@ if TYPE_CHECKING:
     from ecomdata.processing.batch.quality import QualityDecision
 
 GOLD_ZONE = "gold"
-MANIFEST_SCHEMA_VERSION = "marketplace-gold-manifest.v1"
+MANIFEST_SCHEMA_VERSION = "marketplace-gold-manifest.v2"
+READABLE_MANIFEST_VERSIONS = ("marketplace-gold-manifest.v1", MANIFEST_SCHEMA_VERSION)
 CURRENT_POINTER_PATH = f"{GOLD_DATASET}/current.json"
 
 PROMOTED = "PROMOTED"
@@ -70,6 +76,7 @@ class GoldManifest:
     datasets: tuple[ManifestDataset, ...]
     quality: Mapping[str, Any]
     previous_run_id: str | None
+    dw_versions: Mapping[str, int] = field(default_factory=dict)
 
     @property
     def created_at(self) -> datetime:
@@ -91,6 +98,7 @@ def build_gold_manifest(
     context: MarketplaceBatchContext,
     *,
     previous_run_id: str | None,
+    dw_versions: Mapping[str, int | None] | None = None,
 ) -> GoldManifest:
     if decision.run_id != context.run_id:
         raise ValueError("decision belongs to another run")
@@ -128,6 +136,7 @@ def build_gold_manifest(
             "skipped": decision.skipped,
         },
         previous_run_id=previous_run_id,
+        dw_versions={name: int(v) for name, v in sorted((dw_versions or {}).items()) if v is not None},
     )
 
 
@@ -160,6 +169,7 @@ def serialize_manifest(manifest: GoldManifest) -> bytes:
         ],
         "quality": dict(manifest.quality),
         "previous_run_id": manifest.previous_run_id,
+        "dw_versions": dict(sorted(manifest.dw_versions.items())),
     }
     return json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
 
@@ -167,7 +177,7 @@ def serialize_manifest(manifest: GoldManifest) -> bytes:
 def parse_manifest(payload: bytes) -> GoldManifest:
     document = json.loads(payload.decode("utf-8"))
     version = document.get("manifest_schema_version")
-    if version != MANIFEST_SCHEMA_VERSION:
+    if version not in READABLE_MANIFEST_VERSIONS:
         raise ValueError(f"unsupported manifest schema version: {version!r}")
     return GoldManifest(
         manifest_schema_version=version,
@@ -187,6 +197,7 @@ def parse_manifest(payload: bytes) -> GoldManifest:
         ),
         quality=dict(document["quality"]),
         previous_run_id=document["previous_run_id"],
+        dw_versions={name: int(v) for name, v in document.get("dw_versions", {}).items()},
     )
 
 

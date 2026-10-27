@@ -37,7 +37,7 @@ class MarketplaceBatchContext:
     anomaly_mad_threshold: Decimal = Decimal("3.5")
     anomaly_iqr_multiplier: Decimal = Decimal("1.5")
     anomaly_rule_version: str = "anomaly-rules.v1"
-    quality_rule_version: str = "quality-rules.v2"
+    quality_rule_version: str = "quality-rules.v3"
     future_tolerance_seconds: int = 300
     reconciliation_settle_seconds: int = 900
     reconciliation_lookback_seconds: int = 172800

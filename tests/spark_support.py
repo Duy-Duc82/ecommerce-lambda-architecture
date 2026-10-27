@@ -77,6 +77,12 @@ def spark():
         SparkSession.builder.master("local[1]")
         .appName("marketplace-tests")
         .config("spark.ui.enabled", "false")
+        # The status store keeps the last 1000 SQL executions with their plans even
+        # without a UI; over a whole suite the star's plans fill the heap with them.
+        .config("spark.sql.ui.retainedExecutions", "10")
+        .config("spark.ui.retainedJobs", "10")
+        .config("spark.ui.retainedStages", "10")
+        .config("spark.ui.retainedTasks", "100")
         .config("spark.sql.shuffle.partitions", "1")
         # One session serves the whole suite; the default 1g driver heap runs out
         # once the pipeline tests hold every stage's frames (Phase 10 star).

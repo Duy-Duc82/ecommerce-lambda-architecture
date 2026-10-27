@@ -30,6 +30,23 @@ def summary_key(run_id: str) -> str:
     return f"marketplace/{RUNS_DIRECTORY}/run_id={run_id}/facts.json"
 
 
+def built_star_versions(ctx: StageContext) -> dict[str, int | None]:
+    """The version of every star table this run built, from the dimensions and facts summaries.
+
+    The marts and the quality gate read the star at these versions, never at
+    whatever the table holds now, so a rerun of a stage reads the star its run built.
+    """
+    from ecomdata.processing.batch.stages import dimensions
+
+    versions: dict[str, int | None] = {}
+    for key in (dimensions.summary_key(ctx.run.run_id), summary_key(ctx.run.run_id)):
+        payload = ctx.store.get(SILVER_ZONE, key)
+        if payload is None:
+            raise FileNotFoundError(f"the run left no {key}: cannot tell which star it built")
+        versions.update({name: table["version"] for name, table in json.loads(payload)["tables"].items()})
+    return versions
+
+
 class FactsStage(Stage):
     name = "facts"
     requires = (

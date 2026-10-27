@@ -130,7 +130,11 @@ class LakeIO(Protocol):
         and every earlier version stays readable. Parquet: an overwrite.
         """
 
-    def read_dw(self, context: MarketplaceBatchContext, name: str) -> DataFrame: ...
+    def read_dw(self, context: MarketplaceBatchContext, name: str, version: int | None = None) -> DataFrame:
+        """A star table as it is, or as it was at ``version``."""
+
+    def restore_dw(self, context: MarketplaceBatchContext, name: str, version: int) -> int:
+        """Make ``version`` the star table's content again, as a new version; returns that version."""
 
 
 BatchLock = Callable[[], AbstractContextManager[Any]]

@@ -372,7 +372,8 @@ class BatchSettings:
 
 @dataclass(frozen=True)
 class QualitySettings:
-    rule_version: str = "quality-rules.v2"
+    # v3: the gate also judges the star (referential integrity, keys, SCD2 versions).
+    rule_version: str = "quality-rules.v3"
     # Clock skew tolerated between a fetch and the observation it yields.
     future_tolerance_seconds: int = 300
     # A crawl run is reconciled against Silver once settled, while inside the

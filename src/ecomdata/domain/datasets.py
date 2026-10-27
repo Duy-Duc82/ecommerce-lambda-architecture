@@ -311,6 +311,35 @@ if len(_BY_NAME) != len(DATASETS):
     raise RuntimeError("marketplace dataset names must be unique")
 
 
+# Every surrogate key column of the star names the dimension it points into
+# (the role-playing ones too: a page's category, a category's parent). A column
+# is a foreign key wherever the table holding it is not the one it names.
+KEY_ROLES: dict[str, tuple[str, str]] = {
+    "date_key": ("dim_date", "date_key"),
+    "marketplace_key": ("dim_marketplace", "marketplace_key"),
+    "seller_key": ("dim_seller", "seller_key"),
+    "brand_key": ("dim_brand", "brand_key"),
+    "category_key": ("dim_category", "category_key"),
+    "page_category_key": ("dim_category", "category_key"),
+    "parent_key": ("dim_category", "category_key"),
+    "ancestor_key": ("dim_category", "category_key"),
+    "descendant_key": ("dim_category", "category_key"),
+    "listing_key": ("dim_product_listing", "listing_key"),
+    "offer_key": ("dim_product_listing", "offer_key"),
+    "listing_flags_key": ("dim_listing_flags", "listing_flags_key"),
+}
+
+
+def foreign_keys(name: str) -> tuple[tuple[str, str, str], ...]:
+    """``(column, dimension, key)`` for each foreign key of the star table ``name``."""
+    entry = dataset(name)
+    return tuple(
+        (column, *KEY_ROLES[column])
+        for column in entry.columns
+        if column in KEY_ROLES and KEY_ROLES[column] != (name, column)
+    )
+
+
 def dataset(name: str) -> MarketplaceDataset:
     try:
         return _BY_NAME[name]

@@ -22,7 +22,7 @@ import json
 from ecomdata.domain.batch_run import BatchRunStatus as S
 from ecomdata.domain.datasets import BRIDGE, DIM, datasets_of_kind
 from ecomdata.domain.sources import SOURCES, SourceRegistry
-from ecomdata.processing.batch.dimensions import build_marketplace_dimensions
+from ecomdata.processing.batch.dimensions import build_marketplace_dimensions, requested_category_pages
 from ecomdata.processing.batch.inputs import deduplicate_observations
 from ecomdata.processing.batch.stages.base import Outcome, Stage, StageContext
 from ecomdata.processing.batch.stages.silver import OBSERVATIONS, PAGE_CONTEXT, RUNS_DIRECTORY, SILVER_ZONE, wide_name
@@ -58,8 +58,11 @@ class DimensionsStage(Stage):
             wide = {code: ctx.io.read_silver(wide_name(code)) for code in codes}
             contexts = ctx.io.read_silver(PAGE_CONTEXT)
             inputs = star_inputs(observations, wide, contexts, self.registry)
+            # The pages the crawler asked for, failed ones included: their categories
+            # must exist for fact_crawl_attempt to point at them.
+            attempts, _ = ctx.crawl_audit(ctx.spark)
             dims = build_marketplace_dimensions(
-                inputs.observations, None, inputs.category_names, inputs.category_paths
+                inputs.observations, requested_category_pages(attempts), inputs.category_names, inputs.category_paths
             )
             writes = {name: ctx.io.merge_dw(run, name, dims[name]) for name in DIMENSION_NAMES}
         finally:

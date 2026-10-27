@@ -321,7 +321,7 @@ def test_a_second_run_on_the_same_silver_leaves_the_star_as_it_was(spark):
     run_batch(later, deps=deps, stages=select_stages(["silver", "dimensions"]))
 
     assert {name: rows(frame) for (_, name), frame in lake.dw.items()} == first
-    assert set(lake.dw_versions.values()) == {1}
+    assert {len(history) - 1 for history in lake.dw_history.values()} == {1}
     summary = json.loads(store.get("silver", dimensions_stage.summary_key("run-2")))
     assert {table["version"] for table in summary["tables"].values()} == {1}
 
