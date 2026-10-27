@@ -17,6 +17,7 @@ Lịch:
 
 ## Báo cáo (mới nhất trước)
 
+- [2026-10-27 19:00](reports/2026-10-27.md) — CẦN XEM: mp-live vẫn tắt (0/10); Docker tắt, máy mới bật 18:44; không batch; ổ C còn 226.5 GiB (+1.2)
 - [2026-10-26 19:40](reports/2026-10-26.md) — CẦN XEM: mp-live vẫn tắt (0/10); Docker tắt, máy mới bật 19:34; không batch; ổ C còn 225.3 GiB (−9.5)
 - [2026-10-25 10:38](reports/2026-10-25.md) — CẦN XEM: mp-live vẫn tắt (0/10); Docker tắt lúc kiểm (dừng 00:44 10-25), stack thử mp-tikihtml đã dừng; ổ C giảm 22.8 GiB
 - [2026-10-24 07:47](reports/2026-10-24.md) — CẦN XEM: mp-live vẫn tắt (0/10); Docker bật, đang chạy stack thử mp-tikihtml (crawl trang danh mục, batch mỗi giờ, SUCCEEDED)
