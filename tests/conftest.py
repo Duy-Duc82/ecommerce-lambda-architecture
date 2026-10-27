@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from tests.spark_support import spark  # noqa: F401
+from tests.spark_support import _release_cached_frames, spark  # noqa: F401
 
 _FOLDER_MARKERS = {"spark": "spark", "integration": "integration", "legacy": "legacy", "drills": "drill"}
 _TESTS = Path(__file__).resolve().parent

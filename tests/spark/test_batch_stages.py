@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 from datetime import UTC, date, datetime
+from decimal import Decimal
 
 import pytest
 from pyspark.sql import functions as F
@@ -102,6 +103,39 @@ def test_the_six_stages_take_a_run_from_bronze_records_to_a_promoted_gold(spark)
     assert publisher.published == [("run-1", 10, True, record.manifest_uri)]
     assert read_current_manifest(reader=store.get).run_id == "run-1"
     assert "quality" in [item.stage for item in report.stages]
+
+
+def parity_rows(frame):
+    """A mart's rows as comparable cells: numbers by value, and a path by its last node.
+
+    The marts built from the star read a category's path from ``dim_category``, which holds the
+    tree path a page states (Lazada: the breadcrumb ``a/b``), where the marts built from Silver
+    read the request target (``b``). Both name the same node, so the path is compared by it.
+    """
+    def cell(name, value):
+        if name == "category_path" and value is not None:
+            return value.rsplit("/", 1)[-1] if "/" in value and not value[0].isdigit() else value
+        try:
+            return str(Decimal(value).normalize())
+        except (ArithmeticError, TypeError, ValueError):
+            return value
+
+    return sorted(
+        (tuple(cell(n, v) for n, v in zip(frame.columns, row, strict=True)) for row in rows(frame)), key=str
+    )
+
+
+def test_the_marts_built_from_the_facts_equal_the_marts_built_from_silver(spark):
+    from ecomdata.processing.batch.inputs import deduplicate_observations, judged_observations
+    from ecomdata.processing.batch.marts import build_marketplace_marts
+
+    _, context, deps, lake, *_ = run_all(spark, lines_of([*tiki_records(), *lazada_records()]), parsed=10)
+    observations = deduplicate_observations(judged_observations(lake.read_silver("offer_observations_v2"), context.as_of))
+    old = build_marketplace_marts(observations, *deps.crawl_audit(spark), context)
+
+    for name in MART_NAMES:
+        new = lake.read_gold(context, name)
+        assert parity_rows(new) == parity_rows(old[name].select(*new.columns)), name
 
 
 def test_both_sources_reach_the_marts(spark):

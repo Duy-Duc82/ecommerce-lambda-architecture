@@ -89,3 +89,13 @@ def spark():
     session.sparkContext.setLogLevel("ERROR")
     yield session
     session.stop()
+
+
+@pytest.fixture(autouse=True)
+def _release_cached_frames(request):
+    """Drop what a test cached once it ends: the session serves the whole suite, and the
+    in-memory lake caches every frame a stage writes, so the heap would otherwise fill up.
+    """
+    yield
+    if "spark" in request.fixturenames:
+        request.getfixturevalue("spark").catalog.clearCache()

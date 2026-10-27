@@ -32,8 +32,7 @@ class MemoryLake:
         return frame
 
     def write_silver(self, name, frame, *, partition_by=()):
-        self.written[name] = frame.cache()
-        self.written[name].count()
+        self.written[name] = stored(frame)
         self.partitions[name] = tuple(partition_by)
         return f"memory://silver/{name}"
 
@@ -43,7 +42,7 @@ class MemoryLake:
     def write_gold(self, context, name, frame):
         from ecomdata.processing.batch.context import GoldWriteResult
 
-        cached = frame.cache()
+        cached = stored(frame)
         self.gold[(context.run_id, name)] = cached
         return GoldWriteResult(name, context.gold_dataset_uri(name), cached.count())
 
@@ -55,7 +54,7 @@ class MemoryLake:
         from ecomdata.processing.batch.context import DwWriteResult
 
         key = (context.dw_root_uri, name)
-        cached = frame.select(*dataset(name).columns).cache()
+        cached = stored(frame.select(*dataset(name).columns))
         self.dw[key] = cached
         # Like a Delta table, every merge is a new version, numbered from 0.
         self.dw_versions[key] = self.dw_versions.get(key, -1) + 1
@@ -63,6 +62,16 @@ class MemoryLake:
 
     def read_dw(self, context, name):
         return self.dw[(context.dw_root_uri, name)]
+
+
+def stored(frame):
+    """``frame`` as a lake would hand it back: its rows materialised and its lineage cut.
+
+    A real write and read leaves a plan that starts at the files. Keeping the
+    whole lineage instead (Bronze to Silver to the star to the marts) grows the
+    plans until the driver runs out of heap.
+    """
+    return frame.localCheckpoint(eager=True)
 
 
 def lines_of(records):

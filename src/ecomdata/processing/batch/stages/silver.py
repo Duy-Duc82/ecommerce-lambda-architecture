@@ -109,14 +109,20 @@ class SilverStage(Stage):
             observations = ctx.spark.createDataFrame([], schema=_canonical_schema(ctx.spark))
         silver_rows = 0
         duplicates = {"rows": 0, "observation_id": 0, "identical_content": 0}
-        if valid_frames:
-            observations = observations.cache()
-            duplicates = duplicate_counts(observations)
-            silver_rows = duplicates["rows"]
-        ctx.io.write_silver(OBSERVATIONS, observations, partition_by=SILVER_PARTITIONS)
+        observations = observations.cache()
         quarantine = quarantine.cache()
-        quarantine_by_reason = {row.reason: row.n for row in quarantine.groupBy("reason").agg(F.count("*").alias("n")).collect()}
-        ctx.io.write_silver(QUARANTINE, quarantine, partition_by=("source_code",))
+        try:
+            if valid_frames:
+                duplicates = duplicate_counts(observations)
+                silver_rows = duplicates["rows"]
+            ctx.io.write_silver(OBSERVATIONS, observations, partition_by=SILVER_PARTITIONS)
+            quarantine_by_reason = {
+                row.reason: row.n for row in quarantine.groupBy("reason").agg(F.count("*").alias("n")).collect()
+            }
+            ctx.io.write_silver(QUARANTINE, quarantine, partition_by=("source_code",))
+        finally:
+            observations.unpersist()
+            quarantine.unpersist()
         for code, wide in wide_frames.items():
             ctx.io.write_silver(wide_name(code), wide.drop("dropped_fields_json"), partition_by=())
         contexts = common.page_contexts(records)
