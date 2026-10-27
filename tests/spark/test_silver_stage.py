@@ -7,7 +7,7 @@ I/O is exercised in the Docker stack.
 from __future__ import annotations
 
 import json
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 
 import pytest
@@ -43,8 +43,8 @@ pytestmark = requires_spark
 AS_OF = datetime(2026, 10, 25, 10, tzinfo=UTC)
 
 
-def run_silver(spark, lines, *, options=None, as_of=AS_OF):
-    lake, store = MemoryLake(spark, lines), MemoryStore()
+def run_silver(spark, lines, *, options=None, as_of=AS_OF, lake=None):
+    lake, store = lake or MemoryLake(spark, lines), MemoryStore()
     run = MarketplaceBatchContext("run-1", as_of, "memory://silver", "memory://gold")
     ctx = StageContext(
         run=run, record=None, options=options or RunOptions(), audit=None, store=store, io=lake, quality=None,
@@ -178,19 +178,73 @@ def test_a_run_with_no_records_writes_empty_datasets(spark):
     assert lake.written[silver_stage.OBSERVATIONS].columns == list(common.CANONICAL_NAMES)
 
 
+# ---------------------------------------------------------------- the window a run owns
+def test_a_run_owns_its_day_and_the_late_days_before_it():
+    as_of = datetime(2026, 10, 25, 0, 30, tzinfo=UTC)
+
+    assert silver_stage.silver_days(as_of, RunOptions()) == (date(2026, 10, 24), date(2026, 10, 25))
+    assert silver_stage.silver_days(as_of, RunOptions(late_days=0)) == (date(2026, 10, 25),)
+    assert silver_stage.silver_days(as_of, RunOptions(silver_since=date(2026, 10, 22))) == tuple(
+        date(2026, 10, d) for d in (22, 23, 24, 25)
+    )
+    assert silver_stage.silver_days(as_of, RunOptions(rebuild=True)) is None
+    with pytest.raises(ValueError, match="after the run's day"):
+        silver_stage.silver_days(as_of, RunOptions(silver_since=date(2026, 10, 26)))
+
+
 def test_silver_since_rebuilds_only_the_days_from_that_date_on(spark):
     lines = lines_of(tiki_records())
+    as_of = datetime(2026, 10, 27, 10, tzinfo=UTC)
 
-    _, _, after = run_silver(spark, lines, options=RunOptions(silver_since=date(2026, 10, 26)))
-    _, _, same_day = run_silver(spark, lines, options=RunOptions(silver_since=date(2026, 10, 25)))
+    _, _, after = run_silver(spark, lines, as_of=as_of, options=RunOptions(silver_since=date(2026, 10, 26)))
+    _, _, same_day = run_silver(spark, lines, as_of=as_of, options=RunOptions(silver_since=date(2026, 10, 25)))
 
     assert after["silver_rows"] == 0 and same_day["silver_rows"] == 5
+    assert same_day["window"] == ["2026-10-25", "2026-10-26", "2026-10-27"] and not same_day["rebuild"]
 
 
-def test_records_fetched_after_as_of_are_not_read(spark):
+def test_records_of_the_run_day_fetched_after_as_of_are_in_silver_too(spark):
+    # as_of cuts where a later stage reads Silver; a day of Silver is always the whole Bronze day,
+    # so an older run can never shrink what a newer one wrote.
     outcome, _, _ = run_silver(spark, lines_of(tiki_records()), as_of=datetime(2026, 10, 25, 8, tzinfo=UTC))
 
-    assert dict(outcome.columns) == {"silver_rows": 0}
+    assert dict(outcome.columns) == {"silver_rows": 5}
+
+
+def test_a_rebuild_reads_every_day_bronze_holds(spark):
+    lines = lines_of([*tiki_records(fetched=FETCHED - timedelta(days=5)), *lazada_records()])
+
+    _, _, window = run_silver(spark, lines)
+    _, lake, rebuild = run_silver(spark, lines, options=RunOptions(rebuild=True))
+
+    assert window["silver_rows"] < rebuild["silver_rows"] and rebuild["window"] is None and rebuild["rebuild"]
+    days = {row.observed_date for row in lake.written[silver_stage.OBSERVATIONS].select("observed_date").distinct().collect()}
+    assert days == {date(2026, 10, 20), date(2026, 10, 25)}
+
+
+def silver_rows(lake):
+    """Every Silver table's rows as comparable text, by table."""
+    return {
+        name: sorted(map(str, frame.select([F.col(c).cast("string") for c in frame.columns]).collect()))
+        for name, frame in lake.written.items()
+    }
+
+
+def test_an_older_window_run_after_a_newer_one_keeps_every_day_the_newer_one_wrote(spark):
+    day_before = FETCHED - timedelta(days=1)
+    lines = lines_of([*tiki_records(fetched=day_before), *tiki_records(), *lazada_records()])
+    lake = MemoryLake(spark, lines)
+
+    run_silver(spark, lines, lake=lake, options=RunOptions(silver_since=day_before.date()))
+    newer = silver_rows(lake)
+    # The run of the day before, started late (a backfill): its window is 10-23 and 10-24.
+    _, _, older = run_silver(spark, lines, lake=lake, as_of=datetime(2026, 10, 24, 9, tzinfo=UTC))
+
+    assert older["window"] == ["2026-10-23", "2026-10-24"] and older["silver_rows"] == 5
+    assert silver_rows(lake) == newer
+    for name in (silver_stage.OBSERVATIONS, silver_stage.PAGE_CONTEXT, silver_stage.wide_name("tiki")):
+        days = {row.observed_date for row in lake.written[name].select("observed_date").distinct().collect()}
+        assert days == {day_before.date(), FETCHED.date()}, name
 
 
 # ---------------------------------------------------------------- AC7: parity

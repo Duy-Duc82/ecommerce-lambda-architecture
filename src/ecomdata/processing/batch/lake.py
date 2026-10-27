@@ -30,7 +30,7 @@ class SparkLakeIO:
         records_uri: str,
         silver_root_uri: str,
         silver_schemas: Mapping[str, StructType] | None = None,
-        table_format: str = "parquet",
+        table_format: str = "delta",
     ) -> None:
         if table_format not in ("parquet", "delta"):
             raise ValueError(f"table_format must be parquet or delta, not {table_format!r}")
@@ -47,17 +47,41 @@ class SparkLakeIO:
     def silver_uri(self, name: str) -> str:
         return f"{self.silver_root_uri}/{name}"
 
-    def read_records(self, *, since_date: date | None = None) -> DataFrame:
-        records = common.decode_records(self.spark.read.option("recursiveFileLookup", "true").text(self.records_uri))
-        if since_date is not None:
-            records = records.filter(F.to_date("fetched_at") >= F.lit(since_date))
-        return records
+    def read_records(self, *, days: Sequence[date] | None = None) -> DataFrame:
+        # Only the Bronze day partitions asked for are listed and read; a day with
+        # no files reads as no rows, not as an error.
+        root = self.records_uri
+        if days is None:
+            pattern = root
+        elif not days:
+            return common.decode_records(self.spark.createDataFrame([], "value string, bronze_date date"))
+        else:
+            pattern = f"{root}/source=*/observed_date={{{','.join(day.isoformat() for day in days)}}}"
+        from pyspark.errors import AnalysisException
 
-    def write_silver(self, name: str, frame: DataFrame, *, partition_by: Sequence[str] = ()) -> str:
+        try:
+            lines = self.spark.read.option("recursiveFileLookup", "true").text(pattern)
+        except AnalysisException as error:
+            if "PATH_NOT_FOUND" not in str(error) and "Path does not exist" not in str(error):
+                raise
+            return common.decode_records(self.spark.createDataFrame([], "value string, bronze_date date"))
+        partition = F.regexp_extract(F.input_file_name(), r"observed_date=(\d{4}-\d{2}-\d{2})", 1)
+        return common.decode_records(lines.withColumn("bronze_date", F.to_date(F.nullif(partition, F.lit("")))))
+
+    def write_silver(
+        self, name: str, frame: DataFrame, *, partition_by: Sequence[str] = (), whole: bool = False
+    ) -> str:
         uri = self.silver_uri(name)
         writer = frame.write.mode("overwrite")
+        if whole:
+            # A rebuild may change a table's columns or partitioning (Silver is rebuilt from Bronze).
+            writer = writer.option("partitionOverwriteMode", "static")
+            if self.table_format == "delta":
+                writer = writer.option("overwriteSchema", "true")
+        elif partition_by:
+            writer = writer.option("partitionOverwriteMode", "dynamic")
         if partition_by:
-            writer = writer.option("partitionOverwriteMode", "dynamic").partitionBy(*partition_by)
+            writer = writer.partitionBy(*partition_by)
         writer.format(self.table_format).save(uri)
         return uri
 
@@ -87,8 +111,9 @@ class SparkLakeIO:
         uri = context.dw_dataset_uri(name)
         frame = frame.select(*entry.columns)
         if self.table_format != "delta":
-            self._create(frame, uri, entry.partition_columns, format_="parquet")
-            return DwWriteResult(name, uri, self.read_dw(context, name).count(), None)
+            # A Parquet star would be overwritten in place: no MERGE, no version to
+            # read a run back at, and a crash mid-write leaves a broken table.
+            raise RuntimeError(f"the star needs DATA_LAKE_TABLE_FORMAT=delta, not {self.table_format!r}")
         current = self._existing_delta(uri)
         if current is None:
             self._create(frame, uri, entry.partition_columns, format_="delta")
@@ -207,6 +232,7 @@ def silver_schemas() -> dict[str, StructType]:
             StructField("fetched_at", TimestampType()),
             StructField("reason", StringType()),
             StructField("payload_json", StringType()),
+            StructField("observed_date", DateType()),
         ]
     )
     return {OBSERVATIONS: declared(common.CANONICAL_COLUMNS), QUARANTINE: quarantine}

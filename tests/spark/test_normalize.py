@@ -33,22 +33,22 @@ def utc(value):
     return value.astimezone(UTC)
 
 
-def artifact(spec, url):
+def artifact(spec, url, fetched=FETCHED):
     return create_raw_artifact(
         marketplace_code=spec.code, crawl_run_id="run-1", marketplace_id=spec.marketplace_id, request_url=url,
-        resource_type=ResourceType.LISTING_PAGE, fetched_at=FETCHED, http_status=200, content_type="text/html",
+        resource_type=ResourceType.LISTING_PAGE, fetched_at=fetched, http_status=200, content_type="text/html",
         body_sha256=BODY_SHA, raw_uri=f"file:///lake/{spec.code}/part-0.bin.gz", adapter_version=spec.adapter_version,
         raw_bytes=10,
     )
 
 
-def tiki_records(extra_rows=(), page=TIKI_PAGE):
+def tiki_records(extra_rows=(), page=TIKI_PAGE, fetched=FETCHED):
     url = "https://tiki.vn/dien-thoai-may-tinh-bang/c1789"
-    bundle = FetchBundle(url, FETCHED, (FetchPart(url, 200, "text/html", page),))
+    bundle = FetchBundle(url, fetched, (FetchPart(url, 200, "text/html", page),))
     extracted = TikiExtractor().extract(bundle)
     request = ListingPageRequest("tiki", TIKI.marketplace_id, "dien-thoai-may-tinh-bang/c1789", 1)
     return build_records(
-        TIKI, request=request, raw_artifact=artifact(TIKI, url), rows=(*extracted.rows, *extra_rows),
+        TIKI, request=request, raw_artifact=artifact(TIKI, url, fetched), rows=(*extracted.rows, *extra_rows),
         page_context=extracted.page_context,
     )
 

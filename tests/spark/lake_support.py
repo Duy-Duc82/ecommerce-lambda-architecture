@@ -25,13 +25,20 @@ class MemoryLake:
         self.dw: dict[tuple[str, str], object] = {}
         self.dw_versions: dict[tuple[str, str], int] = {}
 
-    def read_records(self, *, since_date=None):
+    def read_records(self, *, days=None):
         frame = common.decode_records(self.spark.createDataFrame([(line,) for line in self.lines], "value string"))
-        if since_date is not None:
-            frame = frame.filter(F.to_date("fetched_at") >= F.lit(since_date))
+        if days is not None:
+            frame = frame.filter(F.col("bronze_date").isin(*days))
         return frame
 
-    def write_silver(self, name, frame, *, partition_by=()):
+    def write_silver(self, name, frame, *, partition_by=(), whole=False):
+        # Like the lake: the partitions the frame has rows for are replaced, the
+        # others kept; ``whole`` replaces the dataset.
+        previous = self.written.get(name)
+        if previous is not None and partition_by and not whole:
+            replaced = frame.select(*partition_by).distinct()
+            kept = previous.join(replaced, [*partition_by], "left_anti").select(*previous.columns)
+            frame = kept.unionByName(frame, allowMissingColumns=True)
         self.written[name] = stored(frame)
         self.partitions[name] = tuple(partition_by)
         return f"memory://silver/{name}"

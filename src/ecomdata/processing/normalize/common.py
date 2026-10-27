@@ -182,16 +182,22 @@ def decode_records(lines: DataFrame, *, source_code: str | None = None) -> DataF
     """Envelope columns plus ``payload_json``, the payload object as sent, from JSON lines (a ``value`` column).
 
     The payload is taken as text so it survives untouched; the envelope is
-    decoded with an explicit schema.
+    decoded with an explicit schema. ``bronze_date`` is the ``observed_date``
+    partition of the Bronze file a line came from, when ``lines`` carries it (the
+    lake reader does); otherwise the date of ``fetched_at``, which is how the
+    writer names that partition (``ingestion/record_store.records_path``).
     """
+    bronze = F.col("bronze_date") if "bronze_date" in lines.columns else F.lit(None).cast("date")
     decoded = lines.select(
         F.from_json("value", ENVELOPE_SCHEMA).alias("e"),
         F.get_json_object("value", "$.payload").alias("payload_json"),
         F.get_json_object("value", "$.dropped_fields").alias("dropped_fields_json"),
+        bronze.alias("bronze_date"),
     )
-    frame = decoded.select("e.*", "payload_json", "dropped_fields_json").withColumn(
+    frame = decoded.select("e.*", "payload_json", "dropped_fields_json", "bronze_date").withColumn(
         "fetched_at", F.try_to_timestamp("fetched_at")
     )
+    frame = frame.withColumn("bronze_date", F.coalesce(F.col("bronze_date"), F.to_date("fetched_at")))
     if source_code is not None:
         frame = frame.filter(F.col("source_code") == source_code)
     return frame
@@ -409,6 +415,7 @@ def canonical(records: DataFrame, spec: Any, fields: SourceFields) -> DataFrame:
         F.col("request_target"),
         F.col("request_page"),
         F.col("payload_json"),
+        F.col("bronze_date"),
         F.col("_listing_occurrence"),
     )
     return result.withColumn("reason", quarantine_reason())
@@ -441,6 +448,7 @@ def split_quarantine(frame: DataFrame) -> tuple[DataFrame, DataFrame]:
         F.col("fetched_at"),
         "reason",
         "payload_json",
+        "bronze_date",
     )
     return valid, quarantined
 

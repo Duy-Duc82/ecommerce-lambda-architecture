@@ -138,6 +138,28 @@ def test_the_marts_built_from_the_facts_equal_the_marts_built_from_silver(spark)
         assert parity_rows(new) == parity_rows(old[name].select(*new.columns)), name
 
 
+def test_an_older_run_after_a_newer_one_leaves_the_star_as_the_newer_one_built_it(spark):
+    from datetime import timedelta
+
+    from tests.spark.test_normalize import FETCHED
+
+    day_before = FETCHED - timedelta(days=1)
+    lines = lines_of([*tiki_records(fetched=day_before), *tiki_records(), *lazada_records()])
+    newer_context, deps, lake, *_ = pipeline(spark, lines, run_id="run-new")
+    star_stages = select_stages(["silver", "dimensions", "facts"])
+    run_batch(newer_context, deps=deps, stages=star_stages, options=RunOptions(silver_since=day_before.date()))
+    star = {name: rows(lake.read_dw(newer_context, name)) for name in (*DIMENSION_NAMES, *FACT_NAMES)}
+    assert {r[0] for r in rows(lake.read_dw(newer_context, "fact_offer_observation").select("date_key"))} == {
+        "20261024", "20261025",
+    }
+
+    # The previous day's run, late: its window and its as_of end before the newer run's day.
+    older_context = MarketplaceBatchContext("run-old", datetime(2026, 10, 24, 9, tzinfo=UTC), "memory://silver", "memory://gold")
+    run_batch(older_context, deps=deps, stages=star_stages, options=RunOptions())
+
+    assert {name: rows(lake.read_dw(older_context, name)) for name in star} == star
+
+
 def test_both_sources_reach_the_marts(spark):
     report, context, deps, lake, store, audit, _ = run_all(spark, lines_of([*tiki_records(), *lazada_records()]), parsed=10)
 

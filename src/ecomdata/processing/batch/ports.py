@@ -108,10 +108,13 @@ class CachePublisher(Protocol):
 class LakeIO(Protocol):
     """Reading and writing the datasets stages hand to each other through storage."""
 
-    def read_records(self, *, since_date: Any = None) -> DataFrame:
-        """Bronze/records (envelope columns and ``payload_json``), from ``since_date`` on."""
+    def read_records(self, *, days: Sequence[Any] | None = None) -> DataFrame:
+        """Bronze/records (envelope columns, ``payload_json``, ``bronze_date``) of ``days``; ``None``: every day."""
 
-    def write_silver(self, name: str, frame: DataFrame, *, partition_by: Sequence[str] = ()) -> str: ...
+    def write_silver(
+        self, name: str, frame: DataFrame, *, partition_by: Sequence[str] = (), whole: bool = False
+    ) -> str:
+        """Replace the partitions ``frame`` has rows for; ``whole`` replaces the dataset."""
 
     def read_silver(self, name: str) -> DataFrame: ...
 

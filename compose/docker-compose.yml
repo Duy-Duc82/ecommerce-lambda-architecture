@@ -50,6 +50,7 @@ x-marketplace-env: &marketplace-env
   POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-admin123}
   POSTGRES_DB: ${POSTGRES_DB:-data_warehouse}
   DATA_LAKE_PROFILE: minio
+  DATA_LAKE_TABLE_FORMAT: ${DATA_LAKE_TABLE_FORMAT:-delta}
   MINIO_ENDPOINT: minio:9000
   MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-minioadmin}
   MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}

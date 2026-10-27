@@ -83,11 +83,11 @@ def test_settings_default_driver_memory_is_three_gigabytes():
 
 
 # --- Delta Lake and the Databricks runtime -------------------------------------------------------
-def test_the_default_table_format_is_parquet_and_adds_no_delta_option():
+def test_the_default_table_format_is_delta_and_parquet_adds_no_delta_option():
     settings = load_settings({})
 
-    assert settings.storage.table_format == "parquet"
-    assert "spark.sql.extensions" not in factory_for({}).config()
+    assert settings.storage.table_format == "delta"
+    assert "spark.sql.extensions" not in factory_for({"DATA_LAKE_TABLE_FORMAT": "parquet"}).config()
 
 
 def test_delta_adds_the_extension_and_the_catalog_to_a_session_this_project_builds():

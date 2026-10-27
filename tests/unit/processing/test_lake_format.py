@@ -1,4 +1,4 @@
-"""SparkLakeIO writes and reads the table format it was given (Parquet by default, Delta for Databricks)."""
+"""SparkLakeIO writes and reads the table format it was given (Delta by default, Parquet on request)."""
 from __future__ import annotations
 
 import pytest
@@ -73,8 +73,36 @@ def test_silver_is_written_and_read_in_the_configured_format(table_format):
     assert ("read-format", table_format) in log and ("load", uri) in log
 
 
-def test_parquet_is_the_default():
-    assert lake([]).table_format == "parquet"
+def test_delta_is_the_default():
+    assert lake([]).table_format == "delta"
+
+
+def test_the_star_refuses_parquet():
+    from ecomdata.domain.datasets import dataset
+
+    class Context:
+        def dw_dataset_uri(self, name):
+            return f"s3a://g/dw/{name}"
+
+    class Selectable:
+        def select(self, *columns):
+            return self
+
+    assert dataset("dim_marketplace")
+    with pytest.raises(RuntimeError, match="DATA_LAKE_TABLE_FORMAT=delta"):
+        lake([], table_format="parquet").merge_dw(Context(), "dim_marketplace", Selectable())
+
+
+def test_a_window_rewrites_only_its_partitions_and_a_rebuild_replaces_the_table():
+    log = []
+    io = lake(log, table_format="delta")
+
+    io.write_silver("page_context", Frame(log), partition_by=["source_code", "observed_date"])
+    assert ("option", "partitionOverwriteMode", "dynamic") in log
+    log.clear()
+    io.write_silver("page_context", Frame(log), partition_by=["source_code", "observed_date"], whole=True)
+    assert ("option", "partitionOverwriteMode", "static") in log
+    assert ("option", "overwriteSchema", "true") in log
 
 
 def test_an_unknown_format_is_refused():

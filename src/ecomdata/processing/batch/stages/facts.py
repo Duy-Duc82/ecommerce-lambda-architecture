@@ -1,9 +1,9 @@
 """Stage ``facts``: Silver and the dimensions to the star's facts in the lake.
 
-Reads what the ``dimensions`` stage read (``offer_observations_v2`` as it stood
-at the run's ``as_of``, the wide tables, ``page_context``), the built
-``dim_product_listing`` from ``dw/`` (the facts take their ``listing_key`` from
-its versions) and the crawl audit as it stood at ``as_of``. It builds the six
+Reads what the ``dimensions`` stage read (all of ``offer_observations_v2``, the
+wide tables, ``page_context``; not cut at ``as_of``, for the reason given
+there), the built ``dim_product_listing`` from ``dw/`` (the facts take their
+``listing_key`` from its versions) and the whole crawl audit. It builds the six
 facts (``processing/batch/facts.py``) and merges each into
 ``gold/marketplace/dw/<table>/``, partitioned by ``date_key``. Like the
 dimensions, the facts are rebuilt whole from Silver on every run, so a rerun
@@ -18,12 +18,7 @@ from ecomdata.domain.batch_run import BatchRunStatus as S
 from ecomdata.domain.datasets import FACT, datasets_of_kind
 from ecomdata.domain.sources import SOURCES, SourceRegistry
 from ecomdata.processing.batch.facts import FactRules, build_marketplace_facts
-from ecomdata.processing.batch.inputs import (
-    crawl_audit_as_of,
-    deduplicate_observations,
-    fetched_as_of,
-    observations_as_of,
-)
+from ecomdata.processing.batch.inputs import deduplicate_observations
 from ecomdata.processing.batch.stages.base import Outcome, Stage, StageContext
 from ecomdata.processing.batch.stages.silver import OBSERVATIONS, PAGE_CONTEXT, RUNS_DIRECTORY, SILVER_ZONE, wide_name
 from ecomdata.processing.batch.star_inputs import star_inputs
@@ -52,15 +47,15 @@ class FactsStage(Stage):
 
     def execute(self, ctx: StageContext) -> Outcome:
         run = ctx.run
-        observations = deduplicate_observations(observations_as_of(ctx.io.read_silver(OBSERVATIONS), run.as_of))
+        observations = deduplicate_observations(ctx.io.read_silver(OBSERVATIONS))
         observations = observations.cache()
         try:
             present = {row.source_code for row in observations.select("source_code").distinct().collect()}
             codes = [spec.code for spec in self.registry if spec.code in present]
             wide = {code: ctx.io.read_silver(wide_name(code)) for code in codes}
-            contexts = fetched_as_of(ctx.io.read_silver(PAGE_CONTEXT), run.as_of)
+            contexts = ctx.io.read_silver(PAGE_CONTEXT)
             inputs = star_inputs(observations, wide, contexts, self.registry)
-            attempts, _ = crawl_audit_as_of(*ctx.crawl_audit(ctx.spark), run.as_of)
+            attempts, _ = ctx.crawl_audit(ctx.spark)
             facts = build_marketplace_facts(
                 inputs.observations,
                 ctx.io.read_dw(run, "dim_product_listing"),

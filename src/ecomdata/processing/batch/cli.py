@@ -39,7 +39,11 @@ def build_parser(silver_root: str, gold_root: str) -> argparse.ArgumentParser:
     run.add_argument("--allow-backfill", action="store_true", help="let an older as-of become the serving version")
     run.add_argument("--quality-only", action="store_true", help="write Gold and the manifest, then hold the run")
     run.add_argument("--force", action="store_true", help="run a stage again although the run already passed it")
-    run.add_argument("--silver-since", help="rebuild Silver day partitions from this date (YYYY-MM-DD) on")
+    run.add_argument("--silver-since", help="rebuild Silver day partitions from this date (YYYY-MM-DD) to the run's day")
+    run.add_argument(
+        "--late-days", type=int, default=1, help="days before the run's day a default Silver window reaches back"
+    )
+    run.add_argument("--rebuild", action="store_true", help="rebuild Silver from every day Bronze holds")
 
     scheduler = commands.add_parser("scheduler", help="the polling loop (profile legacy-scheduler)")
     scheduler.add_argument("--max-ticks", type=int, default=None, help="stop after N ticks (tests and smoke only)")
@@ -80,6 +84,8 @@ def run_main(args: argparse.Namespace, settings: Settings, *, serving_gold_root_
         publish_cache=not args.skip_postgres,
         serving_gold_root_uri=serving_gold_root_uri,
         silver_since=date.fromisoformat(args.silver_since) if args.silver_since else None,
+        late_days=args.late_days,
+        rebuild=args.rebuild,
         force=args.force,
     )
     deps = batch_dependencies(settings, publish_cache=not args.skip_postgres)

@@ -48,8 +48,13 @@ class RunOptions:
     publish_cache: bool = True
     # The Gold root the manifests and the pointer describe; a run into another root is a scratch run.
     serving_gold_root_uri: str | None = None
-    # Silver rebuilds the day partitions from this date on (None: every record in Bronze).
+    # Silver rebuilds the day partitions from this date to the run's day (None: the run's
+    # day and the late_days before it).
     silver_since: date | None = None
+    # How many days before the run's day a default window reaches back, for records that arrive late.
+    late_days: int = 1
+    # Rebuild Silver from every day Bronze holds, and the star from all of Silver.
+    rebuild: bool = False
     # Run a stage again although the run already passed its milestone.
     force: bool = False
 

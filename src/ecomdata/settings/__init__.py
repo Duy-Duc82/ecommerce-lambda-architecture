@@ -112,7 +112,7 @@ class StorageSettings:
     region: str | None = None
     access_key: str = ""
     secret_key: str = ""
-    table_format: str = "parquet"
+    table_format: str = "delta"
 
     @property
     def is_local(self) -> bool:
@@ -154,7 +154,9 @@ def _storage(env: _Env) -> StorageSettings:
     )
     if profile not in STORAGE_PROFILES:
         raise SettingsError(f"unknown DATA_LAKE_PROFILE {profile!r} (expected one of {', '.join(STORAGE_PROFILES)})")
-    table_format = env.text("DATA_LAKE_TABLE_FORMAT", "parquet").strip().lower()
+    # Delta: the star needs MERGE, table versions and atomic commits; Parquet stays for
+    # reading or writing a lake without the Delta jars, and cannot build the star.
+    table_format = env.text("DATA_LAKE_TABLE_FORMAT", "delta").strip().lower()
     if table_format not in TABLE_FORMATS:
         raise SettingsError(f"unknown DATA_LAKE_TABLE_FORMAT {table_format!r} (expected one of {', '.join(TABLE_FORMATS)})")
     common = {
