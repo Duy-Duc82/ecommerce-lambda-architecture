@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import os
 from collections.abc import Mapping
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 
 from ecomdata.domain.sources import SOURCES
@@ -74,20 +74,56 @@ def python_image(environ: Mapping[str, str] | None = None) -> str:
 AS_OF_TEMPLATE = "{{ data_interval_end.strftime('%Y-%m-%dT%H:%M:%SZ') }}"
 RUN_ID_TEMPLATE = "mp-{{ data_interval_end.strftime('%Y%m%dT%H%MZ') }}"
 ALLOW_BACKFILL_TEMPLATE = "{% if params.allow_backfill %}--allow-backfill{% endif %}"
+# Only a retry continues a run: a first try of a stage either starts the run or
+# follows the stage before it. A run the gate refused is not reopened by accident.
+RESUME_TEMPLATE = "{% if ti.try_number > 1 %}--resume{% endif %}"
+
+# A reprocessing run (DAG marketplace_reprocess) is an ordinary newer run whose
+# Silver window reaches further back: from params.since, or every day (params.rebuild).
+REPROCESS_AS_OF_TEMPLATE = "{{ dag_run.run_after.strftime('%Y-%m-%dT%H:%M:%SZ') }}"
+REPROCESS_RUN_ID_TEMPLATE = "mp-reprocess-{{ dag_run.run_after.strftime('%Y%m%dT%H%M%SZ') }}"
+REPROCESS_WINDOW_TEMPLATE = (
+    "{% if params.rebuild %}--rebuild{% elif params.since %}--silver-since {{ params.since }}{% endif %}"
+)
+
+# The gate's verdict is deterministic: running it again on the same data gives the same refusal.
+_STAGE_RETRIES = {"quality": 0}
+# One stage of one hourly window; past this the task is failed rather than left to block the next window.
+STAGE_TIMEOUT = timedelta(minutes=45)
 
 
-def batch_stage_command(stage: str) -> str:
-    """The command of one batch stage task.
-
-    ``--resume`` is always passed: it only matters for a run an earlier try crashed (an Airflow retry), which
-    continues from the last stage that finished.
-    """
+def batch_stage_command(
+    stage: str,
+    *,
+    run_id: str = RUN_ID_TEMPLATE,
+    as_of: str = AS_OF_TEMPLATE,
+    extra: str = ALLOW_BACKFILL_TEMPLATE,
+) -> str:
+    """The command of one batch stage task; ``--resume`` is added on a retry only (``RESUME_TEMPLATE``)."""
     if stage not in BATCH_STAGES:
         raise ValueError(f"unknown batch stage {stage!r}; stages are {BATCH_STAGES}")
     return (
         f"python3 -m ecomdata.processing.batch run --stage {stage} "
-        f"--run-id {RUN_ID_TEMPLATE} --as-of {AS_OF_TEMPLATE} --resume {ALLOW_BACKFILL_TEMPLATE}"
+        f"--run-id {run_id} --as-of {as_of} {RESUME_TEMPLATE} {extra}"
     )
+
+
+def reprocess_stage_command(stage: str) -> str:
+    """The command of one stage of a reprocessing run (its window from ``params``)."""
+    return batch_stage_command(
+        stage, run_id=REPROCESS_RUN_ID_TEMPLATE, as_of=REPROCESS_AS_OF_TEMPLATE, extra=REPROCESS_WINDOW_TEMPLATE
+    )
+
+
+def stage_retries(stage: str, default: int) -> int:
+    return _STAGE_RETRIES.get(stage, default)
+
+
+def settle_delay(environ: Mapping[str, str] | None = None) -> timedelta:
+    """How long after a window closes its batch starts: crawl pages fetched just before the end are still
+    being written to Bronze then (the polling scheduler's ``lag``)."""
+    source = os.environ if environ is None else environ
+    return timedelta(minutes=int(source.get("MARKETPLACE_BATCH_SETTLE_MINUTES", "10")))
 
 
 def render_run_id(as_of: datetime) -> str:

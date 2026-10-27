@@ -14,14 +14,51 @@ def test_the_dag_stages_are_the_batch_cli_stages_in_order():
     assert tasks.BATCH_STAGES == STAGE_NAMES
 
 
-def test_a_stage_command_names_the_stage_the_run_the_instant_and_resumes():
+def test_a_stage_command_names_the_stage_the_run_the_instant_and_resumes_on_a_retry_only():
+    from jinja2 import Template
+
     command = tasks.batch_stage_command("marts")
 
     assert command.startswith("python3 -m ecomdata.processing.batch run --stage marts ")
     assert "--run-id mp-{{ data_interval_end.strftime('%Y%m%dT%H%MZ') }}" in command
     assert "--as-of {{ data_interval_end.strftime('%Y-%m-%dT%H:%M:%SZ') }}" in command
-    assert "--resume" in command
     assert "{% if params.allow_backfill %}--allow-backfill{% endif %}" in command
+
+    class Ti:
+        def __init__(self, try_number):
+            self.try_number = try_number
+
+    def render(try_number):
+        context = {"data_interval_end": datetime(2026, 10, 25, 11, tzinfo=UTC), "params": {}, "ti": Ti(try_number)}
+        return Template(command).render(**context).split()
+
+    assert "--resume" not in render(1)
+    assert "--resume" in render(2)
+
+
+def test_a_reprocessing_run_takes_its_window_from_its_params():
+    from jinja2 import Template
+
+    class DagRun:
+        run_after = datetime(2026, 10, 27, 9, 30, 5, tzinfo=UTC)
+
+    def render(params):
+        command = tasks.reprocess_stage_command("silver")
+        return Template(command).render(dag_run=DagRun(), params=params, ti=type("Ti", (), {"try_number": 1})())
+
+    assert render({"since": "2026-10-01", "rebuild": False}).split()[-2:] == ["--silver-since", "2026-10-01"]
+    assert render({"since": None, "rebuild": True}).split()[-1] == "--rebuild"
+    plain = render({"since": None, "rebuild": False}).split()
+    assert plain[plain.index("--run-id") + 1] == "mp-reprocess-20261027T093005Z"
+    assert plain[plain.index("--as-of") + 1] == "2026-10-27T09:30:05Z"
+    assert "--silver-since" not in plain and "--rebuild" not in plain
+
+
+def test_the_gate_is_never_retried_and_a_window_settles_before_its_run():
+    assert tasks.stage_retries("quality", 2) == 0
+    assert tasks.stage_retries("silver", 2) == 2
+    assert tasks.settle_delay({}).total_seconds() == 600
+    assert tasks.settle_delay({"MARKETPLACE_BATCH_SETTLE_MINUTES": "3"}).total_seconds() == 180
 
 
 def test_an_unknown_stage_is_refused():

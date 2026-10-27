@@ -25,7 +25,7 @@ def bag():
 
 def test_every_dag_parses_without_error(bag):
     assert bag.import_errors == {}
-    assert set(bag.dags) == {"marketplace_batch", "marketplace_maintenance", "source_discovery"}
+    assert set(bag.dags) == {"marketplace_batch", "marketplace_maintenance", "marketplace_reprocess", "source_discovery"}
 
 
 def test_the_batch_dag_runs_hourly_one_run_at_a_time_with_retries(bag):
@@ -37,11 +37,25 @@ def test_the_batch_dag_runs_hourly_one_run_at_a_time_with_retries(bag):
     assert dag.params["allow_backfill"] is False or dag.params.get_param("allow_backfill").value is False
 
 
-def test_the_batch_dag_chains_the_five_stages_in_order(bag):
+def test_the_batch_dag_waits_for_the_window_then_chains_the_seven_stages_in_order(bag):
+    from ecomdata.orchestration.tasks import BATCH_STAGES
+
     dag = bag.dags["marketplace_batch"]
 
-    assert [task.task_id for task in dag.topological_sort()] == ["silver", "marts", "quality", "publish", "promote"]
-    assert all(type(task).__name__ == "DockerOperator" for task in dag.tasks)
+    assert [task.task_id for task in dag.topological_sort()] == ["window_settled", *BATCH_STAGES]
+    stages = [task for task in dag.tasks if task.task_id != "window_settled"]
+    assert all(type(task).__name__ == "DockerOperator" for task in stages)
+    assert dag.get_task("quality").retries == 0 and dag.get_task("silver").retries == 2
+    assert all(task.execution_timeout is not None for task in stages)
+
+
+def test_the_reprocess_dag_is_manual_and_runs_the_seven_stages(bag):
+    from ecomdata.orchestration.tasks import BATCH_STAGES
+
+    dag = bag.dags["marketplace_reprocess"]
+
+    assert dag.max_active_runs == 1 and dag.catchup is False
+    assert [task.task_id for task in dag.topological_sort()] == list(BATCH_STAGES)
 
 
 def test_maintenance_is_weekly_and_discovery_daily(bag):
