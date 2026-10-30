@@ -1,4 +1,4 @@
-# Orchestration. Tag: ecommerce/airflow:3.3.2-r1.
+# Orchestration. Tag: ecommerce/airflow:3.3.2-r2 (r2: task containers carry the stack labels).
 # Tasks start the Spark and Python images through the Docker socket
 # (DockerOperator); this image only schedules, and parses the DAGs.
 FROM apache/airflow:3.3.2-python3.12

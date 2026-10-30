@@ -76,7 +76,7 @@ Test Spark trên Windows truyền dữ liệu trong bộ nhớ (không có `winu
 
 ## Công nghệ
 
-Kafka 4.2 (KRaft), Spark 4.0 (Python 3.12), MinIO (S3A), PostgreSQL 18, Elasticsearch và Kibana 8.18, Redis, Superset 4.1, Airflow 3.3, Playwright 1.55 (Lazada). Image: `ecommerce/marketplace-python:2`, `ecommerce/spark-marketplace:4.0.1-r3`, `ecommerce/crawler-browser:1`, `ecommerce/airflow:3.3.2-r1`.
+Kafka 4.2 (KRaft), Spark 4.0 (Python 3.12), MinIO (S3A), PostgreSQL 18, Elasticsearch và Kibana 8.18, Redis, Superset 4.1, Airflow 3.3, Playwright 1.55 (Lazada). Image: `ecommerce/marketplace-python:2`, `ecommerce/spark-marketplace:4.0.1-r3`, `ecommerce/crawler-browser:1`, `ecommerce/airflow:3.3.2-r2`.
 
 ## Tài liệu
 

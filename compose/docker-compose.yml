@@ -23,7 +23,9 @@
 # Files (all relative to the repository root, which is mounted at /app):
 #   compose/docker-compose.yml                this file
 #   compose/docker-compose.legacy.yml         Kaggle demo, add it with -f
-#   compose/docker-compose.observability.yml  Loki, Promtail, Grafana, add it with -f
+#   compose/docker-compose.observability.yml  Alloy, Prometheus, Loki, Grafana, add it with -f
+# Every service carries the label ecomdata.layer (crawl, ingest, speed, batch,
+# serving, storage, ops, orchestration); logs and metrics are grouped by it.
 # The root docker-compose.yml includes this file, so `docker compose -f
 # docker-compose.yml` keeps working.
 #
@@ -88,8 +90,10 @@ x-airflow: &airflow
   build:
     context: ..
     dockerfile: docker/airflow/Dockerfile
-  image: ecommerce/airflow:3.3.2-r1
+  image: ecommerce/airflow:3.3.2-r2
   profiles: ["orchestration"]
+  labels:
+    ecomdata.layer: orchestration
   environment:
     <<: *marketplace-env
     # The package is installed in this image; the working tree's source path in
@@ -104,11 +108,15 @@ x-airflow: &airflow
     AIRFLOW__API__SECRET_KEY: ${AIRFLOW_JWT_SECRET:?set AIRFLOW_JWT_SECRET, see env/base.env}
     AIRFLOW__CORE__EXECUTION_API_SERVER_URL: http://airflow-api-server:8080/execution/
     AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_ALL_ADMINS: "true"
-    AIRFLOW__SCHEDULER__DAG_DIR_LIST_INTERVAL: "30"
+    # Airflow 3 moved [scheduler] dag_dir_list_interval here.
+    AIRFLOW__DAG_PROCESSOR__REFRESH_INTERVAL: "30"
     # What the DAGs hand to their task containers.
     AIRFLOW_SPARK_IMAGE: ${AIRFLOW_SPARK_IMAGE:-ecommerce/spark-marketplace:4.0.1-r3}
     AIRFLOW_PYTHON_IMAGE: ${AIRFLOW_PYTHON_IMAGE:-ecommerce/marketplace-python:2}
     AIRFLOW_DOCKER_NETWORK: ${COMPOSE_PROJECT_NAME:-mp}_bigdata
+    # Labels the task containers with this stack, so the log collector (Alloy) finds
+    # them although they are no compose services.
+    AIRFLOW_STACK_PROJECT: ${COMPOSE_PROJECT_NAME:-mp}
     AIRFLOW_DOCKER_URL: unix://var/run/docker.sock
     # Host path of the working tree; set to run task containers on it instead
     # of the code baked into their image (a host path, as the Docker daemon sees it).
@@ -120,6 +128,9 @@ x-airflow: &airflow
     - ../src/ecomdata/orchestration/dags:/opt/airflow/dags:ro
     - ../scripts/create_airflow_db.py:/opt/airflow/scripts/create_airflow_db.py:ro
     - /var/run/docker.sock:/var/run/docker.sock
+    # Task logs (each holds its container's output): kept across a recreate, shared with
+    # the api-server that shows them, and read by Alloy for Loki.
+    - airflow_logs:/opt/airflow/logs
   # Airflow's own user, in group 0: the socket in the Docker Desktop VM is
   # root:root, and a task launcher needs to write to it. Root itself would not
   # see the user-site packages the image installs Airflow into.
@@ -138,6 +149,8 @@ x-core-ready: &core-ready
 services:
   # ── INGESTION LAYER ─────────────────────────────────────────
   kafka:
+    labels:
+      ecomdata.layer: storage
     image: apache/kafka:4.2.0
     container_name: ${MP_CONTAINER_PREFIX:-}kafka
     restart: unless-stopped
@@ -187,6 +200,8 @@ services:
   # changes. marketplace.observations.v1 has no producer and no consumer any
   # more. The legacy ecommerce_events topic stays with the Kaggle scripts.
   kafka-init:
+    labels:
+      ecomdata.layer: ingest
     image: apache/kafka:4.2.0
     container_name: ${MP_CONTAINER_PREFIX:-}kafka-init
     depends_on:
@@ -207,6 +222,8 @@ services:
   # ── MARKETPLACE SERVICES ───────────────────────────────────
   crawl-worker:
     <<: *marketplace-python
+    labels:
+      ecomdata.layer: crawl
     profiles: ["crawl", "demo", "bench"]
     container_name: ${MP_CONTAINER_PREFIX:-}crawl-worker
     restart: unless-stopped
@@ -246,6 +263,8 @@ services:
   # project's honest user agent, and Lazada's floor of 5 s per page enforced by
   # its source spec. It leases only the sources it names.
   crawl-worker-lazada:
+    labels:
+      ecomdata.layer: crawl
     build:
       context: ..
       dockerfile: docker/crawler-browser/Dockerfile
@@ -288,6 +307,8 @@ services:
 
   speed:
     <<: *spark-marketplace
+    labels:
+      ecomdata.layer: speed
     profiles: ["speed", "demo", "bench"]
     container_name: ${MP_CONTAINER_PREFIX:-}speed
     restart: unless-stopped
@@ -321,6 +342,8 @@ services:
   # The pre-Airflow loop, kept for hosts without Airflow. Not part of any default stack.
   batch-scheduler:
     <<: *spark-marketplace
+    labels:
+      ecomdata.layer: batch
     profiles: ["legacy-scheduler"]
     container_name: ${MP_CONTAINER_PREFIX:-}batch-scheduler
     restart: unless-stopped
@@ -343,6 +366,8 @@ services:
   # same command, one task per stage.
   batch-once:
     <<: *spark-marketplace
+    labels:
+      ecomdata.layer: batch
     profiles: ["batch", "demo", "bench"]
     command: ["python3", "-m", "ecomdata.processing.batch", "--help"]
     restart: "no"
@@ -357,6 +382,8 @@ services:
   # The tool container behind scripts/mp.ps1: `run --rm ops python -m ecomdata.ops ...`.
   ops:
     <<: *marketplace-python
+    labels:
+      ecomdata.layer: ops
     profiles: ["ops"]
     command: ["python", "-m", "ecomdata.ops", "--help"]
     restart: "no"
@@ -379,6 +406,8 @@ services:
   # after the records are indexed.
   es-projector:
     <<: *marketplace-python
+    labels:
+      ecomdata.layer: serving
     profiles: ["ops", "demo"]
     container_name: ${MP_CONTAINER_PREFIX:-}es-projector
     restart: unless-stopped
@@ -409,6 +438,8 @@ services:
   # TIKI_BASE_URL to http://stub-source:8000.
   stub-source:
     <<: *marketplace-python
+    labels:
+      ecomdata.layer: crawl
     profiles: ["smoke", "demo", "bench"]
     container_name: ${MP_CONTAINER_PREFIX:-}stub-source
     restart: unless-stopped
@@ -426,6 +457,8 @@ services:
 
   # ── DATA LAKE (MinIO - S3 Compatible) ──────────────────────
   minio:
+    labels:
+      ecomdata.layer: storage
     # MinIO no longer publishes pullable images (every Docker Hub and quay.io
     # tag answers `denied`, checked 2026-10-02). Pinned by the digest of the
     # copy already cached here; see docs/RUNBOOK.md for how to get one.
@@ -454,6 +487,8 @@ services:
 
   # MinIO Client - tao bucket khi khoi dong
   minio-init:
+    labels:
+      ecomdata.layer: storage
     image: minio/mc@sha256:a7fe349ef4bd8521fb8497f55c6042871b2ae640607cf99d9bede5e9bdf11727
     pull_policy: missing
     container_name: ${MP_CONTAINER_PREFIX:-}minio-init
@@ -476,6 +511,8 @@ services:
 
   # ── SERVING LAYER STORAGE ──────────────────────────────────
   redis:
+    labels:
+      ecomdata.layer: storage
     image: redis:8.6.2
     container_name: ${MP_CONTAINER_PREFIX:-}redis
     restart: unless-stopped
@@ -492,6 +529,8 @@ services:
       - bigdata
 
   postgres-dw:
+    labels:
+      ecomdata.layer: storage
     image: postgres:18.3
     container_name: ${MP_CONTAINER_PREFIX:-}postgres-dw
     restart: unless-stopped
@@ -515,6 +554,8 @@ services:
 
   # ── SEARCH & ANALYTICS ─────────────────────────────────────
   elasticsearch:
+    labels:
+      ecomdata.layer: storage
     # 8.18.1, not 8.18.0: on the development machine the 8.18.0 image was
     # pulled while the disk was full and its snapshot stayed corrupt across
     # re-pulls (PROGRESS.md section 13.4). Kibana is pinned to the same patch.
@@ -541,6 +582,8 @@ services:
       - bigdata
 
   kibana:
+    labels:
+      ecomdata.layer: serving
     # Also under `legacy`, whose dashboard importer depends on it.
     profiles: ["serve", "legacy", "demo"]
     image: docker.elastic.co/kibana/kibana:8.18.1
@@ -572,6 +615,8 @@ services:
   # imported with overwrite=true.
   kibana-marketplace-setup:
     <<: *marketplace-python
+    labels:
+      ecomdata.layer: serving
     profiles: ["serve", "demo"]
     container_name: ${MP_CONTAINER_PREFIX:-}kibana-marketplace-setup
     restart: "no"
@@ -585,6 +630,8 @@ services:
 
   # ── SERVING LAYER BI (Apache Superset) ─────────────────────
   superset:
+    labels:
+      ecomdata.layer: serving
     profiles: ["serve", "demo"]
     image: apache/superset:4.1.1
     container_name: ${MP_CONTAINER_PREFIX:-}superset
@@ -610,6 +657,8 @@ services:
       - bigdata
 
   superset-init:
+    labels:
+      ecomdata.layer: serving
     profiles: ["serve", "demo"]
     image: apache/superset:4.1.1
     container_name: ${MP_CONTAINER_PREFIX:-}superset-init
@@ -695,3 +744,4 @@ volumes:
   es_data:
   superset_home:
   speed_checkpoints:
+  airflow_logs:

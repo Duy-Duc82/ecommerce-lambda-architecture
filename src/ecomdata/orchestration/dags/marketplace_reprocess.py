@@ -46,7 +46,7 @@ with DAG(
             image=spark_image(),
             command=reprocess_stage_command(stage),
             retries=stage_retries(stage, RETRIES),
-            **docker_settings(),
+            **docker_settings(layer="batch", service=f"reprocess-{stage}"),
         )
         if previous is not None:
             previous >> task

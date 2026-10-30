@@ -42,23 +42,50 @@ def task_environment(environ: Mapping[str, str] | None = None) -> dict[str, str]
     return {key: value for key, value in source.items() if key.startswith(_ENVIRONMENT_PREFIXES)}
 
 
-def docker_settings(environ: Mapping[str, str] | None = None) -> dict[str, Any]:
-    """Where and how a DockerOperator starts its container (the same for every task)."""
+def task_labels(layer: str, service: str, environ: Mapping[str, str] | None = None) -> dict[str, str]:
+    """The Docker labels of a task container. It is no compose service, so it has no
+    ``com.docker.compose.*`` labels; the log and metrics collector (Alloy) finds the stack's
+    task containers by ``ecomdata.project`` and groups them like the services, by layer."""
+    source = os.environ if environ is None else environ
+    return {
+        "ecomdata.project": source.get("AIRFLOW_STACK_PROJECT", "mp"),
+        "ecomdata.layer": layer,
+        "ecomdata.service": service,
+    }
+
+
+def kafka_data_volume(environ: Mapping[str, str] | None = None) -> str:
+    """The stack's Kafka data volume, which ``ops storage-snapshot`` sizes from ``/kafka-data``
+    (Kafka 4 no longer answers the log-dir sizes kafka-python asks for)."""
+    source = os.environ if environ is None else environ
+    return f"{source.get('AIRFLOW_STACK_PROJECT', 'mp')}_kafka_data"
+
+
+def docker_settings(
+    environ: Mapping[str, str] | None = None, *, layer: str, service: str, kafka_data: bool = False
+) -> dict[str, Any]:
+    """Where and how a DockerOperator starts its container (the same for every task but its labels)."""
     source = os.environ if environ is None else environ
     settings: dict[str, Any] = {
         "docker_url": source.get("AIRFLOW_DOCKER_URL", "unix://var/run/docker.sock"),
         "network_mode": source.get("AIRFLOW_DOCKER_NETWORK", "bridge"),
         "environment": task_environment(source),
+        "labels": task_labels(layer, service, source),
         "auto_remove": "success",
         "mount_tmp_dir": False,
         "tty": False,
     }
+    mounts = []
     mount = source.get("AIRFLOW_SOURCE_MOUNT", "").strip()
     if mount:
         # Run on the working tree instead of the code baked into the image (a development stack).
+        mounts.append(("bind", mount, "/app"))
+    if kafka_data:
+        mounts.append(("volume", kafka_data_volume(source), "/kafka-data"))
+    if mounts:
         from docker.types import Mount
 
-        settings["mounts"] = [Mount(source=mount, target="/app", type="bind", read_only=True)]
+        settings["mounts"] = [Mount(source=s, target=d, type=kind, read_only=True) for kind, s, d in mounts]
     return settings
 
 

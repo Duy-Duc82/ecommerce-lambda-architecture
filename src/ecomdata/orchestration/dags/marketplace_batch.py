@@ -53,7 +53,7 @@ with DAG(
             image=spark_image(),
             command=batch_stage_command(stage),
             retries=stage_retries(stage, RETRIES),
-            **docker_settings(),
+            **docker_settings(layer="batch", service=f"batch-{stage}"),
         )
         previous >> task
         previous = task

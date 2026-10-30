@@ -25,4 +25,9 @@ with DAG(
     doc_md=__doc__,
 ) as dag:
     for code, command in discovery_commands().items():
-        DockerOperator(task_id=f"discover_{code}", image=python_image(), command=command, **docker_settings())
+        DockerOperator(
+            task_id=f"discover_{code}",
+            image=python_image(),
+            command=command,
+            **docker_settings(layer="crawl", service=f"discover-{code}"),
+        )

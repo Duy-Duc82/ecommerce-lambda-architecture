@@ -96,12 +96,27 @@ def test_task_environment_carries_the_stack_settings_and_none_of_airflows_own():
 
 
 def test_docker_settings_use_the_stack_network_and_socket():
-    settings = tasks.docker_settings({"AIRFLOW_DOCKER_NETWORK": "mp-refactor_bigdata", "KAFKA_X": "1"})
+    settings = tasks.docker_settings(
+        {"AIRFLOW_DOCKER_NETWORK": "mp-refactor_bigdata", "KAFKA_X": "1"}, layer="batch", service="batch-silver"
+    )
 
     assert settings["network_mode"] == "mp-refactor_bigdata"
     assert settings["docker_url"] == "unix://var/run/docker.sock"
     assert settings["auto_remove"] == "success" and settings["environment"] == {"KAFKA_X": "1"}
     assert "mounts" not in settings
+
+
+def test_a_task_container_is_labelled_with_its_stack_layer_and_service():
+    """No compose labels on a DockerOperator container: without these the log collector
+    would not see it, and it is removed as soon as it succeeds."""
+    settings = tasks.docker_settings({"AIRFLOW_STACK_PROJECT": "mp-refactor"}, layer="ops", service="maintenance-backup")
+
+    assert settings["labels"] == {
+        "ecomdata.project": "mp-refactor",
+        "ecomdata.layer": "ops",
+        "ecomdata.service": "maintenance-backup",
+    }
+    assert "AIRFLOW_STACK_PROJECT" not in settings["environment"]
 
 
 def test_every_source_with_discovery_gets_a_seed_command_into_the_sweep_tier():
@@ -115,3 +130,15 @@ def test_every_source_with_discovery_gets_a_seed_command_into_the_sweep_tier():
 def test_maintenance_prunes_raw_before_the_backup_and_the_snapshot():
     assert list(tasks.maintenance_commands()) == ["prune_raw", "backup", "storage_snapshot"]
     assert tasks.maintenance_commands(45)["prune_raw"].endswith("--older-than-days 45")
+
+
+def test_the_storage_snapshot_task_reads_the_stack_s_kafka_volume():
+    """ops storage-snapshot sizes Kafka from /kafka-data; in a task container that path
+    was missing, so the Airflow snapshot measured every store but Kafka."""
+    pytest.importorskip("docker.types")  # the repository's docker/ folder shadows a bare "docker"
+    settings = tasks.docker_settings({"AIRFLOW_STACK_PROJECT": "mp-refactor"}, layer="ops", service="s", kafka_data=True)
+
+    (mount,) = settings["mounts"]
+    assert (mount["Source"], mount["Target"], mount["Type"], mount["ReadOnly"]) == (
+        "mp-refactor_kafka_data", "/kafka-data", "volume", True)
+    assert "mounts" not in tasks.docker_settings({}, layer="ops", service="s")

@@ -26,7 +26,13 @@ with DAG(
 ) as dag:
     commands = maintenance_commands()
     tasks = [
-        DockerOperator(task_id=name, image=python_image(), command=command, **docker_settings())
+        DockerOperator(
+            task_id=name,
+            image=python_image(),
+            command=command,
+            # The snapshot sizes Kafka's partition logs from the broker's volume.
+            **docker_settings(layer="ops", service=f"maintenance-{name}", kafka_data=name == "storage_snapshot"),
+        )
         for name, command in commands.items()
     ]
     # Prune first, then back up what remains, then measure.
