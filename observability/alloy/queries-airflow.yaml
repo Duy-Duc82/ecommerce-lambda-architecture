@@ -1,0 +1,42 @@
+# Airflow's own state, read from its metadata database (database airflow on
+# postgres-dw). StatsD reports what happens; these report where things stand, and
+# survive a restart of Alloy or Airflow.
+
+airflow_dag:
+  query: |
+    SELECT d.dag_id,
+           (CASE WHEN d.is_paused THEN 1 ELSE 0 END)::float AS paused,
+           COALESCE((SELECT EXTRACT(EPOCH FROM max(r.end_date)) FROM dag_run r
+                     WHERE r.dag_id = d.dag_id AND r.state = 'success'), 0)::float AS last_success_timestamp,
+           COALESCE((SELECT EXTRACT(EPOCH FROM max(r.end_date)) FROM dag_run r
+                     WHERE r.dag_id = d.dag_id AND r.state = 'failed'), 0)::float AS last_failure_timestamp,
+           (SELECT count(*) FROM dag_run r WHERE r.dag_id = d.dag_id AND r.state IN ('running', 'queued'))::float
+             AS active_runs
+    FROM dag d
+  metrics:
+    - dag_id: {usage: LABEL, description: "DAG"}
+    - paused: {usage: GAUGE, description: "1 if the DAG is paused"}
+    - last_success_timestamp: {usage: GAUGE, description: "End of the last successful run, Unix seconds (0: none)"}
+    - last_failure_timestamp: {usage: GAUGE, description: "End of the last failed run, Unix seconds (0: none)"}
+    - active_runs: {usage: GAUGE, description: "Runs queued or running"}
+
+airflow_task_24h:
+  query: |
+    SELECT dag_id, task_id, state, count(*)::float AS task_instances
+    FROM task_instance
+    WHERE end_date > now() - interval '24 hours' AND state IN ('success', 'failed', 'upstream_failed', 'skipped')
+    GROUP BY 1, 2, 3
+  metrics:
+    - dag_id: {usage: LABEL, description: "DAG"}
+    - task_id: {usage: LABEL, description: "Task"}
+    - state: {usage: LABEL, description: "Final state"}
+    - task_instances: {usage: GAUGE, description: "Task instances that ended in the last 24 hours"}
+
+airflow_job:
+  query: |
+    SELECT job_type, EXTRACT(EPOCH FROM now() - max(latest_heartbeat))::float AS heartbeat_age_seconds
+    FROM job WHERE state = 'running'
+    GROUP BY 1
+  metrics:
+    - job_type: {usage: LABEL, description: "SchedulerJob, DagProcessorJob, TriggererJob"}
+    - heartbeat_age_seconds: {usage: GAUGE, description: "Seconds since the job's last heartbeat"}

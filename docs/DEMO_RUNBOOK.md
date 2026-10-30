@@ -1,6 +1,6 @@
 # Runbook: stack demo `mp-tikihtml` (full stack + giám sát log)
 
-Stack dùng cho buổi demo với giáo viên: crawl HTML Tiki, Kafka, Silver, speed (Spark Structured Streaming), batch (Spark, mỗi giờ), Elasticsearch/Kibana, Postgres/Superset, Loki/Promtail/Grafana. Số đo của lượt chạy 8 giờ ngày 24/10: `docs/evidence/fullstack-run-20261024/bao-cao-chay-thu.html` (nằm ở worktree `C:\code\data`, chưa commit).
+Stack dùng cho buổi demo với giáo viên: crawl HTML Tiki, Kafka, Silver, speed (Spark Structured Streaming), batch (Spark, mỗi giờ), Elasticsearch/Kibana, Postgres/Superset, Alloy/Prometheus/Loki/Grafana (thiết kế: `docs/OBSERVABILITY.md`). Số đo của lượt chạy 8 giờ ngày 24/10: `docs/evidence/fullstack-run-20261024/bao-cao-chay-thu.html` (nằm ở worktree `C:\code\data`, chưa commit).
 
 ## Địa chỉ
 
@@ -8,7 +8,8 @@ Stack dùng cho buổi demo với giáo viên: crawl HTML Tiki, Kafka, Silver, s
 |---|---|---|
 | Kibana, speed layer | http://localhost:5602, gồm các dashboard "Demo — dữ liệu chảy liên tục qua pipeline", "Marketplace — realtime changes", "Marketplace — source health and freshness" | — |
 | Superset, batch layer (Gold) | http://localhost:8089/superset/dashboard/marketplace-batch-gold/ | admin / admin |
-| Grafana, log theo layer | http://localhost:3001/d/lambda-logs | admin / admin (cũng xem được ở chế độ khách) |
+| Grafana: tổng quan, pipeline, tài nguyên, Airflow, log | http://localhost:3003 (trang chủ là `lambda-overview`) | admin / `GRAFANA_ADMIN_PASSWORD` trong `env/base.env` (cũng xem được ở chế độ khách) |
+| Prometheus, Alloy | http://localhost:9093, http://localhost:12353 | — |
 | MinIO Console, dữ liệu gốc | http://localhost:9011 | minioadmin / minioadmin |
 
 ## Bật, dừng, kiểm tra
@@ -16,7 +17,7 @@ Stack dùng cho buổi demo với giáo viên: crawl HTML Tiki, Kafka, Silver, s
 Chạy từ thư mục gốc của repo (Git Bash). Lệnh dùng `env/base.env` + `env/ports.tiki-html.env` + `env/tiki-html.env` + `compose/docker-compose.observability.yml` (qua `run-fullstack.sh`):
 
 ```sh
-sh run-fullstack.sh up -d --build loki promtail grafana   # giám sát log trước
+sh run-fullstack.sh up -d loki prometheus alloy grafana   # giám sát trước
 sh run-fullstack.sh up -d                                  # toàn bộ stack
 sh run-fullstack.sh ps
 sh observability/healthcheck.sh                             # in dòng PROBLEM nếu có vấn đề
@@ -48,7 +49,7 @@ docker compose --profile ops run --rm ops python -m ops seed --marketplace tiki 
 Cần Python có `requests` và `sqlalchemy`, ví dụ `pip install requests sqlalchemy psycopg2-binary`:
 
 ```sh
-python observability/build_grafana_dashboard.py          # sinh lại observability/grafana/dashboards/lambda-logs.json
+python observability/build_grafana_dashboard.py          # sinh lại 5 dashboard Grafana và luật cảnh báo
 python observability/build_kibana_demo_dashboard.py http://localhost:5602
 python observability/build_superset_batch_dashboard.py http://localhost:8089
 python observability/run_report_metrics.py out.json      # đo số liệu cho báo cáo (sửa cửa sổ T0/T1 trong file)

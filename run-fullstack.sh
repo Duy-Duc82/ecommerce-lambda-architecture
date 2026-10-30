@@ -1,5 +1,5 @@
 #!/bin/sh
-# Full Lambda stack with log observability. Usage: sh run-fullstack.sh [compose args...]
+# Full Lambda stack with observability (docs/OBSERVABILITY.md). Usage: sh run-fullstack.sh [compose args...]
 cd "$(dirname "$0")"
 set -a; . env/base.env; . env/ports.tiki-html.env; . env/tiki-html.env; set +a
 export CRAWL_REQUEST_DELAY_SECONDS=3.5

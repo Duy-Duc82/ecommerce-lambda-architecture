@@ -1,0 +1,410 @@
+// The one collector of a stack (docs/OBSERVABILITY.md): container logs to Loki,
+// metrics to Prometheus. Every stream and series carries project=<compose project>.
+// UI with the component graph: http://localhost:${ALLOY_HOST_PORT}.
+
+logging {
+  level  = "warn"
+  format = "logfmt"
+}
+
+// ======================================================================
+// Which containers belong to this stack
+// ======================================================================
+
+discovery.docker "containers" {
+  host             = "unix:///var/run/docker.sock"
+  refresh_interval = "5s"
+}
+
+// A compose service of this project, or a task container Airflow started for it
+// (no compose labels; labelled ecomdata.project by ecomdata.orchestration.tasks).
+// layer and service come from the labels set next to each service in compose.
+discovery.relabel "stack" {
+  targets = discovery.docker.containers.targets
+
+  rule {
+    source_labels = ["__meta_docker_container_label_com_docker_compose_project", "__meta_docker_container_label_ecomdata_project"]
+    separator     = ";"
+    regex         = sys.env("COMPOSE_PROJECT_NAME") + ";.*|;" + sys.env("COMPOSE_PROJECT_NAME")
+    action        = "keep"
+  }
+  rule {
+    source_labels = ["__meta_docker_container_name"]
+    regex         = "/(.*)"
+    target_label  = "container"
+  }
+  rule {
+    source_labels = ["__meta_docker_container_label_com_docker_compose_service", "__meta_docker_container_label_ecomdata_service"]
+    separator     = ""
+    target_label  = "service"
+  }
+  rule {
+    source_labels = ["__meta_docker_container_label_ecomdata_layer"]
+    regex         = "(.+)"
+    target_label  = "layer"
+  }
+  rule {
+    source_labels = ["__meta_docker_container_label_ecomdata_layer"]
+    regex         = ""
+    target_label  = "layer"
+    replacement   = "other"
+  }
+}
+
+// ======================================================================
+// Logs
+// ======================================================================
+
+discovery.relabel "log_stream" {
+  targets = []
+
+  rule {
+    source_labels = ["__meta_docker_container_log_stream"]
+    target_label  = "stream"
+  }
+}
+
+// The compose services. A task container Airflow starts is left out: it may be gone
+// (auto_remove) before discovery sees it, and its whole output is in the Airflow task
+// log anyway, read below.
+discovery.relabel "log_containers" {
+  targets = discovery.relabel.stack.output
+
+  rule {
+    source_labels = ["__meta_docker_container_label_ecomdata_project"]
+    regex         = ".+"
+    action        = "drop"
+  }
+}
+
+loki.source.docker "containers" {
+  host             = "unix:///var/run/docker.sock"
+  targets          = discovery.relabel.log_containers.output
+  relabel_rules    = discovery.relabel.log_stream.rules
+  refresh_interval = "5s"
+  forward_to       = [loki.process.levels.receiver]
+}
+
+loki.process "levels" {
+  // Explicit level markers only: level=error, "level": "error", [ERROR], an upper-case
+  // ERROR/FATAL word, a Python traceback, or a "SomethingError:" class name; WARN alike.
+  stage.regex {
+    expression = `(?P<err>level=(?:error|fatal|critical)\b|"level": ?"(?:error|fatal|critical)"|\[(?:ERROR|FATAL|CRITICAL)\s*\]|\b(?:ERROR|FATAL|CRITICAL)\b|Traceback \(most recent call last\)|\b[A-Z][A-Za-z]+(?:Error|Exception):)|(?P<warn>level=warn(?:ing)?\b|"level": ?"warn(?:ing)?"|\[WARN(?:ING)?\s*\]|\bWARN(?:ING)?\b)`
+  }
+  stage.template {
+    source   = "level"
+    template = `{{ if .err }}error{{ else if .warn }}warn{{ else }}info{{ end }}`
+  }
+  // The batch probes each staging table before it creates it; Postgres logs the probe
+  // as ERROR "relation staging.mp_... does not exist". Kept, labelled as expected.
+  stage.match {
+    selector = `{service="postgres-dw"} |~ "relation .staging[.]mp_[a-z_0-9]+. does not exist"`
+
+    stage.template {
+      source   = "level"
+      template = "expected"
+    }
+  }
+  stage.labels {
+    values = { level = "" }
+  }
+
+  // The batch run a line belongs to (mp-20261025T1400Z, mp-reprocess-...), as structured
+  // metadata: one value per run would make a label explode. Query: {...} | run_id="...".
+  stage.regex {
+    expression = `(?P<run_id>mp-(?:reprocess-)?\d{8}T\d{4,6}Z)`
+  }
+  stage.structured_metadata {
+    values = { run_id = "" }
+  }
+
+  forward_to = [loki.write.loki.receiver]
+}
+
+// Airflow task logs: one file per task try, dag_id=<d>/run_id=<r>/task_id=<t>/attempt=<n>.log,
+// JSON lines; a DockerOperator task's lines include every line its container printed.
+local.file_match "airflow_tasks" {
+  path_targets = [{"__path__" = "/airflow-logs/dag_id=*/run_id=*/task_id=*/attempt=*.log"}]
+  sync_period  = "10s"
+}
+
+loki.source.file "airflow_tasks" {
+  targets    = local.file_match.airflow_tasks.targets
+  forward_to = [loki.process.airflow_tasks.receiver]
+}
+
+loki.process "airflow_tasks" {
+  stage.regex {
+    source     = "filename"
+    expression = `dag_id=(?P<dag_id>[^/]+)/run_id=(?P<run_id>[^/]+)/task_id=(?P<task_id>[^/]+)/(?:map_index=\d+/)?attempt=(?P<attempt>\d+)\.log$`
+  }
+  stage.json {
+    expressions = { json_level = "level", event = "event", logger = "logger" }
+  }
+  // Same markers as the container logs, for what a task container printed (logged at info).
+  stage.regex {
+    source     = "event"
+    expression = `(?P<err>level=(?:error|fatal|critical)\b|"level": ?"(?:error|fatal|critical)"|\[(?:ERROR|FATAL|CRITICAL)\s*\]|\b(?:ERROR|FATAL|CRITICAL)\b|Traceback \(most recent call last\)|\b[A-Z][A-Za-z]+(?:Error|Exception):)|(?P<warn>level=warn(?:ing)?\b|"level": ?"warn(?:ing)?"|\[WARN(?:ING)?\s*\]|\bWARN(?:ING)?\b)`
+  }
+  stage.template {
+    source   = "level"
+    template = `{{ if or (eq .json_level "error") (eq .json_level "critical") .err }}error{{ else if or (eq .json_level "warning") .warn }}warn{{ else }}info{{ end }}`
+  }
+  // The DAG decides the layer, as the task containers' labels do.
+  stage.template {
+    source   = "layer"
+    template = `{{ if or (eq .dag_id "marketplace_batch") (eq .dag_id "marketplace_reprocess") }}batch{{ else if eq .dag_id "marketplace_maintenance" }}ops{{ else if eq .dag_id "source_discovery" }}crawl{{ else }}orchestration{{ end }}`
+  }
+  stage.template {
+    source   = "service"
+    template = "airflow-task"
+  }
+  stage.labels {
+    values = { level = "", layer = "", service = "", dag_id = "", task_id = "" }
+  }
+  stage.structured_metadata {
+    values = { run_id = "", attempt = "" }
+  }
+  stage.label_drop {
+    values = ["filename"]
+  }
+  // The line people read: "<logger>: <event>"; the JSON fields stay in the label set above.
+  stage.template {
+    source   = "line"
+    template = `{{ if .event }}{{ .logger }}: {{ .event }}{{ else }}{{ .Entry }}{{ end }}`
+  }
+  stage.output {
+    source = "line"
+  }
+
+  forward_to = [loki.write.loki.receiver]
+}
+
+loki.write "loki" {
+  endpoint {
+    url = "http://loki:3100/loki/api/v1/push"
+  }
+  external_labels = { project = sys.env("COMPOSE_PROJECT_NAME") }
+}
+
+// ======================================================================
+// Metrics: exporters built into Alloy
+// ======================================================================
+
+prometheus.remote_write "prometheus" {
+  endpoint {
+    url = "http://prometheus:9090/api/v1/write"
+  }
+  external_labels = { project = sys.env("COMPOSE_PROJECT_NAME") }
+}
+
+prometheus.exporter.self "alloy" { }
+
+// The host. With pid: host, /proc is the host's; on Docker Desktop that host is its Linux VM.
+prometheus.exporter.unix "host" {
+  procfs_path        = "/proc"
+  sysfs_path         = "/sys"
+  rootfs_path        = "/rootfs"
+  disable_collectors = ["btrfs", "infiniband", "ipvs", "mdadm", "nfs", "nfsd", "xfs", "zfs"]
+}
+
+// Per container CPU, memory, OOM kills (cAdvisor), read from the cgroups directly.
+// cAdvisor's Docker handler cannot read Docker Desktop's containerd image store
+// ("failed to identify the read-write layer ID", standalone v0.53 too), so it is
+// pointed at no socket and each container is a raw cgroup /docker/<id>. The
+// container's name, service and layer are joined on in Prometheus
+// (observability/prometheus/rules.yml) from mp_container_info below.
+prometheus.exporter.cadvisor "containers" {
+  docker_host                 = "unix:///nonexistent.sock"
+  docker_only                 = false
+  raw_cgroup_prefix_allowlist = ["/docker/"]
+  storage_duration            = "2m"
+}
+
+// Topic offsets and consumer group lag. The speed query commits no group offsets
+// (Spark keeps them in its checkpoint); its lag comes from PostgreSQL below.
+prometheus.exporter.kafka "kafka" {
+  kafka_uris          = ["kafka:19092"]
+  kafka_version       = "3.7.0"
+  topics_filter_regex = `marketplace\..*`
+  instance            = "kafka"
+}
+
+prometheus.exporter.redis "redis" {
+  redis_addr = "redis:6379"
+}
+
+prometheus.exporter.elasticsearch "elasticsearch" {
+  address = "http://elasticsearch:9200"
+}
+
+// Airflow's StatsD metrics (scheduler heartbeat, task finishes, DAG run durations).
+prometheus.exporter.statsd "airflow" {
+  listen_udp          = ":9125"
+  mapping_config_path = "/etc/alloy/statsd-airflow.yaml"
+}
+
+// Is each web endpoint answering? probe_success{instance=...}.
+prometheus.exporter.blackbox "http" {
+  config = "{ modules: { http_2xx: { prober: http, timeout: 5s } } }"
+
+  target {
+    name    = "minio"
+    address = "http://minio:9000/minio/health/live"
+    module  = "http_2xx"
+  }
+  target {
+    name    = "elasticsearch"
+    address = "http://elasticsearch:9200/_cluster/health"
+    module  = "http_2xx"
+  }
+  target {
+    name    = "kibana"
+    address = "http://kibana:5601/api/status"
+    module  = "http_2xx"
+  }
+  target {
+    name    = "superset"
+    address = "http://superset:8088/health"
+    module  = "http_2xx"
+  }
+  target {
+    name    = "airflow"
+    address = "http://airflow-api-server:8080/api/v2/monitor/health"
+    module  = "http_2xx"
+  }
+  target {
+    name    = "loki"
+    address = "http://loki:3100/ready"
+    module  = "http_2xx"
+  }
+  target {
+    name    = "grafana"
+    address = "http://grafana:3000/api/health"
+    module  = "http_2xx"
+  }
+}
+
+// The pipeline itself, read from its audit tables (crawl, batch, quality, speed,
+// storage): observability/alloy/queries-warehouse.yaml.
+prometheus.exporter.postgres "warehouse" {
+  data_source_names          = [string.format("postgresql://%s:%s@postgres-dw:5432/%s?sslmode=disable", sys.env("POSTGRES_USER"), sys.env("POSTGRES_PASSWORD"), sys.env("POSTGRES_DB"))]
+  custom_queries_config_path = "/etc/alloy/queries-warehouse.yaml"
+}
+
+// Airflow's metadata database: last successful run per DAG, failed tasks, paused DAGs,
+// scheduler heartbeat. Present only with the orchestration profile.
+prometheus.exporter.postgres "airflow" {
+  data_source_names          = [string.format("postgresql://%s:%s@postgres-dw:5432/airflow?sslmode=disable", sys.env("POSTGRES_USER"), sys.env("POSTGRES_PASSWORD"))]
+  disable_default_metrics    = true
+  disable_settings_metrics   = true
+  custom_queries_config_path = "/etc/alloy/queries-airflow.yaml"
+}
+
+// ======================================================================
+// Scrapes
+// ======================================================================
+
+prometheus.scrape "exporters" {
+  targets = array.concat(
+    prometheus.exporter.self.alloy.targets,
+    prometheus.exporter.unix.host.targets,
+    prometheus.exporter.kafka.kafka.targets,
+    prometheus.exporter.redis.redis.targets,
+    prometheus.exporter.elasticsearch.elasticsearch.targets,
+    prometheus.exporter.statsd.airflow.targets,
+  )
+  scrape_interval = "30s"
+  forward_to      = [prometheus.remote_write.prometheus.receiver]
+}
+
+prometheus.scrape "probes" {
+  targets         = prometheus.exporter.blackbox.http.targets
+  scrape_interval = "30s"
+  forward_to      = [prometheus.relabel.probes.receiver]
+}
+
+// A probe's job is integrations/blackbox/<name>; its instance would be Alloy's hostname.
+prometheus.relabel "probes" {
+  forward_to = [prometheus.remote_write.prometheus.receiver]
+
+  rule {
+    source_labels = ["job"]
+    regex         = "integrations/blackbox/(.+)"
+    target_label  = "instance"
+  }
+}
+
+// The audit queries are cheaper once a minute.
+prometheus.scrape "pipeline" {
+  targets = array.concat(
+    prometheus.exporter.postgres.warehouse.targets,
+    prometheus.exporter.postgres.airflow.targets,
+  )
+  scrape_interval = "60s"
+  scrape_timeout  = "30s"
+  forward_to      = [prometheus.remote_write.prometheus.receiver]
+}
+
+prometheus.scrape "containers" {
+  targets         = prometheus.exporter.cadvisor.containers.targets
+  scrape_interval = "30s"
+  forward_to      = [prometheus.relabel.containers.receiver]
+}
+
+// One cgroup per container: keep its id, drop the machine's own cgroups.
+prometheus.relabel "containers" {
+  forward_to = [prometheus.remote_write.prometheus.receiver]
+
+  rule {
+    source_labels = ["id"]
+    regex         = "/docker/([0-9a-f]{64})"
+    action        = "keep"
+  }
+  rule {
+    source_labels = ["id"]
+    regex         = "/docker/([0-9a-f]{64})"
+    target_label  = "container_id"
+  }
+  rule {
+    action = "labeldrop"
+    regex  = "id"
+  }
+}
+
+// mp_container_info: one series per container of this stack, the labels that name it.
+// Nothing is fetched: each target points at a closed port, and the scrape's own `up`
+// series (value 0) carries the labels; rules.yml renames it and joins it on container_id.
+discovery.relabel "container_info" {
+  targets = discovery.relabel.stack.output
+
+  rule {
+    source_labels = ["__meta_docker_container_id"]
+    target_label  = "container_id"
+  }
+  rule {
+    target_label = "__address__"
+    replacement  = "127.0.0.1:1"
+  }
+}
+
+prometheus.scrape "container_info" {
+  targets         = discovery.relabel.container_info.output
+  job_name        = "container_info"
+  scrape_interval = "30s"
+  scrape_timeout  = "1s"
+  forward_to      = [prometheus.remote_write.prometheus.receiver]
+}
+
+// Services that serve their own /metrics.
+prometheus.scrape "services" {
+  targets = [
+    {"__address__" = "minio:9000", "__metrics_path__" = "/minio/v2/metrics/cluster", "job" = "minio"},
+    {"__address__" = "minio:9000", "__metrics_path__" = "/minio/v2/metrics/bucket", "job" = "minio-bucket"},
+    {"__address__" = "loki:3100", "job" = "loki"},
+    {"__address__" = "grafana:3000", "job" = "grafana"},
+    {"__address__" = "prometheus:9090", "job" = "prometheus"},
+  ]
+  scrape_interval = "30s"
+  forward_to      = [prometheus.remote_write.prometheus.receiver]
+}

@@ -1,6 +1,6 @@
 {
  "uid": "lambda-logs",
- "title": "Lambda pipeline — log theo layer",
+ "title": "Lambda — log theo layer",
  "timezone": "Asia/Ho_Chi_Minh",
  "refresh": "10s",
  "time": {
@@ -12,6 +12,17 @@
   "lambda",
   "logs"
  ],
+ "links": [
+  {
+   "title": "Dashboards",
+   "type": "dashboards",
+   "tags": [
+    "lambda"
+   ],
+   "asDropdown": false,
+   "includeVars": false
+  }
+ ],
  "templating": {
   "list": [
    {
@@ -21,15 +32,16 @@
      "type": "loki",
      "uid": "loki"
     },
+    "definition": "label_values(layer)",
     "query": {
      "label": "layer",
      "type": 1,
      "stream": "",
      "refId": "LokiVariableQueryEditor-VariableQuery"
     },
-    "definition": "label_values(layer)",
     "multi": true,
     "includeAll": true,
+    "allValue": ".+",
     "current": {
      "text": "All",
      "value": "$__all"
@@ -43,20 +55,31 @@
      "type": "loki",
      "uid": "loki"
     },
+    "definition": "label_values(service)",
     "query": {
      "label": "service",
      "type": 1,
-     "stream": "{project=\"mp-tikihtml\", layer=~\"$layer\"}",
+     "stream": "{layer=~\"$layer\"}",
      "refId": "LokiVariableQueryEditor-VariableQuery"
     },
-    "definition": "label_values(service)",
     "multi": true,
     "includeAll": true,
+    "allValue": ".+",
     "current": {
      "text": "All",
      "value": "$__all"
     },
     "refresh": 2
+   },
+   {
+    "name": "run_id",
+    "type": "textbox",
+    "label": "run_id (regex, ví dụ mp-20261025T1400Z)",
+    "query": ".*",
+    "current": {
+     "text": ".*",
+     "value": ".*"
+    }
    },
    {
     "name": "search",
@@ -74,15 +97,20 @@
   {
    "type": "timeseries",
    "title": "Số dòng log / phút theo layer",
+   "description": "",
+   "datasource": {
+    "type": "loki",
+    "uid": "loki"
+   },
    "targets": [
     {
      "refId": "A",
-     "expr": "sum by (layer) (count_over_time({project=\"mp-tikihtml\", layer=~\"$layer\"}[1m]))",
-     "legendFormat": "{{layer}}",
      "datasource": {
       "type": "loki",
       "uid": "loki"
-     }
+     },
+     "expr": "sum by (layer) (count_over_time({layer=~\"$layer\"}[1m]))",
+     "legendFormat": "{{layer}}"
     }
    ],
    "fieldConfig": {
@@ -91,6 +119,8 @@
      "custom": {
       "drawStyle": "bars",
       "fillOpacity": 60,
+      "lineWidth": 1,
+      "showPoints": "never",
       "stacking": {
        "mode": "normal"
       }
@@ -100,11 +130,12 @@
    },
    "options": {
     "legend": {
-     "displayMode": "table",
-     "placement": "right",
-     "calcs": [
-      "sum"
-     ]
+     "displayMode": "list",
+     "placement": "bottom"
+    },
+    "tooltip": {
+     "mode": "multi",
+     "sort": "desc"
     }
    },
    "id": 1,
@@ -113,24 +144,25 @@
     "w": 12,
     "x": 0,
     "y": 0
-   },
-   "datasource": {
-    "type": "loki",
-    "uid": "loki"
    }
   },
   {
    "type": "timeseries",
-   "title": "Lỗi / 5 phút theo layer (level=error: ERROR, FATAL, Traceback, XxxError:)",
+   "title": "Lỗi / 5 phút theo layer (level=error)",
+   "description": "",
+   "datasource": {
+    "type": "loki",
+    "uid": "loki"
+   },
    "targets": [
     {
      "refId": "A",
-     "expr": "sum by (layer) (count_over_time({project=\"mp-tikihtml\", layer=~\"$layer\", level=\"error\"} [5m]))",
-     "legendFormat": "{{layer}}",
      "datasource": {
       "type": "loki",
       "uid": "loki"
-     }
+     },
+     "expr": "sum by (layer) (count_over_time({layer=~\"$layer\", level=\"error\"}[5m]))",
+     "legendFormat": "{{layer}}"
     }
    ],
    "fieldConfig": {
@@ -139,6 +171,8 @@
      "custom": {
       "drawStyle": "bars",
       "fillOpacity": 60,
+      "lineWidth": 1,
+      "showPoints": "never",
       "stacking": {
        "mode": "normal"
       }
@@ -148,11 +182,12 @@
    },
    "options": {
     "legend": {
-     "displayMode": "table",
-     "placement": "right",
-     "calcs": [
-      "sum"
-     ]
+     "displayMode": "list",
+     "placement": "bottom"
+    },
+    "tooltip": {
+     "mode": "multi",
+     "sort": "desc"
     }
    },
    "id": 2,
@@ -161,29 +196,31 @@
     "w": 12,
     "x": 12,
     "y": 0
-   },
-   "datasource": {
-    "type": "loki",
-    "uid": "loki"
    }
   },
   {
    "type": "stat",
    "title": "Lỗi trong khoảng thời gian đang chọn",
+   "description": "",
+   "datasource": {
+    "type": "loki",
+    "uid": "loki"
+   },
    "targets": [
     {
      "refId": "A",
-     "expr": "sum by (layer) (count_over_time({project=\"mp-tikihtml\", layer=~\"$layer\", level=\"error\"} [$__range]))",
-     "legendFormat": "{{layer}}",
-     "instant": true,
      "datasource": {
       "type": "loki",
       "uid": "loki"
-     }
+     },
+     "expr": "sum by (layer) (count_over_time({layer=~\"$layer\", level=\"error\"}[$__range]))",
+     "legendFormat": "{{layer}}",
+     "queryType": "instant"
     }
    ],
    "fieldConfig": {
     "defaults": {
+     "unit": "short",
      "thresholds": {
       "mode": "absolute",
       "steps": [
@@ -196,7 +233,9 @@
         "value": 1
        }
       ]
-     }
+     },
+     "mappings": [],
+     "noValue": "–"
     },
     "overrides": []
    },
@@ -207,31 +246,34 @@
      ]
     },
     "colorMode": "background",
-    "textMode": "value_and_name"
+    "textMode": "value_and_name",
+    "graphMode": "none",
+    "justifyMode": "auto"
    },
    "id": 3,
    "gridPos": {
-    "h": 5,
+    "h": 4,
     "w": 24,
     "x": 0,
     "y": 8
-   },
-   "datasource": {
-    "type": "loki",
-    "uid": "loki"
    }
   },
   {
    "type": "logs",
-   "title": "Chỉ dòng lỗi và cảnh báo (level error/warn), mới nhất trước",
+   "title": "Chỉ dòng lỗi và cảnh báo, mới nhất trước",
+   "datasource": {
+    "type": "loki",
+    "uid": "loki"
+   },
    "targets": [
     {
      "refId": "A",
-     "expr": "{project=\"mp-tikihtml\", layer=~\"$layer\", service=~\"$service\", level=~\"error|warn\"}",
      "datasource": {
       "type": "loki",
       "uid": "loki"
-     }
+     },
+     "expr": "{layer=~\"$layer\", service=~\"$service\", level=~\"error|warn\"} | run_id=~\"$run_id\"",
+     "legendFormat": ""
     }
    ],
    "options": {
@@ -246,37 +288,38 @@
     "h": 10,
     "w": 24,
     "x": 0,
-    "y": 13
-   },
-   "datasource": {
-    "type": "loki",
-    "uid": "loki"
+    "y": 12
    }
   },
   {
    "type": "row",
-   "title": "Crawl (crawl-worker): tải trang, ghi bronze, publish Kafka",
+   "title": "Crawl (crawl-worker, discovery): tải trang, ghi Bronze, publish Kafka",
    "id": 5,
    "collapsed": false,
    "gridPos": {
     "h": 1,
     "w": 24,
     "x": 0,
-    "y": 23
+    "y": 22
    },
    "panels": []
   },
   {
    "type": "logs",
    "title": "Log crawl",
+   "datasource": {
+    "type": "loki",
+    "uid": "loki"
+   },
    "targets": [
     {
      "refId": "A",
-     "expr": "{project=\"mp-tikihtml\", layer=\"crawl\", service=~\"$service\"} |~ \"$search\"",
      "datasource": {
       "type": "loki",
       "uid": "loki"
-     }
+     },
+     "expr": "{layer=\"crawl\", service=~\"$service\"} | run_id=~\"$run_id\" |~ \"$search\"",
+     "legendFormat": ""
     }
    ],
    "options": {
@@ -291,11 +334,7 @@
     "h": 9,
     "w": 24,
     "x": 0,
-    "y": 24
-   },
-   "datasource": {
-    "type": "loki",
-    "uid": "loki"
+    "y": 23
    }
   },
   {
@@ -307,21 +346,26 @@
     "h": 1,
     "w": 24,
     "x": 0,
-    "y": 33
+    "y": 32
    },
    "panels": []
   },
   {
    "type": "logs",
    "title": "Log ingest",
+   "datasource": {
+    "type": "loki",
+    "uid": "loki"
+   },
    "targets": [
     {
      "refId": "A",
-     "expr": "{project=\"mp-tikihtml\", layer=\"ingest\", service=~\"$service\"} |~ \"$search\"",
      "datasource": {
       "type": "loki",
       "uid": "loki"
-     }
+     },
+     "expr": "{layer=\"ingest\", service=~\"$service\"} | run_id=~\"$run_id\" |~ \"$search\"",
+     "legendFormat": ""
     }
    ],
    "options": {
@@ -336,11 +380,7 @@
     "h": 9,
     "w": 24,
     "x": 0,
-    "y": 34
-   },
-   "datasource": {
-    "type": "loki",
-    "uid": "loki"
+    "y": 33
    }
   },
   {
@@ -352,21 +392,26 @@
     "h": 1,
     "w": 24,
     "x": 0,
-    "y": 43
+    "y": 42
    },
    "panels": []
   },
   {
    "type": "logs",
    "title": "Log speed",
+   "datasource": {
+    "type": "loki",
+    "uid": "loki"
+   },
    "targets": [
     {
      "refId": "A",
-     "expr": "{project=\"mp-tikihtml\", layer=\"speed\", service=~\"$service\"} |~ \"$search\"",
      "datasource": {
       "type": "loki",
       "uid": "loki"
-     }
+     },
+     "expr": "{layer=\"speed\", service=~\"$service\"} | run_id=~\"$run_id\" |~ \"$search\"",
+     "legendFormat": ""
     }
    ],
    "options": {
@@ -381,37 +426,38 @@
     "h": 9,
     "w": 24,
     "x": 0,
-    "y": 44
-   },
-   "datasource": {
-    "type": "loki",
-    "uid": "loki"
+    "y": 43
    }
   },
   {
    "type": "row",
-   "title": "Batch (scheduler + Spark batch): Silver → Gold → quality → Postgres",
+   "title": "Batch (task Airflow): Silver → star → Gold → quality → publish → promote",
    "id": 11,
    "collapsed": false,
    "gridPos": {
     "h": 1,
     "w": 24,
     "x": 0,
-    "y": 53
+    "y": 52
    },
    "panels": []
   },
   {
    "type": "logs",
    "title": "Log batch",
+   "datasource": {
+    "type": "loki",
+    "uid": "loki"
+   },
    "targets": [
     {
      "refId": "A",
-     "expr": "{project=\"mp-tikihtml\", layer=\"batch\", service=~\"$service\"} |~ \"$search\"",
      "datasource": {
       "type": "loki",
       "uid": "loki"
-     }
+     },
+     "expr": "{layer=\"batch\", service=~\"$service\"} | run_id=~\"$run_id\" |~ \"$search\"",
+     "legendFormat": ""
     }
    ],
    "options": {
@@ -426,37 +472,38 @@
     "h": 9,
     "w": 24,
     "x": 0,
-    "y": 54
-   },
-   "datasource": {
-    "type": "loki",
-    "uid": "loki"
+    "y": 53
    }
   },
   {
    "type": "row",
-   "title": "Serving (es-projector, Kibana, Superset)",
+   "title": "Orchestration (Airflow scheduler, api-server, dag-processor)",
    "id": 13,
    "collapsed": false,
    "gridPos": {
     "h": 1,
     "w": 24,
     "x": 0,
-    "y": 63
+    "y": 62
    },
    "panels": []
   },
   {
    "type": "logs",
-   "title": "Log serving",
+   "title": "Log orchestration",
+   "datasource": {
+    "type": "loki",
+    "uid": "loki"
+   },
    "targets": [
     {
      "refId": "A",
-     "expr": "{project=\"mp-tikihtml\", layer=\"serving\", service=~\"$service\"} |~ \"$search\"",
      "datasource": {
       "type": "loki",
       "uid": "loki"
-     }
+     },
+     "expr": "{layer=\"orchestration\", service=~\"$service\"} | run_id=~\"$run_id\" |~ \"$search\"",
+     "legendFormat": ""
     }
    ],
    "options": {
@@ -471,37 +518,38 @@
     "h": 9,
     "w": 24,
     "x": 0,
-    "y": 64
-   },
-   "datasource": {
-    "type": "loki",
-    "uid": "loki"
+    "y": 63
    }
   },
   {
    "type": "row",
-   "title": "Storage (Kafka, MinIO, Postgres, Redis, Elasticsearch)",
+   "title": "Serving (es-projector, Kibana, Superset)",
    "id": 15,
    "collapsed": false,
    "gridPos": {
     "h": 1,
     "w": 24,
     "x": 0,
-    "y": 73
+    "y": 72
    },
    "panels": []
   },
   {
    "type": "logs",
-   "title": "Log storage",
+   "title": "Log serving",
+   "datasource": {
+    "type": "loki",
+    "uid": "loki"
+   },
    "targets": [
     {
      "refId": "A",
-     "expr": "{project=\"mp-tikihtml\", layer=\"storage\", service=~\"$service\"} |~ \"$search\"",
      "datasource": {
       "type": "loki",
       "uid": "loki"
-     }
+     },
+     "expr": "{layer=\"serving\", service=~\"$service\"} | run_id=~\"$run_id\" |~ \"$search\"",
+     "legendFormat": ""
     }
    ],
    "options": {
@@ -516,12 +564,101 @@
     "h": 9,
     "w": 24,
     "x": 0,
-    "y": 74
+    "y": 73
+   }
+  },
+  {
+   "type": "row",
+   "title": "Storage (Kafka, MinIO, Postgres, Redis, Elasticsearch)",
+   "id": 17,
+   "collapsed": false,
+   "gridPos": {
+    "h": 1,
+    "w": 24,
+    "x": 0,
+    "y": 82
    },
+   "panels": []
+  },
+  {
+   "type": "logs",
+   "title": "Log storage",
    "datasource": {
     "type": "loki",
     "uid": "loki"
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "loki",
+      "uid": "loki"
+     },
+     "expr": "{layer=\"storage\", service=~\"$service\"} | run_id=~\"$run_id\" |~ \"$search\"",
+     "legendFormat": ""
+    }
+   ],
+   "options": {
+    "showTime": true,
+    "showLabels": true,
+    "wrapLogMessage": true,
+    "sortOrder": "Descending",
+    "enableLogDetails": true
+   },
+   "id": 18,
+   "gridPos": {
+    "h": 9,
+    "w": 24,
+    "x": 0,
+    "y": 83
+   }
+  },
+  {
+   "type": "row",
+   "title": "Ops (backup, prune, snapshot)",
+   "id": 19,
+   "collapsed": false,
+   "gridPos": {
+    "h": 1,
+    "w": 24,
+    "x": 0,
+    "y": 92
+   },
+   "panels": []
+  },
+  {
+   "type": "logs",
+   "title": "Log ops",
+   "datasource": {
+    "type": "loki",
+    "uid": "loki"
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "loki",
+      "uid": "loki"
+     },
+     "expr": "{layer=\"ops\", service=~\"$service\"} | run_id=~\"$run_id\" |~ \"$search\"",
+     "legendFormat": ""
+    }
+   ],
+   "options": {
+    "showTime": true,
+    "showLabels": true,
+    "wrapLogMessage": true,
+    "sortOrder": "Descending",
+    "enableLogDetails": true
+   },
+   "id": 20,
+   "gridPos": {
+    "h": 9,
+    "w": 24,
+    "x": 0,
+    "y": 93
    }
   }
- ]
+ ],
+ "editable": true
 }

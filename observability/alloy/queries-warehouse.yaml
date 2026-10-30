@@ -1,0 +1,202 @@
+# The pipeline's own metrics, read from the audit schema of postgres-dw by Alloy's
+# PostgreSQL exporter once a minute (postgres_exporter custom-query format). A metric
+# is named <query>_<column>: mp_crawl_5m_attempts, mp_batch_latest_gold_rows, ...
+# "_5m" queries count what finished in the last five minutes; the others are a state.
+# Nothing here changes the pipeline: every number is one the pipeline already writes.
+
+mp_crawl_5m:
+  query: |
+    SELECT f.marketplace_code AS marketplace, a.status, COALESCE(a.error_kind, 'NONE') AS error_kind,
+           count(*)::float AS attempts,
+           COALESCE(sum(a.raw_bytes), 0)::float AS raw_bytes,
+           COALESCE(sum(a.parsed_count), 0)::float AS parsed_records,
+           COALESCE(sum(a.rejected_count), 0)::float AS rejected_records
+    FROM audit.crawl_request_attempt a JOIN audit.crawl_frontier f USING (task_id)
+    WHERE a.completed_at > now() - interval '5 minutes'
+    GROUP BY 1, 2, 3
+  metrics:
+    - marketplace: {usage: LABEL, description: "Marketplace code"}
+    - status: {usage: LABEL, description: "SUCCEEDED, PARTIAL or FAILED"}
+    - error_kind: {usage: LABEL, description: "Error class of a failed attempt, NONE otherwise"}
+    - attempts: {usage: GAUGE, description: "Crawl attempts finished in the last 5 minutes"}
+    - raw_bytes: {usage: GAUGE, description: "Raw bytes written to Bronze in the last 5 minutes"}
+    - parsed_records: {usage: GAUGE, description: "Records parsed and published in the last 5 minutes"}
+    - rejected_records: {usage: GAUGE, description: "Records rejected by the parser in the last 5 minutes"}
+
+mp_crawl_latency_5m:
+  query: |
+    SELECT f.marketplace_code AS marketplace,
+           COALESCE(percentile_cont(0.95) WITHIN GROUP (ORDER BY a.latency_ms), 0)::float AS p95_ms,
+           COALESCE(avg(a.latency_ms), 0)::float AS avg_ms
+    FROM audit.crawl_request_attempt a JOIN audit.crawl_frontier f USING (task_id)
+    WHERE a.completed_at > now() - interval '5 minutes' AND a.latency_ms IS NOT NULL
+    GROUP BY 1
+  metrics:
+    - marketplace: {usage: LABEL, description: "Marketplace code"}
+    - p95_ms: {usage: GAUGE, description: "95th percentile fetch latency over the last 5 minutes, ms"}
+    - avg_ms: {usage: GAUGE, description: "Mean fetch latency over the last 5 minutes, ms"}
+
+mp_crawl_frontier:
+  query: |
+    SELECT marketplace_code AS marketplace, status, tier,
+           count(*)::float AS tasks,
+           COALESCE(EXTRACT(EPOCH FROM now() - min(scheduled_for) FILTER (WHERE scheduled_for <= now())), 0)::float
+             AS oldest_due_seconds
+    FROM audit.crawl_frontier
+    WHERE status IN ('READY', 'LEASED', 'RETRY_WAIT', 'FAILED', 'DISABLED')
+    GROUP BY 1, 2, 3
+  metrics:
+    - marketplace: {usage: LABEL, description: "Marketplace code"}
+    - status: {usage: LABEL, description: "Frontier task status (SUCCEEDED rows are not counted)"}
+    - tier: {usage: LABEL, description: "Crawl tier"}
+    - tasks: {usage: GAUGE, description: "Frontier tasks in this status"}
+    - oldest_due_seconds: {usage: GAUGE, description: "How long the oldest due task has waited, seconds"}
+
+mp_crawl_source:
+  query: |
+    SELECT marketplace_code AS marketplace,
+           (CASE WHEN opened_until > now() THEN 1 ELSE 0 END)::float AS circuit_open,
+           consecutive_failures::float AS consecutive_failures,
+           COALESCE(EXTRACT(EPOCH FROM last_success_at), 0)::float AS last_success_timestamp
+    FROM audit.crawl_source_state
+  metrics:
+    - marketplace: {usage: LABEL, description: "Marketplace code"}
+    - circuit_open: {usage: GAUGE, description: "1 while the source's circuit breaker is open"}
+    - consecutive_failures: {usage: GAUGE, description: "Failures in a row"}
+    - last_success_timestamp: {usage: GAUGE, description: "Last successful fetch, Unix seconds"}
+
+mp_batch_latest:
+  query: |
+    SELECT run_id, status,
+           EXTRACT(EPOCH FROM as_of)::float AS as_of_timestamp,
+           EXTRACT(EPOCH FROM started_at)::float AS started_timestamp,
+           EXTRACT(EPOCH FROM COALESCE(completed_at, now()) - started_at)::float AS duration_seconds,
+           COALESCE(silver_rows, 0)::float AS silver_rows,
+           COALESCE(gold_rows, 0)::float AS gold_rows,
+           COALESCE(mandatory_failure_count, 0)::float AS mandatory_failures
+    FROM audit.marketplace_batch_run ORDER BY started_at DESC LIMIT 1
+  metrics:
+    - run_id: {usage: LABEL, description: "Batch run id"}
+    - status: {usage: LABEL, description: "Run state (CREATED ... PROMOTED, HELD, QUALITY_FAILED, FAILED)"}
+    - as_of_timestamp: {usage: GAUGE, description: "End of the run's data window, Unix seconds"}
+    - started_timestamp: {usage: GAUGE, description: "When the run started, Unix seconds"}
+    - duration_seconds: {usage: GAUGE, description: "Run duration so far, seconds"}
+    - silver_rows: {usage: GAUGE, description: "Silver rows of the run"}
+    - gold_rows: {usage: GAUGE, description: "Gold rows of the run"}
+    - mandatory_failures: {usage: GAUGE, description: "Mandatory quality rules the run failed"}
+
+mp_batch_runs_24h:
+  query: |
+    SELECT status, count(*)::float AS runs
+    FROM audit.marketplace_batch_run WHERE started_at > now() - interval '24 hours'
+    GROUP BY 1
+  metrics:
+    - status: {usage: LABEL, description: "Run state"}
+    - runs: {usage: GAUGE, description: "Batch runs started in the last 24 hours"}
+
+mp_batch_promoted:
+  query: |
+    SELECT COALESCE(EXTRACT(EPOCH FROM max(as_of)), 0)::float AS last_as_of_timestamp,
+           COALESCE(EXTRACT(EPOCH FROM max(completed_at)), 0)::float AS last_completed_timestamp
+    FROM audit.marketplace_batch_run WHERE status IN ('PROMOTED', 'SUCCEEDED')
+  metrics:
+    - last_as_of_timestamp: {usage: GAUGE, description: "Data window end of the newest promoted run, Unix seconds"}
+    - last_completed_timestamp: {usage: GAUGE, description: "When the newest promoted run finished, Unix seconds"}
+
+mp_serving_cache:
+  query: |
+    SELECT run_id,
+           EXTRACT(EPOCH FROM published_at)::float AS published_timestamp,
+           COALESCE((SELECT sum(value::bigint) FROM jsonb_each_text(dataset_counts)), 0)::float AS cached_rows
+    FROM audit.marketplace_cache_version
+  metrics:
+    - run_id: {usage: LABEL, description: "Run whose Gold the BI cache serves"}
+    - published_timestamp: {usage: GAUGE, description: "When the BI cache was published, Unix seconds"}
+    - cached_rows: {usage: GAUGE, description: "Rows in the published BI cache"}
+
+mp_quality_latest:
+  query: |
+    SELECT severity, status, count(*)::float AS checks
+    FROM audit.marketplace_quality_result
+    WHERE run_id = (SELECT run_id FROM audit.marketplace_quality_result ORDER BY checked_at DESC LIMIT 1)
+    GROUP BY 1, 2
+  metrics:
+    - severity: {usage: LABEL, description: "MANDATORY or ADVISORY"}
+    - status: {usage: LABEL, description: "PASS, FAIL or SKIPPED"}
+    - checks: {usage: GAUGE, description: "Quality rules of the latest judged run"}
+
+mp_quality_failing:
+  query: |
+    SELECT run_id, check_name, dataset_name AS dataset, severity, 1::float AS failing,
+           COALESCE(observed_value, 0)::float AS observed_value
+    FROM audit.marketplace_quality_result
+    WHERE run_id = (SELECT run_id FROM audit.marketplace_quality_result ORDER BY checked_at DESC LIMIT 1)
+      AND status = 'FAIL'
+  metrics:
+    - run_id: {usage: LABEL, description: "Batch run id"}
+    - check_name: {usage: LABEL, description: "Quality rule"}
+    - dataset: {usage: LABEL, description: "Dataset the rule judges"}
+    - severity: {usage: LABEL, description: "MANDATORY or ADVISORY"}
+    - failing: {usage: GAUGE, description: "1 for each rule the latest judged run failed"}
+    - observed_value: {usage: GAUGE, description: "The value the rule observed"}
+
+mp_speed_5m:
+  query: |
+    SELECT query_name, status, count(*)::float AS batches,
+           sum(input_rows)::float AS input_rows, sum(applied_rows)::float AS applied_rows,
+           sum(invalid_rows)::float AS invalid_rows, sum(duplicate_rows)::float AS duplicate_rows,
+           sum(late_rows)::float AS late_rows, sum(change_rows)::float AS change_rows,
+           sum(es_rows)::float AS es_rows, sum(redis_rows)::float AS redis_rows
+    FROM audit.marketplace_speed_batch WHERE started_at > now() - interval '5 minutes'
+    GROUP BY 1, 2
+  metrics:
+    - query_name: {usage: LABEL, description: "Streaming query"}
+    - status: {usage: LABEL, description: "RUNNING, SUCCEEDED or FAILED"}
+    - batches: {usage: GAUGE, description: "Micro-batches started in the last 5 minutes"}
+    - input_rows: {usage: GAUGE, description: "Rows read from Kafka"}
+    - applied_rows: {usage: GAUGE, description: "Rows applied to the speed view"}
+    - invalid_rows: {usage: GAUGE, description: "Rows sent to the DLQ"}
+    - duplicate_rows: {usage: GAUGE, description: "Duplicate rows dropped"}
+    - late_rows: {usage: GAUGE, description: "Rows later than the watermark"}
+    - change_rows: {usage: GAUGE, description: "Price or stock changes detected"}
+    - es_rows: {usage: GAUGE, description: "Documents written to Elasticsearch"}
+    - redis_rows: {usage: GAUGE, description: "Keys written to Redis"}
+
+mp_speed_last:
+  query: |
+    SELECT query_name, EXTRACT(EPOCH FROM max(completed_at))::float AS last_success_timestamp
+    FROM audit.marketplace_speed_batch WHERE status = 'SUCCEEDED'
+    GROUP BY 1
+  metrics:
+    - query_name: {usage: LABEL, description: "Streaming query"}
+    - last_success_timestamp: {usage: GAUGE, description: "Last successful micro-batch, Unix seconds"}
+
+mp_stream_5m:
+  query: |
+    SELECT query_name,
+           COALESCE(avg(input_rows_per_second), 0)::float AS input_rows_per_second,
+           COALESCE(avg(processed_rows_per_second), 0)::float AS processed_rows_per_second,
+           COALESCE(avg(batch_duration_ms), 0)::float AS batch_duration_ms_avg,
+           COALESCE(max(batch_duration_ms), 0)::float AS batch_duration_ms_max,
+           COALESCE(max(state_memory_bytes), 0)::float AS state_memory_bytes,
+           COALESCE(max(offsets_behind_latest), 0)::float AS offsets_behind_latest
+    FROM audit.marketplace_stream_progress WHERE progress_at > now() - interval '5 minutes'
+    GROUP BY 1
+  metrics:
+    - query_name: {usage: LABEL, description: "Streaming query"}
+    - input_rows_per_second: {usage: GAUGE, description: "Mean input rate Spark reports"}
+    - processed_rows_per_second: {usage: GAUGE, description: "Mean processing rate Spark reports"}
+    - batch_duration_ms_avg: {usage: GAUGE, description: "Mean micro-batch duration, ms"}
+    - batch_duration_ms_max: {usage: GAUGE, description: "Longest micro-batch duration, ms"}
+    - state_memory_bytes: {usage: GAUGE, description: "State store memory"}
+    - offsets_behind_latest: {usage: GAUGE, description: "Kafka offsets the query trails the topic by (speed lag)"}
+
+mp_storage:
+  query: |
+    SELECT DISTINCT ON (component, scope) component, scope, bytes::float AS bytes, COALESCE(objects, 0)::float AS objects
+    FROM audit.storage_snapshot ORDER BY component, scope, snapshot_date DESC
+  metrics:
+    - component: {usage: LABEL, description: "minio, postgres, elasticsearch or kafka"}
+    - scope: {usage: LABEL, description: "Bucket, schema, index or topic"}
+    - bytes: {usage: GAUGE, description: "Bytes held, from the latest daily snapshot"}
+    - objects: {usage: GAUGE, description: "Objects or rows held, from the latest daily snapshot"}

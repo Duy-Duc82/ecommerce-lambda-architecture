@@ -22,6 +22,7 @@ docker compose --profile serve up -d         # Kibana, Superset
 `docker-compose.yml` at the root only includes `compose/docker-compose.yml`.
 Add `-f compose/docker-compose.legacy.yml` or
 `-f compose/docker-compose.observability.yml` for those layers.
+Observability (Alloy, Prometheus, Loki, Grafana, alerts): docs/OBSERVABILITY.md.
 
 | Profile | Services |
 |---|---|
