@@ -17,6 +17,8 @@ Lịch:
 
 ## Báo cáo (mới nhất trước)
 
+- [2026-10-30 23:12](reports/2026-10-30.md) — CẦN XEM: mp-live vẫn tắt (0/10); Docker tắt, máy mới bật 23:05; không batch; ổ C còn 224.2 GiB (+5.9)
+
 - [2026-10-29 17:49](reports/2026-10-29.md) — CẦN XEM: mp-live vẫn tắt (0/10); Docker tắt, máy mới bật 17:42; không batch; ổ C còn 218.3 GiB (−4.0)
 - [2026-10-28 18:22](reports/2026-10-28.md) — CẦN XEM: mp-live vẫn tắt (0/10); Docker tắt, máy mới bật 18:13; không batch; ổ C còn 222.3 GiB (−4.2)
 - [2026-10-27 19:00](reports/2026-10-27.md) — CẦN XEM: mp-live vẫn tắt (0/10); Docker tắt, máy mới bật 18:44; không batch; ổ C còn 226.5 GiB (+1.2)
