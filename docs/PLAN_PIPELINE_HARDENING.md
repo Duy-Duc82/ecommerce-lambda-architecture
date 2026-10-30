@@ -64,6 +64,10 @@ Mỗi gói: test viết cùng mã, chạy toàn bộ suite, `ruff`, `lint-import
 3. Run hỏng chất lượng: `RESTORE` các bảng `dw` về version của manifest hiện hành.
 4. Docker: được bật khi tới H1 (smoke) và H7 (E2E), tắt sau khi xong.
 
+Bổ sung ngày 2026-10-30:
+
+5. **H2 rút gọn.** Hệ thống chạy trên laptop của người dùng, mỗi lần tối đa khoảng 5–6 giờ. Silver vì vậy chỉ cỡ vài nghìn tới vài chục nghìn dòng, và dựng lại star toàn bộ mỗi run vẫn rẻ. Không làm watermark `ingested_at` và SCD2 tăng dần. Chỉ giữ phần đo: thời gian từng stage được ghi vào summary của run. Số dòng thì summary của từng stage đã có sẵn. Giới hạn này (thời gian run tăng tuyến tính theo Silver) được nêu trong báo cáo, kèm số đo ở H7.
+
 ## 7. Tiến độ (cập nhật 2026-10-27 23:30)
 
 | Gói | Trạng thái | Commit |
@@ -73,7 +77,8 @@ Mỗi gói: test viết cùng mã, chạy toàn bộ suite, `ruff`, `lint-import
 | H3 | xong: 4 luật star, manifest v2 `dw_versions`, `VERSION AS OF`, `RESTORE` khi trượt cổng, inferred member cho `dim_category` | `12bef19` |
 | H4 | xong ở mức unit; **chưa** chạy `tests/airflow` trong image Airflow | `c8c4e6e` |
 | docs | ADR-0007, `DATA_MODEL.md` §4.10, ADR-0005, `ARCHITECTURE.md` | `03fd4d7` |
-| H2, H5, H6 (phần còn lại), H7 | chưa làm | |
+| H2 | rút gọn (mục 6.5): thời gian từng stage vào `_runs/run_id=<run>/timings/<stage>.json` và vào output của `batch run` (`stage_seconds`) | (commit này) |
+| H5, H6 (phần còn lại), H7 | chưa làm | |
 
 **Việc tiếp theo:**
 1. Chạy toàn bộ suite tại `03fd4d7` trên worktree `C:\code\data-refactor-verify` (`PYTHONPATH=<worktree>/src`, khoảng 1,5–2 giờ, không chạy Spark nào khác cùng lúc). Lượt chạy tối 27/10 bị dừng vì tắt máy.
@@ -84,5 +89,5 @@ Mỗi gói: test viết cùng mã, chạy toàn bộ suite, `ruff`, `lint-import
    - một run có `as_of` cũ hơn;
    - `tests/airflow` trong image `ecommerce/airflow:3.3.2-r1`.
    Ghi kết quả vào `docs/evidence/hardening-<ngày>/`.
-3. Sang H2 (tăng dần), rồi H5, H6, H7.
+3. Sang H5, H6, H7 (H2 đã rút gọn, mục 6.5).
 

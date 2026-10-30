@@ -94,6 +94,8 @@ class StageResult:
     status: BatchRunStatus
     detail: Mapping[str, Any] = field(default_factory=dict)
     skipped: bool = False
+    # How long the stage ran; None when it was skipped.
+    seconds: float | None = None
 
 
 @dataclass(frozen=True)

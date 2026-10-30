@@ -5,10 +5,14 @@ refuses a stage the run's status does not allow, treats a stage whose milestone
 the run already passed as a no-op (unless ``force``), records each stage's
 outcome, marks a crashed run FAILED, and raises ``QualityGateFailure`` after a
 refused run has been recorded. The batch lock is held for the whole invocation,
-so ``--all`` and a single stage take it the same way.
+so ``--all`` and a single stage take it the same way. Each stage that runs is
+timed: the seconds go on its result and into ``_runs/run_id=<run>/timings/<stage>.json``
+next to the stages' own summaries, which hold their row counts.
 """
 from __future__ import annotations
 
+import json
+import time
 from collections.abc import Callable, Sequence
 from contextlib import AbstractContextManager, nullcontext
 from dataclasses import dataclass, field
@@ -36,11 +40,15 @@ from ecomdata.processing.batch.stages.marts import MartsStage
 from ecomdata.processing.batch.stages.promote import PromoteStage
 from ecomdata.processing.batch.stages.publish import PublishStage
 from ecomdata.processing.batch.stages.quality import QualityStage
-from ecomdata.processing.batch.stages.silver import SilverStage
+from ecomdata.processing.batch.stages.silver import RUNS_DIRECTORY, SILVER_ZONE, SilverStage
 
 
 class RunNeedsResume(RuntimeError):
     """The run crashed earlier; going on needs an explicit ``--resume``."""
+
+
+def timing_key(run_id: str, stage: str) -> str:
+    return f"marketplace/{RUNS_DIRECTORY}/run_id={run_id}/timings/{stage}.json"
 
 
 def default_stages() -> tuple[Stage, ...]:
@@ -60,6 +68,8 @@ class BatchDependencies:
     publisher: CachePublisher | None = None
     lock: Callable[[], AbstractContextManager[Any]] | None = None
     clock: Callable[[], datetime] = lambda: datetime.now(UTC)
+    # Measures how long a stage took; the clock above says when, and may be frozen in a test.
+    timer: Callable[[], float] = time.monotonic
 
 
 @dataclass
@@ -147,8 +157,10 @@ def _run(
             publisher=deps.publisher,
             clock=now,
         )
+        started_at, started = now(), deps.timer()
         try:
             outcome = stage.execute(ctx)
+            seconds = round(deps.timer() - started, 3)
             if forced or outcome.status is record.status:
                 audit.set_columns(context.run_id, **outcome.columns)
             else:
@@ -160,7 +172,17 @@ def _run(
             raise
         record = audit.get(context.run_id)
         report.record = record
-        report.stages.append(StageResult(stage.name, record.status, outcome.detail))
+        timing = {
+            "stage": stage.name,
+            "started_at": started_at.isoformat(),
+            "seconds": seconds,
+            "status": record.status.value,
+            "forced": forced,
+        }
+        deps.store.put(
+            SILVER_ZONE, timing_key(context.run_id, stage.name), json.dumps(timing, sort_keys=True).encode("utf-8")
+        )
+        report.stages.append(StageResult(stage.name, record.status, outcome.detail, seconds=seconds))
         if outcome.failure is not None:
             raise outcome.failure
         if record.status is S.HELD:

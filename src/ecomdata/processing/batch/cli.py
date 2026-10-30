@@ -125,6 +125,7 @@ def run_main(args: argparse.Namespace, settings: Settings, *, serving_gold_root_
                 "run_id": result.run_id,
                 "status": result.status,
                 "stages": {item.stage: ("skipped" if item.skipped else item.status.value) for item in report.stages},
+                "stage_seconds": {item.stage: item.seconds for item in report.stages if not item.skipped},
                 "silver_rows": result.silver_rows,
                 "dataset_counts": result.dataset_counts,
                 "quality_status": result.quality_status,

@@ -5,6 +5,7 @@ stages (silver, dimensions, marts, quality) are exercised in ``tests/spark``.
 """
 from __future__ import annotations
 
+import json
 from contextlib import contextmanager
 from datetime import UTC, datetime
 
@@ -32,6 +33,7 @@ from ecomdata.processing.batch.runner import (
     default_stages,
     run_batch,
     select_stages,
+    timing_key,
 )
 from ecomdata.processing.batch.stages.base import Outcome, RunOptions, Stage, StageNotAllowed
 from ecomdata.processing.batch.stages.promote import PromoteStage
@@ -116,6 +118,30 @@ def test_all_stages_walk_the_state_machine_in_order():
     ]  # fmt: skip
     assert report.result().status == "PROMOTED"
     assert [item.stage for item in report.stages] == ["silver", "dimensions", "facts", "marts", "quality", "publish", "promote"]
+
+
+def test_each_stage_that_runs_is_timed_and_its_timing_is_stored():
+    ticks = iter(range(0, 100, 2))
+    d = deps()
+    d.timer = lambda: float(next(ticks))
+    stages = chain()
+    run_batch(context(), deps=d, stages=select_stages(["silver"], stages))
+
+    report = run_batch(context(), deps=d, stages=select_stages(["silver", "dimensions"], stages))
+
+    assert [(item.stage, item.skipped, item.seconds) for item in report.stages] == [
+        ("silver", True, None),
+        ("dimensions", False, 2.0),
+    ]
+    stored = json.loads(d.store.get("silver", timing_key("run-1", "dimensions")))
+    assert stored == {
+        "stage": "dimensions",
+        "started_at": LATER.isoformat(),
+        "seconds": 2.0,
+        "status": "DIMENSIONS_BUILT",
+        "forced": False,
+    }
+    assert json.loads(d.store.get("silver", timing_key("run-1", "silver")))["status"] == "SILVER_BUILT"
 
 
 def test_each_stage_runs_alone_and_the_run_keeps_its_place():
