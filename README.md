@@ -17,6 +17,7 @@ Lịch:
 
 ## Báo cáo (mới nhất trước)
 
+- [2026-11-01 11:08](reports/2026-11-01.md) — CẦN XEM: mp-live vẫn tắt (0/10); Docker tắt, máy mới bật 10:57; không batch; Docker (mp-refactor E2E) chạy tới 00:51 rồi dừng bình thường; ổ C còn 191.4 GiB (−29.9)
 - [2026-10-31 09:35](reports/2026-10-31.md) — CẦN XEM: mp-live vẫn tắt (0/10); Docker tắt, máy mới bật 09:26; không batch; Docker (mp-refactor) chạy đêm qua tới 01:18 rồi lỗi engine WSL; ổ C còn 221.3 GiB (−2.9)
 - [2026-10-30 23:12](reports/2026-10-30.md) — CẦN XEM: mp-live vẫn tắt (0/10); Docker tắt, máy mới bật 23:05; không batch; ổ C còn 224.2 GiB (+5.9)
 - [2026-10-29 17:49](reports/2026-10-29.md) — CẦN XEM: mp-live vẫn tắt (0/10); Docker tắt, máy mới bật 17:42; không batch; ổ C còn 218.3 GiB (−4.0)
