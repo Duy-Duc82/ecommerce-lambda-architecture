@@ -214,3 +214,90 @@ class CrawlAuditRepository:
                 "   THEN %s ELSE audit.crawl_source_state.opened_until END",
                 (code, at, at, threshold, opened_until),
             )
+
+
+class LakeCrawlAuditLog:
+    """The crawl audit's copy of record: one gzip JSON-lines object per finished crawl run in Bronze.
+
+    ``writer(zone, path, data)`` is the object-store put the raw store uses.
+    Rewriting a run's object gives the same path, so a retried write replaces
+    rather than duplicates it. See ``ecomdata.domain.crawl_audit`` for the layout.
+    """
+
+    def __init__(self, writer: Callable[[str, str, bytes], str]):
+        if not callable(writer):
+            raise TypeError("writer must be callable")
+        self.writer = writer
+
+    def write(self, run: CrawlRun, attempts: tuple[tuple[CrawlAttemptAudit, Any], ...]) -> str:
+        """Write ``run`` and its attempts, each with the crawl task it fetched; the object's URI."""
+        import gzip
+
+        from ecomdata.domain import crawl_audit as layout
+
+        if run.completed_at is None:
+            raise ValueError("only a finished crawl run is written to the lake")
+        lines = [encode_run_line(run)] + [encode_attempt_line(attempt, task) for attempt, task in attempts]
+        data = gzip.compress("".join(line + "\n" for line in lines).encode("utf-8"), compresslevel=6, mtime=0)
+        path = layout.audit_path(run.started_at.strftime("%Y-%m-%d"), run.started_at.strftime("%H"), run.crawl_run_id)
+        return self.writer("bronze", path, data)
+
+
+def _instant(value: datetime | None) -> str | None:
+    return None if value is None else value.isoformat()
+
+
+def encode_run_line(run: CrawlRun, *, error_summary: dict | None = None) -> str:
+    from ecomdata.domain import crawl_audit as layout
+
+    summary = error_summary if error_summary is not None else run.error_summary
+    return json.dumps(
+        {
+            "kind": layout.KIND_RUN,
+            "schema_version": layout.SCHEMA_VERSION,
+            "crawl_run_id": run.crawl_run_id,
+            "marketplace_id": run.marketplace_id,
+            "started_at": _instant(run.started_at),
+            "completed_at": _instant(run.completed_at),
+            "status": run.status.value,
+            "requested": run.requested,
+            "succeeded": run.succeeded,
+            "failed": run.failed,
+            "adapter_version": run.adapter_version,
+            "error_summary": json.dumps(summary, sort_keys=True) if summary else None,
+        },
+        sort_keys=True,
+        ensure_ascii=False,
+    )
+
+
+def encode_attempt_line(attempt: CrawlAttemptAudit, task: Any) -> str:
+    from ecomdata.domain import crawl_audit as layout
+
+    resource_type = getattr(task, "resource_type", None)
+    return json.dumps(
+        {
+            "kind": layout.KIND_ATTEMPT,
+            "schema_version": layout.SCHEMA_VERSION,
+            "crawl_run_id": attempt.crawl_run_id,
+            "task_id": attempt.task_id,
+            "marketplace_code": getattr(task, "marketplace_code", None),
+            "request_target": getattr(task, "target", None),
+            "resource_type": getattr(resource_type, "value", resource_type),
+            "attempt_number": attempt.attempt_number,
+            "started_at": _instant(attempt.started_at),
+            "completed_at": _instant(attempt.completed_at),
+            "status": attempt.status,
+            "http_status": attempt.http_status,
+            "latency_ms": attempt.latency_ms,
+            "raw_artifact_id": attempt.raw_artifact_id,
+            "raw_uri": attempt.raw_uri,
+            "raw_bytes": attempt.raw_bytes,
+            "parsed_count": attempt.parsed_count,
+            "rejected_count": attempt.rejected_count,
+            "error_kind": attempt.error_kind.value if attempt.error_kind else None,
+            "error_message": attempt.error_message,
+        },
+        sort_keys=True,
+        ensure_ascii=False,
+    )

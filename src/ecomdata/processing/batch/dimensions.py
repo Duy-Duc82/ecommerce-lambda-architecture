@@ -241,9 +241,6 @@ def build_dim_seller(observations: DataFrame) -> DataFrame:
             latest("seller_type").alias("seller_type"),
             latest("is_official_store").alias("is_official_store"),
             latest("is_trusted_store").alias("is_trusted_store"),
-            F.min("observed_at").alias("first_seen_at"),
-            F.max("observed_at").alias("last_seen_at"),
-            F.countDistinct("offer_id").cast("int").alias("observed_listing_count"),
         )
         .select(
             seller_key().alias("seller_key"),
@@ -253,9 +250,6 @@ def build_dim_seller(observations: DataFrame) -> DataFrame:
             "seller_type",
             "is_official_store",
             "is_trusted_store",
-            "first_seen_at",
-            "last_seen_at",
-            "observed_listing_count",
         )
     )
     return with_unknown_member(
@@ -277,18 +271,12 @@ def build_dim_brand(observations: DataFrame) -> DataFrame:
         .groupBy("marketplace", "brand_id")
         .agg(
             latest("brand").alias("brand_name"),
-            F.min("observed_at").alias("first_seen_at"),
-            F.max("observed_at").alias("last_seen_at"),
-            F.countDistinct("offer_id").cast("int").alias("observed_listing_count"),
         )
         .select(
             brand_key().alias("brand_key"),
             marketplace_key().alias("marketplace_key"),
             "brand_id",
             "brand_name",
-            "first_seen_at",
-            "last_seen_at",
-            "observed_listing_count",
         )
     )
     return with_unknown_member(
@@ -307,6 +295,39 @@ def _latest_names(names: DataFrame) -> DataFrame:
     return names.groupBy(F.col("marketplace").alias("_nm"), F.col("category_id").alias("_nid")).agg(
         latest("category_name", ("observed_at",)).alias("_name"),
         latest("category_slug", ("observed_at",)).alias("_name_slug"),
+    )
+
+
+def category_parent_conflicts(observations: DataFrame, page_paths: DataFrame | None = None) -> DataFrame:
+    """Category ids found under more than one parent in one marketplace: (marketplace, category_id, parent_ids).
+
+    Lazada names a category by its slug, and a slug is unique only under its
+    parent; ``build_dim_category`` keys a node by (marketplace, id) and keeps one
+    path for it. A row here is a node whose other paths that choice dropped: the
+    dimensions stage reports them (H6) rather than merge two categories silently.
+    """
+    frames = [observations.select("marketplace", "category_path")]
+    if page_paths is not None:
+        frames.append(page_paths.select("marketplace", "category_path"))
+    paths = frames[0]
+    for frame in frames[1:]:
+        paths = paths.unionByName(frame)
+    nodes = (
+        paths.filter(F.col("category_path").isNotNull())
+        .withColumn("_ids", _path_ids("category_path"))
+        .select("marketplace", "_ids", F.posexplode("_ids").alias("_pos", "category_id"))
+        .select(
+            "marketplace",
+            "category_id",
+            F.coalesce(
+                F.when(F.col("_pos") > 0, F.element_at("_ids", F.col("_pos"))), F.lit(UNKNOWN_NATURAL_KEY)
+            ).alias("_parent_id"),
+        )
+    )
+    return (
+        nodes.groupBy("marketplace", "category_id")
+        .agg(F.sort_array(F.collect_set("_parent_id")).alias("parent_ids"))
+        .filter(F.size("parent_ids") > 1)
     )
 
 

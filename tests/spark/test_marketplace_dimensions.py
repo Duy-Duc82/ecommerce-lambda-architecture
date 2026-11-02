@@ -23,6 +23,7 @@ from ecomdata.processing.batch.dimensions import (
     build_dim_product_listing,
     build_dim_seller,
     build_marketplace_dimensions,
+    category_parent_conflicts,
     listing_flags_key,
     page_category_key,
 )
@@ -200,7 +201,7 @@ def test_dim_marketplace_takes_attributes_from_configuration(spark):
     assert tiki.marketplace_key == xxhash64(spark, "tiki")
 
 
-def test_dim_seller_skips_missing_sellers_and_counts_distinct_listings(spark):
+def test_dim_seller_skips_missing_sellers_and_holds_only_slowly_changing_columns(spark):
     rows = [
         observation(offer="a", minute=0, seller_id="s1"),
         observation(offer="a", minute=5, seller_id="s1"),
@@ -208,8 +209,9 @@ def test_dim_seller_skips_missing_sellers_and_counts_distinct_listings(spark):
         observation(offer="c", minute=1, seller_id=None),
     ]
     sellers = collectable(known(build_dim_seller(observations(spark, rows)), "seller_key")).collect()
-    assert [(s.seller_id, s.observed_listing_count) for s in sellers] == [("s1", 2)]
-    assert sellers[0].last_seen_at == utc(DAY + timedelta(minutes=9))
+    assert [s.seller_id for s in sellers] == ["s1"]
+    # Activity (first/last seen, listing count) is a fact's question, not the dimension's (H6).
+    assert not {"first_seen_at", "last_seen_at", "observed_listing_count"} & set(sellers[0].asDict())
     assert sellers[0].seller_key == xxhash64(spark, "s1")
 
 
@@ -263,6 +265,18 @@ def test_a_node_under_two_parents_takes_the_latest_path(spark):
     assert nodes["9"].full_path == "1/6/9"
     assert nodes["9"].parent_key == nodes["6"].category_key
     assert nodes["5"].is_leaf  # no chosen child any more
+
+
+def test_a_node_under_two_parents_is_reported_as_a_conflict(spark):
+    rows = [
+        observation(offer="a", minute=0, category_path="1/5/9"),
+        observation(offer="b", minute=30, category_path="1/6/9"),
+        observation(offer="c", minute=31, category_path="1/6/10"),
+    ]
+
+    conflicts = category_parent_conflicts(observations(spark, rows)).collect()
+
+    assert [(r.marketplace, r.category_id, list(r.parent_ids)) for r in conflicts] == [("tiki", "9", ["5", "6"])]
 
 
 def test_slug_comes_from_the_frontier_target(spark):
@@ -464,7 +478,8 @@ def test_dim_brand_is_keyed_by_marketplace_and_id_and_keeps_the_latest_name(spar
     ]
     dim = build_dim_brand(frame(spark, rows))
     (brand,) = known(dim, "brand_key").collect()
-    assert (brand.brand_id, brand.brand_name, brand.observed_listing_count) == ("77", "ACME Corp", 2)
+    assert (brand.brand_id, brand.brand_name) == ("77", "ACME Corp")
+    assert "observed_listing_count" not in brand.asDict()
     assert brand.brand_key == xxhash64(spark, "tiki", "77")
     assert dim.filter(f"brand_key = {UNKNOWN_KEY}").count() == 1
 

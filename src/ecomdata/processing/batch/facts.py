@@ -35,7 +35,7 @@ from ecomdata.processing.batch.dimensions import (
     page_category_key,
     seller_key,
 )
-from ecomdata.processing.batch.keys import UNKNOWN_KEY, date_key, key_or_unknown
+from ecomdata.processing.batch.keys import UNKNOWN_KEY, date_key, key_or_unknown, surrogate_key
 from ecomdata.processing.batch.marts import build_counter_delta_daily, build_counter_transitions
 from ecomdata.processing.batch.star_inputs import with_listing_columns
 
@@ -321,6 +321,11 @@ def build_fact_crawl_attempt(attempts: DataFrame) -> DataFrame:
     ``marketplace_code``, ``request_target`` and ``resource_type`` attached
     (``marts.attach_marketplace_code``); a column the audit lacks reads as
     NULL. A page that is not a category listing points at the unknown category.
+
+    ``attempt_id`` is the surrogate key of the attempt's natural key
+    (``crawl_run_id``, ``task_id``, ``attempt_number``), not PostgreSQL's
+    sequence: the lake's copy of the audit has no sequence, and the fact must
+    be the same whichever copy it was built from.
     """
     present = set(attempts.columns)
     optional = [name for name in ("request_target", "resource_type", "marketplace_code") if name not in present]
@@ -332,7 +337,8 @@ def build_fact_crawl_attempt(attempts: DataFrame) -> DataFrame:
     ).otherwise(F.lit(UNKNOWN_KEY).cast("bigint"))
     return _registry(
         "fact_crawl_attempt",
-        attempts.withColumn("date_key", date_key("started_at"))
+        attempts.withColumn("attempt_id", surrogate_key("crawl_run_id", "task_id", F.col("attempt_number").cast("string")))
+        .withColumn("date_key", date_key("started_at"))
         .withColumn("marketplace_key", key_or_unknown("marketplace_code"))
         .withColumn("category_key", category),
     )

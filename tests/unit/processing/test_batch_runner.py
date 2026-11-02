@@ -32,6 +32,7 @@ from ecomdata.processing.batch.runner import (
     RunNeedsResume,
     default_stages,
     run_batch,
+    run_record_key,
     select_stages,
     timing_key,
 )
@@ -142,6 +143,22 @@ def test_each_stage_that_runs_is_timed_and_its_timing_is_stored():
         "forced": False,
     }
     assert json.loads(d.store.get("silver", timing_key("run-1", "silver")))["status"] == "SILVER_BUILT"
+
+
+def test_the_run_record_is_kept_in_the_lake_after_each_stage_and_on_failure():
+    d, stages = deps(), chain()
+    run_batch(context(), deps=d, stages=select_stages(["silver"], stages))
+
+    stored = json.loads(d.store.get("silver", run_record_key("run-1")))
+    assert stored["status"] == "SILVER_BUILT" and stored["as_of"] == AS_OF.isoformat()
+    assert stored["run_id"] == "run-1"
+
+    stages[1].fail = RuntimeError("spark died")
+    with pytest.raises(RuntimeError):
+        run_batch(context(), deps=d, stages=stages)
+    stored = json.loads(d.store.get("silver", run_record_key("run-1")))
+    assert stored["status"] == "FAILED" and "spark died" in stored["error_message"]
+    assert stored["last_completed_status"] == "SILVER_BUILT"
 
 
 def test_each_stage_runs_alone_and_the_run_keeps_its_place():

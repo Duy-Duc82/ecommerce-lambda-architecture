@@ -68,26 +68,27 @@ Bổ sung ngày 2026-10-30:
 
 5. **H2 rút gọn.** Hệ thống chạy trên laptop của người dùng, mỗi lần tối đa khoảng 5–6 giờ. Silver vì vậy chỉ cỡ vài nghìn tới vài chục nghìn dòng, và dựng lại star toàn bộ mỗi run vẫn rẻ. Không làm watermark `ingested_at` và SCD2 tăng dần. Chỉ giữ phần đo: thời gian từng stage được ghi vào summary của run. Số dòng thì summary của từng stage đã có sẵn. Giới hạn này (thời gian run tăng tuyến tính theo Silver) được nêu trong báo cáo, kèm số đo ở H7.
 
-## 7. Tiến độ (cập nhật 2026-10-27 23:30)
+## 7. Tiến độ (cập nhật 2026-11-02)
 
 | Gói | Trạng thái | Commit |
 |---|---|---|
 | H0 | xong: mart dựng từ fact, parity 10 mart; sửa lỗi hết heap của suite test (lineage, status store) | `d150731`, `12bef19` |
 | H1 | xong ở mức code và test Spark; **chưa** smoke Delta trên MinIO | `a27a0f3` |
 | H3 | xong: 4 luật star, manifest v2 `dw_versions`, `VERSION AS OF`, `RESTORE` khi trượt cổng, inferred member cho `dim_category` | `12bef19` |
-| H4 | xong ở mức unit; **chưa** chạy `tests/airflow` trong image Airflow | `c8c4e6e` |
+| H4 | xong ở mức unit; `tests/airflow` chạy lại được trong image `3.3.2-r2` | `c8c4e6e`, `0fff3e7` |
 | docs | ADR-0007, `DATA_MODEL.md` §4.10, ADR-0005, `ARCHITECTURE.md` | `03fd4d7` |
-| H2 | rút gọn (mục 6.5): thời gian từng stage vào `_runs/run_id=<run>/timings/<stage>.json` và vào output của `batch run` (`stage_seconds`) | (commit này) |
-| H5, H6 (phần còn lại), H7 | chưa làm | |
+| H2 | rút gọn (mục 6.5): thời gian từng stage vào `_runs/run_id=<run>/timings/<stage>.json` và vào output của `batch run` (`stage_seconds`) | `1cb3981` |
+| H5 | xong (ADR-0008): crawler ghi thêm crawl audit vào `bronze/marketplace/crawl_audit/`, batch đọc từ lake (`MARKETPLACE_CRAWL_AUDIT_SOURCE`, mặc định `lake`), `ops audit-export` chép dữ liệu cũ; `fact_crawl_attempt.attempt_id` thành khoá băm; `run.json` và `quality.json` của mỗi run trong `_runs/`. Parity mart lake/JDBC trong `tests/spark/test_crawl_audit_lake.py`. Speed batch, stream progress, storage snapshot ở lại PostgreSQL (số đo vận hành, Grafana đọc) | (commit này) |
+| H6 | xong: `dim_seller`, `dim_brand` bỏ `first_seen_at`, `last_seen_at`, `observed_listing_count`; summary của `dimensions` ghi `category_parent_conflicts` (id danh mục dưới hai cha); summary `dimensions`/`facts` ghi `write_mode` (`created`, `merged`, `schema_replaced`); các mục docs lệch mã đã sửa ở `03fd4d7` | (commit này) |
+| H7 | **chưa làm**: cần Docker | |
 
-**Việc tiếp theo:**
-1. Chạy toàn bộ suite tại `03fd4d7` trên worktree `C:\code\data-refactor-verify` (`PYTHONPATH=<worktree>/src`, khoảng 1,5–2 giờ, không chạy Spark nào khác cùng lúc). Lượt chạy tối 27/10 bị dừng vì tắt máy.
-   - Lỗi `Net.bind0` hoặc "Python worker failed to connect back" là do cạn cổng tạm trên Windows; chạy lại riêng các test đó.
-2. Bật Docker và chạy E2E trên `mp-refactor` với Bronze có sẵn của ngày 25/10:
-   - `batch run --all --rebuild` (lake cũ là Parquet);
+**Việc tiếp theo (H7, cần Docker):**
+1. Giải phóng ổ C: trước khi bật Docker (ngày 02/11 còn khoảng 3,4 GB; một lần đầy ổ trước đây đã làm hỏng Docker).
+2. Trên `mp-refactor` với Bronze có sẵn:
+   - `ops migrate`, rồi `ops audit-export` để đưa audit cũ vào lake;
+   - `batch run --all --rebuild` (lake cũ là Parquet, `dim_seller`/`dim_brand` đổi cột: lần này ghi `schema_replaced`);
    - một run theo cửa sổ;
-   - một run có `as_of` cũ hơn;
-   - `tests/airflow` trong image `ecommerce/airflow:3.3.2-r1`.
-   Ghi kết quả vào `docs/evidence/hardening-<ngày>/`.
-3. Sang H5, H6, H7 (H2 đã rút gọn, mục 6.5).
-
+   - một run có `as_of` cũ hơn (không được mất dòng nào);
+   - smoke Delta `MERGE` trên MinIO;
+   - `tests/airflow` trong image `ecommerce/airflow:3.3.2-r2`.
+3. Chạy crawler vài giờ với Tiki và Lazada, rồi chạy bù một ngày cũ. Ghi số dòng, thời gian từng stage, version Delta, kết quả quality vào `docs/evidence/hardening-<ngày>/`.

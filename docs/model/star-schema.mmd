@@ -78,18 +78,12 @@ erDiagram
         string seller_type "SCD1, as the source names it"
         boolean is_official_store "SCD1"
         boolean is_trusted_store "SCD1, null if the source has no such badge"
-        timestamp first_seen_at
-        timestamp last_seen_at
-        int observed_listing_count
     }
     DIM_BRAND {
         bigint brand_key PK "xxhash64(marketplace, brand_id)"
         bigint marketplace_key FK
         string brand_id "UK with marketplace"
         string brand_name "SCD1"
-        timestamp first_seen_at
-        timestamp last_seen_at
-        int observed_listing_count
     }
     DIM_CATEGORY {
         bigint category_key PK
@@ -267,7 +261,7 @@ erDiagram
         decimal in_stock_ratio
     }
     FACT_CRAWL_ATTEMPT {
-        bigint attempt_id PK "audit sequence"
+        bigint attempt_id PK "hash of run, task, attempt number"
         int date_key FK
         bigint marketplace_key FK
         bigint category_key FK "-1 if not a category page"

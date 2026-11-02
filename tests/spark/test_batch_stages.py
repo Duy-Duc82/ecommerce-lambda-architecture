@@ -74,6 +74,7 @@ def pipeline(spark, lines, *, parsed=5, run_id="run-1", extra=None):
         crawl_audit=lambda session: _audit(spark, attempts_rows),
         publisher=publisher,
         clock=lambda: AS_OF,
+        timer=lambda: 0.0,
     )
     context = MarketplaceBatchContext(run_id, AS_OF, "memory://silver", "memory://gold")
     return context, deps, lake, store, audit, publisher
@@ -269,7 +270,7 @@ def test_the_dimensions_stage_merges_every_dimension_into_the_star_outside_the_r
     summary = json.loads(store.get("silver", dimensions_stage.summary_key("run-1")))
     assert set(summary["sources"]) == {"tiki", "lazada"}
     assert summary["tables"]["dim_marketplace"] == {
-        "uri": "memory://gold/dw/dim_marketplace", "rows": 3, "version": 0,
+        "uri": "memory://gold/dw/dim_marketplace", "rows": 3, "version": 0, "write_mode": "created",
     }  # fmt: skip
     # Sponsored sightings are in the star too: 10 listings, 1 sponsored on each page.
     listings = lake.read_dw(context, "dim_product_listing").filter("listing_key != -1")
@@ -324,6 +325,7 @@ def test_a_second_run_on_the_same_silver_leaves_the_star_as_it_was(spark):
     assert {len(history) - 1 for history in lake.dw_history.values()} == {1}
     summary = json.loads(store.get("silver", dimensions_stage.summary_key("run-2")))
     assert {table["version"] for table in summary["tables"].values()} == {1}
+    assert {table["write_mode"] for table in summary["tables"].values()} == {"merged"}
 
 
 def test_marts_cannot_run_before_the_dimensions(spark):

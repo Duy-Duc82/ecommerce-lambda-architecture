@@ -17,6 +17,7 @@ lives here.
     backup [--path DIR]           section 12.2, under the batch lock
     restore --from ID [--path DIR] section 12.3, into a fresh project only
     backups [--path DIR]          list what is in the backup directory
+    audit-export [--since TS]     copy the finished crawl runs and attempts from PostgreSQL to the lake
 """
 
 from __future__ import annotations
@@ -267,6 +268,18 @@ def status() -> int:
     return 0
 
 
+def audit_export(since: str | None) -> int:
+    from ecomdata.ops.audit_export import export_crawl_audit
+    from ecomdata.ops.bootstrap import object_store
+
+    start = None if since is None else datetime.fromisoformat(since.replace("Z", "+00:00"))
+    if start is not None and start.tzinfo is None:
+        start = start.replace(tzinfo=UTC)
+    counts = export_crawl_audit(_connection_factory(), object_store().put, since=start)
+    print(json.dumps({"event": "crawl_audit_exported", **counts}, sort_keys=True))
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
     if argv[:1] == ["seed"]:
@@ -314,6 +327,8 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("storage-snapshot", help="record what each store holds, once per UTC day (read-only)")
     backups_parser = sub.add_parser("backups")
     backups_parser.add_argument("--path", default=DEFAULT_BACKUP_ROOT)
+    export_parser = sub.add_parser("audit-export", help="copy the crawl audit from PostgreSQL to the lake")
+    export_parser.add_argument("--since", default=None, help="only runs started at or after this ISO instant")
     args = parser.parse_args(argv)
     if args.command == "migrate":
         return migrate()
@@ -344,6 +359,8 @@ def main(argv: list[str] | None = None) -> int:
         return 0 if run_snapshot()["measured"] else 1
     if args.command == "backups":
         return list_backups(args.path)
+    if args.command == "audit-export":
+        return audit_export(args.since)
     return status()
 
 

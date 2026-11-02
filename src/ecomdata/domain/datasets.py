@@ -196,15 +196,14 @@ STAR: tuple[MarketplaceDataset, ...] = (
         DIM,
         "one seller",
         ("seller_key",),
-        _cols("""seller_key seller_id marketplace_key seller_name seller_type is_official_store is_trusted_store
-                 first_seen_at last_seen_at observed_listing_count"""),
+        _cols("seller_key seller_id marketplace_key seller_name seller_type is_official_store is_trusted_store"),
     ),
     MarketplaceDataset(
         "dim_brand",
         DIM,
         "one brand of one marketplace",
         ("brand_key",),
-        _cols("brand_key marketplace_key brand_id brand_name first_seen_at last_seen_at observed_listing_count"),
+        _cols("brand_key marketplace_key brand_id brand_name"),
     ),
     MarketplaceDataset(
         "dim_category",

@@ -343,6 +343,9 @@ class SparkSettings:
     speed_app_name: str = "MarketplaceSpeedLayer"
 
 
+CRAWL_AUDIT_SOURCES = ("lake", "postgres")
+
+
 @dataclass(frozen=True)
 class BatchSettings:
     silver_dataset: str = "marketplace/offer_observations"
@@ -368,6 +371,9 @@ class BatchSettings:
     anomaly_iqr_multiplier: Decimal = Decimal("1.5")
     # Bronze/raw objects older than this are removed by the maintenance DAG.
     raw_retention_days: int = 30
+    # Where the batch reads the crawl audit: "lake" (the copy of record the
+    # crawler writes to Bronze) or "postgres" (the operational copy, over JDBC).
+    crawl_audit_source: str = "lake"
 
 
 @dataclass(frozen=True)
@@ -519,6 +525,9 @@ def _read(env: _Env) -> Settings:
             anomaly_mad_threshold=env.decimal("MARKETPLACE_ANOMALY_MAD_THRESHOLD", "3.5"),
             anomaly_iqr_multiplier=env.decimal("MARKETPLACE_ANOMALY_IQR_MULTIPLIER", "1.5"),
             raw_retention_days=env.integer("MARKETPLACE_RAW_RETENTION_DAYS", batch_defaults.raw_retention_days),
+            crawl_audit_source=env.text("MARKETPLACE_CRAWL_AUDIT_SOURCE", batch_defaults.crawl_audit_source)
+            .strip()
+            .lower(),
         ),
         quality=QualitySettings(
             rule_version=env.text("MARKETPLACE_QUALITY_RULE_VERSION", quality_defaults.rule_version),
@@ -672,6 +681,11 @@ def validate(settings: Settings) -> Settings:
     for name, value in required_text.items():
         if not value.strip():
             raise SettingsError(f"{name} must be non-empty")
+    if batch.crawl_audit_source not in CRAWL_AUDIT_SOURCES:
+        raise SettingsError(
+            f"unknown MARKETPLACE_CRAWL_AUDIT_SOURCE {batch.crawl_audit_source!r}"
+            f" (expected one of {', '.join(CRAWL_AUDIT_SOURCES)})"
+        )
     if not quality.allowed_currencies:
         raise SettingsError("MARKETPLACE_ALLOWED_CURRENCIES must list at least one code")
     for code in quality.allowed_currencies:

@@ -133,6 +133,9 @@ class DwWriteResult:
     uri: str
     row_count: int
     version: int | None
+    # How the table was written: "created", "merged", or "schema_replaced" when
+    # the registry's columns changed and the table was rewritten with the new schema.
+    write_mode: str = "merged"
 
 
 # A passing run deliberately kept off the serving version for inspection.

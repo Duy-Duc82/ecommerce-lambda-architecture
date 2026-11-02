@@ -22,13 +22,18 @@ import json
 from ecomdata.domain.batch_run import BatchRunStatus as S
 from ecomdata.domain.datasets import BRIDGE, DIM, datasets_of_kind
 from ecomdata.domain.sources import SOURCES, SourceRegistry
-from ecomdata.processing.batch.dimensions import build_marketplace_dimensions, requested_category_pages
+from ecomdata.processing.batch.dimensions import (
+    build_marketplace_dimensions,
+    category_parent_conflicts,
+    requested_category_pages,
+)
 from ecomdata.processing.batch.inputs import deduplicate_observations
 from ecomdata.processing.batch.stages.base import Outcome, Stage, StageContext
 from ecomdata.processing.batch.stages.silver import OBSERVATIONS, PAGE_CONTEXT, RUNS_DIRECTORY, SILVER_ZONE, wide_name
 from ecomdata.processing.batch.star_inputs import star_inputs
 
 DIMENSION_NAMES = tuple(d.name for d in datasets_of_kind(DIM, BRIDGE))
+CONFLICT_SAMPLE = 10
 
 
 def summary_key(run_id: str) -> str:
@@ -65,14 +70,29 @@ class DimensionsStage(Stage):
                 inputs.observations, requested_category_pages(attempts), inputs.category_names, inputs.category_paths
             )
             writes = {name: ctx.io.merge_dw(run, name, dims[name]) for name in DIMENSION_NAMES}
+            conflicts = category_parent_conflicts(inputs.observations, inputs.category_paths).orderBy(
+                "marketplace", "category_id"
+            )
+            conflict_count = conflicts.count()
+            conflict_sample = [
+                {"marketplace": row.marketplace, "category_id": row.category_id, "parent_ids": list(row.parent_ids)}
+                for row in conflicts.limit(CONFLICT_SAMPLE).collect()
+            ]
         finally:
             observations.unpersist()
         summary = {
             "run_id": run.run_id,
             "as_of": run.as_of.isoformat(),
             "sources": codes,
+            # A category id under two parents: dim_category kept one path (H6).
+            "category_parent_conflicts": {"count": conflict_count, "sample": conflict_sample},
             "tables": {
-                name: {"uri": result.uri, "rows": result.row_count, "version": result.version}
+                name: {
+                    "uri": result.uri,
+                    "rows": result.row_count,
+                    "version": result.version,
+                    "write_mode": result.write_mode,
+                }
                 for name, result in writes.items()
             },
         }

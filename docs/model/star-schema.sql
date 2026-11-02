@@ -41,10 +41,7 @@ CREATE TABLE dw.dim_seller (
     seller_name             varchar(256),
     seller_type             varchar(64),                -- as the source names it: OFFICIAL_STORE, NONE, LAZMALL
     is_official_store       boolean,
-    is_trusted_store        boolean,                    -- NULL when the source has no such badge (Lazada)
-    first_seen_at           timestamptz,
-    last_seen_at            timestamptz,
-    observed_listing_count  integer
+    is_trusted_store        boolean                     -- NULL when the source has no such badge (Lazada)
 );
 
 -- SCD1. Brand ids are each marketplace's own; a listing without one points to -1.
@@ -53,9 +50,6 @@ CREATE TABLE dw.dim_brand (
     marketplace_key         bigint NOT NULL REFERENCES dw.dim_marketplace (marketplace_key),
     brand_id                varchar(64) NOT NULL,
     brand_name              varchar(256),
-    first_seen_at           timestamptz,
-    last_seen_at            timestamptz,
-    observed_listing_count  integer,
     UNIQUE (marketplace_key, brand_id)
 );
 
@@ -263,7 +257,7 @@ CREATE TABLE dw.fact_category_page_daily (
 
 -- Transaction fact. Grain: one HTTP attempt to fetch one page.
 CREATE TABLE dw.fact_crawl_attempt (
-    attempt_id       bigint PRIMARY KEY,                -- audit.crawl_request_attempt sequence
+    attempt_id       bigint PRIMARY KEY,                -- xxhash64(crawl_run_id, task_id, attempt_number)
     date_key         integer NOT NULL REFERENCES dw.dim_date (date_key),
     marketplace_key  bigint NOT NULL REFERENCES dw.dim_marketplace (marketplace_key),
     category_key     bigint NOT NULL REFERENCES dw.dim_category (category_key),  -- -1 if not a category page

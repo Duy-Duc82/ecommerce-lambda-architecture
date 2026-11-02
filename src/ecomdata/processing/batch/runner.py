@@ -8,6 +8,10 @@ refused run has been recorded. The batch lock is held for the whole invocation,
 so ``--all`` and a single stage take it the same way. Each stage that runs is
 timed: the seconds go on its result and into ``_runs/run_id=<run>/timings/<stage>.json``
 next to the stages' own summaries, which hold their row counts.
+
+The run's audit row lives in PostgreSQL, where the state machine and the lock
+need it; its copy of record is ``_runs/run_id=<run>/run.json`` in the lake,
+rewritten after every stage and when the run fails.
 """
 from __future__ import annotations
 
@@ -49,6 +53,29 @@ class RunNeedsResume(RuntimeError):
 
 def timing_key(run_id: str, stage: str) -> str:
     return f"marketplace/{RUNS_DIRECTORY}/run_id={run_id}/timings/{stage}.json"
+
+
+def run_record_key(run_id: str) -> str:
+    return f"marketplace/{RUNS_DIRECTORY}/run_id={run_id}/run.json"
+
+
+def run_record_json(record: RunRecord) -> bytes:
+    """The run's audit row as the lake keeps it."""
+
+    def value(item: Any) -> Any:
+        if isinstance(item, datetime):
+            return item.isoformat()
+        return getattr(item, "value", item)
+
+    fields = {name: value(getattr(record, name)) for name in record.__dataclass_fields__}
+    fields["dataset_counts"] = dict(record.dataset_counts)
+    return json.dumps(fields, sort_keys=True, default=str).encode("utf-8")
+
+
+def _save_record(deps: BatchDependencies, run_id: str) -> None:
+    record = deps.audit.get(run_id)
+    if record is not None:
+        deps.store.put(SILVER_ZONE, run_record_key(run_id), run_record_json(record))
 
 
 def default_stages() -> tuple[Stage, ...]:
@@ -169,6 +196,7 @@ def _run(
                 audit.advance(context.run_id, outcome.status, now(), **outcome.columns)
         except Exception as error:
             _mark_failed(audit, context.run_id, now, error)
+            _try_save_record(deps, context.run_id)
             raise
         record = audit.get(context.run_id)
         report.record = record
@@ -182,6 +210,7 @@ def _run(
         deps.store.put(
             SILVER_ZONE, timing_key(context.run_id, stage.name), json.dumps(timing, sort_keys=True).encode("utf-8")
         )
+        _save_record(deps, context.run_id)
         report.stages.append(StageResult(stage.name, record.status, outcome.detail, seconds=seconds))
         if outcome.failure is not None:
             raise outcome.failure
@@ -189,6 +218,14 @@ def _run(
             # A held run goes no further in this invocation: the operator decides next.
             break
     return report
+
+
+def _try_save_record(deps: BatchDependencies, run_id: str) -> None:
+    try:
+        _save_record(deps, run_id)
+    except Exception:
+        # The stage's error is the one to report.
+        pass
 
 
 def _mark_failed(audit: AuditRepo, run_id: str, now: Callable[[], datetime], error: BaseException) -> None:

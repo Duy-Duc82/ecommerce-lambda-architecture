@@ -117,14 +117,17 @@ class SparkLakeIO:
         current = self._existing_delta(uri)
         if current is None:
             self._create(frame, uri, entry.partition_columns, format_="delta")
+            mode = "created"
         elif _shape(current.schema) != _shape(frame.schema):
             # The registry changed the table's columns: a MERGE cannot, so the
             # table is replaced as a new version and the old one stays readable.
             self._create(frame, uri, entry.partition_columns, format_="delta", overwrite_schema=True)
+            mode = "schema_replaced"
         else:
             self.spark.sql(merge_statement(uri, frame, entry.key, _source_view(frame, name)))
+            mode = "merged"
         history = self.spark.sql(f"DESCRIBE HISTORY delta.`{uri}` LIMIT 1").first()
-        return DwWriteResult(name, uri, self.read_dw(context, name).count(), int(history["version"]))
+        return DwWriteResult(name, uri, self.read_dw(context, name).count(), int(history["version"]), mode)
 
     def read_dw(self, context: MarketplaceBatchContext, name: str, version: int | None = None) -> DataFrame:
         reader = self.spark.read.format(self.table_format)
@@ -198,6 +201,46 @@ def read_crawl_audit(spark: SparkSession, jdbc_url: str, properties: Mapping[str
     return attach_marketplace_code(attempts, frontier), runs
 
 
+def read_crawl_audit_lake(spark: SparkSession, root_uri: str) -> tuple[DataFrame, DataFrame]:
+    """The crawl audit as the crawler wrote it to the lake (``ecomdata.domain.crawl_audit``): attempts and runs.
+
+    Same columns as ``read_crawl_audit`` gives the marts and gates; the attempts
+    already carry their marketplace code, target and resource type, so no
+    frontier is read. A lake without audit objects yet reads as no rows.
+    """
+    from pyspark.errors import AnalysisException
+
+    try:
+        lines = spark.read.option("recursiveFileLookup", "true").text(root_uri.rstrip("/"))
+    except AnalysisException as error:
+        if "PATH_NOT_FOUND" not in str(error) and "Path does not exist" not in str(error):
+            raise
+        lines = spark.createDataFrame([], "value string")
+    return crawl_audit_from_lines(lines)
+
+
+def crawl_audit_from_lines(lines: DataFrame) -> tuple[DataFrame, DataFrame]:
+    """(attempts, runs) out of the audit's JSON lines (a ``value`` column), one row per attempt and per run."""
+    from pyspark.sql.types import StringType, StructField
+
+    from ecomdata.domain import crawl_audit as layout
+
+    fields = layout.line_fields()
+    # Every field is parsed as text and cast: a cast takes the offset and the
+    # microseconds Python's isoformat writes, whatever the JSON parser's format.
+    text_schema = StructType([StructField(name, StringType()) for name, _ in fields])
+    parsed = lines.filter(F.trim(F.col("value")) != "").select(F.from_json("value", text_schema).alias("line"))
+    typed = parsed.select(*[F.col(f"line.{name}").cast(dtype).alias(name) for name, dtype in fields])
+
+    def kind(name: str, columns: Sequence[tuple[str, str]], key: Sequence[str]) -> DataFrame:
+        frame = typed.filter(F.col("kind") == name).select(*[column for column, _ in columns])
+        return frame.dropDuplicates(list(key))
+
+    attempts = kind(layout.KIND_ATTEMPT, layout.ATTEMPT_FIELDS, ("crawl_run_id", "task_id", "attempt_number"))
+    runs = kind(layout.KIND_RUN, layout.RUN_FIELDS, ("crawl_run_id",))
+    return attempts, runs
+
+
 def silver_schemas() -> dict[str, StructType]:
     """Explicit read schemas of the Silver datasets later stages read back."""
     from pyspark.sql.types import (
@@ -246,4 +289,11 @@ def silver_schemas() -> dict[str, StructType]:
     return {OBSERVATIONS: declared(common.CANONICAL_COLUMNS), QUARANTINE: quarantine}
 
 
-__all__ = ["SparkLakeIO", "merge_statement", "read_crawl_audit", "silver_schemas"]
+__all__ = [
+    "SparkLakeIO",
+    "crawl_audit_from_lines",
+    "merge_statement",
+    "read_crawl_audit",
+    "read_crawl_audit_lake",
+    "silver_schemas",
+]

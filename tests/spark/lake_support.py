@@ -63,8 +63,14 @@ class MemoryLake:
         cached = stored(frame.select(*dataset(name).columns))
         # Like a Delta table, every merge is a new version, numbered from 0.
         history = self.dw_history.setdefault(key, [])
+        if not history:
+            mode = "created"
+        elif history[-1].dtypes != cached.dtypes:
+            mode = "schema_replaced"
+        else:
+            mode = "merged"
         history.append(cached)
-        return DwWriteResult(name, context.dw_dataset_uri(name), cached.count(), len(history) - 1)
+        return DwWriteResult(name, context.dw_dataset_uri(name), cached.count(), len(history) - 1, mode)
 
     def read_dw(self, context, name, version=None):
         history = self.dw_history[(context.dw_root_uri, name)]

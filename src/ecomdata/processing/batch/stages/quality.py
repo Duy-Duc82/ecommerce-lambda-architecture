@@ -14,6 +14,7 @@ nothing that failed the gate stays where the next run, or a reader, would build 
 from __future__ import annotations
 
 import json
+from datetime import datetime
 
 from pyspark.sql import functions as F
 
@@ -27,13 +28,29 @@ from ecomdata.processing.batch.stages.base import Outcome, Stage, StageContext
 from ecomdata.processing.batch.stages.facts import built_star_versions
 from ecomdata.processing.batch.stages.marts import load_judged
 from ecomdata.processing.batch.stages.marts import summary_key as marts_summary_key
-from ecomdata.processing.batch.stages.silver import OBSERVATIONS, QUARANTINE, SILVER_ZONE
+from ecomdata.processing.batch.stages.silver import OBSERVATIONS, QUARANTINE, RUNS_DIRECTORY, SILVER_ZONE
+
+
+def results_key(run_id: str) -> str:
+    return f"marketplace/{RUNS_DIRECTORY}/run_id={run_id}/quality.json"
+
+
+def results_json(results, decision) -> bytes:
+    """Every check's result and the run's decision, as the lake keeps them."""
+
+    def row(item) -> dict:
+        values = {name: getattr(item, name) for name in item.__dataclass_fields__}
+        return {name: value.isoformat() if isinstance(value, datetime) else value for name, value in values.items()}
+
+    return json.dumps({"decision": row(decision), "results": [row(item) for item in results]}, sort_keys=True).encode(
+        "utf-8"
+    )
 
 
 class QualityStage(Stage):
     name = "quality"
     requires = ("silver/offer_observations_v2", "gold/marketplace/runs/<run>", "silver/_runs/<run>/marts.json")
-    produces = ("gold/marketplace/manifests/<run>/manifest.json",)
+    produces = ("gold/marketplace/manifests/<run>/manifest.json", "silver/_runs/<run>/quality.json")
     allowed_from = frozenset({S.GOLD_WRITTEN})
     milestone = S.QUALITY_PASSED
 
@@ -62,6 +79,8 @@ class QualityStage(Stage):
         decision = decide(results, run)
         # Its own write, before the decision is acted on: the evidence for a refused run is the point of the gate.
         ctx.quality.record(results, run_id=run.run_id)
+        # The copy of record, in the lake next to the run's other summaries.
+        ctx.store.put(SILVER_ZONE, results_key(run.run_id), results_json(results, decision))
 
         previous = read_current_manifest(reader=ctx.store.get)
         # A pointer that already names this run is not its own predecessor: keep the one it recorded.

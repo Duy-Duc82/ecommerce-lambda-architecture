@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
+from ecomdata.domain.crawl_audit import CRAWL_AUDIT_ROOT
 from ecomdata.domain.datasets import GOLD_DATASET
 from ecomdata.settings import Settings
 
@@ -68,11 +69,12 @@ def batch_dependencies(settings: Settings, *, publish_cache: bool = True):
     """The real adapters of a batch run: PostgreSQL audit, object store, Spark lake, advisory lock.
 
     ``publish_cache=False`` (``--skip-postgres``) keeps the audit and the quality results in memory and
-    publishes no cache, but the crawl audit is still read from PostgreSQL.
+    publishes no cache. The crawl audit is read from the lake, or from PostgreSQL when
+    ``MARKETPLACE_CRAWL_AUDIT_SOURCE=postgres`` (a lake written before the crawler kept its audit there).
     """
     from ecomdata.infra.object_store import object_store_for
     from ecomdata.infra.postgres import connection_factory, jdbc_properties, jdbc_url
-    from ecomdata.processing.batch.lake import SparkLakeIO, read_crawl_audit, silver_schemas
+    from ecomdata.processing.batch.lake import SparkLakeIO, read_crawl_audit, read_crawl_audit_lake, silver_schemas
     from ecomdata.processing.batch.lock import exclusive_batch
     from ecomdata.processing.batch.memory import MemoryAudit, MemoryQuality
     from ecomdata.processing.batch.repositories import (
@@ -94,13 +96,18 @@ def batch_dependencies(settings: Settings, *, publish_cache: bool = True):
         silver_schemas=silver_schemas(),
         table_format=settings.storage.table_format,
     )
+    if settings.batch.crawl_audit_source == "postgres":
+        crawl_audit = lambda spark: read_crawl_audit(spark, url, props)  # noqa: E731
+    else:
+        audit_root = store.uri("bronze", CRAWL_AUDIT_ROOT)
+        crawl_audit = lambda spark: read_crawl_audit_lake(spark, audit_root)  # noqa: E731
     return BatchDependencies(
         audit=MarketplaceBatchAudit(factory) if publish_cache else MemoryAudit(),
         quality=MarketplaceQualityRepository(factory) if publish_cache else MemoryQuality(),
         store=store,
         io=io,
         spark_provider=provider,
-        crawl_audit=lambda spark: read_crawl_audit(spark, url, props),
+        crawl_audit=crawl_audit,
         publisher=MarketplaceCachePublisher(factory, url, props) if publish_cache else None,
         lock=lambda: exclusive_batch(connection_factory(pg), key=settings.batch.lock_key),
     )

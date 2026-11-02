@@ -51,6 +51,8 @@ flowchart LR
     frontier[(Frontier + audit<br/>PostgreSQL)] --> worker["crawl-worker<br/>Fetcher → Extractor"]
     worker --> raw[("Bronze/raw<br/>part-N.bin.gz + metadata.json")]
     worker --> rec[("Bronze/records<br/>JSONL.gz theo trang")]
+    worker --> audit[("Bronze/crawl_audit<br/>JSONL.gz theo crawl run")]
+    audit --> silver
     rec --> kafka{{"Kafka<br/>marketplace.records.v1"}}
     kafka --> norm["speed: normalizer<br/>(foreachBatch)"]
     norm --> obs{{"marketplace.observations.v1<br/>(dẫn xuất)"}}
@@ -69,10 +71,11 @@ flowchart LR
     airflow["Airflow: marketplace_batch (@hourly)"] -. lập lịch .-> silver
 ```
 
-Hai điểm cần đọc kỹ:
+Ba điểm cần đọc kỹ:
 
 1. **Bronze là sự thật**. `bronze/raw` giữ phản hồi nguyên vẹn (gzip, có manifest); `bronze/marketplace/records` giữ từng dòng nguồn với toàn bộ trường (trừ danh sách PII khai báo trong spec). Mọi bảng phía sau dựng lại được từ đó.
-2. **Batch là bản đúng, speed là bản nhanh.** Cả hai chuẩn hoá bằng cùng một normalizer theo nguồn (`processing/normalize/sources/<site>.py`) và cùng quy tắc: thứ tự `domain/ordering.py`, luật thay đổi `domain/change_rules.py`.
+2. **Audit: bản lưu trong lake, bản vận hành trong PostgreSQL** (ADR-0008). Crawler ghi crawl audit vào cả hai; batch đọc bản trong lake. Run của batch và kết quả quality có bản trong `_runs/run_id=<run>/` (`run.json`, `quality.json`).
+3. **Batch là bản đúng, speed là bản nhanh.** Cả hai chuẩn hoá bằng cùng một normalizer theo nguồn (`processing/normalize/sources/<site>.py`) và cùng quy tắc: thứ tự `domain/ordering.py`, luật thay đổi `domain/change_rules.py`.
 
 ## 3. Các module
 
@@ -133,9 +136,9 @@ silver -> dimensions -> facts -> marts -> quality -> publish -> promote
 |---|---|---|---|
 | `silver` | Bronze/records (đến `as_of`) | `offer_observations_v2`, `<source>_listing_wide`, `page_context`, `quarantine`, tóm tắt `_runs/<run>/silver.json` (drift, bản trùng) | `SILVER_BUILT` |
 | `dimensions` | Silver v2 (cắt tại `as_of`, gồm cả quảng cáo), `<source>_listing_wide`, `page_context` | 7 dimension và bridge ở `gold/marketplace/dw/<bảng>/` (Delta `MERGE`, ngoài thư mục run), `_runs/<run>/dimensions.json` (số dòng, phiên bản Delta) | `DIMENSIONS_BUILT` |
-| `facts` | Silver v2 (như `dimensions`), `dw/dim_product_listing`, crawl audit (cắt tại `as_of`) | 6 fact ở `gold/marketplace/dw/<bảng>/` (Delta `MERGE`, partition `date_key`), `_runs/<run>/facts.json` | `FACTS_BUILT` |
+| `facts` | Silver v2 (như `dimensions`), `dw/dim_product_listing`, crawl audit trong lake | 6 fact ở `gold/marketplace/dw/<bảng>/` (Delta `MERGE`, partition `date_key`), `_runs/<run>/facts.json` | `FACTS_BUILT` |
 | `marts` | Silver v2, crawl audit (cắt tại `as_of`, bỏ quảng cáo) | 10 mart Gold theo run, `_runs/<run>/marts.json` | `GOLD_WRITTEN` |
-| `quality` | Silver, Gold, audit | kết quả quality, manifest của run | `QUALITY_PASSED`, `QUALITY_FAILED` hoặc `HELD` |
+| `quality` | Silver, Gold, star, crawl audit | kết quả quality (PostgreSQL và `_runs/<run>/quality.json`), manifest của run | `QUALITY_PASSED`, `QUALITY_FAILED` hoặc `HELD` |
 | `publish` | Gold, manifest | PostgreSQL `cache.marketplace_*` | `PUBLISHED` (hoặc `HELD`) |
 | `promote` | manifest | `current.json` (compare-and-swap) | `PROMOTED` (hoặc `HELD`) |
 

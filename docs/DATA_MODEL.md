@@ -266,18 +266,12 @@ erDiagram
         string seller_type "SCD1, as the source names it"
         boolean is_official_store "SCD1"
         boolean is_trusted_store "SCD1, null if the source has no such badge"
-        timestamp first_seen_at
-        timestamp last_seen_at
-        int observed_listing_count
     }
     DIM_BRAND {
         bigint brand_key PK "xxhash64(marketplace, brand_id)"
         bigint marketplace_key FK
         string brand_id "UK with marketplace"
         string brand_name "SCD1"
-        timestamp first_seen_at
-        timestamp last_seen_at
-        int observed_listing_count
     }
     DIM_CATEGORY {
         bigint category_key PK
@@ -455,7 +449,7 @@ erDiagram
         decimal in_stock_ratio
     }
     FACT_CRAWL_ATTEMPT {
-        bigint attempt_id PK "audit sequence"
+        bigint attempt_id PK "hash of run, task, attempt number"
         int date_key FK
         bigint marketplace_key FK
         bigint category_key FK "-1 if not a category page"
@@ -536,8 +530,10 @@ Tiki and Lazada; adding a marketplace is a new row, not a new column.
 
 **`dim_seller`.** `seller_id` is already scoped to its marketplace
 (`make_seller_id(marketplace, platform_seller_id)`), so it is the natural key
-on its own. `first_seen_at`, `last_seen_at` and `observed_listing_count` are
-overwritten each run (SCD1); they are what `seller_current` publishes. The
+on its own. The dimension holds only what describes the seller; when it was
+first and last seen and how many listings it has are activity, read from
+`fact_offer_observation` (or the `seller_current` mart), so a new sighting does
+not rewrite every seller row each run (H6). The
 descriptive columns take the **latest value seen** (SCD1): the value on the
 latest sighting that has one, so a sighting missing a field does not erase it:
 
@@ -556,8 +552,8 @@ without a seller points to `-1`.
 **`dim_brand`.** Brand ids are each marketplace's own numbers (Tiki
 `brand_id`, Lazada `brandId`), so the natural key is (`marketplace_code`,
 `brand_id`) and `brand_key = xxhash64(marketplace_code, brand_id)`.
-`brand_name` is the latest name seen for the id (SCD1); `first_seen_at`,
-`last_seen_at` and `observed_listing_count` are maintained like the seller's.
+`brand_name` is the latest name seen for the id (SCD1); like the seller, the
+brand keeps no activity columns.
 A listing without a brand id points to `-1`, even when it has a brand name:
 a name alone is not a stable key, and 13.9 % of Tiki products carry no brand
 at all. The same brand on two marketplaces is two rows; matching them is the
@@ -708,7 +704,7 @@ and a uniqueness check enforces it on every run.
 | `fact_price_change` | transaction, derived | **one sighting whose price differs from the same offer's previous sighting** | `observation_id` |
 | `fact_counter_daily` | periodic snapshot (sparse) | **one offer, one UTC day, one public counter** (`rating_count`, `review_count`, `sold_count`) | (`date_key`, `offer_key`, `counter_name`) |
 | `fact_category_page_daily` | periodic snapshot (sparse) | **one crawled category page, one UTC day, one currency** | (`date_key`, `category_key`, `currency`) |
-| `fact_crawl_attempt` | transaction | **one HTTP attempt to fetch one page** (one `audit.crawl_request_attempt` row) | `attempt_id` |
+| `fact_crawl_attempt` | transaction | **one HTTP attempt to fetch one page** (one attempt line of the crawl audit) | `attempt_id` = `xxhash64(crawl_run_id, task_id, attempt_number)` |
 
 **`fact_offer_observation`** is the atomic fact; every price mart can be
 derived from it. Besides the foreign keys it keeps the observation's measures

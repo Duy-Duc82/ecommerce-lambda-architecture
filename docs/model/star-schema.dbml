@@ -62,9 +62,6 @@ Table dw.dim_seller {
   seller_type varchar [note: 'as the source names it: OFFICIAL_STORE, NONE, LAZMALL ...']
   is_official_store boolean
   is_trusted_store boolean [null, note: 'NULL when the source has no such badge (Lazada)']
-  first_seen_at timestamptz
-  last_seen_at timestamptz
-  observed_listing_count int
   Note: 'SCD1: descriptive columns from the latest sighting in <source>_listing_wide.'
 }
 
@@ -73,9 +70,6 @@ Table dw.dim_brand {
   marketplace_key bigint [ref: > dw.dim_marketplace.marketplace_key]
   brand_id varchar [not null, note: 'the marketplace\'s own id']
   brand_name varchar
-  first_seen_at timestamptz
-  last_seen_at timestamptz
-  observed_listing_count int
   indexes {
     (marketplace_key, brand_id) [unique]
   }
@@ -294,7 +288,7 @@ Table dw.fact_category_page_daily {
 }
 
 Table dw.fact_crawl_attempt {
-  attempt_id bigint [pk, note: 'audit.crawl_request_attempt sequence']
+  attempt_id bigint [pk, note: 'xxhash64(crawl_run_id, task_id, attempt_number)']
   date_key int [ref: > dw.dim_date.date_key]
   marketplace_key bigint [ref: > dw.dim_marketplace.marketplace_key]
   category_key bigint [ref: > dw.dim_category.category_key, note: '-1 if not a category page']

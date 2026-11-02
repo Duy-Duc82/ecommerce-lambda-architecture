@@ -88,7 +88,12 @@ class FactsStage(Stage):
             "as_of": run.as_of.isoformat(),
             "sources": codes,
             "tables": {
-                name: {"uri": result.uri, "rows": result.row_count, "version": result.version}
+                name: {
+                    "uri": result.uri,
+                    "rows": result.row_count,
+                    "version": result.version,
+                    "write_mode": result.write_mode,
+                }
                 for name, result in writes.items()
             },
         }
