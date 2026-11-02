@@ -4,14 +4,14 @@
 #
 # Every push: lint, the plain unit tests, the Airflow DAGs and the legacy
 # Kaggle demo (a few minutes). The Spark tests (tests/spark, about 30 minutes
-# in one process) run only on a pull request into master, on master itself, or
-# by hand, split across parallel runners so they take about 10 minutes.
+# in one process) run only on a pull request into master or develop, on master or
+# develop themselves, or by hand, split across parallel runners (about 10 minutes).
 name: tests
 
 on:
   push:
   pull_request:
-    branches: [master]
+    branches: [master, develop]
   workflow_dispatch:
 
 concurrency:
@@ -59,7 +59,9 @@ jobs:
 
   spark:
     name: spark (${{ matrix.group }}/4)
-    if: github.event_name != 'push' || github.ref == 'refs/heads/master'
+    if: >-
+      github.event_name != 'push' ||
+      github.ref == 'refs/heads/master' || github.ref == 'refs/heads/develop'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:
