@@ -12,8 +12,6 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from ecomdata.domain.datasets import STAR_NAMES
-
 
 def describe_table(spark: Any, uri: str) -> dict[str, Any]:
     from pyspark.errors import AnalysisException
@@ -42,18 +40,9 @@ def lost_rows(before: dict[str, Any], after: dict[str, Any]) -> dict[str, tuple[
 
 
 def main() -> None:
-    from ecomdata.processing.batch.bootstrap import default_uris, spark_factory
-    from ecomdata.settings import load_settings
+    from ecomdata.processing.batch.bootstrap import star_snapshot
 
-    settings = load_settings(dotenv=True)
-    _, gold_root = default_uris(settings)
-    spark = spark_factory(settings, app_name="dw-inspect").create()
-    try:
-        tables = {name: describe_table(spark, f"{gold_root.rstrip('/')}/dw/{name}") for name in STAR_NAMES}
-    finally:
-        spark.stop()
-    print(json.dumps({"gold_root": gold_root, "tables": tables}, sort_keys=True))
-
+    print(json.dumps(star_snapshot(), sort_keys=True))
 
 if __name__ == "__main__":
     main()

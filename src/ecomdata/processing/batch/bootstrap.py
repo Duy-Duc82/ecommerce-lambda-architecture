@@ -65,6 +65,22 @@ def default_uris(settings: Settings) -> tuple[str, str]:
     return store.uri("silver", settings.batch.silver_root), store.uri("gold", GOLD_DATASET)
 
 
+def star_snapshot(settings: Settings | None = None) -> dict:
+    """Rows, Delta version and last operation of every star table (read-only)."""
+    from ecomdata.domain.datasets import STAR_NAMES
+    from ecomdata.processing.batch.dw_inspect import describe_table
+    from ecomdata.settings import load_settings
+
+    settings = load_settings(dotenv=True) if settings is None else settings
+    _, gold_root = default_uris(settings)
+    spark = spark_factory(settings, app_name="dw-inspect").create()
+    try:
+        tables = {name: describe_table(spark, f"{gold_root.rstrip('/')}/dw/{name}") for name in STAR_NAMES}
+    finally:
+        spark.stop()
+    return {"gold_root": gold_root, "tables": tables}
+
+
 def batch_dependencies(settings: Settings, *, publish_cache: bool = True):
     """The real adapters of a batch run: PostgreSQL audit, object store, Spark lake, advisory lock.
 
