@@ -78,8 +78,8 @@ Bổ sung ngày 2026-10-30:
 | H4 | xong ở mức unit; `tests/airflow` chạy lại được trong image `3.3.2-r2` | `c8c4e6e`, `0fff3e7` |
 | docs | ADR-0007, `DATA_MODEL.md` §4.10, ADR-0005, `ARCHITECTURE.md` | `03fd4d7` |
 | H2 | rút gọn (mục 6.5): thời gian từng stage vào `_runs/run_id=<run>/timings/<stage>.json` và vào output của `batch run` (`stage_seconds`) | `1cb3981` |
-| H5 | xong (ADR-0008): crawler ghi thêm crawl audit vào `bronze/marketplace/crawl_audit/`, batch đọc từ lake (`MARKETPLACE_CRAWL_AUDIT_SOURCE`, mặc định `lake`), `ops audit-export` chép dữ liệu cũ; `fact_crawl_attempt.attempt_id` thành khoá băm; `run.json` và `quality.json` của mỗi run trong `_runs/`. Parity mart lake/JDBC trong `tests/spark/test_crawl_audit_lake.py`. Speed batch, stream progress, storage snapshot ở lại PostgreSQL (số đo vận hành, Grafana đọc) | (commit này) |
-| H6 | xong: `dim_seller`, `dim_brand` bỏ `first_seen_at`, `last_seen_at`, `observed_listing_count`; summary của `dimensions` ghi `category_parent_conflicts` (id danh mục dưới hai cha); summary `dimensions`/`facts` ghi `write_mode` (`created`, `merged`, `schema_replaced`); các mục docs lệch mã đã sửa ở `03fd4d7` | (commit này) |
+| H5 | xong (ADR-0008): crawler ghi thêm crawl audit vào `bronze/marketplace/crawl_audit/`, batch đọc từ lake (`MARKETPLACE_CRAWL_AUDIT_SOURCE`, mặc định `lake`), `ops audit-export` chép dữ liệu cũ; `fact_crawl_attempt.attempt_id` thành khoá băm; `run.json` và `quality.json` của mỗi run trong `_runs/`. Parity mart lake/JDBC trong `tests/spark/test_crawl_audit_lake.py`. Speed batch, stream progress, storage snapshot ở lại PostgreSQL (số đo vận hành, Grafana đọc) | `c33c5a5` |
+| H6 | xong: `dim_seller`, `dim_brand` bỏ `first_seen_at`, `last_seen_at`, `observed_listing_count`; summary của `dimensions` ghi `category_parent_conflicts` (id danh mục dưới hai cha); summary `dimensions`/`facts` ghi `write_mode` (`created`, `merged`, `schema_replaced`); các mục docs lệch mã đã sửa ở `03fd4d7` | `c33c5a5` |
 | H7 | **chưa làm**: cần Docker | |
 
 **Việc tiếp theo (H7, cần Docker):**
