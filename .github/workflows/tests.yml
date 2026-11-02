@@ -1,0 +1,73 @@
+# Runs the test suite on GitHub instead of the laptop: every push, and every
+# pull request into master. The drill and integration markers stay off (they
+# need a running stack or the live marketplace), as in pyproject addopts.
+name: tests
+
+on:
+  push:
+  pull_request:
+    branches: [master]
+  workflow_dispatch:
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  suite:
+    name: lint + unit + spark
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            pyproject.toml
+            constraints.txt
+
+      # PySpark 4.0 needs Java 17 or 21.
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -c constraints.txt -e ".[spark,dev]"
+
+      - name: Ruff
+        run: ruff check src tests
+
+      - name: Pytest
+        env:
+          PYSPARK_PYTHON: python
+          PYSPARK_DRIVER_PYTHON: python
+        run: pytest -q --no-header -ra --ignore=tests/airflow
+
+  airflow:
+    name: airflow DAGs
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            pyproject.toml
+            constraints.txt
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -c constraints.txt -e ".[airflow,dev]"
+
+      - name: Pytest
+        run: pytest -q --no-header -ra tests/airflow
