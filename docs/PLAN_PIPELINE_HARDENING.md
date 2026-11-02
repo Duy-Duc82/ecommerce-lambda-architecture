@@ -82,7 +82,7 @@ Bổ sung ngày 2026-10-30:
 | H6 | xong: `dim_seller`, `dim_brand` bỏ `first_seen_at`, `last_seen_at`, `observed_listing_count`; summary của `dimensions` ghi `category_parent_conflicts` (id danh mục dưới hai cha); summary `dimensions`/`facts` ghi `write_mode` (`created`, `merged`, `schema_replaced`); các mục docs lệch mã đã sửa ở `03fd4d7` | `c33c5a5` |
 | H7 | **chưa làm**: cần Docker | |
 
-**Việc tiếp theo (H7, cần Docker):**
+**Việc tiếp theo (H7, cần Docker):** chạy `.\scripts\h7.ps1` (bước 1–2 bên dưới, khoảng 30–60 phút), hoặc `.\scripts\h7.ps1 -CrawlHours 3` để làm cả bước 3. Script dừng ở bước đầu tiên lỗi, ghi `docs/evidence/hardening-<ngày>/summary.{json,md}` (run, thời gian từng stage, số dòng và version Delta của từng bảng `dw` sau mỗi run, các check) và log thô vào `data/ops/h7/`, rồi dừng stack (giữ volume).
 1. Giải phóng ổ C: trước khi bật Docker (ngày 02/11 còn khoảng 3,4 GB; một lần đầy ổ trước đây đã làm hỏng Docker).
 2. Trên `mp-refactor` với Bronze có sẵn:
    - `ops migrate`, rồi `ops audit-export` để đưa audit cũ vào lake;
