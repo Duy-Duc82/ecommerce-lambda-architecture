@@ -327,7 +327,7 @@
       "severity": "critical"
      },
      "annotations": {
-      "summary": "Không có lần tải nào trong 20 phút, dù crawl đã chạy trong 6 giờ qua.",
+      "summary": "{{ $labels.marketplace }}: task đến hạn chờ quá 10 phút nhưng không có lần tải nào trong 20 phút.",
       "value": "{{ $values.A }}"
      },
      "data": [
@@ -340,7 +340,7 @@
        "datasourceUid": "prometheus",
        "model": {
         "refId": "A",
-        "expr": "(sum(mp_crawl_5m_attempts) or vector(0)) and on () (max_over_time((sum(mp_crawl_5m_attempts))[6h:5m]) > 0)",
+        "expr": "(sum by (marketplace) (mp_crawl_5m_attempts) or 0 * max by (marketplace) (mp_crawl_frontier_oldest_due_seconds)) and on (marketplace) (max by (marketplace) (mp_crawl_frontier_oldest_due_seconds{status=\"READY\"}) > 600) and on (marketplace) (max_over_time((sum by (marketplace) (mp_crawl_5m_attempts))[6h:5m]) > 0)",
         "instant": true,
         "range": false
        }
@@ -477,7 +477,7 @@
       "severity": "critical"
      },
      "annotations": {
-      "summary": "{{ $labels.query_name }}: batch thành công gần nhất cách {{ $values.A }} giây.",
+      "summary": "{{ $labels.query_name }}: có bản ghi mới trên Kafka nhưng batch thành công gần nhất cách {{ $values.A }} giây.",
       "value": "{{ $values.A }}"
      },
      "data": [
@@ -490,7 +490,7 @@
        "datasourceUid": "prometheus",
        "model": {
         "refId": "A",
-        "expr": "time() - max by (query_name) (mp_speed_last_last_success_timestamp) < 21600",
+        "expr": "(time() - max by (query_name) (mp_speed_last_last_success_timestamp) < 21600) and on () (sum(increase(kafka_topic_partition_current_offset{topic=\"marketplace.records.v1\"}[15m])) > 0)",
         "instant": true,
         "range": false
        }

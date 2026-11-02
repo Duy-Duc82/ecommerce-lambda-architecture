@@ -239,13 +239,16 @@ class CrawlWorker:
         error = error or getattr(failure, "error", None) or RuntimeError("acquisition failed")
         parsed_count = report.record_count if report else 0
         if isinstance(error, RecordPublishError):
-            # The fetch, raw write and parse all happened; only publication
-            # failed part-way. The report rides on the error so the audit can
-            # still name the raw artifact, and only the observations Kafka
-            # acknowledged count as parsed: nothing else can reach Silver, and
-            # Phase 7 check 8 reconciles exactly this number against it.
+            # The fetch, raw write, parse and the Bronze records file all happened;
+            # only publication to Kafka failed part-way. The report rides on the
+            # error so the audit can still name the raw artifact. Silver is built
+            # from that records file, not from Kafka, so every row in it reaches
+            # Silver and counts as parsed: silver_parse_attempt_reconciliation
+            # compares exactly this number per crawl run. Counting only what Kafka
+            # acknowledged (the Silver-from-Kafka design) held every batch back
+            # after a Kafka outage (found 2026-10-31).
             report = error.report
-            parsed_count = error.acknowledged
+            parsed_count = report.record_count
         http_status = _http_status(report, error)
         kind = classify_failure(error, http_status)
         decision = decide_retry(

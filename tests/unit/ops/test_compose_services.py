@@ -98,9 +98,9 @@ def test_the_lazada_worker_runs_one_browser_with_the_room_chromium_needs():
 def test_the_workers_run_the_images_this_refactor_built():
     text = COMPOSE.read_text(encoding="utf-8")
 
-    assert "ecommerce/marketplace-python:2" in text
-    assert "ecommerce/spark-marketplace:4.0.1-r3" in text
-    assert "ecommerce/airflow:3.3.2-r2" in text
+    assert "ecommerce/marketplace-python:3" in text
+    assert "ecommerce/spark-marketplace:4.0.1-r4" in text
+    assert "ecommerce/airflow:3.3.2-r3" in text
     for old in ("ecommerce/marketplace-python:1", "ecommerce/spark-marketplace:4.0.1" + NL):
         assert old not in text
 

@@ -100,3 +100,18 @@ def test_the_s3_store_creates_its_bucket_once_and_writes_under_it():
 
     assert client.buckets == {"ecommerce-bronze"}
     assert client.objects == {("ecommerce-bronze", "a/b.bin"): b"x", ("ecommerce-bronze", "a/c.bin"): b"y"}
+
+
+def test_the_s3_listing_skips_directory_markers():
+    """Delta on S3A leaves ``_delta_log/_staged_commits/``; the weekly backup listed it,
+    could not read it back, and refused the whole backup."""
+    from types import SimpleNamespace
+
+    class Listing(_FakeMinio):
+        def list_objects(self, bucket, prefix=None, recursive=False):
+            for name, size in (("run/t/_delta_log/0.json", 5), ("run/t/_delta_log/_staged_commits/", 0)):
+                yield SimpleNamespace(object_name=name, size=size, last_modified=None)
+
+    store = S3ObjectStore(load_settings({"DATA_LAKE_PROFILE": "minio"}).storage, client=Listing())
+
+    assert store.list("gold", "run/") == ["run/t/_delta_log/0.json"]

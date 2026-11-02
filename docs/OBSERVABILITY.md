@@ -105,10 +105,10 @@ Trên Docker Desktop, "máy" là VM Linux của Docker. Panel đĩa theo dõi �
 | | Container bị OOM kill | có OOM trong 10 phút |
 | | Container khởi động lại liên tục | > 2 lần trong 30 phút |
 | | Alloy không gửi metrics | không có metric của Alloy trong 5 phút (mọi cảnh báo khác đang mù) |
-| pipeline | Crawl ngừng | không có lần tải nào trong 20 phút, dù crawl đã chạy trong 6 giờ qua |
+| pipeline | Crawl ngừng | theo marketplace đã crawl trong 6 giờ qua: có task `READY` quá hạn hơn 10 phút mà không có lần tải nào trong 20 phút (crawler rảnh giữa hai chu kỳ không bị báo) |
 | | Crawl bị chặn | > 20% lần tải là `RATE_LIMITED`/`BLOCKED` trong 10 phút |
 | | Circuit breaker mở | worker tạm ngừng một nguồn |
-| | Speed không có micro-batch thành công | > 10 phút (bỏ qua nếu speed đã dừng quá 6 giờ) |
+| | Speed không có micro-batch thành công | > 10 phút trong khi Kafka có bản ghi mới trong 15 phút (không có dữ liệu mới thì Spark không chạy batch; bỏ qua nếu speed đã dừng quá 6 giờ) |
 | | Speed đi sau Kafka | > 5.000 offset trong 10 phút |
 | | **Batch không chạy đúng khung giờ** | cửa sổ đã promote mới nhất cũ hơn 2,5 giờ. Đây là lỗi WP0 ngày 05/10; luật đọc bảng audit nên đúng cho cả Airflow lẫn scheduler vòng lặp cũ |
 | | Batch run thất bại hoặc bị giữ | run mới nhất `FAILED`, `QUALITY_FAILED` hoặc `HELD` |

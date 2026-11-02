@@ -105,6 +105,25 @@ loki.process "levels" {
       template = "expected"
     }
   }
+  // Without Telegram, Grafana still tries its built-in email contact point and logs
+  // "SMTP not configured" as an error. Alerts stay visible in Grafana by design.
+  // The scheduler echoes the task container's output, Spark's glob probe included (see airflow_tasks).
+  stage.match {
+    selector = `{service="airflow-scheduler"} |~ "FileNotFoundException: No such file or directory: s3a://[^ ]*[*{]"`
+
+    stage.template {
+      source   = "level"
+      template = "expected"
+    }
+  }
+  stage.match {
+    selector = `{service="grafana"} |~ "SMTP not configured"`
+
+    stage.template {
+      source   = "level"
+      template = "expected"
+    }
+  }
   stage.labels {
     values = { level = "" }
   }
@@ -146,9 +165,15 @@ loki.process "airflow_tasks" {
     source     = "event"
     expression = `(?P<err>level=(?:error|fatal|critical)\b|"level": ?"(?:error|fatal|critical)"|\[(?:ERROR|FATAL|CRITICAL)\s*\]|\b(?:ERROR|FATAL|CRITICAL)\b|Traceback \(most recent call last\)|\b[A-Z][A-Za-z]+(?:Error|Exception):)|(?P<warn>level=warn(?:ing)?\b|"level": ?"warn(?:ing)?"|\[WARN(?:ING)?\s*\]|\bWARN(?:ING)?\b)`
   }
+  // Spark looks for a metadata directory under a glob path before reading Bronze and logs
+  // the miss with its FileNotFoundException ("Assume no metadata directory"); not a failure.
+  stage.regex {
+    source     = "event"
+    expression = `(?P<glob_probe>FileNotFoundException: No such file or directory: s3a://\S*[*{])`
+  }
   stage.template {
     source   = "level"
-    template = `{{ if or (eq .json_level "error") (eq .json_level "critical") .err }}error{{ else if or (eq .json_level "warning") .warn }}warn{{ else }}info{{ end }}`
+    template = `{{ if .glob_probe }}expected{{ else if or (eq .json_level "error") (eq .json_level "critical") .err }}error{{ else if or (eq .json_level "warning") .warn }}warn{{ else }}info{{ end }}`
   }
   // The DAG decides the layer, as the task containers' labels do.
   stage.template {

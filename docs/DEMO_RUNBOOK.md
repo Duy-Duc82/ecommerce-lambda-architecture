@@ -20,7 +20,7 @@ Chạy từ thư mục gốc của repo (Git Bash). Lệnh dùng `env/base.env` 
 sh run-fullstack.sh up -d loki prometheus alloy grafana   # giám sát trước
 sh run-fullstack.sh up -d                                  # toàn bộ stack
 sh run-fullstack.sh ps
-sh observability/healthcheck.sh                             # in dòng PROBLEM nếu có vấn đề
+sh observability/healthcheck.sh env/tiki-html.env           # in dòng PROBLEM nếu có vấn đề (stack khác: env/<stack>.env)
 docker compose -p mp-tikihtml --profile "*" stop           # dừng, dữ liệu trong volume vẫn giữ
 docker compose -p mp-tikihtml --profile "*" start          # bật lại đúng các container cũ
 ```

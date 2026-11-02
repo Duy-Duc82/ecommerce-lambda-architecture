@@ -648,7 +648,7 @@
   {
    "type": "timeseries",
    "title": "Lag của consumer group",
-   "description": "Chỉ các consumer commit offset (es-projector). Lag của speed ở hàng Speed.",
+   "description": "Chỉ các consumer commit offset: group DLQ của es-projector, chỉ có lag khi DLQ có message. Speed giữ offset trong checkpoint, lag của speed ở hàng Speed.",
    "datasource": {
     "type": "prometheus",
     "uid": "prometheus"
@@ -669,6 +669,7 @@
    "fieldConfig": {
     "defaults": {
      "unit": "short",
+     "noValue": "0 (chưa có offset nào được commit)",
      "custom": {
       "drawStyle": "line",
       "fillOpacity": 10,

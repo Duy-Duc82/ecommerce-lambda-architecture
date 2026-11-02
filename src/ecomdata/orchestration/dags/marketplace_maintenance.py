@@ -31,7 +31,12 @@ with DAG(
             image=python_image(),
             command=command,
             # The snapshot sizes Kafka's partition logs from the broker's volume.
-            **docker_settings(layer="ops", service=f"maintenance-{name}", kafka_data=name == "storage_snapshot"),
+            **docker_settings(
+                layer="ops",
+                service=f"maintenance-{name}",
+                kafka_data=name == "storage_snapshot",
+                reports=name == "backup",
+            ),
         )
         for name, command in commands.items()
     ]

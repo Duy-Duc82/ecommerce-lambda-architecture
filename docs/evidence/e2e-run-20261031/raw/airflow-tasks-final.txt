@@ -1,0 +1,52 @@
+### A1 Airflow task durations (successful tries), seconds
+         dag_id          |     task_id      | n  | p50_s | max_s | queue_wait_avg_s 
+-------------------------+------------------+----+-------+-------+------------------
+ marketplace_batch       | silver           | 15 | 134.8 | 296.6 |              0.1
+ marketplace_batch       | dimensions       | 15 | 128.0 | 333.6 |              0.3
+ marketplace_batch       | facts            | 15 |  70.2 | 122.8 |              0.4
+ marketplace_batch       | quality          | 15 |  55.9 | 105.7 |              0.2
+ marketplace_batch       | marts            | 15 |  46.1 |  83.8 |              0.2
+ marketplace_batch       | publish          | 15 |  30.8 |  64.8 |              0.2
+ marketplace_batch       | promote          | 15 |   2.1 |   4.9 |              0.2
+ marketplace_batch       | window_settled   | 16 |   0.5 |   3.5 |              0.1
+ marketplace_maintenance | backup           |  1 | 259.2 | 259.2 |              0.1
+ marketplace_maintenance | prune_raw        |  4 |   5.4 |   8.3 |              0.1
+ marketplace_maintenance | storage_snapshot |  1 |   3.2 |   3.2 |              0.1
+ marketplace_reprocess   | dimensions       |  1 | 141.3 | 141.3 |              0.2
+ marketplace_reprocess   | silver           |  1 | 126.6 | 126.6 |              0.1
+ marketplace_reprocess   | quality          |  1 |  67.0 |  67.0 |              0.1
+ marketplace_reprocess   | facts            |  1 |  65.0 |  65.0 |              0.6
+ marketplace_reprocess   | marts            |  1 |  51.3 |  51.3 |              0.1
+ marketplace_reprocess   | publish          |  1 |  35.6 |  35.6 |              0.1
+ marketplace_reprocess   | promote          |  1 |   2.1 |   2.1 |              0.2
+ source_discovery        | discover_tiki    |  1 |  66.5 |  66.5 |              0.1
+ source_discovery        | discover_lazada  |  1 |   2.2 |   2.2 |              0.1
+
+### A2 Airflow task failures and retries
+         dag_id          |     task_id      |      state      | max_try | count 
+-------------------------+------------------+-----------------+---------+-------
+ marketplace_batch       | dimensions       | upstream_failed |       0 |     1
+ marketplace_batch       | dimensions       | success         |       5 |     1
+ marketplace_batch       | facts            | upstream_failed |       0 |     1
+ marketplace_batch       | marts            | upstream_failed |       0 |     1
+ marketplace_batch       | promote          | upstream_failed |       0 |     1
+ marketplace_batch       | publish          | upstream_failed |       0 |     1
+ marketplace_batch       | quality          | success         |       2 |     1
+ marketplace_batch       | quality          | upstream_failed |       0 |     1
+ marketplace_batch       | silver           | failed          |       3 |     1
+ marketplace_maintenance | backup           | failed          |       2 |     2
+ marketplace_maintenance | backup           | running         |       1 |     1
+ marketplace_maintenance | prune_raw        | success         |       2 |     1
+ marketplace_maintenance | storage_snapshot | upstream_failed |       0 |     2
+
+### A3 DAG runs: schedule delay and duration
+         dag_id          |  state  | n  | dur_p50_min | start_delay_p50_s 
+-------------------------+---------+----+-------------+-------------------
+ marketplace_batch       | failed  |  1 |       14.42 |             118.9
+ marketplace_batch       | success | 15 |       17.89 |               0.5
+ marketplace_maintenance | failed  |  2 |       15.22 |               0.7
+ marketplace_maintenance | running |  1 |             |               0.8
+ marketplace_maintenance | success |  1 |        4.44 |               0.2
+ marketplace_reprocess   | success |  1 |        8.23 |               0.3
+ source_discovery        | success |  1 |        1.12 |            9457.1
+

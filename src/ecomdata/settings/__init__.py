@@ -432,8 +432,8 @@ class ServiceSettings:
 @dataclass(frozen=True)
 class AirflowSettings:
     # Image every DockerOperator task runs, and the network it joins.
-    spark_image: str = "ecommerce/spark-marketplace:4.0.1-r3"
-    python_image: str = "ecommerce/marketplace-python:2"
+    spark_image: str = "ecommerce/spark-marketplace:4.0.1-r4"
+    python_image: str = "ecommerce/marketplace-python:3"
     docker_network: str = "mp-refactor_default"
     docker_url: str = "unix://var/run/docker.sock"
     # Host paths mounted into the task containers.

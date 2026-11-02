@@ -67,7 +67,7 @@ x-marketplace-python: &marketplace-python
   build:
     context: ..
     dockerfile: docker/python/Dockerfile
-  image: ecommerce/marketplace-python:2
+  image: ecommerce/marketplace-python:3
   volumes:
     # Read-only: data goes to MinIO, PostgreSQL or a named volume.
     - ../:/app:ro
@@ -78,7 +78,7 @@ x-spark-marketplace: &spark-marketplace
   build:
     context: ..
     dockerfile: docker/spark/Dockerfile
-  image: ecommerce/spark-marketplace:4.0.1-r3
+  image: ecommerce/spark-marketplace:4.0.1-r4
   # Spark may write scratch files into its working directory; /app is read-only.
   working_dir: /tmp
   volumes:
@@ -90,7 +90,7 @@ x-airflow: &airflow
   build:
     context: ..
     dockerfile: docker/airflow/Dockerfile
-  image: ecommerce/airflow:3.3.2-r2
+  image: ecommerce/airflow:3.3.2-r3
   profiles: ["orchestration"]
   labels:
     ecomdata.layer: orchestration
@@ -111,8 +111,8 @@ x-airflow: &airflow
     # Airflow 3 moved [scheduler] dag_dir_list_interval here.
     AIRFLOW__DAG_PROCESSOR__REFRESH_INTERVAL: "30"
     # What the DAGs hand to their task containers.
-    AIRFLOW_SPARK_IMAGE: ${AIRFLOW_SPARK_IMAGE:-ecommerce/spark-marketplace:4.0.1-r3}
-    AIRFLOW_PYTHON_IMAGE: ${AIRFLOW_PYTHON_IMAGE:-ecommerce/marketplace-python:2}
+    AIRFLOW_SPARK_IMAGE: ${AIRFLOW_SPARK_IMAGE:-ecommerce/spark-marketplace:4.0.1-r4}
+    AIRFLOW_PYTHON_IMAGE: ${AIRFLOW_PYTHON_IMAGE:-ecommerce/marketplace-python:3}
     AIRFLOW_DOCKER_NETWORK: ${COMPOSE_PROJECT_NAME:-mp}_bigdata
     # Labels the task containers with this stack, so the log collector (Alloy) finds
     # them although they are no compose services.
@@ -121,6 +121,8 @@ x-airflow: &airflow
     # Host path of the working tree; set to run task containers on it instead
     # of the code baked into their image (a host path, as the Docker daemon sees it).
     AIRFLOW_SOURCE_MOUNT: ${AIRFLOW_SOURCE_MOUNT:-}
+    # Host path of data/ops, the ops service's /reports; the weekly backup task writes there.
+    AIRFLOW_REPORTS_MOUNT: ${AIRFLOW_REPORTS_MOUNT:-}
     CRAWL_REQUEST_DELAY_SECONDS: ${CRAWL_REQUEST_DELAY_SECONDS:-2.0}
     SPARK_DRIVER_MEMORY: ${SPARK_DRIVER_MEMORY:-3g}
     MARKETPLACE_QUALITY_RECONCILIATION_SETTLE_SECONDS: ${MARKETPLACE_QUALITY_RECONCILIATION_SETTLE_SECONDS:-900}

@@ -1,6 +1,6 @@
 """The DAGs parse, and have the shape the plan fixes. Needs apache-airflow: run inside the Airflow image.
 
-    docker run --rm -v <repo>:/repo ecommerce/airflow:3.3.2-r2 bash -c "cd /repo && python -m pytest tests/airflow -m airflow"
+    docker run --rm -v <repo>:/repo ecommerce/airflow:3.3.2-r3 bash -c "cd /repo && python -m pytest tests/airflow -m airflow"
 """
 from __future__ import annotations
 
@@ -17,7 +17,7 @@ DAGS = Path(__file__).resolve().parents[2] / "src" / "ecomdata" / "orchestration
 
 @pytest.fixture(scope="module")
 def bag():
-    os.environ.setdefault("AIRFLOW_SPARK_IMAGE", "ecommerce/spark-marketplace:4.0.1-r3")
+    os.environ.setdefault("AIRFLOW_SPARK_IMAGE", "ecommerce/spark-marketplace:4.0.1-r4")
     os.environ["AIRFLOW__CORE__LOAD_EXAMPLES"] = "false"
     # Airflow 3.3 moved DagBag and dropped its include_examples argument.
     from airflow.dag_processing.dagbag import DagBag

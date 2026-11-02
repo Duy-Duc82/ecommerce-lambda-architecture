@@ -62,7 +62,12 @@ def kafka_data_volume(environ: Mapping[str, str] | None = None) -> str:
 
 
 def docker_settings(
-    environ: Mapping[str, str] | None = None, *, layer: str, service: str, kafka_data: bool = False
+    environ: Mapping[str, str] | None = None,
+    *,
+    layer: str,
+    service: str,
+    kafka_data: bool = False,
+    reports: bool = False,
 ) -> dict[str, Any]:
     """Where and how a DockerOperator starts its container (the same for every task but its labels)."""
     source = os.environ if environ is None else environ
@@ -82,19 +87,27 @@ def docker_settings(
         mounts.append(("bind", mount, "/app"))
     if kafka_data:
         mounts.append(("volume", kafka_data_volume(source), "/kafka-data"))
-    if mounts:
+    writable = []
+    reports_mount = source.get("AIRFLOW_REPORTS_MOUNT", "").strip()
+    if reports and reports_mount:
+        # The ops service's writable /reports (data/ops on the host): backups land where
+        # `ops backups` and `ops restore` look, and a second project can restore them.
+        writable.append(("bind", reports_mount, "/reports"))
+    if mounts or writable:
         from docker.types import Mount
 
-        settings["mounts"] = [Mount(source=s, target=d, type=kind, read_only=True) for kind, s, d in mounts]
+        settings["mounts"] = [Mount(source=s, target=d, type=kind, read_only=True) for kind, s, d in mounts] + [
+            Mount(source=s, target=d, type=kind, read_only=False) for kind, s, d in writable
+        ]
     return settings
 
 
 def spark_image(environ: Mapping[str, str] | None = None) -> str:
-    return (os.environ if environ is None else environ).get("AIRFLOW_SPARK_IMAGE", "ecommerce/spark-marketplace:4.0.1-r3")
+    return (os.environ if environ is None else environ).get("AIRFLOW_SPARK_IMAGE", "ecommerce/spark-marketplace:4.0.1-r4")
 
 
 def python_image(environ: Mapping[str, str] | None = None) -> str:
-    return (os.environ if environ is None else environ).get("AIRFLOW_PYTHON_IMAGE", "ecommerce/marketplace-python:2")
+    return (os.environ if environ is None else environ).get("AIRFLOW_PYTHON_IMAGE", "ecommerce/marketplace-python:3")
 
 
 # Jinja, rendered by Airflow per run. ``data_interval_end`` is the run's instant: the window it closes.

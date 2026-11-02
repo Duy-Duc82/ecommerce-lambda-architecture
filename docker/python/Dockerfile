@@ -1,5 +1,5 @@
 # Crawl worker (HTTP sources), ES projector, ops tools, the Tiki stub.
-# Tag: ecommerce/marketplace-python:2. No ENTRYPOINT: each service sets its command.
+# Tag: ecommerce/marketplace-python:3. No ENTRYPOINT: each service sets its command.
 FROM python:3.12.11-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \

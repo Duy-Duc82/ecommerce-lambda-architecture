@@ -142,3 +142,15 @@ def test_the_storage_snapshot_task_reads_the_stack_s_kafka_volume():
     assert (mount["Source"], mount["Target"], mount["Type"], mount["ReadOnly"]) == (
         "mp-refactor_kafka_data", "/kafka-data", "volume", True)
     assert "mounts" not in tasks.docker_settings({}, layer="ops", service="s")
+
+
+def test_the_backup_task_writes_to_the_ops_reports_directory():
+    """The task image runs as nobody with no writable /reports, so the weekly backup
+    failed with PermissionError until it got the ops service's data/ops bind."""
+    pytest.importorskip("docker.types")
+    environ = {"AIRFLOW_REPORTS_MOUNT": "/srv/data/ops"}
+
+    (mount,) = tasks.docker_settings(environ, layer="ops", service="s", reports=True)["mounts"]
+    assert (mount["Source"], mount["Target"], mount["Type"], mount["ReadOnly"]) == (
+        "/srv/data/ops", "/reports", "bind", False)
+    assert "mounts" not in tasks.docker_settings(environ, layer="ops", service="s")

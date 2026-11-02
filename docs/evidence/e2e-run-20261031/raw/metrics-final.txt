@@ -1,0 +1,141 @@
+### C1 crawl per marketplace: totals, rate, latency, size
+   m    | attempts |  ok  | partial | failed | ok_pct | rps_span | lat_p50 | lat_p95 | lat_p99 | lat_max | kb_avg | records_avg | records | rejected 
+--------+----------+------+---------+--------+--------+----------+---------+---------+---------+---------+--------+-------------+---------+----------
+ lazada |       80 |   74 |       0 |      6 |  92.50 |   0.0042 |    5354 |    8809 |   31712 |   37159 | 2188.0 |        37.5 |    3000 |        0
+ tiki   |     4578 | 4549 |       0 |     29 |  99.37 |   0.0874 |    2414 |    3200 |    3761 |   39850 |  409.7 |        25.6 |  117332 |        0
+
+### C2 crawl busy-minute rate per marketplace (minutes with >=1 attempt), requests/second
+   m    | busy_minutes | rps_avg | rps_p50 | rps_p95 | rps_max | max_per_min 
+--------+--------------+---------+---------+---------+---------+-------------
+ lazada |           24 |  0.0556 |  0.0500 |  0.1000 |  0.1000 |           6
+ tiki   |          245 |  0.3114 |  0.3500 |  0.3667 |  0.3833 |          23
+
+### C3 gap between consecutive requests of one marketplace worker (start to start, seconds, gaps under 120 s)
+   m    | gaps | min_s | p50_s | p95_s 
+--------+------+-------+-------+-------
+ lazada |   72 |  9.75 | 10.51 | 37.55
+ tiki   | 4558 |  0.25 |  2.52 |  7.69
+
+### C4 crawl errors per marketplace
+   m    | status |     kind      | http_status | count |                                           sample                                           
+--------+--------+---------------+-------------+-------+--------------------------------------------------------------------------------------------
+ lazada | FAILED | BLOCKED       |             |     5 | lazada answered with a block or challenge page
+ lazada | FAILED | PUBLISH_ERROR |         200 |     1 | published 0 of 41 records: KafkaTimeoutError: Timeout after waiting for 30 secs.
+ tiki   | FAILED | PARSE_ERROR   |         200 |    24 | Tiki category page has no products
+ tiki   | FAILED | PUBLISH_ERROR |         200 |     4 | published 0 of 11 records: [Error 6] NotLeaderForPartitionError
+ tiki   | FAILED | STORAGE_ERROR |         200 |     1 | could not persist a raw part: HTTPConnectionPool(host='minio', port=9000): Max retries exc
+
+### C5 retries: attempts by attempt number
+   m    | attempt_number | count 
+--------+----------------+-------
+ lazada |              1 |    75
+ lazada |              2 |     2
+ lazada |              3 |     1
+ lazada |              4 |     1
+ lazada |              5 |     1
+ tiki   |              1 |  4569
+ tiki   |              2 |     9
+
+### C6 empty pages (page-context only) and pages with rows
+   m    | empty_pages | pages_with_rows | max_records_page 
+--------+-------------+-----------------+------------------
+ lazada |           0 |              74 |               40
+ tiki   |         451 |            4098 |               55
+
+### C7 frontier now
+   m    |  tier  |  status   | count 
+--------+--------+-----------+-------
+ lazada | ACTIVE | DISABLED  |    11
+ lazada | ACTIVE | FAILED    |     1
+ lazada | ACTIVE | SUCCEEDED |    95
+ lazada | SWEEP  | DISABLED  |     3
+ lazada | SWEEP  | FAILED    |    11
+ lazada | SWEEP  | SUCCEEDED |     6
+ tiki   | ACTIVE | READY     |    25
+ tiki   | ACTIVE | SUCCEEDED |   350
+ tiki   | SWEEP  | FAILED    |     1
+ tiki   | SWEEP  | READY     |  4224
+ tiki   | SWEEP  | SUCCEEDED |  5551
+
+### C8 source state (circuit breaker)
+ marketplace_code | consecutive_failures |         opened_until          |        last_failure_at        |        last_success_at        |          updated_at           
+------------------+----------------------+-------------------------------+-------------------------------+-------------------------------+-------------------------------
+ lazada           |                    5 | 2026-10-31 14:31:59.384565+00 | 2026-10-31 14:16:59.384565+00 | 2026-10-31 14:06:32.356179+00 | 2026-10-31 14:16:59.384565+00
+ tiki             |                    0 |                               | 2026-10-31 13:03:14.196595+00 | 2026-10-31 17:09:35.178104+00 | 2026-10-31 17:09:35.178104+00
+
+### S1 speed micro-batches
+ batches |  ok  | failed | input_rows | invalid | duplicates | late | changes | es_rows | redis_rows | dur_p50_s | dur_p95_s | dur_max_s 
+---------+------+--------+------------+---------+------------+------+---------+---------+------------+-----------+-----------+-----------
+    6429 | 6429 |      0 |     113530 |       0 |         54 |    0 |  156542 |  270018 |     270018 |     0.011 |     0.091 |    11.488
+
+### S2 speed end-to-end latency (crawler publish to all sinks written), batches with rows, ms
+ batches_with_rows | p50_of_p50 | p50_of_p95 | p95_of_p95 |   worst   
+-------------------+------------+------------+------------+-----------
+               564 |      44192 |      58156 |      61373 | 473393974
+
+### S3 speed stages, batches with rows, ms
+ clients_avg | collect_avg | kafka_avg | es_avg | redis_avg | es_p95 
+-------------+-------------+-----------+--------+-----------+--------
+           6 |        1313 |        58 |     52 |        18 |    127
+
+### S4 Spark progress: throughput and lag
+      query_name      | progresses | max_rows_batch | max_in_rps | max_proc_rps | dur_p50_ms | dur_max_ms | max_behind | max_state_bytes 
+----------------------+------------+----------------+------------+--------------+------------+------------+------------+-----------------
+ marketplace-speed-v1 |       6422 |           1394 |      117.6 |        713.7 |        335 |      81781 |          0 |       183511440
+
+### S5 speed cost: batch duration against rows (least squares, batches with rows)
+      query_name      |  n  | fixed_ms | per_row_ms |  r2   
+----------------------+-----+----------+------------+-------
+ marketplace-speed-v1 | 563 |   1538.1 |     0.3111 | 0.001
+
+### B1 batch runs
+            run_id             |  status  | quality_status | silver_rows | gold_rows | mandatory_failure_count | minutes | silver_rows_per_s 
+-------------------------------+----------+----------------+-------------+-----------+-------------------------+---------+-------------------
+ mp-20261031T0200Z             | PROMOTED | PASS           |       38808 |    262665 |                       0 |   24.29 |              26.6
+ mp-20261031T0300Z             | FAILED   |                |             |           |                         |    6.14 |                  
+ mp-reprocess-20261031T032842Z | PROMOTED | PASS           |       65840 |    448601 |                       0 |    8.18 |             134.1
+ mp-20261031T0400Z             | PROMOTED | PASS           |       81543 |    543580 |                       0 |    8.71 |             156.0
+ mp-20261031T0500Z             | PROMOTED | PASS           |      110529 |    693421 |                       0 |    6.99 |             263.5
+ mp-20261031T0600Z             | PROMOTED | PASS           |      142012 |    792408 |                       0 |    6.65 |             355.9
+ mp-20261031T0700Z             | PROMOTED | PASS           |      142612 |    792424 |                       0 |    6.67 |             356.4
+ mp-20261031T0800Z             | PROMOTED | PASS           |      143212 |    792424 |                       0 |    6.66 |             358.2
+ mp-20261031T0900Z             | PROMOTED | PASS           |      143812 |    792440 |                       0 |   15.68 |             152.9
+ mp-20261031T1000Z             | PROMOTED | PASS           |      145012 |    796218 |                       0 |    7.58 |             318.8
+ mp-20261031T1100Z             | PROMOTED | PASS           |      146092 |    797466 |                       0 |    7.53 |             323.5
+ mp-20261031T1200Z             | PROMOTED | PASS           |      147342 |    798007 |                       0 |   16.19 |             151.7
+ mp-20261031T1300Z             | PROMOTED | PASS           |      148422 |    798283 |                       0 |    7.78 |             318.1
+ mp-20261031T1400Z             | PROMOTED | PASS           |      149502 |    798708 |                       0 |    8.76 |             284.3
+ mp-20261031T1500Z             | PROMOTED | PASS           |      150542 |    798946 |                       0 |    8.85 |             283.6
+ mp-20261031T1600Z             | PROMOTED | PASS           |      151142 |    798946 |                       0 |   10.25 |             245.6
+ mp-20261031T1700Z             | PROMOTED | PASS           |      151742 |    798946 |                       0 |   13.83 |             182.9
+
+### B2 quality results of the newest promoted run
+                check_name                | severity  | status |   observed_value    
+------------------------------------------+-----------+--------+---------------------
+ price_anomaly_evaluation_coverage        | ADVISORY  | FAIL   |                   0
+ counter_invalid_transition_rate          | ADVISORY  | PASS   |  0.4015016230545172
+ crawl_reliability_evidence_present       | ADVISORY  | PASS   |                   4
+ source_coverage_rate_denominator_present | ADVISORY  | PASS   |                   0
+ star_unknown_member_rate                 | ADVISORY  | PASS   | 0.19063223530276488
+ currency_valid                           | MANDATORY | PASS   |                   0
+ freshness_rule_version_and_as_of_applied | MANDATORY | PASS   |                   0
+ gold_daily_price_aggregates_reconcile    | MANDATORY | PASS   |                   0
+ gold_daily_row_count_reconciles          | MANDATORY | PASS   |                   0
+ observation_id_unique                    | MANDATORY | PASS   |                   0
+ observed_at_within_future_tolerance      | MANDATORY | PASS   |                   0
+ offer_current_single_row_per_offer       | MANDATORY | PASS   |                   0
+ offer_key_and_price_complete             | MANDATORY | PASS   |                   0
+ offer_listing_key_unique                 | MANDATORY | PASS   |                   0
+ price_non_negative                       | MANDATORY | PASS   |                   0
+ raw_artifact_checksum_and_uri_present    | MANDATORY | PASS   |                   0
+ silver_observation_raw_lineage_complete  | MANDATORY | PASS   |                   0
+ silver_parse_attempt_reconciliation      | MANDATORY | PASS   |                   0
+ star_foreign_keys_resolve                | MANDATORY | PASS   |                   0
+ star_listing_versions_consistent         | MANDATORY | PASS   |                   0
+ star_surrogate_keys_unique               | MANDATORY | PASS   |                   0
+
+### B3 BI cache
+      run_id       |      published_at      |                                                                                                                                            dataset_counts                                                                                                                                            
+-------------------+------------------------+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ mp-20261031T1700Z | 2026-10-31 17:00:00+00 | {"offer_current": 75911, "seller_current": 4078, "offer_freshness": 75911, "offer_change_daily": 106234, "counter_delta_daily": 318702, "price_anomaly_daily": 106234, "category_price_daily": 5624, "source_coverage_daily": 14, "crawl_reliability_daily": 4, "offer_price_history_daily": 106234}
+

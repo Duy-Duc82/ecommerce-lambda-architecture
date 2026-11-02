@@ -78,10 +78,11 @@ GREEN_RED = thresholds(("green", None), ("red", 1))
 
 
 def ts(title: str, targets: list[dict], unit: str = "short", stack: bool = False, bars: bool = False,
-       desc: str = "") -> dict:
+       desc: str = "", no_value: str | None = None) -> dict:
     ds = targets[0]["datasource"]
+    extra = {"noValue": no_value} if no_value is not None else {}
     return {"type": "timeseries", "title": title, "description": desc, "datasource": ds, "targets": targets,
-            "fieldConfig": {"defaults": {"unit": unit, "custom": {
+            "fieldConfig": {"defaults": {"unit": unit, **extra, "custom": {
                 "drawStyle": "bars" if bars else "line", "fillOpacity": 60 if bars else 10, "lineWidth": 1,
                 "showPoints": "never", "stacking": {"mode": "normal" if stack else "none"}}}, "overrides": []},
             "options": {"legend": {"displayMode": "list", "placement": "bottom"},
@@ -206,7 +207,9 @@ def pipeline() -> dict:
              [prom("sum by (topic) (rate(kafka_topic_partition_current_offset[5m]))", "{{topic}}")]), 8, 8)
     b.add(ts("Lag của consumer group", [prom("sum by (consumergroup, topic) (kafka_consumergroup_lag)",
                                               "{{consumergroup}} ← {{topic}}")],
-             desc="Chỉ các consumer commit offset (es-projector). Lag của speed ở hàng Speed."), 8, 8)
+             desc="Chỉ các consumer commit offset: group DLQ của es-projector, chỉ có lag khi DLQ có message. "
+                  "Speed giữ offset trong checkpoint, lag của speed ở hàng Speed.",
+             no_value="0 (chưa có offset nào được commit)"), 8, 8)
     b.add(ts("DLQ: message mới / 30 phút",
              [prom('sum(increase(kafka_topic_partition_current_offset{topic="marketplace.records.v1.dlq"}[30m]))', "dlq")],
              desc="duplicate_listing_on_page là quarantine theo thiết kế; tăng đột biến mới đáng xem."), 8, 8)
@@ -400,19 +403,30 @@ def alert_rules() -> dict:
              severity="critical", summary="Không có metrics từ Alloy trong 5 phút: mọi cảnh báo khác đang mù."),
     ]
     data = [
+        # Work is due but nothing is fetched. An idle crawler between cadences (every task
+        # scheduled later) is the design, not an outage, so idleness alone does not fire.
+        # Per marketplace, and only one crawled in the last 6 hours (a source left out of
+        # CRAWL_SOURCES keeps due tasks forever).
         rule("mp-crawl-stopped", "Crawl ngừng",
-             "(sum(mp_crawl_5m_attempts) or vector(0)) and on () (max_over_time((sum(mp_crawl_5m_attempts))[6h:5m]) > 0)",
+             "(sum by (marketplace) (mp_crawl_5m_attempts)"
+             " or 0 * max by (marketplace) (mp_crawl_frontier_oldest_due_seconds))"
+             ' and on (marketplace) (max by (marketplace) (mp_crawl_frontier_oldest_due_seconds{status="READY"}) > 600)'
+             " and on (marketplace) (max_over_time((sum by (marketplace) (mp_crawl_5m_attempts))[6h:5m]) > 0)",
              "lt", 1, wait="15m", severity="critical",
-             summary="Không có lần tải nào trong 20 phút, dù crawl đã chạy trong 6 giờ qua."),
+             summary="{{ $labels.marketplace }}: task đến hạn chờ quá 10 phút nhưng không có lần tải nào trong 20 phút."),
         rule("mp-crawl-blocked", "Crawl bị chặn hoặc giới hạn tốc độ",
              'sum by (marketplace) (mp_crawl_5m_attempts{error_kind=~"RATE_LIMITED|BLOCKED"}) / '
              "sum by (marketplace) (mp_crawl_5m_attempts)", "gt", 0.2, wait="10m",
              summary="{{ $labels.marketplace }}: {{ $values.A }} phần lần tải bị RATE_LIMITED/BLOCKED."),
         rule("mp-circuit-open", "Circuit breaker của nguồn đang mở", "max by (marketplace) (mp_crawl_source_circuit_open)",
              "gt", 0, wait="0s", summary="{{ $labels.marketplace }}: worker tạm ngừng tải nguồn này."),
+        # Records reached Kafka but no micro-batch succeeded: with no new input Spark runs no
+        # batch at all, so silence alone is the design, not a stall.
         rule("mp-speed-stale", "Speed không có micro-batch thành công",
-             "time() - max by (query_name) (mp_speed_last_last_success_timestamp) < 21600", "gt", 600, wait="0s",
-             severity="critical", summary="{{ $labels.query_name }}: batch thành công gần nhất cách {{ $values.A }} giây."),
+             "(time() - max by (query_name) (mp_speed_last_last_success_timestamp) < 21600)"
+             ' and on () (sum(increase(kafka_topic_partition_current_offset{topic="marketplace.records.v1"}[15m])) > 0)',
+             "gt", 600, wait="0s", severity="critical",
+             summary="{{ $labels.query_name }}: có bản ghi mới trên Kafka nhưng batch thành công gần nhất cách {{ $values.A }} giây."),
         rule("mp-speed-lag", "Speed đi sau Kafka", "max by (query_name) (mp_stream_5m_offsets_behind_latest)", "gt", 5000,
              wait="10m", summary="{{ $labels.query_name }} còn {{ $values.A }} offset chưa đọc."),
         rule("mp-batch-stale", "Batch không chạy đúng khung giờ",

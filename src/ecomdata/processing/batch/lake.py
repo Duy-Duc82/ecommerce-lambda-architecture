@@ -5,8 +5,8 @@ Datasets live under ``<silver root>/<name>/``,
 (merged, not replaced: see ``merge_dw``). Writing a dataset replaces it (for a
 partitioned dataset, the partitions it has rows for, because the session sets
 dynamic partition overwrite), and a dataset that was written empty reads back
-empty: reads carry an explicit schema, so a directory holding only ``_SUCCESS``
-is not an error.
+empty: Parquet reads carry an explicit schema, so a directory holding only
+``_SUCCESS`` is not an error (a Delta table carries its own).
 """
 from __future__ import annotations
 
@@ -20,6 +20,18 @@ from pyspark.sql.types import StructType
 from ecomdata.domain.datasets import dataset
 from ecomdata.processing.batch.context import DwWriteResult, GoldWriteResult, MarketplaceBatchContext
 from ecomdata.processing.normalize import common
+
+
+class SilverLayoutMismatch(RuntimeError):
+    """A Silver table on disk is partitioned unlike the code writing it (a layout change)."""
+
+    def __init__(self, name: str, existing: Sequence[str], expected: Sequence[str]) -> None:
+        super().__init__(
+            f"Silver table {name} is partitioned by {list(existing)}, this code writes {list(expected)}. "
+            "Rebuild Silver once: trigger DAG marketplace_reprocess with {\"rebuild\": true} "
+            "(or python -m ecomdata.processing.batch run --all --rebuild)."
+        )
+        self.name = name
 
 
 class SparkLakeIO:
@@ -72,6 +84,8 @@ class SparkLakeIO:
         self, name: str, frame: DataFrame, *, partition_by: Sequence[str] = (), whole: bool = False
     ) -> str:
         uri = self.silver_uri(name)
+        if not whole and self.table_format == "delta":
+            self._check_silver_layout(name, uri, list(partition_by))
         writer = frame.write.mode("overwrite")
         if whole:
             # A rebuild may change a table's columns or partitioning (Silver is rebuilt from Bronze).
@@ -85,10 +99,24 @@ class SparkLakeIO:
         writer.format(self.table_format).save(uri)
         return uri
 
+    def _check_silver_layout(self, name: str, uri: str, partition_by: list[str]) -> None:
+        # Replacing some days cannot change a table's partitioning; only a rebuild can.
+        # Without this check Delta fails with a long schema-mismatch message.
+        from pyspark.errors import AnalysisException
+
+        try:
+            detail = self.spark.sql(f"DESCRIBE DETAIL delta.`{uri}`").first()
+        except AnalysisException:
+            return  # no table yet: the write creates it
+        existing = list(detail["partitionColumns"] or [])
+        if existing != partition_by:
+            raise SilverLayoutMismatch(name, existing, partition_by)
+
     def read_silver(self, name: str) -> DataFrame:
         reader = self.spark.read
         schema = self.silver_schemas.get(name)
-        if schema is not None:
+        # A Delta table carries its own schema and refuses a user-specified one.
+        if schema is not None and self.table_format != "delta":
             reader = reader.schema(schema)
         return reader.format(self.table_format).load(self.silver_uri(name))
 
@@ -290,6 +318,7 @@ def silver_schemas() -> dict[str, StructType]:
 
 
 __all__ = [
+    "SilverLayoutMismatch",
     "SparkLakeIO",
     "crawl_audit_from_lines",
     "merge_statement",

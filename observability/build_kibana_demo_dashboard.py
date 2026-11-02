@@ -59,7 +59,7 @@ P.add(kd._lens_panel("p4", title="④ Sự kiện thay đổi mỗi phút theo l
                      columns={"x": minute("detected_at"), "s": kd._terms("change_type", size=7, label="loại"), "y": kd._count("Sự kiện")},
                      visualization=kd._xy("layer-p4", x="x", ys=["y"], split="s"), grid=g(24, 21, 24, 14, "p4")))
 P.add(kd._lens_panel("p5", title="⑤ Thời gian một lượt crawl (ms)",
-                     description="Trung vị và p95 latency_ms mỗi phút: chờ giãn cách 3,5 s, tải trang, ghi Bronze, publish Kafka.",
+                     description="Trung vị và p95 latency_ms mỗi phút: chờ giãn cách lịch sự (CRAWL_REQUEST_DELAY_SECONDS), tải trang, ghi Bronze, publish Kafka.",
                      data_view=CRAWL, visualization_type="lnsXY",
                      columns={"x": minute("completed_at"), "a": kd._metric("median", "latency_ms", "Trung vị (ms)"),
                               "b": kd._metric("percentile", "latency_ms", "p95 (ms)", params={"percentile": 95})},
