@@ -23,6 +23,7 @@ class StorageTarget(Protocol):
     region: str | None
     access_key: str
     secret_key: str
+    table_format: str
 
     @property
     def is_local(self) -> bool: ...

@@ -203,6 +203,10 @@ CREATE TABLE IF NOT EXISTS audit.marketplace_stream_progress (
     PRIMARY KEY (query_name, query_id, batch_id)
 );
 CREATE INDEX IF NOT EXISTS idx_stream_progress_at ON audit.marketplace_stream_progress (progress_at);
+-- Observability: how far the query trails its Kafka topics after the batch (the
+-- largest maxOffsetsBehindLatest of its Kafka sources). Spark commits no consumer
+-- group offsets, so a Kafka exporter cannot see the speed layer's lag.
+ALTER TABLE audit.marketplace_stream_progress ADD COLUMN IF NOT EXISTS offsets_behind_latest BIGINT;
 
 -- Phase 9 (plan section 6.3): what each store holds, once per UTC day. Read
 -- by the storage-growth report (P2-04). One row per (day, component, scope);
@@ -339,8 +343,11 @@ ALTER TABLE audit.marketplace_batch_run
     ADD COLUMN IF NOT EXISTS manifest_uri TEXT,
     ADD COLUMN IF NOT EXISTS manifest_promoted BOOLEAN NOT NULL DEFAULT FALSE;
 ALTER TABLE audit.marketplace_batch_run DROP CONSTRAINT IF EXISTS marketplace_batch_run_status_check;
+-- NOT VALID: on a database that already holds refactor states (PROMOTED, ...) this
+-- intermediate list would reject them and stop a re-applied script (ops migrate);
+-- the refactor block below replaces it with the full, validated list.
 ALTER TABLE audit.marketplace_batch_run ADD CONSTRAINT marketplace_batch_run_status_check
-    CHECK (status IN ('RUNNING','GOLD_WRITTEN','QUALITY_FAILED','SUCCEEDED','FAILED'));
+    CHECK (status IN ('RUNNING','GOLD_WRITTEN','QUALITY_FAILED','SUCCEEDED','FAILED')) NOT VALID;
 
 -- Refactor: a batch run is a state machine over stages (ecomdata.domain.batch_run).
 -- RUNNING and SUCCEEDED stay valid so a row written before the refactor still
@@ -354,8 +361,8 @@ ALTER TABLE audit.marketplace_batch_run
     ADD COLUMN IF NOT EXISTS held_reason TEXT;
 ALTER TABLE audit.marketplace_batch_run DROP CONSTRAINT IF EXISTS marketplace_batch_run_status_check;
 ALTER TABLE audit.marketplace_batch_run ADD CONSTRAINT marketplace_batch_run_status_check
-    CHECK (status IN ('CREATED','SILVER_BUILT','GOLD_WRITTEN','QUALITY_PASSED','QUALITY_FAILED','PUBLISHED',
-                      'PROMOTED','HELD','FAILED','RUNNING','SUCCEEDED'));
+    CHECK (status IN ('CREATED','SILVER_BUILT','DIMENSIONS_BUILT','FACTS_BUILT','GOLD_WRITTEN','QUALITY_PASSED',
+                      'QUALITY_FAILED','PUBLISHED','PROMOTED','HELD','FAILED','RUNNING','SUCCEEDED'));
 
 -- The serving cache names the manifest and the rule version that admitted it,
 -- so "which Gold version is live, under which rules" needs no object listing.
@@ -438,6 +445,8 @@ CREATE TABLE IF NOT EXISTS audit.crawl_request_attempt (
 );
 CREATE INDEX IF NOT EXISTS idx_crawl_attempt_run ON audit.crawl_request_attempt (crawl_run_id, started_at);
 CREATE INDEX IF NOT EXISTS idx_crawl_attempt_task ON audit.crawl_request_attempt (task_id, started_at);
+-- The crawl metrics read the last minutes of attempts on every scrape.
+CREATE INDEX IF NOT EXISTS idx_crawl_attempt_completed ON audit.crawl_request_attempt (completed_at);
 
 -- Phase 8: PUBLISH_ERROR, a Kafka failure after a good fetch and parse. The
 -- inline lists above cover a fresh volume; these re-add the two constraints

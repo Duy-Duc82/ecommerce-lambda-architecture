@@ -27,6 +27,10 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 # the round trip on every request.
 DEFAULT_REGION = "ap-southeast-1"
 STORAGE_PROFILES = ("local", "minio", "s3", "r2", "b2")
+# How Silver and Gold tables are stored. Delta is what Databricks reads natively.
+TABLE_FORMATS = ("parquet", "delta")
+# Where the Spark jobs run: a session this project builds, or one the platform provides.
+SPARK_RUNTIMES = ("local", "databricks")
 ZONES = ("bronze", "silver", "gold")
 
 
@@ -108,6 +112,7 @@ class StorageSettings:
     region: str | None = None
     access_key: str = ""
     secret_key: str = ""
+    table_format: str = "delta"
 
     @property
     def is_local(self) -> bool:
@@ -134,6 +139,13 @@ class StorageSettings:
         return self.endpoint_url().split("://", 1)[1].rstrip("/")
 
 
+def _spark_runtime(env: _Env) -> str:
+    runtime = env.text("SPARK_RUNTIME", "local").strip().lower()
+    if runtime not in SPARK_RUNTIMES:
+        raise SettingsError(f"unknown SPARK_RUNTIME {runtime!r} (expected one of {', '.join(SPARK_RUNTIMES)})")
+    return runtime
+
+
 def _storage(env: _Env) -> StorageSettings:
     # DATA_LAKE_MODE predates profiles and is still set by older env files, so
     # it decides when no profile is named.
@@ -142,7 +154,13 @@ def _storage(env: _Env) -> StorageSettings:
     )
     if profile not in STORAGE_PROFILES:
         raise SettingsError(f"unknown DATA_LAKE_PROFILE {profile!r} (expected one of {', '.join(STORAGE_PROFILES)})")
+    # Delta: the star needs MERGE, table versions and atomic commits; Parquet stays for
+    # reading or writing a lake without the Delta jars, and cannot build the star.
+    table_format = env.text("DATA_LAKE_TABLE_FORMAT", "delta").strip().lower()
+    if table_format not in TABLE_FORMATS:
+        raise SettingsError(f"unknown DATA_LAKE_TABLE_FORMAT {table_format!r} (expected one of {', '.join(TABLE_FORMATS)})")
     common = {
+        "table_format": table_format,
         "local_root": Path(env.text("DATA_LAKE_LOCAL_ROOT", str(REPO_ROOT / "data" / "lakehouse"))),
         "bucket_bronze": env.text("MINIO_BUCKET_BRONZE", "ecommerce-bronze"),
         "bucket_silver": env.text("MINIO_BUCKET_SILVER", "ecommerce-silver"),
@@ -313,6 +331,8 @@ def _crawl(env: _Env) -> CrawlSettings:
 # ---------------------------------------------------------------- processing
 @dataclass(frozen=True)
 class SparkSettings:
+    # "databricks": the platform provides the session; the factory sets nothing on it.
+    runtime: str = "local"
     master: str | None = None
     # Set explicitly so a job never runs on Spark's 1g default (the 8 h run of
     # 2026-10-24 needed 3g for the batch).
@@ -321,6 +341,9 @@ class SparkSettings:
     speed_shuffle_partitions: int = 4
     batch_app_name: str = "MarketplaceTemporalWarehouse"
     speed_app_name: str = "MarketplaceSpeedLayer"
+
+
+CRAWL_AUDIT_SOURCES = ("lake", "postgres")
 
 
 @dataclass(frozen=True)
@@ -348,11 +371,15 @@ class BatchSettings:
     anomaly_iqr_multiplier: Decimal = Decimal("1.5")
     # Bronze/raw objects older than this are removed by the maintenance DAG.
     raw_retention_days: int = 30
+    # Where the batch reads the crawl audit: "lake" (the copy of record the
+    # crawler writes to Bronze) or "postgres" (the operational copy, over JDBC).
+    crawl_audit_source: str = "lake"
 
 
 @dataclass(frozen=True)
 class QualitySettings:
-    rule_version: str = "quality-rules.v2"
+    # v3: the gate also judges the star (referential integrity, keys, SCD2 versions).
+    rule_version: str = "quality-rules.v3"
     # Clock skew tolerated between a fetch and the observation it yields.
     future_tolerance_seconds: int = 300
     # A crawl run is reconciled against Silver once settled, while inside the
@@ -405,8 +432,8 @@ class ServiceSettings:
 @dataclass(frozen=True)
 class AirflowSettings:
     # Image every DockerOperator task runs, and the network it joins.
-    spark_image: str = "ecommerce/spark-marketplace:4.0.1-r2"
-    python_image: str = "ecommerce/marketplace-python:2"
+    spark_image: str = "ecommerce/spark-marketplace:4.0.1-r4"
+    python_image: str = "ecommerce/marketplace-python:3"
     docker_network: str = "mp-refactor_default"
     docker_url: str = "unix://var/run/docker.sock"
     # Host paths mounted into the task containers.
@@ -470,6 +497,7 @@ def _read(env: _Env) -> Settings:
         ),
         crawl=_crawl(env),
         spark=SparkSettings(
+            runtime=_spark_runtime(env),
             master=env.text("SPARK_MASTER", "").strip() or None,
             driver_memory=env.text("SPARK_DRIVER_MEMORY", "3g"),
             batch_shuffle_partitions=env.integer("MARKETPLACE_BATCH_SHUFFLE_PARTITIONS", 8),
@@ -497,6 +525,9 @@ def _read(env: _Env) -> Settings:
             anomaly_mad_threshold=env.decimal("MARKETPLACE_ANOMALY_MAD_THRESHOLD", "3.5"),
             anomaly_iqr_multiplier=env.decimal("MARKETPLACE_ANOMALY_IQR_MULTIPLIER", "1.5"),
             raw_retention_days=env.integer("MARKETPLACE_RAW_RETENTION_DAYS", batch_defaults.raw_retention_days),
+            crawl_audit_source=env.text("MARKETPLACE_CRAWL_AUDIT_SOURCE", batch_defaults.crawl_audit_source)
+            .strip()
+            .lower(),
         ),
         quality=QualitySettings(
             rule_version=env.text("MARKETPLACE_QUALITY_RULE_VERSION", quality_defaults.rule_version),
@@ -650,6 +681,11 @@ def validate(settings: Settings) -> Settings:
     for name, value in required_text.items():
         if not value.strip():
             raise SettingsError(f"{name} must be non-empty")
+    if batch.crawl_audit_source not in CRAWL_AUDIT_SOURCES:
+        raise SettingsError(
+            f"unknown MARKETPLACE_CRAWL_AUDIT_SOURCE {batch.crawl_audit_source!r}"
+            f" (expected one of {', '.join(CRAWL_AUDIT_SOURCES)})"
+        )
     if not quality.allowed_currencies:
         raise SettingsError("MARKETPLACE_ALLOWED_CURRENCIES must list at least one code")
     for code in quality.allowed_currencies:

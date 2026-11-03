@@ -148,6 +148,7 @@ PROGRESS_COLUMNS = (
     *_DURATIONS,
     "state_rows_total",
     "state_memory_bytes",
+    "offsets_behind_latest",
 )
 
 
@@ -164,6 +165,15 @@ def _rate(value: Any) -> float | None:
         return None
     number = float(value)
     return number if math.isfinite(number) else None
+
+
+def _offsets_behind(sources: Iterable[Mapping[str, Any]]) -> int | None:
+    """How far the query trails its Kafka topics after this batch: the largest
+    ``maxOffsetsBehindLatest`` its Kafka sources report (Spark sends the number as text).
+    Spark commits no consumer group offsets, so this is the speed layer's lag."""
+    behind = [int(float(s["metrics"]["maxOffsetsBehindLatest"])) for s in sources
+              if (s.get("metrics") or {}).get("maxOffsetsBehindLatest") not in (None, "")]
+    return max(behind) if behind else None
 
 
 def progress_row(progress: Any, *, query_name: str, recorded_at: datetime) -> dict[str, Any]:
@@ -184,6 +194,7 @@ def progress_row(progress: Any, *, query_name: str, recorded_at: datetime) -> di
         **{column: durations.get(key) for column, key in _DURATIONS.items()},
         "state_rows_total": sum(o.get("numRowsTotal") or 0 for o in operators) if operators else None,
         "state_memory_bytes": sum(o.get("memoryUsedBytes") or 0 for o in operators) if operators else None,
+        "offsets_behind_latest": _offsets_behind(p.get("sources") or []),
     }
 
 

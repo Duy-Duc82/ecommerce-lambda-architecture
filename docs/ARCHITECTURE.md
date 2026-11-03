@@ -51,6 +51,8 @@ flowchart LR
     frontier[(Frontier + audit<br/>PostgreSQL)] --> worker["crawl-worker<br/>Fetcher → Extractor"]
     worker --> raw[("Bronze/raw<br/>part-N.bin.gz + metadata.json")]
     worker --> rec[("Bronze/records<br/>JSONL.gz theo trang")]
+    worker --> audit[("Bronze/crawl_audit<br/>JSONL.gz theo crawl run")]
+    audit --> silver
     rec --> kafka{{"Kafka<br/>marketplace.records.v1"}}
     kafka --> norm["speed: normalizer<br/>(foreachBatch)"]
     norm --> obs{{"marketplace.observations.v1<br/>(dẫn xuất)"}}
@@ -69,10 +71,11 @@ flowchart LR
     airflow["Airflow: marketplace_batch (@hourly)"] -. lập lịch .-> silver
 ```
 
-Hai điểm cần đọc kỹ:
+Ba điểm cần đọc kỹ:
 
 1. **Bronze là sự thật**. `bronze/raw` giữ phản hồi nguyên vẹn (gzip, có manifest); `bronze/marketplace/records` giữ từng dòng nguồn với toàn bộ trường (trừ danh sách PII khai báo trong spec). Mọi bảng phía sau dựng lại được từ đó.
-2. **Batch là bản đúng, speed là bản nhanh.** Cả hai chuẩn hoá bằng cùng một normalizer theo nguồn (`processing/normalize/sources/<site>.py`) và cùng quy tắc: thứ tự `domain/ordering.py`, luật thay đổi `domain/change_rules.py`.
+2. **Audit: bản lưu trong lake, bản vận hành trong PostgreSQL** (ADR-0008). Crawler ghi crawl audit vào cả hai; batch đọc bản trong lake. Run của batch và kết quả quality có bản trong `_runs/run_id=<run>/` (`run.json`, `quality.json`).
+3. **Batch là bản đúng, speed là bản nhanh.** Cả hai chuẩn hoá bằng cùng một normalizer theo nguồn (`processing/normalize/sources/<site>.py`) và cùng quy tắc: thứ tự `domain/ordering.py`, luật thay đổi `domain/change_rules.py`.
 
 ## 3. Các module
 
@@ -102,7 +105,7 @@ Hai điểm cần đọc kỹ:
 ### `processing/`
 
 - `normalize/`: `common.py` (đọc envelope, cột canonical, quarantine, drift), `sources/{tiki,lazada}.py` (`PAYLOAD_SCHEMA`, `to_wide`, `to_offer_observation`), `wire.py` (cột canonical → event `marketplace-observation.v1`).
-- `batch/`: `stages/{base,silver,marts,quality,publish,promote}.py`, `runner.py`, `ports.py`, `context.py`, `lake.py` (`SparkLakeIO`), `inputs.py`, `memory.py` (bản trong bộ nhớ của các port), `marts.py`, `anomaly.py`, `quality.py`, `manifest.py`, `repositories.py`, `lock.py`, `scheduler.py` (vòng lặp cũ, profile `legacy-scheduler`), `cli.py`, `bootstrap.py`, `dimensions.py`, `keys.py`, `dim_date.py` (star Phase 10, chưa nối vào stage).
+- `batch/`: `stages/{base,silver,dimensions,facts,marts,quality,publish,promote}.py`, `runner.py`, `ports.py`, `context.py`, `lake.py` (`SparkLakeIO`), `inputs.py`, `memory.py` (bản trong bộ nhớ của các port), `marts.py`, `anomaly.py`, `quality.py`, `manifest.py`, `repositories.py`, `lock.py`, `scheduler.py` (vòng lặp cũ, profile `legacy-scheduler`), `cli.py`, `bootstrap.py`, `dimensions.py`, `star_inputs.py`, `keys.py`, `dim_date.py`, `facts.py` (star Phase 10: dimension và fact ở stage `dimensions`, `facts`; mart dựng từ fact qua `star_sightings.py`; cửa sổ ngày và star đã chứng nhận theo ADR-0007).
 - `speed/`: `normalizer.py`, `stream.py`, `service.py`, `sinks.py`, `change_producer.py`.
 
 ### `orchestration/`, `serving/`, `ops/`
@@ -126,14 +129,16 @@ Hai điểm cần đọc kỹ:
 ## 5. Batch theo stage
 
 ```
-silver -> marts -> quality -> publish -> promote
+silver -> dimensions -> facts -> marts -> quality -> publish -> promote
 ```
 
 | Stage | Đọc | Ghi | Trạng thái sau |
 |---|---|---|---|
 | `silver` | Bronze/records (đến `as_of`) | `offer_observations_v2`, `<source>_listing_wide`, `page_context`, `quarantine`, tóm tắt `_runs/<run>/silver.json` (drift, bản trùng) | `SILVER_BUILT` |
+| `dimensions` | Silver v2 (cắt tại `as_of`, gồm cả quảng cáo), `<source>_listing_wide`, `page_context` | 7 dimension và bridge ở `gold/marketplace/dw/<bảng>/` (Delta `MERGE`, ngoài thư mục run), `_runs/<run>/dimensions.json` (số dòng, phiên bản Delta) | `DIMENSIONS_BUILT` |
+| `facts` | Silver v2 (như `dimensions`), `dw/dim_product_listing`, crawl audit trong lake | 6 fact ở `gold/marketplace/dw/<bảng>/` (Delta `MERGE`, partition `date_key`), `_runs/<run>/facts.json` | `FACTS_BUILT` |
 | `marts` | Silver v2, crawl audit (cắt tại `as_of`, bỏ quảng cáo) | 10 mart Gold theo run, `_runs/<run>/marts.json` | `GOLD_WRITTEN` |
-| `quality` | Silver, Gold, audit | kết quả quality, manifest của run | `QUALITY_PASSED`, `QUALITY_FAILED` hoặc `HELD` |
+| `quality` | Silver, Gold, star, crawl audit | kết quả quality (PostgreSQL và `_runs/<run>/quality.json`), manifest của run | `QUALITY_PASSED`, `QUALITY_FAILED` hoặc `HELD` |
 | `publish` | Gold, manifest | PostgreSQL `cache.marketplace_*` | `PUBLISHED` (hoặc `HELD`) |
 | `promote` | manifest | `current.json` (compare-and-swap) | `PROMOTED` (hoặc `HELD`) |
 
@@ -156,7 +161,7 @@ python -m ecomdata.processing.batch run --run-id <id> --as-of <ISO> --stage <tê
 
 | Thành phần | Vị trí |
 |---|---|
-| Image | `docker/python` (`ecommerce/marketplace-python:2`), `docker/spark` (`ecommerce/spark-marketplace:4.0.1-r2`), `docker/crawler-browser` (`ecommerce/crawler-browser:1`, nền Playwright `v1.55.0-noble`), `docker/airflow` (`ecommerce/airflow:3.3.2-r1`) |
+| Image | `docker/python` (`ecommerce/marketplace-python:3`), `docker/spark` (`ecommerce/spark-marketplace:4.0.1-r4`), `docker/crawler-browser` (`ecommerce/crawler-browser:1`, nền Playwright `v1.55.0-noble`), `docker/airflow` (`ecommerce/airflow:3.3.2-r3`) |
 | Compose | `compose/docker-compose.yml` (lõi và profile `crawl`, `crawl-browser`, `speed`, `batch`, `orchestration`, `legacy-scheduler`, `serve`, `ops`, `smoke`), `compose/docker-compose.legacy.yml`, `compose/docker-compose.observability.yml`; `docker-compose.yml` ở gốc include file chính |
 | Môi trường | `env/base.env` + `env/ports.<stack>.env` + `env/<stack>.env`; mỗi stack có project, prefix container và port riêng (`tests/unit/ops/test_compose_isolation.py`) |
 | Phiên bản | `constraints.txt` là nơi duy nhất pin phiên bản chính xác; `pyproject.toml` giữ khoảng phiên bản |
@@ -165,7 +170,7 @@ python -m ecomdata.processing.batch run --run-id <id> --as-of <ISO> --stage <tê
 
 | File | Lệnh |
 |---|---|
-| `observability/grafana/dashboards/lambda-logs.json` | `python observability/build_grafana_dashboard.py` |
+| `observability/grafana/dashboards/*.json`, `observability/grafana/provisioning/alerting/rules.yaml` (xem `docs/OBSERVABILITY.md`) | `python observability/build_grafana_dashboard.py` |
 | dashboard Kibana (`marketplace_dashboards.ndjson`) | `python observability/build_kibana_demo_dashboard.py` |
 | dashboard Superset `marketplace-batch-gold` | `python observability/build_superset_batch_dashboard.py` |
 

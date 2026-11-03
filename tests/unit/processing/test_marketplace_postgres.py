@@ -9,6 +9,7 @@ from datetime import UTC, datetime
 import pytest
 
 from ecomdata.domain.batch_run import BatchRunStatus, InvalidTransition
+from ecomdata.domain.quality_rules import mandatory_rule_names
 from ecomdata.processing.batch.context import MarketplaceBatchContext
 from ecomdata.processing.batch.quality import QualityDecision, QualityGateFailure, QualityResult
 from ecomdata.processing.batch.repositories import (
@@ -375,7 +376,7 @@ def test_advance_checks_the_state_machine_under_a_row_lock():
 
 
 def test_advance_records_the_status_the_milestone_and_the_columns():
-    cursor = FakeCursor(rows=run_row("SILVER_BUILT", "SILVER_BUILT"))
+    cursor = FakeCursor(rows=run_row("FACTS_BUILT", "FACTS_BUILT"))
     audit = MarketplaceBatchAudit(_factory(cursor))
 
     audit.advance(
@@ -528,7 +529,7 @@ def test_an_empty_result_set_is_refused():
 
 
 def test_latest_decision_rebuilds_the_stored_verdict():
-    cursor = FakeCursor(rows=(13, 0, 1, 0, "quality-rules.v1", AS_OF))
+    cursor = FakeCursor(rows=(len(mandatory_rule_names()), 0, 1, 0, "quality-rules.v1", AS_OF))
 
     decision = MarketplaceQualityRepository(_factory(cursor)).latest_decision(run_id="run-1")
 
@@ -538,9 +539,9 @@ def test_latest_decision_rebuilds_the_stored_verdict():
 
 
 def test_a_partially_recorded_run_does_not_reload_as_passing():
-    # Twelve of thirteen mandatory rows stored. The missing one was never
-    # evaluated, which decide() counts as a failure; a reload must agree.
-    cursor = FakeCursor(rows=(12, 0, 0, 0, "quality-rules.v1", AS_OF))
+    # All but one mandatory row stored. The missing one was never evaluated,
+    # which decide() counts as a failure; a reload must agree.
+    cursor = FakeCursor(rows=(len(mandatory_rule_names()) - 1, 0, 0, 0, "quality-rules.v1", AS_OF))
 
     decision = MarketplaceQualityRepository(_factory(cursor)).latest_decision(run_id="run-1")
 

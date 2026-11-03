@@ -77,18 +77,27 @@ def ddl_tables(path: Path) -> dict[str, tuple[list[str], tuple[str, ...]]]:
     return tables
 
 
-def test_registry_holds_ten_marts_and_the_twelve_star_tables():
+def test_registry_holds_ten_marts_and_the_fourteen_star_tables():
     assert len(MARTS) == 10
-    assert len(STAR) == 12
+    assert len(STAR) == 14
     assert {d.kind for d in STAR} == {DIM, BRIDGE, FACT}
     assert [d.name for d in datasets_of_kind(FACT)] == [
         "fact_offer_observation",
         "fact_price_snapshot_daily",
         "fact_price_change",
         "fact_counter_daily",
+        "fact_category_page_daily",
         "fact_crawl_attempt",
     ]
-    assert len(datasets_of_kind(DIM)) == 6
+    assert [d.name for d in datasets_of_kind(DIM)] == [
+        "dim_date",
+        "dim_marketplace",
+        "dim_seller",
+        "dim_brand",
+        "dim_category",
+        "dim_product_listing",
+        "dim_listing_flags",
+    ]
 
 
 def test_kind_and_name_agree_and_schemas_follow_the_kind():

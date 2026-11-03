@@ -11,7 +11,7 @@ from ecomdata.processing.batch.repositories import DATASETS, MarketplaceCachePub
 
 
 def write_run_scoped_gold(marts, context):
-    io = SparkLakeIO(lambda: None, records_uri="file:///records", silver_root_uri="file:///silver")
+    io = SparkLakeIO(lambda: None, records_uri="file:///records", silver_root_uri="file:///silver", table_format="parquet")
     return {name: io.write_gold(context, name, frame) for name, frame in marts.items()}
 
 AS_OF = datetime(2026, 9, 5, 10, tzinfo=UTC)
@@ -36,7 +36,12 @@ class FakeWriter:
         self.partitions = columns
         return self
 
-    def parquet(self, uri):
+    def format(self, table_format):
+        self.table_format = table_format
+        return self
+
+    def save(self, uri):
+        assert self.table_format == "parquet"
         self.log.append((self.name, uri, self.mode_value, self.partitions))
 
 

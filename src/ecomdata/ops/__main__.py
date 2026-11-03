@@ -17,6 +17,8 @@ lives here.
     backup [--path DIR]           section 12.2, under the batch lock
     restore --from ID [--path DIR] section 12.3, into a fresh project only
     backups [--path DIR]          list what is in the backup directory
+    audit-export [--since TS]     copy the finished crawl runs and attempts from PostgreSQL to the lake
+    prune-raw [--older-than-days N] [--dry-run]  delete Bronze raw artifacts past the retention window
 """
 
 from __future__ import annotations
@@ -267,6 +269,33 @@ def status() -> int:
     return 0
 
 
+def audit_export(since: str | None) -> int:
+    from ecomdata.ops.audit_export import export_crawl_audit
+    from ecomdata.ops.bootstrap import object_store
+
+    start = None if since is None else datetime.fromisoformat(since.replace("Z", "+00:00"))
+    if start is not None and start.tzinfo is None:
+        start = start.replace(tzinfo=UTC)
+    counts = export_crawl_audit(_connection_factory(), object_store().put, since=start)
+    print(json.dumps({"event": "crawl_audit_exported", **counts}, sort_keys=True))
+    return 0
+
+
+def prune_raw(older_than_days: int | None, *, dry_run: bool = False, store=None, today=None) -> int:
+    from ecomdata.ops.bootstrap import object_store
+    from ecomdata.ops.retention import prune_raw as prune
+
+    days = _settings().batch.raw_retention_days if older_than_days is None else older_than_days
+    prune(
+        object_store() if store is None else store,
+        today=datetime.now(UTC).date() if today is None else today,
+        older_than_days=days,
+        dry_run=dry_run,
+        log=lambda line: print(line, flush=True),
+    )
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
     if argv[:1] == ["seed"]:
@@ -314,6 +343,13 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("storage-snapshot", help="record what each store holds, once per UTC day (read-only)")
     backups_parser = sub.add_parser("backups")
     backups_parser.add_argument("--path", default=DEFAULT_BACKUP_ROOT)
+    export_parser = sub.add_parser("audit-export", help="copy the crawl audit from PostgreSQL to the lake")
+    export_parser.add_argument("--since", default=None, help="only runs started at or after this ISO instant")
+    prune_parser = sub.add_parser("prune-raw", help="delete Bronze raw artifacts older than the retention window")
+    prune_parser.add_argument(
+        "--older-than-days", type=int, default=None, help="defaults to MARKETPLACE_RAW_RETENTION_DAYS"
+    )
+    prune_parser.add_argument("--dry-run", action="store_true", help="list what would go, delete nothing")
     args = parser.parse_args(argv)
     if args.command == "migrate":
         return migrate()
@@ -344,6 +380,10 @@ def main(argv: list[str] | None = None) -> int:
         return 0 if run_snapshot()["measured"] else 1
     if args.command == "backups":
         return list_backups(args.path)
+    if args.command == "audit-export":
+        return audit_export(args.since)
+    if args.command == "prune-raw":
+        return prune_raw(args.older_than_days, dry_run=args.dry_run)
     return status()
 
 

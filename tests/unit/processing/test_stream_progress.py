@@ -86,6 +86,24 @@ def test_a_stateless_progress_has_no_state_size():
     assert row["state_rows_total"] is None and row["state_memory_bytes"] is None
 
 
+def test_the_lag_is_the_largest_offsets_behind_latest_of_the_kafka_sources():
+    sources = [
+        {"description": "KafkaV2[Subscribe[marketplace.records.v1]]", "metrics": {"maxOffsetsBehindLatest": "120"}},
+        {"description": "KafkaV2[Subscribe[marketplace.observations.v1]]", "metrics": {"maxOffsetsBehindLatest": "7"}},
+    ]
+
+    row = service.progress_row(_progress(1, sources=sources), query_name="q", recorded_at=NOW)
+
+    assert row["offsets_behind_latest"] == 120
+
+
+def test_a_source_without_offset_metrics_leaves_the_lag_unknown():
+    row = service.progress_row(_progress(1, sources=[{"description": "RateSource", "metrics": {}}]),
+                               query_name="q", recorded_at=NOW)
+
+    assert row["offsets_behind_latest"] is None
+
+
 def test_each_batch_is_inserted_once_across_repeated_polls():
     """recentProgress repeats the last hundred updates on every poll."""
     cursor = Cursor()

@@ -198,6 +198,10 @@ class S3ObjectStore(_GzipMixin):
         try:
             objects = self.client.list_objects(self._bucket(zone), prefix=prefix.strip("/") or None, recursive=True)
             for item in objects:
+                # S3A and Delta leave empty "directory" markers (``_delta_log/_staged_commits/``);
+                # they hold no data and cannot be read back as an object.
+                if item.object_name.endswith("/"):
+                    continue
                 yield StoredObject(item.object_name, item.size or 0, item.last_modified)
         except S3Error as error:
             if error.code != "NoSuchBucket":

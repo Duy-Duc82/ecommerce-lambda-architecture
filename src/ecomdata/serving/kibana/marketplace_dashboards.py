@@ -195,12 +195,17 @@ def _lens_panel(panel_index: str, *, title: str, description: str, data_view: st
                 visualization_type: str, columns: dict[str, dict], visualization: dict,
                 grid: dict, query: str = "") -> tuple[dict, list[dict]]:
     layer_id = f"layer-{panel_index}"
+    # The layer's data view must also be named inside the by-value attributes: with
+    # only the dashboard-level reference, Kibana 8.18 imports the panel but Lens never
+    # resolves its data view and the panel stays loading, empty, with no error
+    # (found 2026-10-31; every Lens panel of every dashboard was blank).
+    layer_reference = {"name": f"indexpattern-datasource-layer-{layer_id}", "type": "index-pattern", "id": data_view}
     attributes = {
         "title": title,
         "description": description,
         "visualizationType": visualization_type,
         "type": "lens",
-        "references": [],
+        "references": [layer_reference],
         "state": {
             "visualization": visualization,
             "query": {"query": query, "language": "kuery"},

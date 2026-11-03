@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
+from ecomdata.domain.crawl_audit import CRAWL_AUDIT_ROOT
 from ecomdata.domain.datasets import GOLD_DATASET
 from ecomdata.settings import Settings
 
@@ -21,13 +22,14 @@ def spark_factory(settings: Settings, app_name: str | None = None):
         shuffle_partitions=settings.spark.batch_shuffle_partitions,
         driver_memory=settings.spark.driver_memory,
         master=settings.spark.master,
+        runtime=settings.spark.runtime,
     )
 
 
 def context_for(settings: Settings, *, run_id: str, as_of: datetime, silver_uri: str, gold_root_uri: str):
     from ecomdata.processing.batch.context import MarketplaceBatchContext
 
-    batch, quality = settings.batch, settings.quality
+    batch, quality, speed = settings.batch, settings.quality, settings.speed
     return MarketplaceBatchContext(
         run_id,
         as_of,
@@ -37,6 +39,9 @@ def context_for(settings: Settings, *, run_id: str, as_of: datetime, silver_uri:
         freshness_rule_version=batch.freshness_rule_version,
         counter_rule_version=batch.counter_rule_version,
         counter_max_gap_seconds=batch.counter_max_gap_seconds,
+        change_rule_version=speed.change_rule_version,
+        large_drop_absolute=speed.large_drop_absolute,
+        large_drop_relative=speed.large_drop_relative,
         anomaly_window_days=batch.anomaly_window_days,
         anomaly_min_samples=batch.anomaly_min_samples,
         anomaly_mad_threshold=batch.anomaly_mad_threshold,
@@ -60,15 +65,32 @@ def default_uris(settings: Settings) -> tuple[str, str]:
     return store.uri("silver", settings.batch.silver_root), store.uri("gold", GOLD_DATASET)
 
 
+def star_snapshot(settings: Settings | None = None) -> dict:
+    """Rows, Delta version and last operation of every star table (read-only)."""
+    from ecomdata.domain.datasets import STAR_NAMES
+    from ecomdata.processing.batch.dw_inspect import describe_table
+    from ecomdata.settings import load_settings
+
+    settings = load_settings(dotenv=True) if settings is None else settings
+    _, gold_root = default_uris(settings)
+    spark = spark_factory(settings, app_name="dw-inspect").create()
+    try:
+        tables = {name: describe_table(spark, f"{gold_root.rstrip('/')}/dw/{name}") for name in STAR_NAMES}
+    finally:
+        spark.stop()
+    return {"gold_root": gold_root, "tables": tables}
+
+
 def batch_dependencies(settings: Settings, *, publish_cache: bool = True):
     """The real adapters of a batch run: PostgreSQL audit, object store, Spark lake, advisory lock.
 
     ``publish_cache=False`` (``--skip-postgres``) keeps the audit and the quality results in memory and
-    publishes no cache, but the crawl audit is still read from PostgreSQL.
+    publishes no cache. The crawl audit is read from the lake, or from PostgreSQL when
+    ``MARKETPLACE_CRAWL_AUDIT_SOURCE=postgres`` (a lake written before the crawler kept its audit there).
     """
     from ecomdata.infra.object_store import object_store_for
     from ecomdata.infra.postgres import connection_factory, jdbc_properties, jdbc_url
-    from ecomdata.processing.batch.lake import SparkLakeIO, read_crawl_audit, silver_schemas
+    from ecomdata.processing.batch.lake import SparkLakeIO, read_crawl_audit, read_crawl_audit_lake, silver_schemas
     from ecomdata.processing.batch.lock import exclusive_batch
     from ecomdata.processing.batch.memory import MemoryAudit, MemoryQuality
     from ecomdata.processing.batch.repositories import (
@@ -88,14 +110,20 @@ def batch_dependencies(settings: Settings, *, publish_cache: bool = True):
         records_uri=store.uri("bronze", settings.batch.records_dataset),
         silver_root_uri=default_uris(settings)[0],
         silver_schemas=silver_schemas(),
+        table_format=settings.storage.table_format,
     )
+    if settings.batch.crawl_audit_source == "postgres":
+        crawl_audit = lambda spark: read_crawl_audit(spark, url, props)  # noqa: E731
+    else:
+        audit_root = store.uri("bronze", CRAWL_AUDIT_ROOT)
+        crawl_audit = lambda spark: read_crawl_audit_lake(spark, audit_root)  # noqa: E731
     return BatchDependencies(
         audit=MarketplaceBatchAudit(factory) if publish_cache else MemoryAudit(),
         quality=MarketplaceQualityRepository(factory) if publish_cache else MemoryQuality(),
         store=store,
         io=io,
         spark_provider=provider,
-        crawl_audit=lambda spark: read_crawl_audit(spark, url, props),
+        crawl_audit=crawl_audit,
         publisher=MarketplaceCachePublisher(factory, url, props) if publish_cache else None,
         lock=lambda: exclusive_batch(connection_factory(pg), key=settings.batch.lock_key),
     )

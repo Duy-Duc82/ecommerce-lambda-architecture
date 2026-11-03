@@ -152,7 +152,7 @@ def build_worker(
     marketplace_ids: Sequence[str] | None = None,
 ):
     """Wire one crawl worker from the crawl settings (``CrawlSettings``)."""
-    from ecomdata.ingestion.audit import CrawlAuditRepository
+    from ecomdata.ingestion.audit import CrawlAuditRepository, LakeCrawlAuditLog
     from ecomdata.ingestion.frontier import PostgresCrawlFrontier
     from ecomdata.ingestion.runtime import listing_page_executor
     from ecomdata.ingestion.scheduling import RetryPolicy
@@ -174,6 +174,7 @@ def build_worker(
         jitter=lambda: Decimal(str(random.random())),
         cadence_minutes=crawl.cadence_minutes,
         marketplace_ids=marketplace_ids,
+        audit_log=LakeCrawlAuditLog(writer),
     )
 
 

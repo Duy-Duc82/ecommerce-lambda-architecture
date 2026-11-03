@@ -1,47 +1,141 @@
-# Log observability for the Lambda stack: Promtail -> Loki -> Grafana (2026-10-24).
+# Observability for the Lambda stack (design: docs/OBSERVABILITY.md).
+#
+#   Alloy ── logs ──────────────► Loki ───────┐
+#   (one collector) ── metrics ─► Prometheus ─┴─► Grafana (dashboards, alerts)
+#
+# Alloy is the only collector: it tails the stack's container logs (the compose
+# services and the task containers Airflow starts), runs the exporters built into
+# it (host, containers, Kafka, PostgreSQL, Redis, Elasticsearch, Airflow StatsD,
+# HTTP probes), scrapes MinIO, Loki, Grafana and Prometheus, and pushes the
+# metrics to Prometheus. Prometheus and Loki only store, seven days each.
+#
 # Used with: docker compose -f compose/docker-compose.yml -f compose/docker-compose.observability.yml ...
+# Ports are published on 127.0.0.1 only.
+x-observability: &observability
+  restart: unless-stopped
+  labels:
+    ecomdata.layer: observability
+  networks: [bigdata]
+
+# Airflow sends its metrics to Alloy over StatsD. Set here, not in the main file:
+# with no Alloy on the network the StatsD client cannot resolve its host.
+x-airflow-statsd: &airflow-statsd
+  AIRFLOW__METRICS__STATSD_ON: "True"
+  AIRFLOW__METRICS__STATSD_HOST: alloy
+  AIRFLOW__METRICS__STATSD_PORT: "9125"
+  AIRFLOW__METRICS__STATSD_PREFIX: airflow
+
 services:
   loki:
+    <<: *observability
     image: grafana/loki:3.4.2
     container_name: ${MP_CONTAINER_PREFIX:-}loki
-    restart: unless-stopped
-    command: ["-config.file=/etc/loki/local-config.yaml"]
-    ports: ["${LOKI_HOST_PORT:-3101}:3100"]
-    volumes: ["loki_data:/loki"]
-    networks: [bigdata]
-
-  promtail:
-    image: grafana/promtail:3.4.2
-    container_name: ${MP_CONTAINER_PREFIX:-}promtail
-    restart: unless-stopped
-    command: ["-config.file=/etc/promtail/promtail.yml", "-config.expand-env=true"]
-    environment:
-      COMPOSE_PROJECT_NAME: ${COMPOSE_PROJECT_NAME}
+    command: ["-config.file=/etc/loki/config.yaml"]
+    ports: ["127.0.0.1:${LOKI_HOST_PORT:-3101}:3100"]
     volumes:
-      - ../observability/promtail.yml:/etc/promtail/promtail.yml:ro
+      - ../observability/loki/config.yaml:/etc/loki/config.yaml:ro
+      - loki_data:/loki
+    mem_limit: 512m
+
+  prometheus:
+    <<: *observability
+    image: prom/prometheus:v3.2.1
+    container_name: ${MP_CONTAINER_PREFIX:-}prometheus
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=7d
+      - --storage.tsdb.retention.size=2GB
+      # Alloy pushes every metric here; Prometheus scrapes nothing but itself.
+      - --web.enable-remote-write-receiver
+    ports: ["127.0.0.1:${PROMETHEUS_HOST_PORT:-9090}:9090"]
+    volumes:
+      - ../observability/prometheus:/etc/prometheus:ro
+      - prometheus_data:/prometheus
+    mem_limit: 768m
+
+  alloy:
+    <<: *observability
+    image: grafana/alloy:v1.10.0
+    container_name: ${MP_CONTAINER_PREFIX:-}alloy
+    command:
+      - run
+      - --server.http.listen-addr=0.0.0.0:12345
+      - --storage.path=/var/lib/alloy/data
+      - --stability.level=generally-available
+      - /etc/alloy/config.alloy
+    environment:
+      COMPOSE_PROJECT_NAME: ${COMPOSE_PROJECT_NAME:-mp}
+      POSTGRES_USER: ${POSTGRES_USER:-admin}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-admin123}
+      POSTGRES_DB: ${POSTGRES_DB:-data_warehouse}
+    # The container exporter (cAdvisor) reads every container's cgroup; the host
+    # exporter reads the host's /proc, /sys and file systems; the socket names the
+    # containers. On Docker Desktop "the host" is its Linux VM, not Windows.
+    privileged: true
+    pid: host
+    cgroup: host
+    ports: ["127.0.0.1:${ALLOY_HOST_PORT:-12345}:12345"]
+    volumes:
+      - ../observability/alloy:/etc/alloy:ro
+      - alloy_data:/var/lib/alloy/data
       - /var/run/docker.sock:/var/run/docker.sock:ro
-    depends_on: [loki]
-    networks: [bigdata]
+      - /:/rootfs:ro
+      - /sys:/sys:ro
+      # Airflow's task logs (volume of the main file), tailed for Loki.
+      - airflow_logs:/airflow-logs:ro
+    mem_limit: 512m
+    # An exporter whose service is not up when Alloy starts fails to build and is
+    # not retried (seen with Kafka), so Alloy waits for the core.
+    depends_on:
+      loki: {condition: service_started}
+      prometheus: {condition: service_started}
+      kafka: {condition: service_healthy}
+      postgres-dw: {condition: service_healthy}
 
   grafana:
+    <<: *observability
     image: grafana/grafana:11.5.2
     container_name: ${MP_CONTAINER_PREFIX:-}grafana
-    restart: unless-stopped
+    # Copies the provisioning into place, the Telegram contact point only when
+    # TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID are set, then starts Grafana.
+    entrypoint: ["/bin/sh", "/etc/grafana/start.sh"]
     environment:
-      GF_SECURITY_ADMIN_USER: admin
-      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?set GRAFANA_ADMIN_PASSWORD, see env/base.env}
       GF_AUTH_ANONYMOUS_ENABLED: "true"
       GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
       GF_DATE_FORMATS_DEFAULT_TIMEZONE: Asia/Ho_Chi_Minh
-      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/lambda-logs.json
-    ports: ["${GRAFANA_HOST_PORT:-3001}:3000"]
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/lambda-overview.json
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_NEWS_NEWS_FEED_ENABLED: "false"
+      MP_PROJECT: ${COMPOSE_PROJECT_NAME:-mp}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}
+    ports: ["127.0.0.1:${GRAFANA_HOST_PORT:-3001}:3000"]
     volumes:
-      - ../observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ../observability/grafana/start.sh:/etc/grafana/start.sh:ro
+      - ../observability/grafana/provisioning:/provisioning:ro
+      - ../observability/grafana/optional:/provisioning-optional:ro
       - ../observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
       - grafana_data:/var/lib/grafana
-    depends_on: [loki]
-    networks: [bigdata]
+    mem_limit: 384m
+    depends_on: [loki, prometheus]
+
+  # MinIO serves its metrics without a token on this private network.
+  minio:
+    environment:
+      MINIO_PROMETHEUS_AUTH_TYPE: public
+
+  airflow-api-server:
+    environment: *airflow-statsd
+  airflow-scheduler:
+    environment: *airflow-statsd
+  airflow-dag-processor:
+    environment: *airflow-statsd
 
 volumes:
   loki_data:
+  prometheus_data:
+  alloy_data:
   grafana_data:

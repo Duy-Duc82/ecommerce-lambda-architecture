@@ -120,6 +120,7 @@ def test_a_page_without_next_data_is_a_block_not_a_parse_failure():
         (b'<script id="__NEXT_DATA__">{"props":{}}</script>', "no props.initialState.catalog"),
         (html_with({"data": "x"}), "must be a list"),
         (html_with({"data": []}), "no products"),
+        (html_with({"data": [], "paging": {"total": 3}}), "no products"),
         (html_with({"data": [1]}), "not an object"),
         (html_with({}), "must be a list"),
     ],
@@ -127,6 +128,15 @@ def test_a_page_without_next_data_is_a_block_not_a_parse_failure():
 def test_a_changed_page_shape_fails_loudly(body, message):
     with pytest.raises(ListingPageParseError, match=message):
         TikiExtractor().extract(bundle(body))
+
+
+def test_an_empty_category_is_a_page_with_no_rows():
+    # Tiki states the category holds nothing; the page context is kept as the evidence.
+    paging = {"total": 0, "per_page": 40, "current_page": 1, "last_page": 0}
+    page = TikiExtractor().extract(bundle(html_with({"data": [], "paging": paging})))
+
+    assert page.rows == ()
+    assert page.page_context == {"paging": paging}
 
 
 # --- discovery ----------------------------------------------------------------

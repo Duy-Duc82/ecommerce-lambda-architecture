@@ -112,6 +112,68 @@ CANONICAL_COLUMNS: tuple[tuple[str, str], ...] = (
     ("request_page", "int"),
 )
 CANONICAL_NAMES = tuple(name for name, _ in CANONICAL_COLUMNS)
+
+# What the star reads from a source's wide table besides the canonical columns,
+# one row per listing record (docs/DATA_MODEL.md 4.4). A source that does not
+# publish a field leaves it NULL: unknown, never false.
+LISTING_ATTRIBUTE_COLUMNS: tuple[tuple[str, str], ...] = (
+    ("record_id", "string"),
+    ("seller_type", "string"),
+    ("is_official_store", "boolean"),
+    ("is_trusted_store", "boolean"),
+    ("master_product_sku", "string"),
+    ("origin", "string"),
+    ("is_authentic", "boolean"),
+    ("is_platform_verified", "boolean"),
+    ("has_free_shipping", "boolean"),
+    ("is_express_delivery", "boolean"),
+    ("is_next_day_delivery", "boolean"),
+    ("is_flash_deal", "boolean"),
+    ("is_gift_available", "boolean"),
+)
+# A name or slug some page gave a category node.
+CATEGORY_NAME_COLUMNS: tuple[tuple[str, str], ...] = (
+    ("marketplace", "string"),
+    ("category_id", "string"),
+    ("category_name", "string"),
+    ("category_slug", "string"),
+    ("observed_at", "timestamp"),
+)
+# A whole category path, top first, as a page states it ("a/b/c").
+CATEGORY_PATH_COLUMNS: tuple[tuple[str, str], ...] = (
+    ("marketplace", "string"),
+    ("category_path", "string"),
+    ("observed_at", "timestamp"),
+)
+# The size of a category as a page states it ("N products"), for the page's own category.
+LISTED_COUNT_COLUMNS: tuple[tuple[str, str], ...] = (
+    ("marketplace", "string"),
+    ("category_id", "string"),
+    ("listed_product_count", "bigint"),
+    ("observed_at", "timestamp"),
+)
+
+
+def typed(frame: DataFrame, columns: tuple[tuple[str, str], ...]) -> DataFrame:
+    """``frame`` reduced to ``columns``, in order and cast; a missing column is NULL."""
+    present = set(frame.columns)
+    return frame.select(
+        *[(F.col(name) if name in present else F.lit(None)).cast(dtype).alias(name) for name, dtype in columns]
+    )
+
+
+def empty(spark: SparkSession, columns: tuple[tuple[str, str], ...]) -> DataFrame:
+    return spark.createDataFrame([], ", ".join(f"{name} {dtype}" for name, dtype in columns))
+
+
+def any_true(*flags: Column) -> Column:
+    """True if any flag is true, false if none is but one is known, NULL if all are unknown."""
+    known = F.lit(False)
+    hit = F.lit(False)
+    for flag in flags:
+        known = known | flag.isNotNull()
+        hit = hit | F.coalesce(flag, F.lit(False))
+    return F.when(hit, True).when(known, False)
 OBSERVATION_SCHEMA_VERSION = "marketplace-observation.v1"
 OBSERVATION_EVENT_TYPE = "OFFER_OBSERVED"
 
@@ -120,16 +182,22 @@ def decode_records(lines: DataFrame, *, source_code: str | None = None) -> DataF
     """Envelope columns plus ``payload_json``, the payload object as sent, from JSON lines (a ``value`` column).
 
     The payload is taken as text so it survives untouched; the envelope is
-    decoded with an explicit schema.
+    decoded with an explicit schema. ``bronze_date`` is the ``observed_date``
+    partition of the Bronze file a line came from, when ``lines`` carries it (the
+    lake reader does); otherwise the date of ``fetched_at``, which is how the
+    writer names that partition (``ingestion/record_store.records_path``).
     """
+    bronze = F.col("bronze_date") if "bronze_date" in lines.columns else F.lit(None).cast("date")
     decoded = lines.select(
         F.from_json("value", ENVELOPE_SCHEMA).alias("e"),
         F.get_json_object("value", "$.payload").alias("payload_json"),
         F.get_json_object("value", "$.dropped_fields").alias("dropped_fields_json"),
+        bronze.alias("bronze_date"),
     )
-    frame = decoded.select("e.*", "payload_json", "dropped_fields_json").withColumn(
+    frame = decoded.select("e.*", "payload_json", "dropped_fields_json", "bronze_date").withColumn(
         "fetched_at", F.try_to_timestamp("fetched_at")
     )
+    frame = frame.withColumn("bronze_date", F.coalesce(F.col("bronze_date"), F.to_date("fetched_at")))
     if source_code is not None:
         frame = frame.filter(F.col("source_code") == source_code)
     return frame
@@ -347,6 +415,7 @@ def canonical(records: DataFrame, spec: Any, fields: SourceFields) -> DataFrame:
         F.col("request_target"),
         F.col("request_page"),
         F.col("payload_json"),
+        F.col("bronze_date"),
         F.col("_listing_occurrence"),
     )
     return result.withColumn("reason", quarantine_reason())
@@ -379,6 +448,7 @@ def split_quarantine(frame: DataFrame) -> tuple[DataFrame, DataFrame]:
         F.col("fetched_at"),
         "reason",
         "payload_json",
+        "bronze_date",
     )
     return valid, quarantined
 
@@ -403,6 +473,13 @@ def payload_drift(rows: DataFrame, schema: StructType) -> DataFrame:
 __all__ = [
     "CANONICAL_COLUMNS",
     "CANONICAL_NAMES",
+    "CATEGORY_NAME_COLUMNS",
+    "CATEGORY_PATH_COLUMNS",
+    "LISTED_COUNT_COLUMNS",
+    "LISTING_ATTRIBUTE_COLUMNS",
+    "any_true",
+    "empty",
+    "typed",
     "ENVELOPE_SCHEMA",
     "KIND_CONTEXT",
     "KIND_ROW",

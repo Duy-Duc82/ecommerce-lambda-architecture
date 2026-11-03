@@ -1,0 +1,123 @@
+## VM mem used % peak
+   8f1ad177bd43 93.495
+## VM mem used % avg
+   8f1ad177bd43 59.481
+## VM CPU busy % avg
+    27.322
+## VM CPU busy % peak
+    87.891
+## cpu cores by service avg
+   batch-dimensions 2.972
+   reprocess-silver 3.286
+   reprocess-quality 1.451
+   batch-publish 1.002
+   batch-silver 3.193
+   batch-quality 1.953
+   reprocess-dimensions 2.807
+   discover-tiki 0.126
+   batch-facts 2.316
+   maintenance-backup 0.095
+   batch-marts 1.576
+   airflow-api-server 0.004
+   airflow-dag-processor 0.021
+   airflow-scheduler 0.047
+   alloy 0.037
+   crawl-worker 0.013
+   crawl-worker-lazada 0.024
+   elasticsearch 0.023
+   es-projector 0.005
+   grafana 0.01
+   kafka 0.142
+   kibana 0.013
+   loki 0.005
+   minio 0.05
+   postgres-dw 0.032
+   prometheus 0.003
+   redis 0.006
+   speed 0.768
+   superset 0.001
+## cpu cores by service peak
+   batch-dimensions 4.563
+   reprocess-silver 4.302
+   reprocess-quality 1.451
+   batch-publish 1.002
+   batch-silver 4.652
+   batch-quality 2.442
+   reprocess-dimensions 3.827
+   discover-tiki 0.126
+   batch-facts 3.558
+   maintenance-backup 0.119
+   batch-marts 2.632
+   airflow-api-server 0.217
+   airflow-dag-processor 0.172
+   airflow-scheduler 0.386
+   alloy 0.092
+   crawl-worker 0.061
+   crawl-worker-lazada 0.603
+   elasticsearch 0.446
+   es-projector 0.026
+   grafana 0.035
+   kafka 0.598
+   kibana 0.293
+   loki 0.015
+   minio 0.511
+   postgres-dw 0.375
+   prometheus 0.01
+   redis 0.076
+   speed 2.277
+   superset 0.026
+## mem GB by service peak
+   batch-publish 2.674
+   batch-dimensions 4.654
+   batch-quality 4.115
+   reprocess-silver 2.93
+   reprocess-quality 3.059
+   batch-silver 4.006
+   reprocess-publish 2.534
+   batch-marts 3.67
+   reprocess-dimensions 4.545
+   discover-tiki 0.026
+   batch-facts 4.575
+   reprocess-facts 2.894
+   maintenance-backup 0.093
+   reprocess-marts 2.387
+   airflow-api-server 0.563
+   airflow-dag-processor 0.424
+   airflow-scheduler 1.066
+   alloy 0.294
+   crawl-worker 0.06
+   crawl-worker-lazada 0.663
+   elasticsearch 2.099
+   es-projector 0.066
+   grafana 0.16
+   kafka 1.146
+   kibana 0.659
+   loki 0.166
+   minio 1.493
+   postgres-dw 0.448
+   prometheus 0.139
+   redis 0.305
+   speed 4.012
+   superset 0.307
+## probe availability %
+   airflow 99.685
+   elasticsearch 99.685
+   grafana 100.0
+   kibana 99.763
+   loki 99.921
+   minio 99.763
+   superset 100.0
+## kafka msgs/s peak 5m
+   marketplace.changes.v1 169.831
+   marketplace.observations.v1 13.439
+   marketplace.observations.v1.dlq 0.0
+   marketplace.records.v1 16.701
+   marketplace.records.v1.dlq 0.018
+## kafka messages added
+   marketplace.changes.v1 156531.854
+   marketplace.observations.v1 110697.411
+   marketplace.observations.v1.dlq 0.0
+   marketplace.records.v1 117249.479
+   marketplace.records.v1.dlq 26.028
+## prometheus series
+   prometheus:9090 12681.0

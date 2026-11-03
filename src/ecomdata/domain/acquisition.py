@@ -94,9 +94,10 @@ class RecordPublishError(Exception):
     """An attempt stored its page but could not publish every record.
 
     Not an acquisition failure: the fetch, the raw write and the extraction all
-    succeeded. ``acknowledged`` counts the records Kafka accepted before the
-    failure, in publish order; the attempt audit records that as parsed, since
-    only those can reach Silver.
+    succeeded, and the Bronze records file was written. ``acknowledged`` counts
+    the records Kafka accepted before the failure, in publish order. The attempt
+    audit still records every row as parsed: Silver is built from the records
+    file, so all of them reach it.
     """
 
     def __init__(self, *, report: Any, acknowledged: int, cause: BaseException):

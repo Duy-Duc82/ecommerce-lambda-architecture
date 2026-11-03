@@ -27,7 +27,8 @@ CHECK_NAME_RE = re.compile(r"^[a-z][a-z0-9_]{0,62}$")
 # The ten Gold marts, from the dataset registry (itself config, so this module
 # still imports nothing from batch_layer).
 GOLD_DATASETS = MART_NAMES
-SOURCE_DATASETS = ("silver", "audit")
+# "star": the run's version of the dimensions and facts in the lake's dw/.
+SOURCE_DATASETS = ("silver", "audit", "star")
 
 
 @dataclass(frozen=True)
@@ -150,6 +151,30 @@ QUALITY_RULES: tuple[QualityRule, ...] = (
         ADVISORY,
         "crawl_reliability_daily",
         "crawl_reliability_daily is non-empty whenever Silver holds observations",
+    ),
+    QualityRule(
+        "star_foreign_keys_resolve",
+        MANDATORY,
+        "star",
+        "every foreign key of every star table (datasets.foreign_keys) names a row of its dimension",
+    ),
+    QualityRule(
+        "star_surrogate_keys_unique",
+        MANDATORY,
+        "star",
+        "every star table holds each value of its registry key once",
+    ),
+    QualityRule(
+        "star_listing_versions_consistent",
+        MANDATORY,
+        "star",
+        "per offer, dim_product_listing has exactly one current version and versions that do not overlap",
+    ),
+    QualityRule(
+        "star_unknown_member_rate",
+        ADVISORY,
+        "star",
+        "the share of fact_offer_observation rows whose seller, brand or category is the unknown member (-1) is reported",
     ),
 )
 

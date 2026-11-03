@@ -77,7 +77,16 @@ def spark():
         SparkSession.builder.master("local[1]")
         .appName("marketplace-tests")
         .config("spark.ui.enabled", "false")
+        # The status store keeps the last 1000 SQL executions with their plans even
+        # without a UI; over a whole suite the star's plans fill the heap with them.
+        .config("spark.sql.ui.retainedExecutions", "10")
+        .config("spark.ui.retainedJobs", "10")
+        .config("spark.ui.retainedStages", "10")
+        .config("spark.ui.retainedTasks", "100")
         .config("spark.sql.shuffle.partitions", "1")
+        # One session serves the whole suite; the default 1g driver heap runs out
+        # once the pipeline tests hold every stage's frames (Phase 10 star).
+        .config("spark.driver.memory", "2g")
         # SparkSessionFactory pins the session to UTC; a test session on local time
         # would bucket observed_date differently from production.
         .config("spark.sql.session.timeZone", "UTC")
@@ -86,3 +95,13 @@ def spark():
     session.sparkContext.setLogLevel("ERROR")
     yield session
     session.stop()
+
+
+@pytest.fixture(autouse=True)
+def _release_cached_frames(request):
+    """Drop what a test cached once it ends: the session serves the whole suite, and the
+    in-memory lake caches every frame a stage writes, so the heap would otherwise fill up.
+    """
+    yield
+    if "spark" in request.fixturenames:
+        request.getfixturevalue("spark").catalog.clearCache()

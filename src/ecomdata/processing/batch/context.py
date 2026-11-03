@@ -28,12 +28,16 @@ class MarketplaceBatchContext:
     freshness_rule_version: str = "freshness-rules.v1"
     counter_rule_version: str = "counter-rules.v1"
     counter_max_gap_seconds: int = 86400
+    # The speed layer's change rules, which fact_price_change applies too.
+    change_rule_version: str = "speed-rules.v1"
+    large_drop_absolute: Decimal = Decimal("100000")
+    large_drop_relative: Decimal = Decimal("0.20")
     anomaly_window_days: int = 14
     anomaly_min_samples: int = 7
     anomaly_mad_threshold: Decimal = Decimal("3.5")
     anomaly_iqr_multiplier: Decimal = Decimal("1.5")
     anomaly_rule_version: str = "anomaly-rules.v1"
-    quality_rule_version: str = "quality-rules.v2"
+    quality_rule_version: str = "quality-rules.v3"
     future_tolerance_seconds: int = 300
     reconciliation_settle_seconds: int = 900
     reconciliation_lookback_seconds: int = 172800
@@ -52,6 +56,7 @@ class MarketplaceBatchContext:
             "gold_root_uri",
             "freshness_rule_version",
             "counter_rule_version",
+            "change_rule_version",
             "anomaly_rule_version",
             "quality_rule_version",
         ):
@@ -72,6 +77,10 @@ class MarketplaceBatchContext:
         ):
             if getattr(self, name) <= 0:
                 raise ValueError(f"{name} must be positive")
+        if self.large_drop_absolute < 0:
+            raise ValueError("large_drop_absolute must be non-negative")
+        if not Decimal("0") <= self.large_drop_relative <= Decimal("1"):
+            raise ValueError("large_drop_relative must be between 0 and 1")
         # A minimum above the frame size would make every row report
         # INSUFFICIENT_HISTORY while nothing looked broken.
         if self.anomaly_min_samples > self.anomaly_window_days:
@@ -96,6 +105,14 @@ class MarketplaceBatchContext:
     def gold_dataset_uri(self, dataset_name: str) -> str:
         return f"{self.gold_run_uri}/{dataset_name}"
 
+    @property
+    def dw_root_uri(self) -> str:
+        """The star: one table per dataset, kept across runs, outside every run directory."""
+        return f"{self.gold_root_uri.rstrip('/')}/dw"
+
+    def dw_dataset_uri(self, dataset_name: str) -> str:
+        return f"{self.dw_root_uri}/{dataset_name}"
+
 
 class ConflictingObservationError(ValueError):
     pass
@@ -106,6 +123,19 @@ class GoldWriteResult:
     dataset_name: str
     uri: str
     row_count: int
+
+
+@dataclass(frozen=True)
+class DwWriteResult:
+    """A star table after a merge: its rows and, for Delta, the table version the merge left."""
+
+    dataset_name: str
+    uri: str
+    row_count: int
+    version: int | None
+    # How the table was written: "created", "merged", or "schema_replaced" when
+    # the registry's columns changed and the table was rewritten with the new schema.
+    write_mode: str = "merged"
 
 
 # A passing run deliberately kept off the serving version for inspection.

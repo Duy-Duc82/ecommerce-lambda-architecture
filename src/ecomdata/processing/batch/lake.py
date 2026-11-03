@@ -1,11 +1,12 @@
-"""The Spark implementation of the lake port: Bronze records in, Silver and Gold out, all as Parquet.
+"""The Spark implementation of the lake port: Bronze records in, Silver and Gold out, as Parquet or Delta (``table_format``).
 
-Datasets live under ``<silver root>/<name>/`` and
-``<gold root>/runs/run_id=<run>/<mart>/``. Writing a dataset replaces it (for a
+Datasets live under ``<silver root>/<name>/``,
+``<gold root>/runs/run_id=<run>/<mart>/`` and, for the star, ``<gold root>/dw/<table>/``
+(merged, not replaced: see ``merge_dw``). Writing a dataset replaces it (for a
 partitioned dataset, the partitions it has rows for, because the session sets
 dynamic partition overwrite), and a dataset that was written empty reads back
-empty: reads carry an explicit schema, so a directory holding only ``_SUCCESS``
-is not an error.
+empty: Parquet reads carry an explicit schema, so a directory holding only
+``_SUCCESS`` is not an error (a Delta table carries its own).
 """
 from __future__ import annotations
 
@@ -17,8 +18,20 @@ from pyspark.sql import functions as F
 from pyspark.sql.types import StructType
 
 from ecomdata.domain.datasets import dataset
-from ecomdata.processing.batch.context import GoldWriteResult, MarketplaceBatchContext
+from ecomdata.processing.batch.context import DwWriteResult, GoldWriteResult, MarketplaceBatchContext
 from ecomdata.processing.normalize import common
+
+
+class SilverLayoutMismatch(RuntimeError):
+    """A Silver table on disk is partitioned unlike the code writing it (a layout change)."""
+
+    def __init__(self, name: str, existing: Sequence[str], expected: Sequence[str]) -> None:
+        super().__init__(
+            f"Silver table {name} is partitioned by {list(existing)}, this code writes {list(expected)}. "
+            "Rebuild Silver once: trigger DAG marketplace_reprocess with {\"rebuild\": true} "
+            "(or python -m ecomdata.processing.batch run --all --rebuild)."
+        )
+        self.name = name
 
 
 class SparkLakeIO:
@@ -29,7 +42,11 @@ class SparkLakeIO:
         records_uri: str,
         silver_root_uri: str,
         silver_schemas: Mapping[str, StructType] | None = None,
+        table_format: str = "delta",
     ) -> None:
+        if table_format not in ("parquet", "delta"):
+            raise ValueError(f"table_format must be parquet or delta, not {table_format!r}")
+        self.table_format = table_format
         self._spark_provider = spark_provider
         self.records_uri = records_uri.rstrip("/")
         self.silver_root_uri = silver_root_uri.rstrip("/")
@@ -42,26 +59,66 @@ class SparkLakeIO:
     def silver_uri(self, name: str) -> str:
         return f"{self.silver_root_uri}/{name}"
 
-    def read_records(self, *, since_date: date | None = None) -> DataFrame:
-        records = common.decode_records(self.spark.read.option("recursiveFileLookup", "true").text(self.records_uri))
-        if since_date is not None:
-            records = records.filter(F.to_date("fetched_at") >= F.lit(since_date))
-        return records
+    def read_records(self, *, days: Sequence[date] | None = None) -> DataFrame:
+        # Only the Bronze day partitions asked for are listed and read; a day with
+        # no files reads as no rows, not as an error.
+        root = self.records_uri
+        if days is None:
+            pattern = root
+        elif not days:
+            return common.decode_records(self.spark.createDataFrame([], "value string, bronze_date date"))
+        else:
+            pattern = f"{root}/source=*/observed_date={{{','.join(day.isoformat() for day in days)}}}"
+        from pyspark.errors import AnalysisException
 
-    def write_silver(self, name: str, frame: DataFrame, *, partition_by: Sequence[str] = ()) -> str:
+        try:
+            lines = self.spark.read.option("recursiveFileLookup", "true").text(pattern)
+        except AnalysisException as error:
+            if "PATH_NOT_FOUND" not in str(error) and "Path does not exist" not in str(error):
+                raise
+            return common.decode_records(self.spark.createDataFrame([], "value string, bronze_date date"))
+        partition = F.regexp_extract(F.input_file_name(), r"observed_date=(\d{4}-\d{2}-\d{2})", 1)
+        return common.decode_records(lines.withColumn("bronze_date", F.to_date(F.nullif(partition, F.lit("")))))
+
+    def write_silver(
+        self, name: str, frame: DataFrame, *, partition_by: Sequence[str] = (), whole: bool = False
+    ) -> str:
         uri = self.silver_uri(name)
+        if not whole and self.table_format == "delta":
+            self._check_silver_layout(name, uri, list(partition_by))
         writer = frame.write.mode("overwrite")
+        if whole:
+            # A rebuild may change a table's columns or partitioning (Silver is rebuilt from Bronze).
+            writer = writer.option("partitionOverwriteMode", "static")
+            if self.table_format == "delta":
+                writer = writer.option("overwriteSchema", "true")
+        elif partition_by:
+            writer = writer.option("partitionOverwriteMode", "dynamic")
         if partition_by:
-            writer = writer.option("partitionOverwriteMode", "dynamic").partitionBy(*partition_by)
-        writer.parquet(uri)
+            writer = writer.partitionBy(*partition_by)
+        writer.format(self.table_format).save(uri)
         return uri
+
+    def _check_silver_layout(self, name: str, uri: str, partition_by: list[str]) -> None:
+        # Replacing some days cannot change a table's partitioning; only a rebuild can.
+        # Without this check Delta fails with a long schema-mismatch message.
+        from pyspark.errors import AnalysisException
+
+        try:
+            detail = self.spark.sql(f"DESCRIBE DETAIL delta.`{uri}`").first()
+        except AnalysisException:
+            return  # no table yet: the write creates it
+        existing = list(detail["partitionColumns"] or [])
+        if existing != partition_by:
+            raise SilverLayoutMismatch(name, existing, partition_by)
 
     def read_silver(self, name: str) -> DataFrame:
         reader = self.spark.read
         schema = self.silver_schemas.get(name)
-        if schema is not None:
+        # A Delta table carries its own schema and refuses a user-specified one.
+        if schema is not None and self.table_format != "delta":
             reader = reader.schema(schema)
-        return reader.parquet(self.silver_uri(name))
+        return reader.format(self.table_format).load(self.silver_uri(name))
 
     def write_gold(self, context: MarketplaceBatchContext, name: str, frame: DataFrame) -> GoldWriteResult:
         uri = context.gold_dataset_uri(name)
@@ -71,11 +128,93 @@ class SparkLakeIO:
         partitions = dataset(name).partition_columns
         if partitions:
             writer = writer.partitionBy(*partitions)
-        writer.parquet(uri)
+        writer.format(self.table_format).save(uri)
         return GoldWriteResult(name, uri, frame.count())
 
     def read_gold(self, context: MarketplaceBatchContext, name: str) -> DataFrame:
-        return self.spark.read.parquet(context.gold_dataset_uri(name))
+        return self.spark.read.format(self.table_format).load(context.gold_dataset_uri(name))
+
+    def merge_dw(self, context: MarketplaceBatchContext, name: str, frame: DataFrame) -> DwWriteResult:
+        entry = dataset(name)
+        uri = context.dw_dataset_uri(name)
+        frame = frame.select(*entry.columns)
+        if self.table_format != "delta":
+            # A Parquet star would be overwritten in place: no MERGE, no version to
+            # read a run back at, and a crash mid-write leaves a broken table.
+            raise RuntimeError(f"the star needs DATA_LAKE_TABLE_FORMAT=delta, not {self.table_format!r}")
+        current = self._existing_delta(uri)
+        if current is None:
+            self._create(frame, uri, entry.partition_columns, format_="delta")
+            mode = "created"
+        elif _shape(current.schema) != _shape(frame.schema):
+            # The registry changed the table's columns: a MERGE cannot, so the
+            # table is replaced as a new version and the old one stays readable.
+            self._create(frame, uri, entry.partition_columns, format_="delta", overwrite_schema=True)
+            mode = "schema_replaced"
+        else:
+            self.spark.sql(merge_statement(uri, frame, entry.key, _source_view(frame, name)))
+            mode = "merged"
+        history = self.spark.sql(f"DESCRIBE HISTORY delta.`{uri}` LIMIT 1").first()
+        return DwWriteResult(name, uri, self.read_dw(context, name).count(), int(history["version"]), mode)
+
+    def read_dw(self, context: MarketplaceBatchContext, name: str, version: int | None = None) -> DataFrame:
+        reader = self.spark.read.format(self.table_format)
+        if version is not None:
+            reader = reader.option("versionAsOf", int(version))
+        return reader.load(context.dw_dataset_uri(name))
+
+    def restore_dw(self, context: MarketplaceBatchContext, name: str, version: int) -> int:
+        uri = context.dw_dataset_uri(name)
+        self.spark.sql(f"RESTORE TABLE delta.`{uri}` TO VERSION AS OF {int(version)}")
+        return int(self.spark.sql(f"DESCRIBE HISTORY delta.`{uri}` LIMIT 1").first()["version"])
+
+    def _existing_delta(self, uri: str) -> DataFrame | None:
+        from pyspark.errors import AnalysisException
+
+        try:
+            return self.spark.read.format("delta").load(uri)
+        except AnalysisException:
+            return None
+
+    @staticmethod
+    def _create(
+        frame: DataFrame, uri: str, partitions: Sequence[str], *, format_: str, overwrite_schema: bool = False
+    ) -> None:
+        writer = frame.write.mode("overwrite").option("partitionOverwriteMode", "static")
+        if overwrite_schema:
+            writer = writer.option("overwriteSchema", "true")
+        if partitions:
+            writer = writer.partitionBy(*partitions)
+        writer.format(format_).save(uri)
+
+
+def _shape(schema: StructType) -> list[tuple[str, str]]:
+    # Nullability differs between a built frame and the stored table; names and types decide.
+    return [(field.name, field.dataType.simpleString()) for field in schema.fields]
+
+
+def _source_view(frame: DataFrame, name: str) -> str:
+    view = f"_dw_merge_source_{name}"
+    frame.createOrReplaceTempView(view)
+    return view
+
+
+def merge_statement(uri: str, frame: DataFrame, key: Sequence[str], source: str) -> str:
+    """The MERGE that makes the Delta table at ``uri`` hold exactly ``source``, matched on ``key``.
+
+    A matched row is rewritten only if a column changed (compared null-safely),
+    so a rerun on the same data rewrites nothing; a key the source no longer has
+    is deleted, so the table never keeps a row the builders did not produce.
+    """
+    on = " AND ".join(f"t.`{column}` <=> s.`{column}`" for column in key)
+    values = [column for column in frame.columns if column not in key]
+    changed = " OR ".join(f"NOT (t.`{column}` <=> s.`{column}`)" for column in values) or "FALSE"
+    return (
+        f"MERGE INTO delta.`{uri}` AS t USING {source} AS s ON {on} "
+        f"WHEN MATCHED AND ({changed}) THEN UPDATE SET * "
+        "WHEN NOT MATCHED THEN INSERT * "
+        "WHEN NOT MATCHED BY SOURCE THEN DELETE"
+    )
 
 
 def read_crawl_audit(spark: SparkSession, jdbc_url: str, properties: Mapping[str, str]) -> tuple[DataFrame, DataFrame]:
@@ -88,6 +227,46 @@ def read_crawl_audit(spark: SparkSession, jdbc_url: str, properties: Mapping[str
     # Neither attempt nor run rows name a marketplace code; the frontier does.
     frontier = spark.read.jdbc(jdbc_url, "audit.crawl_frontier", properties=props)
     return attach_marketplace_code(attempts, frontier), runs
+
+
+def read_crawl_audit_lake(spark: SparkSession, root_uri: str) -> tuple[DataFrame, DataFrame]:
+    """The crawl audit as the crawler wrote it to the lake (``ecomdata.domain.crawl_audit``): attempts and runs.
+
+    Same columns as ``read_crawl_audit`` gives the marts and gates; the attempts
+    already carry their marketplace code, target and resource type, so no
+    frontier is read. A lake without audit objects yet reads as no rows.
+    """
+    from pyspark.errors import AnalysisException
+
+    try:
+        lines = spark.read.option("recursiveFileLookup", "true").text(root_uri.rstrip("/"))
+    except AnalysisException as error:
+        if "PATH_NOT_FOUND" not in str(error) and "Path does not exist" not in str(error):
+            raise
+        lines = spark.createDataFrame([], "value string")
+    return crawl_audit_from_lines(lines)
+
+
+def crawl_audit_from_lines(lines: DataFrame) -> tuple[DataFrame, DataFrame]:
+    """(attempts, runs) out of the audit's JSON lines (a ``value`` column), one row per attempt and per run."""
+    from pyspark.sql.types import StringType, StructField
+
+    from ecomdata.domain import crawl_audit as layout
+
+    fields = layout.line_fields()
+    # Every field is parsed as text and cast: a cast takes the offset and the
+    # microseconds Python's isoformat writes, whatever the JSON parser's format.
+    text_schema = StructType([StructField(name, StringType()) for name, _ in fields])
+    parsed = lines.filter(F.trim(F.col("value")) != "").select(F.from_json("value", text_schema).alias("line"))
+    typed = parsed.select(*[F.col(f"line.{name}").cast(dtype).alias(name) for name, dtype in fields])
+
+    def kind(name: str, columns: Sequence[tuple[str, str]], key: Sequence[str]) -> DataFrame:
+        frame = typed.filter(F.col("kind") == name).select(*[column for column, _ in columns])
+        return frame.dropDuplicates(list(key))
+
+    attempts = kind(layout.KIND_ATTEMPT, layout.ATTEMPT_FIELDS, ("crawl_run_id", "task_id", "attempt_number"))
+    runs = kind(layout.KIND_RUN, layout.RUN_FIELDS, ("crawl_run_id",))
+    return attempts, runs
 
 
 def silver_schemas() -> dict[str, StructType]:
@@ -132,9 +311,18 @@ def silver_schemas() -> dict[str, StructType]:
             StructField("fetched_at", TimestampType()),
             StructField("reason", StringType()),
             StructField("payload_json", StringType()),
+            StructField("observed_date", DateType()),
         ]
     )
     return {OBSERVATIONS: declared(common.CANONICAL_COLUMNS), QUARANTINE: quarantine}
 
 
-__all__ = ["SparkLakeIO", "read_crawl_audit", "silver_schemas"]
+__all__ = [
+    "SilverLayoutMismatch",
+    "SparkLakeIO",
+    "crawl_audit_from_lines",
+    "merge_statement",
+    "read_crawl_audit",
+    "read_crawl_audit_lake",
+    "silver_schemas",
+]

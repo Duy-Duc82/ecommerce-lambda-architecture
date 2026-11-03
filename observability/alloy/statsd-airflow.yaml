@@ -1,0 +1,29 @@
+# Airflow's StatsD names carry the DAG and task in the name
+# (airflow.ti.finish.<dag_id>.<task_id>.<state>); these mappings turn them into labels.
+# Unmapped names keep their own, dots as underscores (airflow_scheduler_heartbeat).
+# Timers arrive in milliseconds and are stored in seconds.
+mappings:
+  - match: "airflow.ti.finish.*.*.*"
+    name: "airflow_ti_finish"
+    labels: {dag_id: "$1", task_id: "$2", state: "$3"}
+  - match: "airflow.ti.start.*.*"
+    name: "airflow_ti_start"
+    labels: {dag_id: "$1", task_id: "$2"}
+  - match: "airflow.dagrun.duration.*.*"
+    name: "airflow_dagrun_duration_seconds"
+    labels: {state: "$1", dag_id: "$2"}
+  - match: "airflow.dagrun.schedule_delay.*"
+    name: "airflow_dagrun_schedule_delay_seconds"
+    labels: {dag_id: "$1"}
+  - match: "airflow.dag.*.*.duration"
+    name: "airflow_task_duration_seconds"
+    labels: {dag_id: "$1", task_id: "$2"}
+  - match: "airflow.dag.*.*.queued_duration"
+    name: "airflow_task_queued_duration_seconds"
+    labels: {dag_id: "$1", task_id: "$2"}
+  - match: "airflow.dag_processing.last_duration.*"
+    name: "airflow_dag_processing_last_duration_seconds"
+    labels: {file: "$1"}
+  - match: "airflow.pool.*.*"
+    name: "airflow_pool_slots"
+    labels: {state: "$1", pool: "$2"}

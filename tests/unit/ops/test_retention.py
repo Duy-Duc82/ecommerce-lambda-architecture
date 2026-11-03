@@ -77,3 +77,31 @@ def test_a_key_without_a_readable_date_is_kept():
 def test_a_window_below_one_day_is_refused():
     with pytest.raises(ValueError, match="at least 1"):
         retention.prune_raw(ListingStore(), today=TODAY, older_than_days=0)
+
+
+@pytest.mark.parametrize("name", ["prune_raw", "backup", "storage_snapshot"])
+def test_every_maintenance_task_runs_an_existing_ops_command(name):
+    # The DAG's commands are plain strings; an unknown subcommand would only fail in Airflow.
+    from ecomdata.ops.__main__ import main
+    from ecomdata.orchestration.tasks import maintenance_commands
+
+    program, module_flag, module, *argv = maintenance_commands(retention_days=30)[name].split()
+    assert (program, module_flag, module) == ("python", "-m", "ecomdata.ops")
+    with pytest.raises(SystemExit) as exit_:
+        main([*argv, "--help"])
+    assert exit_.value.code == 0
+
+
+def test_the_ops_command_prunes_with_the_configured_window(monkeypatch):
+    from types import SimpleNamespace
+
+    from ecomdata.ops import __main__ as ops
+    from ecomdata.ops import bootstrap
+
+    store = store_with("2026-09-01", "2026-10-25")
+    monkeypatch.setattr(bootstrap, "object_store", lambda: store)
+    monkeypatch.setattr(ops, "_settings", lambda: SimpleNamespace(batch=SimpleNamespace(raw_retention_days=30)))
+
+    assert ops.prune_raw(None, today=TODAY) == 0
+
+    assert [key for (zone, key) in store.objects if "/raw/" in key] == [raw_key("2026-10-25", "a1")]

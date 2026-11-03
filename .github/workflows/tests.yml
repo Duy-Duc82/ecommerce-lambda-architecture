@@ -1,0 +1,157 @@
+# Runs the test suite on GitHub instead of the laptop. The drill and
+# integration markers stay off (they need a running stack or the live
+# marketplace), as in pyproject addopts.
+#
+# Every push: lint, the plain unit tests, the Airflow DAGs and the legacy
+# Kaggle demo (a few minutes). The Spark tests (tests/spark, about 30 minutes
+# in one process) run only on a pull request into master or develop, on master or
+# develop themselves, or by hand, split across parallel runners (about 10 minutes).
+name: tests
+
+on:
+  push:
+  pull_request:
+    branches: [master, develop]
+  workflow_dispatch:
+
+concurrency:
+  group: tests-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  unit:
+    name: lint + unit
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            pyproject.toml
+            constraints.txt
+
+      # Some unit tests import pyspark without starting a session; Java keeps
+      # them honest if one ever does.
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -c constraints.txt -e ".[spark,dev]"
+
+      - name: Ruff
+        run: ruff check src tests
+
+      - name: Pytest
+        env:
+          PYSPARK_PYTHON: python
+          PYSPARK_DRIVER_PYTHON: python
+        run: >
+          pytest -q --no-header -ra --durations=15
+          --ignore=tests/spark --ignore=tests/airflow --ignore=tests/legacy
+
+  spark:
+    name: spark (${{ matrix.group }}/4)
+    if: >-
+      github.event_name != 'push' ||
+      github.ref == 'refs/heads/master' || github.ref == 'refs/heads/develop'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        group: [1, 2, 3, 4]
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            pyproject.toml
+            constraints.txt
+
+      # PySpark 4.0 needs Java 17 or 21.
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -c constraints.txt -e ".[spark,dev]" "pytest-split>=0.10"
+
+      # pytest-split gives each runner an equal share of the tests; with no
+      # stored durations it splits by count.
+      - name: Pytest
+        env:
+          PYSPARK_PYTHON: python
+          PYSPARK_DRIVER_PYTHON: python
+        run: >
+          pytest -q --no-header -ra --durations=15
+          tests/spark --splits 4 --group ${{ matrix.group }}
+
+  airflow:
+    name: airflow DAGs
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            pyproject.toml
+            constraints.txt
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -c constraints.txt -e ".[airflow,dev]"
+
+      - name: Pytest
+        run: pytest -q --no-header -ra tests/airflow
+
+  # The old Kaggle demo (legacy/kaggle): scikit-learn, darts, pyod and torch.
+  # Torch comes from the CPU-only index so the job does not pull CUDA wheels.
+  legacy:
+    name: legacy Kaggle demo
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            pyproject.toml
+            constraints.txt
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install --extra-index-url https://download.pytorch.org/whl/cpu -c constraints.txt -e ".[spark,dev,legacy]"
+
+      - name: Pytest
+        env:
+          PYSPARK_PYTHON: python
+          PYSPARK_DRIVER_PYTHON: python
+        run: pytest -q --no-header -ra tests/legacy

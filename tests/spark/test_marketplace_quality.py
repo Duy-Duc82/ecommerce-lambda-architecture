@@ -75,13 +75,13 @@ def test_check_names_are_unique_and_expectations_are_stated():
 
 
 # 18
-def test_exactly_thirteen_mandatory_and_four_advisory_rules_are_registered():
+def test_exactly_sixteen_mandatory_and_five_advisory_rules_are_registered():
     mandatory = rules_with_severity(MANDATORY)
     advisory = rules_with_severity(ADVISORY)
 
-    assert len(mandatory) == 13
-    assert len(advisory) == 4
-    assert len(QUALITY_RULES) == 17
+    assert len(mandatory) == 16
+    assert len(advisory) == 5
+    assert len(QUALITY_RULES) == 21
     assert mandatory_rule_names() == tuple(rule.check_name for rule in mandatory)
 
 
@@ -103,6 +103,9 @@ def test_the_mandatory_list_matches_the_brief_section_16_checks():
         "gold_daily_row_count_reconciles",
         "gold_daily_price_aggregates_reconcile",
         "freshness_rule_version_and_as_of_applied",
+        "star_foreign_keys_resolve",
+        "star_surrogate_keys_unique",
+        "star_listing_versions_consistent",
     )
 
 
@@ -167,7 +170,24 @@ def gates(spark, rows=None, *, parsed_count=None, ctx=None, attempt_frame=None, 
     marts = build_marketplace_marts(frame, attempt, run_frame, ctx)
     if tamper:
         marts = tamper(marts)
-    return evaluate_quality_gates(frame, marts, attempt, run_frame, ctx), ctx
+    return evaluate_quality_gates(frame, marts, attempt, run_frame, ctx, star=empty_star(spark)), ctx
+
+
+def empty_star(spark):
+    """Every star table, empty: the rules on Silver and the marts are judged here, the star's in test_star_quality."""
+    from ecomdata.domain.datasets import STAR_NAMES, dataset
+
+    def spark_type(column):
+        if column in ("valid_from", "valid_to"):
+            return "timestamp"
+        if column == "is_current":
+            return "boolean"
+        return "bigint" if column.endswith("_key") else "string"
+
+    return {
+        name: spark.createDataFrame([], ", ".join(f"{c} {spark_type(c)}" for c in dataset(name).columns))
+        for name in STAR_NAMES
+    }
 
 
 def status_of(results, check_name):
@@ -520,19 +540,20 @@ def test_a_backfill_over_a_silver_that_kept_growing_passes_once_cut(spark):
     frame = observations_as_of(observations(spark, rows), ctx.as_of)
     cut_attempts, cut_runs = crawl_audit_as_of(audit_attempts, audit_runs, ctx.as_of)
     marts = build_marketplace_marts(frame, cut_attempts, cut_runs, ctx)
-    results = evaluate_quality_gates(frame, marts, cut_attempts, cut_runs, ctx)
+    results = evaluate_quality_gates(frame, marts, cut_attempts, cut_runs, ctx, star=empty_star(spark))
 
     assert [result.check_name for result in results if result.status != PASS] == []
     assert frame.count() == len(clean_rows())
 
 
 # 18
-def test_the_rule_version_moved_when_checks_6_and_8_changed_meaning():
-    # Verdicts stored under v1 judged a different question. Keeping the old
-    # version would make them indistinguishable from verdicts under the new one.
+def test_the_rule_version_moved_when_the_rules_changed_meaning():
+    # Verdicts stored under v1 judged a different question (checks 6 and 8), and
+    # v2 did not judge the star. Keeping an old version would make them
+    # indistinguishable from verdicts under the new one.
     from ecomdata.settings import load_settings
 
-    assert load_settings({}).quality.rule_version == "quality-rules.v2"
+    assert load_settings({}).quality.rule_version == "quality-rules.v3"
 
 
 # 26

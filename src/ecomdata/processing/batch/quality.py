@@ -26,7 +26,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
-from pyspark.sql import Column, DataFrame
+from pyspark.sql import Column, DataFrame, Window
 from pyspark.sql import functions as F
 
 from ecomdata.domain.quality_rules import (
@@ -444,6 +444,132 @@ def _evaluate_advisory(
     return results
 
 
+STAR_RULES = (
+    "star_foreign_keys_resolve",
+    "star_surrogate_keys_unique",
+    "star_listing_versions_consistent",
+    "star_unknown_member_rate",
+)
+# The fact whose keys say how much of what was seen could not be attributed.
+_UNKNOWN_MEMBER_ROLES = ("seller_key", "brand_key", "category_key")
+
+
+def _evaluate_star(star: Mapping[str, DataFrame] | None, context: MarketplaceBatchContext) -> list[QualityResult]:
+    """The star's referential integrity, key uniqueness and SCD2 versions, read at the run's versions.
+
+    Without the star (a caller that judges the marts alone) every star rule is
+    SKIPPED, which fails the gate for the mandatory ones: an unchecked star must
+    not read as a good one.
+    """
+    from ecomdata.domain.datasets import STAR_NAMES, dataset, foreign_keys
+    from ecomdata.processing.batch.keys import UNKNOWN_KEY
+
+    missing = [] if star is None else [name for name in STAR_NAMES if name not in star]
+    if star is None or missing:
+        reason = "the star was not given" if star is None else f"star tables missing: {missing}"
+        return [_result(name, context, status=SKIPPED, observed_value=None, reason=reason) for name in STAR_RULES]
+
+    orphan_counts: dict[str, int] = {}
+    orphan_frames = []
+    for name in STAR_NAMES:
+        for column, dim, key in foreign_keys(name):
+            # A NULL is not a reference (the root category has no parent).
+            referenced = star[dim].select(F.col(key).alias("_ref")).distinct()
+            orphans = (
+                star[name]
+                .filter(F.col(column).isNotNull())
+                .join(referenced, F.col(column) == F.col("_ref"), "left_anti")
+                .select(F.concat_ws("", F.lit(f"{name}.{column}="), F.col(column).cast("string")).alias("_key"))
+            )
+            count = orphans.count()
+            if count:
+                orphan_counts[f"{name}.{column}"] = count
+                orphan_frames.append(orphans)
+    results = [
+        _counted(
+            "star_foreign_keys_resolve",
+            context,
+            violations=sum(orphan_counts.values()),
+            frame=orphan_frames[0] if orphan_frames else None,
+            key=F.col("_key"),
+        )
+    ]
+
+    repeated_frames = []
+    repeated = 0
+    for name in STAR_NAMES:
+        key = list(dataset(name).key)
+        duplicates = star[name].groupBy(*key).count().filter(F.col("count") > 1)
+        count = duplicates.count()
+        if count:
+            repeated += count
+            repeated_frames.append(
+                duplicates.select(F.concat_ws("/", F.lit(name), *[F.col(c).cast("string") for c in key]).alias("_key"))
+            )
+    results.append(
+        _counted(
+            "star_surrogate_keys_unique",
+            context,
+            violations=repeated,
+            frame=repeated_frames[0] if repeated_frames else None,
+            key=F.col("_key"),
+        )
+    )
+
+    listings = star["dim_product_listing"].filter(F.col("listing_key") != UNKNOWN_KEY)
+    by_offer = Window.partitionBy("offer_key").orderBy("valid_from", "listing_key")
+    versions = listings.select(
+        "offer_key",
+        "valid_from",
+        "valid_to",
+        "is_current",
+        F.lead("valid_from").over(by_offer).alias("_next_from"),
+    )
+    broken = (
+        versions.groupBy("offer_key")
+        .agg(
+            F.sum(F.when(F.col("is_current"), 1).otherwise(0)).alias("_current"),
+            # A version must end where the next begins, and end after it starts.
+            _violations(
+                (F.col("valid_to") <= F.col("valid_from"))
+                | (F.col("_next_from").isNotNull() & ~F.col("valid_to").eqNullSafe(F.col("_next_from")))
+            ).alias("_bad_intervals"),
+        )
+        .filter((F.col("_current") != 1) | (F.col("_bad_intervals") > 0))
+    )
+    results.append(
+        _counted(
+            "star_listing_versions_consistent",
+            context,
+            violations=broken.count(),
+            frame=broken,
+            key=F.col("offer_key").cast("string"),
+        )
+    )
+
+    shares = (
+        star["fact_offer_observation"]
+        .agg(
+            F.count(F.lit(1)).alias("_rows"),
+            *[_violations(F.col(role) == UNKNOWN_KEY).alias(role) for role in _UNKNOWN_MEMBER_ROLES],
+        )
+        .collect()[0]
+    )
+    rows = int(shares["_rows"])
+    rates = {role: (int(shares[role]) / rows if rows else 0.0) for role in _UNKNOWN_MEMBER_ROLES}
+    worst = max(rates.values())
+    results.append(
+        _result(
+            "star_unknown_member_rate",
+            context,
+            status=PASS if worst <= _ADVISORY_MAJORITY else FAIL,
+            observed_value=worst,
+            keys=tuple(f"{role}={rate:.4f}" for role, rate in sorted(rates.items())),
+        )
+    )
+    return results
+
+
 def evaluate_quality_gates(
     observations: DataFrame,
     marts: Mapping[str, DataFrame],
@@ -453,6 +579,7 @@ def evaluate_quality_gates(
     *,
     duplicate_observation_ids: int = 0,
     accounted_rows: DataFrame | None = None,
+    star: Mapping[str, DataFrame] | None = None,
 ) -> tuple[QualityResult, ...]:
     """Run every registered rule and return exactly one result for each.
 
@@ -460,12 +587,14 @@ def evaluate_quality_gates(
     was deduplicated; ``observation_id_unique`` fails when it is not zero.
     ``accounted_rows`` (``crawl_run_id``, ``_silver_rows``, ``_last_observed_at``) replaces the
     observations as the Silver side of the audit reconciliation when it is given.
+    ``star`` maps every star table to the version this run built; without it the
+    star rules are SKIPPED.
 
     The reconciliation reads parsed counts from ``attempts`` and each crawl
     run's completion time from ``runs``, which decides whether the run has
     settled and is still inside the lookback.
     """
-    required = {rule.dataset_name for rule in QUALITY_RULES} - {"silver", "audit"}
+    required = {rule.dataset_name for rule in QUALITY_RULES} - {"silver", "audit", "star"}
     absent = required - set(marts)
     if absent:
         raise ValueError(f"quality evaluation needs these marts: {sorted(absent)}")
@@ -474,6 +603,7 @@ def evaluate_quality_gates(
     results.append(_evaluate_audit_reconciliation(observations, attempts, runs, context, accounted_rows))
     results.extend(_evaluate_gold(observations, marts, context, silver_rows))
     results.extend(_evaluate_advisory(marts, context, silver_rows))
+    results.extend(_evaluate_star(star, context))
 
     produced = {result.check_name for result in results}
     expected = {rule.check_name for rule in QUALITY_RULES}

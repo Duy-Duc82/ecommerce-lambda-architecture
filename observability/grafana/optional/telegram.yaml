@@ -1,0 +1,21 @@
+# Copied into the provisioning by start.sh only when TELEGRAM_BOT_TOKEN and
+# TELEGRAM_CHAT_ID are set (env/<stack>.env or the shell; never commit a token).
+apiVersion: 1
+contactPoints:
+  - orgId: 1
+    name: telegram
+    receivers:
+      - uid: telegram
+        type: telegram
+        settings:
+          bottoken: $TELEGRAM_BOT_TOKEN
+          chatid: $TELEGRAM_CHAT_ID
+          parse_mode: HTML
+        disableResolveMessage: false
+policies:
+  - orgId: 1
+    receiver: telegram
+    group_by: [grafana_folder, alertname]
+    group_wait: 30s
+    group_interval: 5m
+    repeat_interval: 4h

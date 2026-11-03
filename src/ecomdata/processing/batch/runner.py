@@ -5,10 +5,18 @@ refuses a stage the run's status does not allow, treats a stage whose milestone
 the run already passed as a no-op (unless ``force``), records each stage's
 outcome, marks a crashed run FAILED, and raises ``QualityGateFailure`` after a
 refused run has been recorded. The batch lock is held for the whole invocation,
-so ``--all`` and a single stage take it the same way.
+so ``--all`` and a single stage take it the same way. Each stage that runs is
+timed: the seconds go on its result and into ``_runs/run_id=<run>/timings/<stage>.json``
+next to the stages' own summaries, which hold their row counts.
+
+The run's audit row lives in PostgreSQL, where the state machine and the lock
+need it; its copy of record is ``_runs/run_id=<run>/run.json`` in the lake,
+rewritten after every stage and when the run fails.
 """
 from __future__ import annotations
 
+import json
+import time
 from collections.abc import Callable, Sequence
 from contextlib import AbstractContextManager, nullcontext
 from dataclasses import dataclass, field
@@ -30,19 +38,48 @@ from ecomdata.processing.batch.ports import (
     SparkProvider,
 )
 from ecomdata.processing.batch.stages.base import RunOptions, Stage, StageContext, StageNotAllowed, StageResult
+from ecomdata.processing.batch.stages.dimensions import DimensionsStage
+from ecomdata.processing.batch.stages.facts import FactsStage
 from ecomdata.processing.batch.stages.marts import MartsStage
 from ecomdata.processing.batch.stages.promote import PromoteStage
 from ecomdata.processing.batch.stages.publish import PublishStage
 from ecomdata.processing.batch.stages.quality import QualityStage
-from ecomdata.processing.batch.stages.silver import SilverStage
+from ecomdata.processing.batch.stages.silver import RUNS_DIRECTORY, SILVER_ZONE, SilverStage
 
 
 class RunNeedsResume(RuntimeError):
     """The run crashed earlier; going on needs an explicit ``--resume``."""
 
 
+def timing_key(run_id: str, stage: str) -> str:
+    return f"marketplace/{RUNS_DIRECTORY}/run_id={run_id}/timings/{stage}.json"
+
+
+def run_record_key(run_id: str) -> str:
+    return f"marketplace/{RUNS_DIRECTORY}/run_id={run_id}/run.json"
+
+
+def run_record_json(record: RunRecord) -> bytes:
+    """The run's audit row as the lake keeps it."""
+
+    def value(item: Any) -> Any:
+        if isinstance(item, datetime):
+            return item.isoformat()
+        return getattr(item, "value", item)
+
+    fields = {name: value(getattr(record, name)) for name in record.__dataclass_fields__}
+    fields["dataset_counts"] = dict(record.dataset_counts)
+    return json.dumps(fields, sort_keys=True, default=str).encode("utf-8")
+
+
+def _save_record(deps: BatchDependencies, run_id: str) -> None:
+    record = deps.audit.get(run_id)
+    if record is not None:
+        deps.store.put(SILVER_ZONE, run_record_key(run_id), run_record_json(record))
+
+
 def default_stages() -> tuple[Stage, ...]:
-    return (SilverStage(), MartsStage(), QualityStage(), PublishStage(), PromoteStage())
+    return (SilverStage(), DimensionsStage(), FactsStage(), MartsStage(), QualityStage(), PublishStage(), PromoteStage())
 
 
 @dataclass
@@ -58,6 +95,8 @@ class BatchDependencies:
     publisher: CachePublisher | None = None
     lock: Callable[[], AbstractContextManager[Any]] | None = None
     clock: Callable[[], datetime] = lambda: datetime.now(UTC)
+    # Measures how long a stage took; the clock above says when, and may be frozen in a test.
+    timer: Callable[[], float] = time.monotonic
 
 
 @dataclass
@@ -145,8 +184,10 @@ def _run(
             publisher=deps.publisher,
             clock=now,
         )
+        started_at, started = now(), deps.timer()
         try:
             outcome = stage.execute(ctx)
+            seconds = round(deps.timer() - started, 3)
             if forced or outcome.status is record.status:
                 audit.set_columns(context.run_id, **outcome.columns)
             else:
@@ -155,16 +196,36 @@ def _run(
                 audit.advance(context.run_id, outcome.status, now(), **outcome.columns)
         except Exception as error:
             _mark_failed(audit, context.run_id, now, error)
+            _try_save_record(deps, context.run_id)
             raise
         record = audit.get(context.run_id)
         report.record = record
-        report.stages.append(StageResult(stage.name, record.status, outcome.detail))
+        timing = {
+            "stage": stage.name,
+            "started_at": started_at.isoformat(),
+            "seconds": seconds,
+            "status": record.status.value,
+            "forced": forced,
+        }
+        deps.store.put(
+            SILVER_ZONE, timing_key(context.run_id, stage.name), json.dumps(timing, sort_keys=True).encode("utf-8")
+        )
+        _save_record(deps, context.run_id)
+        report.stages.append(StageResult(stage.name, record.status, outcome.detail, seconds=seconds))
         if outcome.failure is not None:
             raise outcome.failure
         if record.status is S.HELD:
             # A held run goes no further in this invocation: the operator decides next.
             break
     return report
+
+
+def _try_save_record(deps: BatchDependencies, run_id: str) -> None:
+    try:
+        _save_record(deps, run_id)
+    except Exception:
+        # The stage's error is the one to report.
+        pass
 
 
 def _mark_failed(audit: AuditRepo, run_id: str, now: Callable[[], datetime], error: BaseException) -> None:

@@ -1,0 +1,315 @@
+{
+  "completed_runs": 3,
+  "dataset": "replayed_fixture",
+  "environment": {
+    "docker_cpus": 8,
+    "docker_kernel": "6.6.87.2-microsoft-standard-WSL2",
+    "docker_mem_bytes": 14657216512,
+    "docker_os": "Docker Desktop",
+    "docker_server": "28.3.2",
+    "git_dirty": true,
+    "git_head": "7d6b8dfafcd9bea90b34d637478eb3a671d55adb",
+    "host_cpu_count": 8,
+    "host_platform": "Windows-11-10.0.26200-SP0",
+    "host_python": "3.12.13",
+    "images": {
+      "ecommerce/marketplace-python:1": "sha256:23e5681cec3cf9cdabfafac1211984f6bcdcc87474c86c2ad098d8e00443ccc8",
+      "ecommerce/spark-marketplace:4.0.1": "sha256:b81bc0fcbec70a6eedabb20a8fdd8aaf3b8ee61cf22c6bcf7a167ecae8ec2d39"
+    },
+    "live_stack_running_containers": 0,
+    "measured_at": "2026-10-31T09:11:51.398439+00:00"
+  },
+  "failed": false,
+  "failure": null,
+  "params": {
+    "categories": 120,
+    "delay": 2.0,
+    "pages": 1,
+    "rows_per_page": 40
+  },
+  "repeat": 3,
+  "runs": [
+    {
+      "metrics": {
+        "bytes_per_second": 59894.25937659966,
+        "completed": 120,
+        "failed": 0,
+        "latency_p50_ms": 2329,
+        "latency_p95_ms": 2911,
+        "latency_p99_ms": 3056,
+        "parsed": 4800,
+        "parsed_per_second": 14.558724602342846,
+        "partial": 0,
+        "requests": 120,
+        "requests_per_second": 0.36396811505857113,
+        "seconds": 329.699
+      },
+      "params": {
+        "categories": 120,
+        "delay": 2.0,
+        "pages": 1,
+        "rows_per_page": 40
+      },
+      "repeat": 0,
+      "resources": {
+        "bench-crawl-worker": {
+          "cpu_max_pct": 32.74,
+          "cpu_mean_pct": 6.86,
+          "mem_max_mib": 47.8,
+          "samples": 42
+        },
+        "bench-elasticsearch": {
+          "cpu_max_pct": 197.02,
+          "cpu_mean_pct": 20.66,
+          "mem_max_mib": 1489.9,
+          "samples": 49
+        },
+        "bench-kafka": {
+          "cpu_max_pct": 143.13,
+          "cpu_mean_pct": 24.32,
+          "mem_max_mib": 403.5,
+          "samples": 49
+        },
+        "bench-minio": {
+          "cpu_max_pct": 14.74,
+          "cpu_mean_pct": 1.85,
+          "mem_max_mib": 124.1,
+          "samples": 49
+        },
+        "bench-postgres-dw": {
+          "cpu_max_pct": 20.03,
+          "cpu_mean_pct": 4.32,
+          "mem_max_mib": 43.1,
+          "samples": 49
+        },
+        "bench-redis": {
+          "cpu_max_pct": 4.81,
+          "cpu_mean_pct": 0.52,
+          "mem_max_mib": 10.3,
+          "samples": 49
+        },
+        "bench-stub-source": {
+          "cpu_max_pct": 44.82,
+          "cpu_mean_pct": 2.21,
+          "mem_max_mib": 24.3,
+          "samples": 49
+        }
+      },
+      "started_at": "2026-10-31T09:11:51.399442+00:00"
+    },
+    {
+      "metrics": {
+        "bytes_per_second": 59595.65190874056,
+        "completed": 120,
+        "failed": 0,
+        "latency_p50_ms": 2372,
+        "latency_p95_ms": 2939,
+        "latency_p99_ms": 3102,
+        "parsed": 4800,
+        "parsed_per_second": 14.486140953525542,
+        "partial": 0,
+        "requests": 120,
+        "requests_per_second": 0.36215352383813854,
+        "seconds": 331.351
+      },
+      "params": {
+        "categories": 120,
+        "delay": 2.0,
+        "pages": 1,
+        "rows_per_page": 40
+      },
+      "repeat": 1,
+      "resources": {
+        "bench-crawl-worker": {
+          "cpu_max_pct": 17.21,
+          "cpu_mean_pct": 3.82,
+          "mem_max_mib": 39.9,
+          "samples": 41
+        },
+        "bench-elasticsearch": {
+          "cpu_max_pct": 131.24,
+          "cpu_mean_pct": 17.81,
+          "mem_max_mib": 1512.4,
+          "samples": 49
+        },
+        "bench-kafka": {
+          "cpu_max_pct": 179.32,
+          "cpu_mean_pct": 28.69,
+          "mem_max_mib": 426.5,
+          "samples": 49
+        },
+        "bench-minio": {
+          "cpu_max_pct": 7.69,
+          "cpu_mean_pct": 1.0,
+          "mem_max_mib": 119.9,
+          "samples": 49
+        },
+        "bench-postgres-dw": {
+          "cpu_max_pct": 58.16,
+          "cpu_mean_pct": 4.51,
+          "mem_max_mib": 41.6,
+          "samples": 49
+        },
+        "bench-redis": {
+          "cpu_max_pct": 6.86,
+          "cpu_mean_pct": 0.55,
+          "mem_max_mib": 12.4,
+          "samples": 49
+        },
+        "bench-stub-source": {
+          "cpu_max_pct": 32.07,
+          "cpu_mean_pct": 2.48,
+          "mem_max_mib": 38.6,
+          "samples": 49
+        }
+      },
+      "started_at": "2026-10-31T09:18:45.110377+00:00"
+    },
+    {
+      "metrics": {
+        "bytes_per_second": 59265.319273908164,
+        "completed": 120,
+        "failed": 0,
+        "latency_p50_ms": 2473,
+        "latency_p95_ms": 2919,
+        "latency_p99_ms": 3029,
+        "parsed": 4800,
+        "parsed_per_second": 14.405845748146142,
+        "partial": 0,
+        "requests": 120,
+        "requests_per_second": 0.36014614370365355,
+        "seconds": 333.198
+      },
+      "params": {
+        "categories": 120,
+        "delay": 2.0,
+        "pages": 1,
+        "rows_per_page": 40
+      },
+      "repeat": 2,
+      "resources": {
+        "bench-crawl-worker": {
+          "cpu_max_pct": 12.75,
+          "cpu_mean_pct": 1.75,
+          "mem_max_mib": 42.3,
+          "samples": 43
+        },
+        "bench-elasticsearch": {
+          "cpu_max_pct": 232.05,
+          "cpu_mean_pct": 15.64,
+          "mem_max_mib": 1697.8,
+          "samples": 48
+        },
+        "bench-kafka": {
+          "cpu_max_pct": 211.16,
+          "cpu_mean_pct": 21.93,
+          "mem_max_mib": 462.1,
+          "samples": 48
+        },
+        "bench-minio": {
+          "cpu_max_pct": 6.74,
+          "cpu_mean_pct": 0.91,
+          "mem_max_mib": 142.8,
+          "samples": 48
+        },
+        "bench-postgres-dw": {
+          "cpu_max_pct": 58.94,
+          "cpu_mean_pct": 3.7,
+          "mem_max_mib": 51.9,
+          "samples": 48
+        },
+        "bench-redis": {
+          "cpu_max_pct": 3.7,
+          "cpu_mean_pct": 0.44,
+          "mem_max_mib": 14.2,
+          "samples": 48
+        },
+        "bench-stub-source": {
+          "cpu_max_pct": 18.61,
+          "cpu_mean_pct": 1.0,
+          "mem_max_mib": 20.1,
+          "samples": 48
+        }
+      },
+      "started_at": "2026-10-31T09:25:34.893183+00:00"
+    }
+  ],
+  "scenario": "crawl",
+  "seed": 1,
+  "single_run": false,
+  "summary": {
+    "bytes_per_second": {
+      "max": 59894.25937659966,
+      "median": 59595.65190874056,
+      "min": 59265.319273908164,
+      "runs": 3
+    },
+    "completed": {
+      "max": 120,
+      "median": 120,
+      "min": 120,
+      "runs": 3
+    },
+    "failed": {
+      "max": 0,
+      "median": 0,
+      "min": 0,
+      "runs": 3
+    },
+    "latency_p50_ms": {
+      "max": 2473,
+      "median": 2372,
+      "min": 2329,
+      "runs": 3
+    },
+    "latency_p95_ms": {
+      "max": 2939,
+      "median": 2919,
+      "min": 2911,
+      "runs": 3
+    },
+    "latency_p99_ms": {
+      "max": 3102,
+      "median": 3056,
+      "min": 3029,
+      "runs": 3
+    },
+    "parsed": {
+      "max": 4800,
+      "median": 4800,
+      "min": 4800,
+      "runs": 3
+    },
+    "parsed_per_second": {
+      "max": 14.558724602342846,
+      "median": 14.486140953525542,
+      "min": 14.405845748146142,
+      "runs": 3
+    },
+    "partial": {
+      "max": 0,
+      "median": 0,
+      "min": 0,
+      "runs": 3
+    },
+    "requests": {
+      "max": 120,
+      "median": 120,
+      "min": 120,
+      "runs": 3
+    },
+    "requests_per_second": {
+      "max": 0.36396811505857113,
+      "median": 0.36215352383813854,
+      "min": 0.36014614370365355,
+      "runs": 3
+    },
+    "seconds": {
+      "max": 333.198,
+      "median": 331.351,
+      "min": 329.699,
+      "runs": 3
+    }
+  },
+  "variant": "delay=2s"
+}

@@ -10,6 +10,7 @@ them.
 """
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -19,7 +20,7 @@ from typing import Protocol
 from ecomdata.domain import validation as v
 from ecomdata.domain.acquisition import AcquisitionReport, AcquisitionStatus, RecordPublishError
 from ecomdata.domain.observations import CrawlRun, CrawlRunStatus
-from ecomdata.ingestion.audit import CrawlAttemptAudit, CrawlAuditRepository
+from ecomdata.ingestion.audit import CrawlAttemptAudit, CrawlAuditRepository, LakeCrawlAuditLog
 from ecomdata.ingestion.frontier import LeaseLostError, PostgresCrawlFrontier
 from ecomdata.ingestion.scheduling import (
     DEFAULT_CADENCE_MINUTES,
@@ -30,6 +31,8 @@ from ecomdata.ingestion.scheduling import (
     decide_retry,
     next_scheduled_for,
 )
+
+LOGGER = logging.getLogger(__name__)
 
 # A parser or validation failure says this response was bad, not that the
 # source is down, so it never counts towards opening the circuit.
@@ -89,6 +92,7 @@ class CrawlWorker:
         jitter: Callable[[], Decimal] = lambda: Decimal("0.5"),
         cadence_minutes: Mapping[str, int] = DEFAULT_CADENCE_MINUTES,
         marketplace_ids: Sequence[str] | None = None,
+        audit_log: LakeCrawlAuditLog | None = None,
     ):
         if not callable(executor):
             raise TypeError("executor must be callable")
@@ -111,6 +115,8 @@ class CrawlWorker:
         self.jitter = jitter
         self.cadence_minutes = dict(cadence_minutes)
         self.marketplace_ids = tuple(marketplace_ids) if marketplace_ids else None
+        # The lake copy of the audit (the copy of record); PostgreSQL keeps the operational one.
+        self.audit_log = audit_log
 
     def run_once(self, *, crawl_run_id_for: Callable[[CrawlTask], str]) -> CycleResult:
         """Run one polling cycle. Never sleeps; an outer CLI owns the interval."""
@@ -197,7 +203,7 @@ class CrawlWorker:
         )
 
     def _on_success(self, task, run, report, started_at, completed_at) -> str:
-        self.audit.record_attempt(
+        attempt = self._record_attempt(
             CrawlAttemptAudit(
                 crawl_run_id=run.crawl_run_id,
                 task_id=task.task_id,
@@ -221,7 +227,7 @@ class CrawlWorker:
             next_scheduled_for=next_scheduled_for(task.tier, completed_at, self.cadence_minutes),
         )
         self.audit.record_source_success(task.marketplace_code, completed_at)
-        self._finish(run, completed_at, CrawlRunStatus.COMPLETED, succeeded=1, failed=0)
+        self._finish(run, completed_at, CrawlRunStatus.COMPLETED, succeeded=1, failed=0, task=task, attempt=attempt)
         return "SUCCEEDED"
 
     def _on_failure(self, task, run, report, error, started_at, completed_at) -> str:
@@ -233,13 +239,16 @@ class CrawlWorker:
         error = error or getattr(failure, "error", None) or RuntimeError("acquisition failed")
         parsed_count = report.record_count if report else 0
         if isinstance(error, RecordPublishError):
-            # The fetch, raw write and parse all happened; only publication
-            # failed part-way. The report rides on the error so the audit can
-            # still name the raw artifact, and only the observations Kafka
-            # acknowledged count as parsed: nothing else can reach Silver, and
-            # Phase 7 check 8 reconciles exactly this number against it.
+            # The fetch, raw write, parse and the Bronze records file all happened;
+            # only publication to Kafka failed part-way. The report rides on the
+            # error so the audit can still name the raw artifact. Silver is built
+            # from that records file, not from Kafka, so every row in it reaches
+            # Silver and counts as parsed: silver_parse_attempt_reconciliation
+            # compares exactly this number per crawl run. Counting only what Kafka
+            # acknowledged (the Silver-from-Kafka design) held every batch back
+            # after a Kafka outage (found 2026-10-31).
             report = error.report
-            parsed_count = error.acknowledged
+            parsed_count = report.record_count
         http_status = _http_status(report, error)
         kind = classify_failure(error, http_status)
         decision = decide_retry(
@@ -251,7 +260,7 @@ class CrawlWorker:
             policy=self.policy,
             jitter_unit=self.jitter(),
         )
-        self.audit.record_attempt(
+        attempt = self._record_attempt(
             CrawlAttemptAudit(
                 crawl_run_id=run.crawl_run_id,
                 task_id=task.task_id,
@@ -284,7 +293,7 @@ class CrawlWorker:
                 http_status=http_status,
                 error_message=str(error),
             )
-            self._finish(run, completed_at, CrawlRunStatus.PARTIAL, succeeded=0, failed=1)
+            self._finish(run, completed_at, CrawlRunStatus.PARTIAL, succeeded=0, failed=1, task=task, attempt=attempt)
             return "RETRY"
         self.frontier.mark_failed(
             task_id=task.task_id,
@@ -294,20 +303,32 @@ class CrawlWorker:
             http_status=http_status,
             error_message=str(error),
         )
-        self._finish(run, completed_at, CrawlRunStatus.FAILED, succeeded=0, failed=1)
+        self._finish(run, completed_at, CrawlRunStatus.FAILED, succeeded=0, failed=1, task=task, attempt=attempt)
         return "FAILED"
 
-    def _finish(self, run, completed_at, status, *, succeeded, failed) -> None:
-        self.audit.finish_run(
-            CrawlRun(
-                run.crawl_run_id,
-                run.marketplace_id,
-                run.started_at,
-                completed_at,
-                status,
-                requested=1,
-                succeeded=succeeded,
-                failed=failed,
-                adapter_version=run.adapter_version,
-            )
+    def _record_attempt(self, attempt: CrawlAttemptAudit) -> CrawlAttemptAudit:
+        self.audit.record_attempt(attempt)
+        return attempt
+
+    def _finish(self, run, completed_at, status, *, succeeded, failed, task, attempt) -> None:
+        finished = CrawlRun(
+            run.crawl_run_id,
+            run.marketplace_id,
+            run.started_at,
+            completed_at,
+            status,
+            requested=1,
+            succeeded=succeeded,
+            failed=failed,
+            adapter_version=run.adapter_version,
         )
+        self.audit.finish_run(finished)
+        if self.audit_log is None:
+            return
+        try:
+            self.audit_log.write(finished, ((attempt, task),))
+        except Exception:
+            # The fetch, its Bronze records and the operational audit are all
+            # written; a lost lake audit object must not turn them into a retry.
+            # `ops audit-export` rebuilds the lake copy from PostgreSQL.
+            LOGGER.warning("could not write the lake audit of crawl run %s", run.crawl_run_id, exc_info=True)

@@ -34,6 +34,16 @@ PAGE_CONTEXT_KEYS = (
 )
 
 
+def _empty_category(catalog: dict[str, Any]) -> bool:
+    """Tiki says the category holds nothing (``paging.total`` 0), so no rows is the right answer.
+
+    Sitemap categories include leaves with no products (measured 2026-10-31,
+    ``tinh-bot-nghe/c10560``). No rows without that statement stays a parse error.
+    """
+    paging = catalog.get("paging")
+    return isinstance(paging, dict) and paging.get("total") == 0
+
+
 class TikiExtractor:
     def request_url(self, base_url: str, target: str, page: int = 1) -> str:
         if not _CATEGORY_PATH.match(target):
@@ -67,9 +77,10 @@ class TikiExtractor:
         rows = catalog.get("data")
         if not isinstance(rows, list):
             raise ListingPageParseError("Tiki catalog.data must be a list")
-        if not rows:
+        if not rows and not _empty_category(catalog):
             raise ListingPageParseError("Tiki category page has no products")
         if not all(isinstance(row, dict) for row in rows):
             raise ListingPageParseError("Tiki catalog.data holds a row that is not an object")
+        # An empty category still yields its page-context record: proof it was crawled and empty.
         context = {key: catalog[key] for key in PAGE_CONTEXT_KEYS if key in catalog}
         return ExtractedPage(rows=tuple(rows), page_context=context, last_page=1)

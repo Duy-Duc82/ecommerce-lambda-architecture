@@ -375,3 +375,19 @@ def test_every_object_carries_the_migration_stamps_kibana_expects():
         # migrations and the import fails with a 500.
         assert obj["coreMigrationVersion"] == d.CORE_MIGRATION_VERSION
         assert obj["typeMigrationVersion"] == d.TYPE_MIGRATION_VERSIONS[obj["type"]]
+
+
+def test_every_lens_panel_names_its_data_view_inside_its_attributes():
+    """With only the dashboard-level reference, Kibana 8.18 imports the panel but Lens
+    never resolves its data view: the panel stays loading, empty, with no error."""
+    for dashboard in (obj for obj in _committed() if obj["type"] == "dashboard"):
+        outer = {reference["name"]: reference["id"] for reference in dashboard["references"]}
+        for panel in json.loads(dashboard["attributes"]["panelsJSON"]):
+            if panel["type"] != "lens":
+                continue
+            attributes = panel["embeddableConfig"]["attributes"]
+            inner = {reference["name"]: reference["id"] for reference in attributes["references"]}
+            for layer_id in attributes["state"]["datasourceStates"]["formBased"]["layers"]:
+                name = f"indexpattern-datasource-layer-{layer_id}"
+                assert name in inner, f"{dashboard['id']}/{panel['panelIndex']} does not name its data view"
+                assert inner[name] == outer[f"{panel['panelIndex']}:{name}"]

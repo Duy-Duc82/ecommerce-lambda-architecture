@@ -17,7 +17,7 @@ from ecomdata.domain.batch_run import BatchRunStatus
 if TYPE_CHECKING:
     from pyspark.sql import DataFrame, SparkSession
 
-    from ecomdata.processing.batch.context import GoldWriteResult, MarketplaceBatchContext
+    from ecomdata.processing.batch.context import DwWriteResult, GoldWriteResult, MarketplaceBatchContext
     from ecomdata.processing.batch.quality import QualityDecision, QualityResult
     from ecomdata.processing.batch.repositories import StagedDataset
 
@@ -108,16 +108,33 @@ class CachePublisher(Protocol):
 class LakeIO(Protocol):
     """Reading and writing the datasets stages hand to each other through storage."""
 
-    def read_records(self, *, since_date: Any = None) -> DataFrame:
-        """Bronze/records (envelope columns and ``payload_json``), from ``since_date`` on."""
+    def read_records(self, *, days: Sequence[Any] | None = None) -> DataFrame:
+        """Bronze/records (envelope columns, ``payload_json``, ``bronze_date``) of ``days``; ``None``: every day."""
 
-    def write_silver(self, name: str, frame: DataFrame, *, partition_by: Sequence[str] = ()) -> str: ...
+    def write_silver(
+        self, name: str, frame: DataFrame, *, partition_by: Sequence[str] = (), whole: bool = False
+    ) -> str:
+        """Replace the partitions ``frame`` has rows for; ``whole`` replaces the dataset."""
 
     def read_silver(self, name: str) -> DataFrame: ...
 
     def write_gold(self, context: MarketplaceBatchContext, name: str, frame: DataFrame) -> GoldWriteResult: ...
 
     def read_gold(self, context: MarketplaceBatchContext, name: str) -> DataFrame: ...
+
+    def merge_dw(self, context: MarketplaceBatchContext, name: str, frame: DataFrame) -> DwWriteResult:
+        """Make the star table ``name`` hold exactly ``frame``, matched on the registry key.
+
+        Delta: one ``MERGE`` (insert new keys, update changed rows, delete keys
+        ``frame`` no longer has), so a rerun on the same data rewrites no row
+        and every earlier version stays readable. Parquet: an overwrite.
+        """
+
+    def read_dw(self, context: MarketplaceBatchContext, name: str, version: int | None = None) -> DataFrame:
+        """A star table as it is, or as it was at ``version``."""
+
+    def restore_dw(self, context: MarketplaceBatchContext, name: str, version: int) -> int:
+        """Make ``version`` the star table's content again, as a new version; returns that version."""
 
 
 BatchLock = Callable[[], AbstractContextManager[Any]]

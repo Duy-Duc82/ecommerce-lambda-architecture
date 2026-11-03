@@ -496,10 +496,11 @@ def _publish_failure(report, acknowledged):
     return executor
 
 
-def test_a_partial_publish_records_only_the_acknowledged_rows():
-    # Phase 7 check 8 compares parsed_count with Silver rows per crawl run.
-    # Only acknowledged observations can ever reach Silver, so recording the
-    # parsed total would leave that run mismatched for good.
+def test_a_partial_publish_records_every_row_of_the_bronze_records_file():
+    # silver_parse_attempt_reconciliation compares parsed_count with Silver rows
+    # per crawl run, and Silver is built from the Bronze records file written
+    # before publishing. Recording only the acknowledged rows left the run
+    # mismatched and held every batch back after a Kafka outage.
     report = FakeReport(records=(1, 2, 3, 9))
     report.raw_artifact = SimpleNamespace(raw_artifact_id="raw_1", raw_uri="s3a://bronze/raw_1/body.bin", raw_bytes=512)
     frontier, audit = FakeFrontier(tasks=[_task()]), FakeAudit()
@@ -509,7 +510,7 @@ def test_a_partial_publish_records_only_the_acknowledged_rows():
     (attempt,) = audit.attempts
     assert attempt.status == "FAILED"
     assert attempt.error_kind == FailureKind.PUBLISH_ERROR
-    assert attempt.parsed_count == 2
+    assert attempt.parsed_count == report.record_count
     assert attempt.rejected_count == 0
     # The raw response was stored before parsing, and the audit must say where.
     assert attempt.raw_artifact_id == "raw_1"
@@ -517,13 +518,13 @@ def test_a_partial_publish_records_only_the_acknowledged_rows():
     assert result.retried == 1
 
 
-def test_a_publish_failure_with_nothing_acknowledged_records_zero():
+def test_a_publish_failure_with_nothing_acknowledged_still_counts_the_stored_rows():
     report = FakeReport(records=(1, 2))
     frontier, audit = FakeFrontier(tasks=[_task()]), FakeAudit()
 
     _run(frontier, audit, _publish_failure(report, 0))
 
-    assert audit.attempts[0].parsed_count == 0
+    assert audit.attempts[0].parsed_count == report.record_count
 
 
 def test_a_publish_failure_is_retried_and_never_opens_the_source_circuit():
