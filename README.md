@@ -17,6 +17,7 @@ Lịch:
 
 ## Báo cáo (mới nhất trước)
 
+- [2026-11-03 17:58](reports/2026-11-03.md) — CẦN XEM: mốc 30 ngày nhưng không có 30 ngày dữ liệu (mp-live chỉ chạy 10-04..10-06, 0 batch SUCCEEDED); Docker tắt, không batch/evaluate/evidence; user cần quyết integration run + tag freeze; ổ C còn 197.2 GiB (+7.9)
 - [2026-11-02 19:35](reports/2026-11-02.md) — CẦN XEM: mp-live vẫn tắt (0/10); Docker tắt, máy mới bật 19:27; không batch; Docker chạy ngắn 11-01 13:58–14:46 rồi tắt bình thường; ổ C còn 189.3 GiB (−2.1); mai tới bước tóm tắt 30 ngày nhưng không có dữ liệu
 - [2026-11-01 11:08](reports/2026-11-01.md) — CẦN XEM: mp-live vẫn tắt (0/10); Docker tắt, máy mới bật 10:57; không batch; Docker (mp-refactor E2E) chạy tới 00:51 rồi dừng bình thường; ổ C còn 191.4 GiB (−29.9)
 - [2026-10-31 09:35](reports/2026-10-31.md) — CẦN XEM: mp-live vẫn tắt (0/10); Docker tắt, máy mới bật 09:26; không batch; Docker (mp-refactor) chạy đêm qua tới 01:18 rồi lỗi engine WSL; ổ C còn 221.3 GiB (−2.9)
