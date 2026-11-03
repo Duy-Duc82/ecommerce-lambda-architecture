@@ -1,7 +1,7 @@
 # Source feasibility matrix (Brief §3, P0-01)
 
 > **Bản nháp, tổng hợp 2026-10-04, chưa được thầy hướng dẫn duyệt.** Mọi số
-> liệu dưới đây là số đã đo và đã ghi trước đó trong `PROGRESS.md` (§4,
+> liệu dưới đây là số đã đo và đã ghi trước đó trong `archive/PROGRESS.md` (§4,
 > §4a, các lượt chạy 2026-07-26, 2026-08-16, 2026-08-17) hoặc trong audit của
 > stack `mp-live` (2026-10-04). File này **không** đưa ra phép đo mới. Ô nào
 > chưa có bằng chứng thì ghi "chưa đo", không ước đoán.
