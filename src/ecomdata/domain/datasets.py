@@ -62,8 +62,8 @@ class MarketplaceDataset:
 
     @property
     def postgres_table(self) -> str:
-        # Mart tables carry a prefix because cache is shared with the Kaggle
-        # marts; dw belongs to the marketplace star alone.
+        # Mart tables carry a `marketplace_` prefix in the shared cache schema;
+        # dw holds the marketplace star alone.
         return f"marketplace_{self.name}" if self.kind == MART else self.name
 
     @property

@@ -1,8 +1,7 @@
-"""The conformed date dimension, shared by the Kaggle and the marketplace stars.
+"""The date dimension of the marketplace star.
 
-``docs/DATA_MODEL.md`` sections 4.3–4.4. One builder, one set of rows and one
-meaning for every column: that is what lets the two stars share ``dim_date``
-even though they share nothing else.
+``docs/DATA_MODEL.md`` sections 4.3–4.4. A fixed calendar, built the same way
+in every run, with the Vietnamese sale days and holidays marked.
 """
 from __future__ import annotations
 
@@ -13,8 +12,7 @@ from pyspark.sql import functions as F
 
 from ecomdata.processing.batch.keys import UNKNOWN_KEY, with_unknown_member
 
-# Covers the Kaggle file (October 2019 to April 2020) and the marketplace
-# collection with room to spare: about 4 400 rows.
+# Covers the marketplace collection with room to spare: about 4 400 rows.
 DIM_DATE_START = date(2019, 1, 1)
 DIM_DATE_END = date(2030, 12, 31)
 
@@ -60,7 +58,7 @@ def build_dim_date(spark: SparkSession, start: date = DIM_DATE_START, end: date 
     built = days.select(
         F.date_format("full_date", "yyyyMMdd").cast("int").alias("date_key"),
         "full_date",
-        # Spark's numbering, 1 = Sunday, as the Kaggle star always had it.
+        # Spark's numbering, 1 = Sunday.
         smallint(F.dayofweek("full_date")).alias("day_of_week"),
         F.date_format("full_date", "EEEE").alias("day_name"),
         smallint(F.weekofyear("full_date")).alias("week_of_year"),
