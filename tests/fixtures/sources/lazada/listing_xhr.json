@@ -1,0 +1,739 @@
+{
+ "templates": [],
+ "mods": {
+  "filter": {
+   "tItemType": "nt_filter",
+   "filterItems": [
+    {
+     "name": "category",
+     "unfoldRow": "-1",
+     "title": "Danh mục liên quan",
+     "urlKey": "category",
+     "hidden": false,
+     "locked": false,
+     "type": "category",
+     "uniqueName": "category",
+     "value": "dien-thoai-di-dong",
+     "displayValue": "Smartphones",
+     "options": [
+      {
+       "url": "/dien-thoai-di-dong",
+       "title": "Điện thoại di động",
+       "value": "dien-thoai-di-dong"
+      }
+     ]
+    },
+    {
+     "name": "brand",
+     "unfoldRow": "-1",
+     "title": "Thương hiệu",
+     "urlKey": "ppath",
+     "hidden": false,
+     "locked": false,
+     "type": "brand",
+     "uniqueName": "20000",
+     "options": [
+      {
+       "title": "No Brand",
+       "value": "no-brand"
+      },
+      {
+       "title": "Samsung",
+       "value": "lazada6704001704_samsung-127167201"
+      },
+      {
+       "title": "Xiaomi",
+       "value": "lazada6708005704_xiaomi-127166809"
+      }
+     ]
+    },
+    {
+     "name": "service",
+     "unfoldRow": "4",
+     "title": "Dịch vụ & Khuyến mãi",
+     "urlKey": "service",
+     "hidden": false,
+     "locked": false,
+     "type": "multiple",
+     "uniqueName": "service",
+     "options": [
+      {
+       "title": "Sale Cuối Tháng",
+       "value": "2025_MES_Nov",
+       "activeIcon": "",
+       "normalIcon": ""
+      },
+      {
+       "title": "Xử lý đơn hàng bởi Lazada",
+       "value": "FBL",
+       "activeIcon": "",
+       "normalIcon": ""
+      },
+      {
+       "title": "Voucher Max",
+       "value": "Voucher_Max",
+       "activeIcon": "",
+       "normalIcon": ""
+      }
+     ]
+    }
+   ],
+   "filteredQuatity": "2400",
+   "filteredDoneText": "Sản Phẩm",
+   "title": "Bộ lọc tìm kiếm",
+   "pos": 0
+  },
+  "listItems": [
+   {
+    "name": "HUAWEI | Điện Thoại Gập Pura X Màn Hình Lớn Camera Đôi Dùng Cho Doanh Nghiệp Với HarmonyOS Bao Da Da Cam 5G",
+    "nid": "13448421143",
+    "itemId": "13448421143",
+    "icons": [
+     {
+      "domClass": "167087",
+      "type": "img",
+      "group": "6",
+      "showType": "0",
+      "bizType": "Freeshipping"
+     },
+     {
+      "domClass": "76432",
+      "type": "img",
+      "group": "3",
+      "showType": "0",
+      "bizType": "lazMall"
+     }
+    ],
+    "image": "https://filebroker-cdn.lazada.vn/kf/S15e4b7b2738c4066b931dbb679d55395j.png",
+    "isSmartImage": false,
+    "originalPriceShow": "",
+    "priceShow": "601.976.000 ₫",
+    "ratingScore": "5.0",
+    "review": "5",
+    "location": "Hong Kong",
+    "thumbs": [
+     {
+      "image": "https://filebroker-cdn.lazada.vn/kf/S1e837e94880140ba959d6f1e72d69b30I.jpg",
+      "sku": "13448421143_VNAMZ",
+      "skuId": "117280419953",
+      "itemUrl": "/products/pdp-i13448421143.html",
+      "querystring": ""
+     },
+     {
+      "image": "https://filebroker-cdn.lazada.vn/kf/S5faae4b2ac2d448d857fab9140fa8b79t.png",
+      "sku": "13448421143_VNAMZ",
+      "skuId": "117280419962",
+      "itemUrl": "/products/pdp-i13448421143.html",
+      "querystring": ""
+     }
+    ],
+    "sellerName": "Brand Super Deal",
+    "sellerId": "200194944463",
+    "brandName": "HUAWEI",
+    "brandId": "127198865",
+    "cheapest_sku": "13448421143_VNAMZ-117280419953",
+    "skuId": "117280419953",
+    "sku": "13448421143_VNAMZ",
+    "categories": [
+     4402,
+     4518
+    ],
+    "price": "601976000",
+    "restrictedAge": 0,
+    "inStock": true,
+    "clickTrace": "query:;nid:13448421143;src:LazadaMainSrp;rn:acc1578cc65e0ed9f516a73ed444afdf;region:vn;sku:13448421143_VNAMZ;price:601976000;client:desktop;supplier_id:200194944463;session_id:;biz_source:h5_internal;slot:0;utlog_bucket_id:470687;asc_category_id:4518;item_id:13448421143;sku_id:117280419953;shop_id:2",
+    "longImageDisplayable": false,
+    "skus": [
+     {
+      "id": "13448421143_VNAMZ-117280419953"
+     }
+    ],
+    "promotionId": "",
+    "isSponsored": false,
+    "tItemType": "nt_product",
+    "skuType": "2",
+    "adFlag": "0",
+    "directSimilarUrl": "https://native.m.lazada.com/dynamicxresult?item_img=https%3A%2F%2Ffilebroker-cdn.lazada.vn%2Fkf%2FS15e4b7b2738c4066b931dbb679d55395j.png&src=srp_findsimilar&item_id=13448421143&sku_id=117280419953&params=%7B%22sub_src%22%3A%22long_press%22%2C%22src%22%3A%22srp_findsimilar%22%7D&m=tpp_findSimilar&sim",
+    "gridTitleLine": "2",
+    "isFission": "0",
+    "isBadgeAutoScroll": false,
+    "showCart": false,
+    "showBackIcon": false,
+    "showUnitPrice": false,
+    "itemUrl": "//www.lazada.vn/products/pdp-i13448421143.html",
+    "querystring": "fs_ab=2&priceCompare=skuId%3A117280419953%3Bsource%3Alazada-search-voucher%3Bsn%3Aacc1578cc65e0ed9f516a73ed444afdf%3BoriginPrice%3A601976000%3BdisplayPrice%3A601976000%3BisGray%3Afalse%3BsinglePromotionId%3A-1%3BsingleToolCode%3A-1%3BvoucherPricePlugin%3A0%3Btimestamp%3A1792840672206&c=&ratingscore=5.0&freeshipping=1&source=search&channelLpJumpArgs=&fuse_fs=&search=1&sale=0&price=6.01976E%208&review=5&location=Hong%20Kong&stock=1&lang=vi&request_id=acc1578cc65e0ed9f516a73ed444afdf&clickTrackInfo=query%253A%253Bnid%253A13448421143%253Bsrc%253ALazadaMainSrp%253Brn%253Aacc1578cc65e0ed9f516a73ed444afdf%253Bregion%253Avn%253Bsku%253A13448421143_VNAMZ%253Bprice%253A601976000%253Bclient%253Adesktop%253Bsupplier_id%253A200194944463%253Bsession_id%253A%253Bbiz_source%253Ah5_internal%253Bslot%253A0%253Butlog_bucket_id%253A470687%253Basc_category_id%253A4518%253Bitem_id%253A13448421143%253Bsku_id%253A117280419953%253Bshop_id%253A2874615%253BtemplateInfo%253A107883_E%2523-1_A3_C%2523"
+   },
+   {
+    "name": "Điện thoại Oppo A6c (4GB/64GB) - Hàng chính hãng",
+    "nid": "13493380149",
+    "itemId": "13493380149",
+    "icons": [
+     {
+      "domClass": "167087",
+      "type": "img",
+      "group": "6",
+      "showType": "0",
+      "bizType": "Freeshipping"
+     },
+     {
+      "domClass": "76432",
+      "type": "img",
+      "group": "3",
+      "showType": "0",
+      "bizType": "lazMall"
+     }
+    ],
+    "image": "https://vn-live-01.slatic.net/p/617da8ae19e38d1bcde741686f25cd0b.jpg",
+    "isSmartImage": false,
+    "originalPriceShow": "",
+    "priceShow": "4.690.000 ₫",
+    "ratingScore": "",
+    "review": "",
+    "location": "Bến Tre",
+    "thumbs": [
+     {
+      "image": "https://vn-live-01.slatic.net/p/300e2164ec2f83b6ba983538c47ddd16.jpg",
+      "sku": "13493380149_VNAMZ",
+      "skuId": "117467533449",
+      "itemUrl": "/products/pdp-i13493380149.html",
+      "querystring": ""
+     },
+     {
+      "image": "https://vn-live-01.slatic.net/p/658d21365af04c0f3985690cbc6f8e11.jpg",
+      "sku": "13493380149_VNAMZ",
+      "skuId": "117467533450",
+      "itemUrl": "/products/pdp-i13493380149.html",
+      "querystring": ""
+     }
+    ],
+    "sellerName": "Long Hưng TechZone",
+    "sellerId": "200164227353",
+    "brandName": "OPPO",
+    "brandId": "127167612",
+    "cheapest_sku": "13493380149_VNAMZ-117467533449",
+    "skuId": "117467533449",
+    "sku": "13493380149_VNAMZ",
+    "categories": [
+     4402,
+     4518
+    ],
+    "price": "4690000",
+    "restrictedAge": 0,
+    "inStock": true,
+    "clickTrace": "query:;nid:13493380149;src:LazadaMainSrp;rn:acc1578cc65e0ed9f516a73ed444afdf;region:vn;sku:13493380149_VNAMZ;price:4690000;client:desktop;supplier_id:200164227353;session_id:;biz_source:h5_internal;slot:1;utlog_bucket_id:470687;asc_category_id:4518;item_id:13493380149;sku_id:117467533449;shop_id:171",
+    "longImageDisplayable": false,
+    "skus": [
+     {
+      "id": "13493380149_VNAMZ-117467533449"
+     }
+    ],
+    "promotionId": "",
+    "isSponsored": false,
+    "tItemType": "nt_product",
+    "skuType": "2",
+    "adFlag": "0",
+    "directSimilarUrl": "https://native.m.lazada.com/dynamicxresult?item_img=https%3A%2F%2Fvn-live-01.slatic.net%2Fp%2F617da8ae19e38d1bcde741686f25cd0b.jpg&src=srp_findsimilar&item_id=13493380149&sku_id=117467533449&params=%7B%22sub_src%22%3A%22long_press%22%2C%22src%22%3A%22srp_findsimilar%22%7D&m=tpp_findSimilar&similarTy",
+    "gridTitleLine": "2",
+    "isFission": "0",
+    "isBadgeAutoScroll": false,
+    "showCart": false,
+    "showBackIcon": false,
+    "showUnitPrice": false,
+    "itemUrl": "//www.lazada.vn/products/pdp-i13493380149.html",
+    "querystring": "fs_ab=2&priceCompare=skuId%3A117467533449%3Bsource%3Alazada-search-voucher%3Bsn%3Aacc1578cc65e0ed9f516a73ed444afdf%3BoriginPrice%3A4690000%3BdisplayPrice%3A4690000%3BisGray%3Afalse%3BsinglePromotionId%3A-1%3BsingleToolCode%3A-1%3BvoucherPricePlugin%3A0%3Btimestamp%3A1792840672206&c=&ratingscore=&freeshipping=1&source=search&channelLpJumpArgs=&fuse_fs=&search=1&sale=0&price=4.69E%206&review=&location=B%E1%BA%BFn%20Tre&stock=1&lang=vi&request_id=acc1578cc65e0ed9f516a73ed444afdf&clickTrackInfo=query%253A%253Bnid%253A13493380149%253Bsrc%253ALazadaMainSrp%253Brn%253Aacc1578cc65e0ed9f516a73ed444afdf%253Bregion%253Avn%253Bsku%253A13493380149_VNAMZ%253Bprice%253A4690000%253Bclient%253Adesktop%253Bsupplier_id%253A200164227353%253Bsession_id%253A%253Bbiz_source%253Ah5_internal%253Bslot%253A1%253Butlog_bucket_id%253A470687%253Basc_category_id%253A4518%253Bitem_id%253A13493380149%253Bsku_id%253A117467533449%253Bshop_id%253A1714262%253BtemplateInfo%253A107883_E%2523-1_A3_C%2523"
+   },
+   {
+    "name": "Điện thoại Oppo A6c - Hàng chính hãng",
+    "nid": "13493380140",
+    "itemId": "13493380140",
+    "icons": [
+     {
+      "domClass": "167087",
+      "type": "img",
+      "group": "6",
+      "showType": "0",
+      "bizType": "Freeshipping"
+     },
+     {
+      "domClass": "76432",
+      "type": "img",
+      "group": "3",
+      "showType": "0",
+      "bizType": "lazMall"
+     }
+    ],
+    "image": "https://vn-live-01.slatic.net/p/617da8ae19e38d1bcde741686f25cd0b.jpg",
+    "isSmartImage": false,
+    "originalPriceShow": "",
+    "priceShow": "4.690.000 ₫",
+    "ratingScore": "",
+    "review": "",
+    "location": "Bến Tre",
+    "thumbs": [
+     {
+      "image": "https://vn-live-01.slatic.net/p/658d21365af04c0f3985690cbc6f8e11.jpg",
+      "sku": "13493380140_VNAMZ",
+      "skuId": "117485514963",
+      "itemUrl": "/products/pdp-i13493380140.html",
+      "querystring": ""
+     },
+     {
+      "image": "https://vn-live-01.slatic.net/p/300e2164ec2f83b6ba983538c47ddd16.jpg",
+      "sku": "13493380140_VNAMZ",
+      "skuId": "117485514964",
+      "itemUrl": "/products/pdp-i13493380140.html",
+      "querystring": ""
+     }
+    ],
+    "sellerName": "Long Hưng TechZone",
+    "sellerId": "200164227353",
+    "brandName": "OPPO",
+    "brandId": "127167612",
+    "cheapest_sku": "13493380140_VNAMZ-117485514963",
+    "skuId": "117485514963",
+    "sku": "13493380140_VNAMZ",
+    "categories": [
+     4402,
+     4518
+    ],
+    "price": "4690000",
+    "restrictedAge": 0,
+    "inStock": true,
+    "clickTrace": "query:;nid:13493380140;src:LazadaMainSrp;rn:acc1578cc65e0ed9f516a73ed444afdf;region:vn;sku:13493380140_VNAMZ;price:4690000;client:desktop;supplier_id:200164227353;session_id:;biz_source:h5_internal;slot:2;utlog_bucket_id:470687;asc_category_id:4518;item_id:13493380140;sku_id:117485514963;shop_id:171",
+    "longImageDisplayable": false,
+    "skus": [
+     {
+      "id": "13493380140_VNAMZ-117485514963"
+     }
+    ],
+    "promotionId": "",
+    "isSponsored": false,
+    "tItemType": "nt_product",
+    "skuType": "2",
+    "adFlag": "0",
+    "directSimilarUrl": "https://native.m.lazada.com/dynamicxresult?item_img=https%3A%2F%2Fvn-live-01.slatic.net%2Fp%2F617da8ae19e38d1bcde741686f25cd0b.jpg&src=srp_findsimilar&item_id=13493380140&sku_id=117485514963&params=%7B%22sub_src%22%3A%22long_press%22%2C%22src%22%3A%22srp_findsimilar%22%7D&m=tpp_findSimilar&similarTy",
+    "gridTitleLine": "2",
+    "isFission": "0",
+    "isBadgeAutoScroll": false,
+    "showCart": false,
+    "showBackIcon": false,
+    "showUnitPrice": false,
+    "itemUrl": "//www.lazada.vn/products/pdp-i13493380140.html",
+    "querystring": "fs_ab=2&priceCompare=skuId%3A117485514963%3Bsource%3Alazada-search-voucher%3Bsn%3Aacc1578cc65e0ed9f516a73ed444afdf%3BoriginPrice%3A4690000%3BdisplayPrice%3A4690000%3BisGray%3Afalse%3BsinglePromotionId%3A-1%3BsingleToolCode%3A-1%3BvoucherPricePlugin%3A0%3Btimestamp%3A1792840672206&c=&ratingscore=&freeshipping=1&source=search&channelLpJumpArgs=&fuse_fs=&search=1&sale=0&price=4.69E%206&review=&location=B%E1%BA%BFn%20Tre&stock=1&lang=vi&request_id=acc1578cc65e0ed9f516a73ed444afdf&clickTrackInfo=query%253A%253Bnid%253A13493380140%253Bsrc%253ALazadaMainSrp%253Brn%253Aacc1578cc65e0ed9f516a73ed444afdf%253Bregion%253Avn%253Bsku%253A13493380140_VNAMZ%253Bprice%253A4690000%253Bclient%253Adesktop%253Bsupplier_id%253A200164227353%253Bsession_id%253A%253Bbiz_source%253Ah5_internal%253Bslot%253A2%253Butlog_bucket_id%253A470687%253Basc_category_id%253A4518%253Bitem_id%253A13493380140%253Bsku_id%253A117485514963%253Bshop_id%253A1714262%253BtemplateInfo%253A107883_C_E%2523-1_A3%2523"
+   },
+   {
+    "name": "Điện thoại Oppo A6c (4GB/128GB) - Hàng chính hãng",
+    "nid": "13493348504",
+    "itemId": "13493348504",
+    "icons": [
+     {
+      "domClass": "167087",
+      "type": "img",
+      "group": "6",
+      "showType": "0",
+      "bizType": "Freeshipping"
+     },
+     {
+      "domClass": "76432",
+      "type": "img",
+      "group": "3",
+      "showType": "0",
+      "bizType": "lazMall"
+     }
+    ],
+    "image": "https://vn-live-01.slatic.net/p/a67fce6e6907c60c93d6466fcfad6f22.jpg",
+    "isSmartImage": false,
+    "originalPriceShow": "",
+    "priceShow": "5.690.000 ₫",
+    "ratingScore": "",
+    "review": "",
+    "location": "Bến Tre",
+    "thumbs": [
+     {
+      "image": "https://vn-live-01.slatic.net/p/658d21365af04c0f3985690cbc6f8e11.jpg",
+      "sku": "13493348504_VNAMZ",
+      "skuId": "117467555257",
+      "itemUrl": "/products/pdp-i13493348504.html",
+      "querystring": ""
+     },
+     {
+      "image": "https://vn-live-01.slatic.net/p/300e2164ec2f83b6ba983538c47ddd16.jpg",
+      "sku": "13493348504_VNAMZ",
+      "skuId": "117467555256",
+      "itemUrl": "/products/pdp-i13493348504.html",
+      "querystring": ""
+     }
+    ],
+    "sellerName": "Long Hưng TechZone",
+    "sellerId": "200164227353",
+    "brandName": "OPPO",
+    "brandId": "127167612",
+    "cheapest_sku": "13493348504_VNAMZ-117467555257",
+    "skuId": "117467555257",
+    "sku": "13493348504_VNAMZ",
+    "categories": [
+     4402,
+     4518
+    ],
+    "price": "5690000",
+    "restrictedAge": 0,
+    "inStock": true,
+    "clickTrace": "query:;nid:13493348504;src:LazadaMainSrp;rn:acc1578cc65e0ed9f516a73ed444afdf;region:vn;sku:13493348504_VNAMZ;price:5690000;client:desktop;supplier_id:200164227353;session_id:;biz_source:h5_internal;slot:3;utlog_bucket_id:470687;asc_category_id:4518;item_id:13493348504;sku_id:117467555257;shop_id:171",
+    "longImageDisplayable": false,
+    "skus": [
+     {
+      "id": "13493348504_VNAMZ-117467555257"
+     }
+    ],
+    "promotionId": "",
+    "isSponsored": false,
+    "tItemType": "nt_product",
+    "skuType": "2",
+    "adFlag": "0",
+    "directSimilarUrl": "https://native.m.lazada.com/dynamicxresult?item_img=https%3A%2F%2Fvn-live-01.slatic.net%2Fp%2Fa67fce6e6907c60c93d6466fcfad6f22.jpg&src=srp_findsimilar&item_id=13493348504&sku_id=117467555257&params=%7B%22sub_src%22%3A%22long_press%22%2C%22src%22%3A%22srp_findsimilar%22%7D&m=tpp_findSimilar&similarTy",
+    "gridTitleLine": "2",
+    "isFission": "0",
+    "isBadgeAutoScroll": false,
+    "showCart": false,
+    "showBackIcon": false,
+    "showUnitPrice": false,
+    "itemUrl": "//www.lazada.vn/products/pdp-i13493348504.html",
+    "querystring": "fs_ab=2&priceCompare=skuId%3A117467555257%3Bsource%3Alazada-search-voucher%3Bsn%3Aacc1578cc65e0ed9f516a73ed444afdf%3BoriginPrice%3A5690000%3BdisplayPrice%3A5690000%3BisGray%3Afalse%3BsinglePromotionId%3A-1%3BsingleToolCode%3A-1%3BvoucherPricePlugin%3A0%3Btimestamp%3A1792840672206&c=&ratingscore=&freeshipping=1&source=search&channelLpJumpArgs=&fuse_fs=&search=1&sale=0&price=5.69E%206&review=&location=B%E1%BA%BFn%20Tre&stock=1&lang=vi&request_id=acc1578cc65e0ed9f516a73ed444afdf&clickTrackInfo=query%253A%253Bnid%253A13493348504%253Bsrc%253ALazadaMainSrp%253Brn%253Aacc1578cc65e0ed9f516a73ed444afdf%253Bregion%253Avn%253Bsku%253A13493348504_VNAMZ%253Bprice%253A5690000%253Bclient%253Adesktop%253Bsupplier_id%253A200164227353%253Bsession_id%253A%253Bbiz_source%253Ah5_internal%253Bslot%253A3%253Butlog_bucket_id%253A470687%253Basc_category_id%253A4518%253Bitem_id%253A13493348504%253Bsku_id%253A117467555257%253Bshop_id%253A1714262%253BtemplateInfo%253A107883_E%2523-1_A3_C%2523"
+   },
+   {
+    "name": "Cây điện thoại Samsug M21-Ram4/64",
+    "nid": "13487874367",
+    "itemId": "13487874367",
+    "icons": [],
+    "image": "https://filebroker-cdn.lazada.vn/kf/S9d17be0ee2cc4aac9ce3773881a619b2O.jpg",
+    "isSmartImage": false,
+    "originalPriceShow": "",
+    "priceShow": "1.380.000 ₫",
+    "ratingScore": "",
+    "review": "",
+    "location": "Vĩnh Long",
+    "thumbs": [],
+    "sellerName": "Sản phẩm qua sử dụng giá tốt ",
+    "sellerId": "200537552101",
+    "brandName": "H",
+    "brandId": "127198835",
+    "cheapest_sku": "13487874367_VNAMZ-117440903803",
+    "skuId": "117440903803",
+    "sku": "13487874367_VNAMZ",
+    "categories": [
+     4402,
+     4518
+    ],
+    "price": "1380000",
+    "restrictedAge": 0,
+    "inStock": true,
+    "clickTrace": "query:;nid:13487874367;src:LazadaMainSrp;rn:acc1578cc65e0ed9f516a73ed444afdf;region:vn;sku:13487874367_VNAMZ;price:1380000;client:desktop;supplier_id:200537552101;session_id:;biz_source:h5_internal;slot:4;utlog_bucket_id:470687;asc_category_id:4518;item_id:13487874367;sku_id:117440903803;shop_id:389",
+    "longImageDisplayable": false,
+    "skus": [
+     {
+      "id": "13487874367_VNAMZ-117440903803"
+     }
+    ],
+    "promotionId": "",
+    "isSponsored": true,
+    "tItemType": "nt_product",
+    "skuType": "2",
+    "adFlag": "1",
+    "directSimilarUrl": "https://native.m.lazada.com/dynamicxresult?item_img=https%3A%2F%2Ffilebroker-cdn.lazada.vn%2Fkf%2FS9d17be0ee2cc4aac9ce3773881a619b2O.jpg&src=srp_findsimilar&item_id=13487874367&sku_id=117440903803&params=%7B%22sub_src%22%3A%22long_press%22%2C%22src%22%3A%22srp_findsimilar%22%7D&m=tpp_findSimilar&sim",
+    "gridTitleLine": "2",
+    "isFission": "0",
+    "isBadgeAutoScroll": false,
+    "showCart": false,
+    "showBackIcon": false,
+    "showUnitPrice": false,
+    "itemUrl": "//www.lazada.vn/products/pdp-i13487874367.html",
+    "querystring": "fs_ab=2&priceCompare=skuId%3A117440903803%3Bsource%3Alazada-search-voucher%3Bsn%3Aacc1578cc65e0ed9f516a73ed444afdf%3BoriginPrice%3A1380000%3BdisplayPrice%3A1380000%3BisGray%3Afalse%3BsinglePromotionId%3A-1%3BsingleToolCode%3A-1%3BvoucherPricePlugin%3A0%3Btimestamp%3A1792840672206&c=&ratingscore=&freeshipping=1&source=search&channelLpJumpArgs=&fuse_fs=&search=1&sale=0&price=1.38E%206&review=&location=V%C4%A9nh%20Long&stock=1&lang=vi&request_id=acc1578cc65e0ed9f516a73ed444afdf&clickTrackInfo=query%253A%253Bnid%253A13487874367%253Bsrc%253ALazadaMainSrp%253Brn%253Aacc1578cc65e0ed9f516a73ed444afdf%253Bregion%253Avn%253Bsku%253A13487874367_VNAMZ%253Bprice%253A1380000%253Bclient%253Adesktop%253Bsupplier_id%253A200537552101%253Bsession_id%253A%253Bbiz_source%253Ah5_internal%253Bslot%253A4%253Butlog_bucket_id%253A470687%253Basc_category_id%253A4518%253Bitem_id%253A13487874367%253Bsku_id%253A117440903803%253Bshop_id%253A3896630%253BtemplateInfo%253A107883_A3_C_E%2523"
+   }
+  ],
+  "breadcrumb": [
+   {
+    "url": "https://www.lazada.vn",
+    "title": "Trang chủ"
+   },
+   {
+    "url": "/dien-thoai-may-tinh-bang/",
+    "title": "Điện thoại & Máy tính bảng"
+   },
+   {
+    "url": "/dien-thoai-di-dong/",
+    "title": "Smartphones"
+   }
+  ],
+  "sortBar": {
+   "tItemType": "nt_sortbar",
+   "filter": "Bộ lọc",
+   "style": "wf",
+   "sortItems": [
+    {
+     "name": "Popularity",
+     "tip": "Phù hợp nhất",
+     "isActive": "true",
+     "value": "popularity",
+     "key": "sort",
+     "tabName": ""
+    },
+    {
+     "name": "Price-ASC",
+     "tip": "Giá từ thấp tới cao",
+     "value": "priceasc",
+     "key": "sort",
+     "tabName": ""
+    },
+    {
+     "name": "Price-DESC",
+     "tip": "Giá từ cao xuống thấp",
+     "value": "pricedesc",
+     "key": "sort",
+     "tabName": ""
+    }
+   ],
+   "hiddenLayoutBtn": false,
+   "showFilterBtn": true,
+   "hasFilter": false
+  }
+ },
+ "mainInfo": {
+  "errorMsg": "",
+  "bizCode": 0,
+  "totalResults": "2400",
+  "pageSize": "40",
+  "page": "1",
+  "hiddenLayoutBtn": false,
+  "layoutInfo": {
+   "listHeader": [
+    "didYouMean",
+    "campaignBanner",
+    "categoryBar"
+   ],
+   "stickyHeader": [
+    "reminderBanner"
+   ],
+   "sceneHeader": [],
+   "halfStickyHeader": [
+    "sortBar",
+    "preposeFilter"
+   ],
+   "bottomHalfStickyHeader": []
+  },
+  "pageType": "SearchListCategory",
+  "gridTitleLine": "2",
+  "trackParams": {
+   "categoryAsc": "4518",
+   "category": "4518"
+  },
+  "userId": "",
+  "anonUid": "FIXTURE-ANON-UID-0000000000000000",
+  "hyperspaceInfo": "",
+  "currency": "₫",
+  "currencyOnRight": "true",
+  "currencySpace": "true",
+  "priceScaleDigits": "0",
+  "isShowFeedbackForm": "false",
+  "showThumbs": "true",
+  "allProductURL": "/all-products/",
+  "addToCartURL": "//cart.lazada.vn/cart/api/add",
+  "cluster": "fiber2_my211",
+  "column": 2,
+  "bucketId": "mobile_v1",
+  "auctionType": 1,
+  "noMorePages": false,
+  "srpName": "LazadaMainSrp",
+  "params": "{\"src\":\"h5_internal\"}",
+  "searchScenario": "others",
+  "hiddenShopChangeBtn": true,
+  "selectedFilters": {
+   "category": "4518"
+  },
+  "expParams": {
+   "disableTileSimple": "1",
+   "isBadgeAutoScroll": "0",
+   "filterLazyLoad": "0",
+   "funnelFilterBtnPosition": "sortBarContainerRight",
+   "enableShortStyle": "0",
+   "enableFeedbackAssistant": "1",
+   "disableScreenSimple": "1",
+   "enableCompactLineHeight": "1",
+   "disableFspImagePreload": "0"
+  },
+  "filterLazyLoad": false,
+  "RN": "acc1578cc65e0ed9f516a73ed444afdf",
+  "style": "wf",
+  "title": "Điện Thoại Di Động, Smartphone Chính Hãng, Bảo Hành Uy Tín",
+  "lang": "vi",
+  "venture": "VN",
+  "themes": [
+   {
+    "font-size": "11",
+    "labelMarginLeft": "0",
+    "color": "#BB6D19",
+    "key": "195677"
+   },
+   {
+    "img": "https://img.lazcdn.com/us/lzd-onepiece/e09da34c2fe4a880c5c286c8850d9fbd1755399349335.png",
+    "width": "117",
+    "labelMarginLeft": "0",
+    "key": "76432",
+    "height": "36"
+   },
+   {
+    "img": "https://img.lazcdn.com/us/lazgcp/01e3f337-93b1-44dd-a737-6616d9aa8c3a_ALL-155-52.png",
+    "width": "226",
+    "labelMarginLeft": "0",
+    "key": "237774",
+    "height": "52"
+   }
+  ],
+  "q": "",
+  "userQuery": "",
+  "rt": {
+   "all": 108
+  },
+  "serverResponseTime": 1792840672,
+  "reqParams": "{\"src\":\"h5_internal\",\"refer\":\"https://www.lazada.vn/\",\"scenario\":\"keyword-dynamic\",\"ab_test\":\"BASE:0\"}",
+  "pageTitle": "Điện Thoại, Smartphone Chính Hãng, Giá Tốt | Lazada"
+ },
+ "seoInfo": {
+  "canonical_tag": "https://www.lazada.vn/dien-thoai-di-dong/",
+  "category_brand": "4518_0_0_0",
+  "description": "Mua Điện thoại, Smartphone chính hãng từ iPhone, Samsung, Huawei, Xiaomi, OPPO... đời mới, giá tốt. Mua Điện Thoại Di Động tại Lazada với nhiều ưu đãi, giao hàng miễn phí. Mua ngay!",
+  "h1": "Điện Thoại Di Động, Smartphone Chính Hãng, Bảo Hành Uy Tín",
+  "hreflang_data": "[{\"href\":\"https://www.daraz.pk/smartphones/\",\"lang\":\"en-pk\"},{\"href\":\"https://www.daraz.com.bd/smartphones/\",\"lang\":\"en-bd\"},{\"href\":\"https://www.daraz.com.bd/bn-smartphones/\",\"lang\":\"bn-bd\"},{\"href\":",
+  "meta_index": "index,follow",
+  "title": "Điện Thoại, Smartphone Chính Hãng, Giá Tốt | Lazada",
+  "pageTitle": "Điện Thoại, Smartphone Chính Hãng, Giá Tốt | Lazada",
+  "robotsContent": "index,follow",
+  "canonicalHref": "https://www.lazada.vn/dien-thoai-di-dong/",
+  "androidDeepLink": "android-app://com.lazada.android/lazada/vn/page?url_key=%2Fdien-thoai-di-dong%2F&utm_campaign=%2Fdien-thoai-di-dong%2F&utm_medium=organic&utm_source=google_app_indexing&utm_from=search",
+  "nextHref": "/dien-thoai-di-dong/?page=2",
+  "internalLink": [
+   {
+    "category_id": "4518",
+    "link_data": [
+     {
+      "link_text": "Điện thoại bàn",
+      "link_url": "https://www.lazada.vn/dien-thoai-ban/"
+     },
+     {
+      "link_text": "Máy tính bảng",
+      "link_url": "https://www.lazada.vn/may-tinh-bang/"
+     },
+     {
+      "link_text": "Điện thoại cơ bản",
+      "link_url": "https://www.lazada.vn/shop-feature-phones/"
+     }
+    ],
+    "link_type": "2"
+   }
+  ],
+  "itemListSchema": {
+   "@context": "https://schema.org",
+   "@type": "ItemList",
+   "name": "Best Selling undefined Products",
+   "itemListElement": [
+    {
+     "@type": "ListItem",
+     "position": 1,
+     "item": {
+      "@type": "Product",
+      "name": "HUAWEI | Điện Thoại Gập Pura X Màn Hình Lớn Camera Đôi Dùng Cho Doanh Nghiệp Với HarmonyOS Bao Da Da Cam 5G",
+      "image": "https://filebroker-cdn.lazada.vn/kf/S15e4b7b2738c4066b931dbb679d55395j.png",
+      "url": "//www.lazada.vn/products/pdp-i13448421143.html",
+      "aggregateRating": {
+       "@type": "AggregateRating",
+       "ratingValue": "5.0",
+       "ratingCount": 5
+      }
+     }
+    },
+    {
+     "@type": "ListItem",
+     "position": 2,
+     "item": {
+      "@type": "Product",
+      "name": "Màn Hình Oppo A31 - Chất Lượng Cao, Tặng Kèm Keo Dán Chuyên Dụng & Bộ Sửa ᴄhữa",
+      "image": "https://sg-test-11.slatic.net/p/444ef1153dcae18b52a7db08ad4d94a2.jpg",
+      "url": "//www.lazada.vn/products/pdp-i3199463546.html",
+      "aggregateRating": {
+       "@type": "AggregateRating",
+       "ratingValue": "4.7",
+       "ratingCount": 20
+      }
+     }
+    },
+    {
+     "@type": "ListItem",
+     "position": 3,
+     "item": {
+      "@type": "Product",
+      "name": "POCO C85 | Pin khủng 6000mAh (typ) | Lên đến 22 giờ xem video | Màn hình lớn 6.9\"sống động  | Sạc nhanh 33W | Pin đạt 50% sau 31 phút sạc | Vi xử lý tám nhân mạnh mẽ | Camera kép AI 50MP sắc nét",
+      "image": "https://filebroker-cdn.lazada.sg/kf/S154e56edc8344365a96ce62f8b78c61c0.jpg",
+      "url": "//www.lazada.vn/products/pdp-i13431499942.html",
+      "aggregateRating": {
+       "@type": "AggregateRating",
+       "ratingValue": "5.0",
+       "ratingCount": 1831
+      }
+     }
+    }
+   ]
+  },
+  "breadcrumbSchema": {
+   "@context": "https://schema.org",
+   "@type": "BreadcrumbList",
+   "itemListElement": [
+    {
+     "item": {
+      "@id": "https://www.lazada.vn",
+      "name": "Trang chủ"
+     },
+     "@type": "ListItem",
+     "position": 1
+    },
+    {
+     "item": {
+      "@id": "https://www.lazada.vnurl",
+      "name": "Điện thoại & Máy tính bảng"
+     },
+     "@type": "ListItem",
+     "position": 2
+    }
+   ]
+  },
+  "breadcrumbData": [
+   {
+    "categoryName": "Trang chủ",
+    "categoryLink": "https://www.lazada.vn"
+   },
+   {
+    "categoryName": "Điện thoại & Máy tính bảng",
+    "categoryLink": "/dien-thoai-may-tinh-bang/"
+   },
+   {
+    "categoryName": "Smartphones",
+    "categoryLink": "/dien-thoai-di-dong/"
+   }
+  ],
+  "productSchema": {
+   "@type": "Product",
+   "@context": "https://schema.org",
+   "name": "Xiaomi POCO C85 | Pin khủng 6000mAh (typ) | Lên đến 22 giờ xem video | Màn hình lớn 6.9\"sống động  | Sạc nhanh 33W | Pin đạt 50% sau 31 phút sạc | Vi xử lý tám nhân mạnh mẽ | Camera kép AI 50MP sắc né",
+   "image": "https://vn-live-01.slatic.net/p/73c0a6e72bfdce253d522d7d2cdc20d3.jpg",
+   "sku": "3178698209_VNAMZ",
+   "mpn": "15126827257",
+   "aggregateRating": {
+    "@type": "AggregateRating",
+    "ratingValue": "5.0",
+    "ratingCount": 2033
+   },
+   "brand": {
+    "@type": "Organization",
+    "name": "POCO"
+   }
+  }
+ }
+}

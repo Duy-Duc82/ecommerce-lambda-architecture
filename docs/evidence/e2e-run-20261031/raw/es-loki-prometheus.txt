@@ -1,0 +1,86 @@
+## ES indices
+marketplace-changes-v1        115385 145.4mb
+marketplace-crawl-attempts-v1   5831   6.1mb
+marketplace-dlq-v1                 0    249b
+marketplace-offers-current-v1  75457  73.3mb
+marketplace-source-health-v1       2  21.9kb
+marketplace-speed-batches-v1     841 176.5kb
+## Loki lines by layer, 6h
+batch 2684
+crawl 745
+ingest 10
+observability 2193
+ops 228
+orchestration 24536
+serving 2490
+speed 1670
+storage 3927
+## Loki error lines by layer/service, 6h
+batch airflow-task 23
+observability alloy 30
+observability grafana 43
+observability loki 6
+ops airflow-task 20
+orchestration airflow-scheduler 31
+storage postgres-dw 3
+## Loki airflow task logs by dag/task, 6h
+marketplace_batch dimensions 266
+marketplace_batch facts 156
+marketplace_batch marts 138
+marketplace_batch promote 60
+marketplace_batch publish 120
+marketplace_batch quality 120
+marketplace_batch silver 1089
+marketplace_batch window_settled 585
+marketplace_maintenance backup 175
+marketplace_maintenance prune_raw 43
+marketplace_maintenance storage_snapshot 10
+marketplace_reprocess dimensions 29
+marketplace_reprocess facts 27
+marketplace_reprocess marts 23
+marketplace_reprocess promote 10
+marketplace_reprocess publish 20
+marketplace_reprocess quality 20
+marketplace_reprocess silver 21
+source_discovery discover_lazada 11
+source_discovery discover_tiki 11
+## peak host mem used %, 6h
+[('8f1ad177bd43', 93.5)]
+## peak container memory by layer GB, 6h
+[('batch', 8.73), ('crawl', 0.08), ('ops', 0.09), ('orchestration', 1.47), ('observability', 0.62), ('storage', 4.31), ('serving', 1.01), ('speed', 4.01)]
+## avg cpu cores by layer, 6h
+[('batch', 2.82), ('crawl', 0.02), ('ops', 0.1), ('orchestration', 0.09), ('observability', 0.05), ('storage', 0.26), ('serving', 0.02), ('speed', 0.72)]
+## probe availability %, 6h
+[('airflow', 99.42), ('elasticsearch', 100.0), ('grafana', 100.0), ('kibana', 99.86), ('loki', 99.86), ('minio', 100.0), ('superset', 100.0)]
+## speed offsets behind max, 6h
+[('', 0.0)]
+## prometheus series
+[('prometheus:9090', 12976.0)]
+## storage bytes
+{'__name__': 'mp_storage_bytes', 'component': 'elasticsearch', 'instance': 'postgresql://postgres-dw:5432/data_warehouse', 'job': 'integrations/postgres', 'project': 'mp-refactor', 'scope': 'marketplace-changes-v1', 'server': 'postgres-dw:5432'} 139.3 MB
+{'__name__': 'mp_storage_bytes', 'component': 'elasticsearch', 'instance': 'postgresql://postgres-dw:5432/data_warehouse', 'job': 'integrations/postgres', 'project': 'mp-refactor', 'scope': 'marketplace-crawl-attempts-v1', 'server': 'postgres-dw:5432'} 6.3 MB
+{'__name__': 'mp_storage_bytes', 'component': 'elasticsearch', 'instance': 'postgresql://postgres-dw:5432/data_warehouse', 'job': 'integrations/postgres', 'project': 'mp-refactor', 'scope': 'marketplace-dlq-v1', 'server': 'postgres-dw:5432'} 0.0 MB
+{'__name__': 'mp_storage_bytes', 'component': 'elasticsearch', 'instance': 'postgresql://postgres-dw:5432/data_warehouse', 'job': 'integrations/postgres', 'project': 'mp-refactor', 'scope': 'marketplace-offers-current-v1', 'server': 'postgres-dw:5432'} 106.5 MB
+{'__name__': 'mp_storage_bytes', 'component': 'elasticsearch', 'instance': 'postgresql://postgres-dw:5432/data_warehouse', 'job': 'integrations/postgres', 'project': 'mp-refactor', 'scope': 'marketplace-source-health-v1', 'server': 'postgres-dw:5432'} 0.0 MB
+{'__name__': 'mp_storage_bytes', 'component': 'elasticsearch', 'instance': 'postgresql://postgres-dw:5432/data_warehouse', 'job': 'integrations/postgres', 'project': 'mp-refactor', 'scope': 'marketplace-speed-batches-v1', 'server': 'postgres-dw:5432'} 0.2 MB
+{'__name__': 'mp_storage_bytes', 'component': 'kafka', 'instance': 'postgresql://postgres-dw:5432/data_warehouse', 'job': 'integrations/postgres', 'project': 'mp-refactor', 'scope': '__cluster_metadata', 'server': 'postgres-dw:5432'} 2.7 MB
+{'__name__': 'mp_storage_bytes', 'component': 'kafka', 'instance': 'postgresql://postgres-dw:5432/data_warehouse', 'job': 'integrations/postgres', 'project': 'mp-refactor', 'scope': '__consumer_offsets', 'server': 'postgres-dw:5432'} 0.4 MB
+{'__name__': 'mp_storage_bytes', 'component': 'kafka', 'instance': 'postgresql://postgres-dw:5432/data_warehouse', 'job': 'integrations/postgres', 'project': 'mp-refactor', 'scope': 'marketplace.changes.v1', 'server': 'postgres-dw:5432'} 133.6 MB
+{'__name__': 'mp_storage_bytes', 'component': 'kafka', 'instance': 'postgresql://postgres-dw:5432/data_warehouse', 'job': 'integrations/postgres', 'project': 'mp-refactor', 'scope': 'marketplace.observations.v1', 'server': 'postgres-dw:5432'} 247.8 MB
+{'__name__': 'mp_storage_bytes', 'component': 'kafka', 'instance': 'postgresql://postgres-dw:5432/data_warehouse', 'job': 'integrations/postgres', 'project': 'mp-refactor', 'scope': 'marketplace.observations.v1.dlq', 'server': 'postgres-dw:5432'} 0.0 MB
+{'__name__': 'mp_storage_bytes', 'component': 'kafka', 'instance': 'postgresql://postgres-dw:5432/data_warehouse', 'job': 'integrations/postgres', 'project': 'mp-refactor', 'scope': 'marketplace.records.v1', 'server': 'postgres-dw:5432'} 564.6 MB
+{'__name__': 'mp_storage_bytes', 'component': 'kafka', 'instance': 'postgresql://postgres-dw:5432/data_warehouse', 'job': 'integrations/postgres', 'project': 'mp-refactor', 'scope': 'marketplace.records.v1.dlq', 'server': 'postgres-dw:5432'} 0.2 MB
+{'__name__': 'mp_storage_bytes', 'component': 'minio', 'instance': 'postgresql://postgres-dw:5432/data_warehouse', 'job': 'integrations/postgres', 'project': 'mp-refactor', 'scope': 'ecommerce-bronze/marketplace/raw', 'server': 'postgres-dw:5432'} 384.6 MB
+{'__name__': 'mp_storage_bytes', 'component': 'minio', 'instance': 'postgresql://postgres-dw:5432/data_warehouse', 'job': 'integrations/postgres', 'project': 'mp-refactor', 'scope': 'ecommerce-bronze/marketplace/records', 'server': 'postgres-dw:5432'} 73.6 MB
+{'__name__': 'mp_storage_bytes', 'component': 'minio', 'instance': 'postgresql://postgres-dw:5432/data_warehouse', 'job': 'integrations/postgres', 'project': 'mp-refactor', 'scope': 'ecommerce-gold/marketplace', 'server': 'postgres-dw:5432'} 0.0 MB
+{'__name__': 'mp_storage_bytes', 'component': 'minio', 'instance': 'postgresql://postgres-dw:5432/data_warehouse', 'job': 'integrations/postgres', 'project': 'mp-refactor', 'scope': 'ecommerce-gold/marketplace/manifests', 'server': 'postgres-dw:5432'} 0.0 MB
+{'__name__': 'mp_storage_bytes', 'component': 'minio', 'instance': 'postgresql://postgres-dw:5432/data_warehouse', 'job': 'integrations/postgres', 'project': 'mp-refactor', 'scope': 'ecommerce-gold/marketplace/runs', 'server': 'postgres-dw:5432'} 188.3 MB
+{'__name__': 'mp_storage_bytes', 'component': 'minio', 'instance': 'postgresql://postgres-dw:5432/data_warehouse', 'job': 'integrations/postgres', 'project': 'mp-refactor', 'scope': 'ecommerce-silver/marketplace/_runs', 'server': 'postgres-dw:5432'} 0.0 MB
+{'__name__': 'mp_storage_bytes', 'component': 'minio', 'instance': 'postgresql://postgres-dw:5432/data_warehouse', 'job': 'integrations/postgres', 'project': 'mp-refactor', 'scope': 'ecommerce-silver/marketplace/lazada_listing_wide', 'server': 'postgres-dw:5432'} 5.2 MB
+{'__name__': 'mp_storage_bytes', 'component': 'minio', 'instance': 'postgresql://postgres-dw:5432/data_warehouse', 'job': 'integrations/postgres', 'project': 'mp-refactor', 'scope': 'ecommerce-silver/marketplace/offer_observations_v2', 'server': 'postgres-dw:5432'} 118.5 MB
+{'__name__': 'mp_storage_bytes', 'component': 'minio', 'instance': 'postgresql://postgres-dw:5432/data_warehouse', 'job': 'integrations/postgres', 'project': 'mp-refactor', 'scope': 'ecommerce-silver/marketplace/page_context', 'server': 'postgres-dw:5432'} 30.5 MB
+{'__name__': 'mp_storage_bytes', 'component': 'minio', 'instance': 'postgresql://postgres-dw:5432/data_warehouse', 'job': 'integrations/postgres', 'project': 'mp-refactor', 'scope': 'ecommerce-silver/marketplace/quarantine', 'server': 'postgres-dw:5432'} 0.3 MB
+{'__name__': 'mp_storage_bytes', 'component': 'minio', 'instance': 'postgresql://postgres-dw:5432/data_warehouse', 'job': 'integrations/postgres', 'project': 'mp-refactor', 'scope': 'ecommerce-silver/marketplace/tiki_listing_wide', 'server': 'postgres-dw:5432'} 362.0 MB
+{'__name__': 'mp_storage_bytes', 'component': 'postgres', 'instance': 'postgresql://postgres-dw:5432/data_warehouse', 'job': 'integrations/postgres', 'project': 'mp-refactor', 'scope': 'audit', 'server': 'postgres-dw:5432'} 11.0 MB
+{'__name__': 'mp_storage_bytes', 'component': 'postgres', 'instance': 'postgresql://postgres-dw:5432/data_warehouse', 'job': 'integrations/postgres', 'project': 'mp-refactor', 'scope': 'cache', 'server': 'postgres-dw:5432'} 259.9 MB
+{'__name__': 'mp_storage_bytes', 'component': 'minio', 'instance': 'postgresql://postgres-dw:5432/data_warehouse', 'job': 'integrations/postgres', 'project': 'mp-refactor', 'scope': 'ecommerce-gold/marketplace/dw', 'server': 'postgres-dw:5432'} 103.6 MB

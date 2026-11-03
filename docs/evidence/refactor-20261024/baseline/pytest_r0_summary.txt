@@ -1,0 +1,1 @@
+SUCCESS: The process with PID 10672 (child process of PID 33452) has been terminated.

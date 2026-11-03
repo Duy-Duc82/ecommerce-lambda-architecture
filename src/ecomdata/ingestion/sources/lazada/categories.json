@@ -1,0 +1,25 @@
+{
+  "comment": "Large Lazada Vietnam categories to sample. Each target is the category path of https://www.lazada.vn/<target>/ ; ecomdata.ingestion.sources.lazada.discovery reads this list.",
+  "categories": [
+    {"target": "dien-thoai-di-dong", "name": "Smartphones"},
+    {"target": "may-tinh-bang", "name": "Tablets"},
+    {"target": "laptop", "name": "Laptops"},
+    {"target": "tivi", "name": "Televisions"},
+    {"target": "tu-lanh", "name": "Refrigerators"},
+    {"target": "may-giat", "name": "Washing machines"},
+    {"target": "may-anh-may-quay-phim", "name": "Cameras"},
+    {"target": "tai-nghe", "name": "Headphones"},
+    {"target": "loa-bluetooth", "name": "Bluetooth speakers"},
+    {"target": "dong-ho-thong-minh", "name": "Smart watches"},
+    {"target": "ban-phim", "name": "Keyboards"},
+    {"target": "chuot-may-tinh", "name": "Computer mice"},
+    {"target": "man-hinh-may-tinh", "name": "Monitors"},
+    {"target": "may-in", "name": "Printers"},
+    {"target": "quat-dien", "name": "Fans"},
+    {"target": "noi-chien-khong-dau", "name": "Air fryers"},
+    {"target": "may-hut-bui", "name": "Vacuum cleaners"},
+    {"target": "giay-the-thao-nam", "name": "Men's sports shoes"},
+    {"target": "nuoc-hoa", "name": "Perfume"},
+    {"target": "sua-bot-tre-em", "name": "Infant formula"}
+  ]
+}

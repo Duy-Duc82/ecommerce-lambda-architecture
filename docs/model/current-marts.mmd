@@ -1,0 +1,157 @@
+erDiagram
+    SILVER_OFFER_OBSERVATION ||--o{ MARKETPLACE_OFFER_CURRENT : "latest per offer_id"
+    SILVER_OFFER_OBSERVATION ||--o{ MARKETPLACE_OFFER_PRICE_HISTORY_DAILY : "per offer, day, currency"
+    SILVER_OFFER_OBSERVATION ||--o{ MARKETPLACE_OFFER_CHANGE_DAILY : "per offer, day, currency"
+    SILVER_OFFER_OBSERVATION ||--o{ MARKETPLACE_PRICE_ANOMALY_DAILY : "per offer, day, currency"
+    SILVER_OFFER_OBSERVATION ||--o{ MARKETPLACE_COUNTER_DELTA_DAILY : "per offer, day, counter"
+    SILVER_OFFER_OBSERVATION ||--o{ MARKETPLACE_CATEGORY_PRICE_DAILY : "per category, day"
+    SILVER_OFFER_OBSERVATION ||--o{ MARKETPLACE_SELLER_CURRENT : "per seller"
+    MARKETPLACE_OFFER_CURRENT ||--|| MARKETPLACE_OFFER_FRESHNESS : offer_id
+    MARKETPLACE_OFFER_CURRENT ||--o{ MARKETPLACE_OFFER_PRICE_HISTORY_DAILY : offer_id
+    MARKETPLACE_OFFER_CURRENT ||--o{ MARKETPLACE_OFFER_CHANGE_DAILY : offer_id
+    MARKETPLACE_OFFER_CURRENT ||--o{ MARKETPLACE_PRICE_ANOMALY_DAILY : offer_id
+    MARKETPLACE_OFFER_CURRENT ||--o{ MARKETPLACE_COUNTER_DELTA_DAILY : offer_id
+    MARKETPLACE_SELLER_CURRENT ||--o{ MARKETPLACE_OFFER_CURRENT : seller_id
+    MARKETPLACE_CATEGORY_PRICE_DAILY }o--o{ MARKETPLACE_OFFER_CURRENT : category_path
+    AUDIT_CRAWL_REQUEST_ATTEMPT ||--o{ MARKETPLACE_CRAWL_RELIABILITY_DAILY : "per marketplace, day"
+    AUDIT_CRAWL_REQUEST_ATTEMPT ||--o{ MARKETPLACE_SOURCE_COVERAGE_DAILY : "per marketplace, day"
+
+    SILVER_OFFER_OBSERVATION {
+        string observation_id PK
+        string offer_id
+        string marketplace
+        string platform_listing_id
+        string seller_id
+        string category_path
+        timestamp observed_at
+        decimal current_price
+        decimal list_price
+        decimal discount_percent
+        decimal rating_value
+        bigint rating_count
+        bigint review_count
+        bigint sold_count
+        string availability
+        bigint ranking_position
+        string crawl_run_id
+        string raw_uri
+    }
+    MARKETPLACE_OFFER_CURRENT {
+        string offer_id PK
+        string marketplace
+        string platform_listing_id
+        string seller_id
+        string product_title
+        string brand
+        string category_path
+        string currency
+        timestamp first_seen_at
+        timestamp last_seen_at
+        decimal current_price
+        decimal list_price
+        bigint sold_count
+        string availability
+        string raw_uri
+    }
+    MARKETPLACE_SELLER_CURRENT {
+        string seller_id PK
+        string marketplace PK
+        timestamp first_seen_at
+        timestamp last_seen_at
+        bigint observed_offer_count
+    }
+    MARKETPLACE_OFFER_PRICE_HISTORY_DAILY {
+        string marketplace PK
+        string offer_id PK
+        date observed_date PK
+        string currency PK
+        decimal first_price
+        decimal last_price
+        decimal min_price
+        decimal max_price
+        decimal avg_price
+        bigint observation_count
+        bigint distinct_price_count
+    }
+    MARKETPLACE_OFFER_CHANGE_DAILY {
+        string marketplace PK
+        string offer_id PK
+        date observed_date PK
+        string currency PK
+        bigint price_change_count
+        bigint price_drop_count
+        bigint price_increase_count
+        decimal max_price_drop
+        bigint counter_change_count
+        bigint availability_change_count
+    }
+    MARKETPLACE_PRICE_ANOMALY_DAILY {
+        string marketplace PK
+        string offer_id PK
+        date observed_date PK
+        string currency PK
+        decimal evaluated_price
+        decimal baseline_median
+        decimal baseline_mad
+        double robust_score
+        string anomaly_status
+        string anomaly_reason
+    }
+    MARKETPLACE_COUNTER_DELTA_DAILY {
+        string marketplace PK
+        string offer_id PK
+        date observed_date PK
+        string counter_name PK
+        bigint first_value
+        bigint last_value
+        bigint valid_delta_sum
+        double velocity_proxy_per_hour
+        boolean counter_reset_or_invalid
+    }
+    MARKETPLACE_OFFER_FRESHNESS {
+        string offer_id PK
+        timestamp as_of
+        timestamp last_observed_at
+        bigint age_seconds
+        string freshness_status
+    }
+    MARKETPLACE_CATEGORY_PRICE_DAILY {
+        string marketplace PK
+        string category_path PK
+        date observed_date PK
+        string currency PK
+        bigint observed_offer_count
+        decimal median_price
+        decimal p25_price
+        decimal p75_price
+    }
+    MARKETPLACE_SOURCE_COVERAGE_DAILY {
+        string marketplace PK
+        date observed_date PK
+        bigint observed_offer_count
+        bigint fresh_offer_count
+        double coverage_rate
+        double rejection_rate
+    }
+    MARKETPLACE_CRAWL_RELIABILITY_DAILY {
+        string marketplace PK
+        date request_date PK
+        bigint request_count
+        bigint succeeded_count
+        double success_rate
+        double p95_latency_ms
+        bigint rate_limited_count
+    }
+    AUDIT_CRAWL_REQUEST_ATTEMPT {
+        string attempt_id PK
+        string crawl_run_id
+        string task_id
+        timestamp started_at
+        timestamp completed_at
+        string status
+        int http_status
+        bigint latency_ms
+        bigint raw_bytes
+        bigint parsed_count
+        string raw_uri
+    }

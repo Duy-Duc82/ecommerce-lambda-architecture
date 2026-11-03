@@ -1,0 +1,38 @@
+# Recording rules: per container metrics with the container's name, service and layer.
+# cAdvisor reads raw cgroups (see observability/alloy/config.alloy), so its series carry
+# only container_id; Alloy's container_info scrape carries the names. The dashboards and
+# alerts read the container:* series below.
+groups:
+  - name: containers
+    interval: 30s
+    rules:
+      - record: mp_container_info
+        expr: max by (container_id, container, service, layer) (up{job="container_info"}) * 0 + 1
+      - record: container:cpu_usage_cores
+        expr: >
+          sum by (container, service, layer) (
+            rate(container_cpu_usage_seconds_total{cpu="total"}[2m])
+            * on (container_id) group_left (container, service, layer) mp_container_info)
+      - record: container:memory_working_set_bytes
+        expr: >
+          sum by (container, service, layer) (
+            container_memory_working_set_bytes * on (container_id) group_left (container, service, layer) mp_container_info)
+      - record: container:memory_limit_bytes
+        expr: >
+          sum by (container, service, layer) (
+            (container_spec_memory_limit_bytes > 0)
+            * on (container_id) group_left (container, service, layer) mp_container_info)
+      - record: container:oom_events:increase10m
+        expr: >
+          sum by (container, service, layer) (
+            increase(container_oom_events_total[10m])
+            * on (container_id) group_left (container, service, layer) mp_container_info)
+      - record: container:start_time_seconds
+        expr: >
+          max by (container, service, layer) (
+            container_start_time_seconds * on (container_id) group_left (container, service, layer) mp_container_info)
+      - record: container:io_bytes:rate2m
+        expr: >
+          sum by (container, service, layer) (
+            rate(container_blkio_device_usage_total[2m])
+            * on (container_id) group_left (container, service, layer) mp_container_info)

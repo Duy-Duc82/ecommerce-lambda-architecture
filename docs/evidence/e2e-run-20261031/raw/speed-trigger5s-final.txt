@@ -1,0 +1,16 @@
+### S1 speed micro-batches
+ batches |  ok  | failed | input_rows | invalid | duplicates | late | changes | es_rows | redis_rows | dur_p50_s | dur_p95_s | dur_max_s 
+---------+------+--------+------------+---------+------------+------+---------+---------+------------+-----------+-----------+-----------
+    5247 | 5247 |      0 |       7214 |       0 |         54 |    0 |   53562 |   60722 |      60722 |     0.010 |     0.039 |    10.668
+
+### S2 speed end-to-end latency (crawler publish to all sinks written), batches with rows, ms
+ batches_with_rows | p50_of_p50 | p50_of_p95 | p95_of_p95 | worst  
+-------------------+------------+------------+------------+--------
+               149 |       8797 |       9667 |      15317 | 120471
+
+### S3 speed stages, batches with rows, ms
+ clients_avg | collect_avg | kafka_avg | es_avg | redis_avg | es_p95 
+-------------+-------------+-----------+--------+-----------+--------
+          10 |        1161 |        14 |     23 |         5 |     45
+
+### S4 Spark progress: throughput and lag

@@ -1,0 +1,9 @@
+# The images install the package; services mount the source at run time.
+*
+!pyproject.toml
+!constraints.txt
+!README.md
+!src/
+!docker/airflow/
+**/__pycache__
+**/*.pyc

@@ -1,0 +1,55 @@
+databases:
+  - database_name: ecommerce_bi
+    sqlalchemy_uri: postgresql://admin:admin123@postgres-dw:5432/data_warehouse
+    expose_in_sqllab: true
+    allow_run_async: false
+    tables:
+      - table_name: funnel_daily
+        schema: cache
+      - table_name: product_daily
+        schema: cache
+      - table_name: category_daily
+        schema: cache
+      - table_name: session_daily
+        schema: cache
+      - table_name: daily_revenue
+        schema: cache
+      - table_name: predictions
+        schema: cache
+      - table_name: anomalies
+        schema: cache
+      - table_name: v_revenue_forecast
+        schema: cache
+      - table_name: v_anomaly_days
+        schema: cache
+      - table_name: v_top_products
+        schema: cache
+      - table_name: marketplace_offer_current
+        schema: cache
+      - table_name: marketplace_seller_current
+        schema: cache
+      - table_name: marketplace_offer_price_history_daily
+        schema: cache
+      - table_name: marketplace_offer_change_daily
+        schema: cache
+      - table_name: marketplace_offer_freshness
+        schema: cache
+      - table_name: marketplace_category_price_daily
+        schema: cache
+      - table_name: marketplace_source_coverage_daily
+        schema: cache
+      - table_name: marketplace_crawl_reliability_daily
+        schema: cache
+      - table_name: marketplace_counter_delta_daily
+        schema: cache
+      - table_name: marketplace_price_anomaly_daily
+        schema: cache
+      # Read-only exception to "Superset reads cache": when the quality gate
+      # blocks publication nothing reaches cache, and that is precisely when
+      # the audit dashboard has to be able to show what happened.
+      - table_name: marketplace_quality_result
+        schema: audit
+      - table_name: marketplace_batch_run
+        schema: audit
+      - table_name: marketplace_cache_version
+        schema: audit

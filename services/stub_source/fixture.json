@@ -1,0 +1,1021 @@
+{
+ "comment": "Frozen offline fixture of the stub source: Tiki-shaped listing rows (one advertisement, one row Silver must quarantine) and the page context around them. Trimmed from a public category page; no personal data.",
+ "rows": [
+  {
+   "id": 279411794,
+   "sku": "6270873415812",
+   "name": "Máy tính bảng Samsung Galaxy Tab A11 4G ( 4GB/64GB) - Hàng chính hãng",
+   "url_key": "may-tinh-bang-samsung-galaxy-tab-a11-4g-4gb-64gb-p279411794",
+   "url_path": "may-tinh-bang-samsung-galaxy-tab-a11-4g-4gb-64gb-p279411794.html?spid=279412568",
+   "availability": 1,
+   "seller_id": 1,
+   "seller_name": "Tiki Trading",
+   "brand_id": 18802,
+   "brand_name": "Samsung",
+   "price": 4190000,
+   "original_price": 6990000,
+   "badges_new": [
+    {
+     "placement": "delivery_info",
+     "type": "delivery_info_badge",
+     "code": "tikinow",
+     "icon": "https://salt.tikicdn.com/ts/tka/a8/31/b6/802e2c99dcce64c67aa2648edb15dd25.png",
+     "icon_width": 32,
+     "icon_height": 16,
+     "text": "Giao siêu tốc 2h"
+    },
+    {
+     "placement": "under_product_image",
+     "type": "icon_badge",
+     "code": "authentic_brand",
+     "icon": "https://salt.tikicdn.com/ts/tka/69/cf/22/1be823299ae34c7ddcd922e73abd4909.png",
+     "icon_width": 89,
+     "icon_height": 20
+    },
+    {
+     "placement": "under_rating",
+     "type": "under_rating_text",
+     "code": "option_color",
+     "text": "Nhiều màu"
+    },
+    {
+     "placement": "above_product_name",
+     "type": "text_above_product_name",
+     "code": "brand_name",
+     "text": "SAMSUNG",
+     "text_color": "#808089"
+    }
+   ],
+   "badges_v3": [
+    {
+     "placement": "badge_overlay_product_image",
+     "type": "image_badge",
+     "code": "product_image_badge",
+     "image": "https://salt.tikicdn.com/ts/upload/c2/bc/6d/ff18cc8968e2bbb43f7ac58efbfafdff.png"
+    }
+   ],
+   "discount": 2800000,
+   "discount_rate": 40,
+   "rating_average": 0,
+   "review_count": 0,
+   "category_ids": [
+    1789,
+    1794
+   ],
+   "primary_category_path": "1/2/1789/1794",
+   "primary_category_name": "Máy tính bảng",
+   "thumbnail_url": "https://salt.tikicdn.com/cache/280x280/ts/product/1e/63/7a/257cf8230d8ead4ab42a02b9480c0a4f.jpg",
+   "thumbnail_width": 280,
+   "thumbnail_height": 280,
+   "productset_id": 2645,
+   "seller_product_id": 279412568,
+   "seller_product_sku": "6270873415812",
+   "master_product_sku": "3495750908711",
+   "quantity_sold": {
+    "text": "Đã bán 111",
+    "value": 111
+   },
+   "shippable": true,
+   "isGiftAvailable": false,
+   "is_tikinow_delivery": true,
+   "is_nextday_delivery": false,
+   "is_from_official_store": false,
+   "is_authentic": 1,
+   "tiki_verified": 0,
+   "tiki_hero": 0,
+   "origin": "China",
+   "impression_info": [
+    {
+     "impression_id": "thanos-YdMGJdkDfCsibKyX-TjdEX1ar",
+     "metadata": {
+      "request_id": "YdMGJdkDfCsibKyX",
+      "params": {
+       "include": "advertisement",
+       "_v": "web_ssr",
+       "limit": "40",
+       "page": "1",
+       "category": "1789",
+       "aggregations": "2",
+       "version": "home-persionalized",
+       "trackity_id": "455243a9-0d2f-29d8-f86a-079c5d7822c1"
+      },
+      "delivery_zone": "VN039006001",
+      "category": 1789,
+      "mpid": 279411794,
+      "spid": 279412568,
+      "quantity_sold": 111,
+      "astra_reward": 0,
+      "price": 4190000,
+      "discount_rate": 40,
+      "rating": 0,
+      "is_ad": 0,
+      "is_official_store": 0,
+      "is_trusted_store": 0,
+      "is_tikinow": 1,
+      "is_tikipro": 0,
+      "is_astra_plus": 0,
+      "position": 6,
+      "tiki_verified": 0,
+      "flags": {
+       "_v": "web_ssr"
+      }
+     }
+    }
+   ],
+   "visible_impression_info": {
+    "amplitude": {
+     "seller_type": "OFFICIAL_STORE",
+     "seller_id": 1,
+     "all_time_quantity_sold": 111,
+     "brand_name": "Samsung",
+     "category_l1_name": "Điện Thoại - Máy Tính Bảng",
+     "is_best_offer_available": false,
+     "is_flash_deal": false,
+     "is_gift_available": false,
+     "master_product_sku": "3495750908711",
+     "seller_product_id": 279412568,
+     "seller_product_sku": "6270873415812",
+     "number_of_reviews": 0,
+     "order_route": "same_province",
+     "partner_rewards_amount": 0,
+     "price": 4190000,
+     "primary_category_name": "Máy tính bảng",
+     "product_rating": 0,
+     "search_rank": 0,
+     "tiki_verified": 0,
+     "is_authentic": 1,
+     "standard_delivery_estimate": 0,
+     "earliest_delivery_estimate": 0,
+     "tikipro_delivery_estimate": 0,
+     "tikinow_delivery_estimate": 0.21,
+     "layout": "grid_view",
+     "variant": false,
+     "is_hero": false,
+     "is_imported": false,
+     "origin": "China",
+     "is_high_price_penalty": false,
+     "deboosted_high_price_diff_position": 0,
+     "joined_strategy_rerank": false,
+     "is_freeship_xtra": false,
+     "is_top_brand": true
+    }
+   },
+   "layout_type": "grid_view",
+   "is_high_price_penalty": false,
+   "is_top_brand": true,
+   "uiConfig": {
+    "showUnderProductImage": true,
+    "showUnderProductImage2": false,
+    "isShowOverlayProductImg": false
+   }
+  },
+  {
+   "id": 279411764,
+   "sku": "8123678432032",
+   "name": "Máy Tính Bảng Samsung Galaxy Tab A11 WiFi (4GB/64GB) - Hàng chính hãng",
+   "url_key": "may-tinh-bang-samsung-galaxy-tab-a11-wifi-4gb-64gb-p279411764",
+   "url_path": "may-tinh-bang-samsung-galaxy-tab-a11-wifi-4gb-64gb-p279411764.html?spid=279411768",
+   "availability": 1,
+   "seller_id": 1,
+   "seller_name": "Tiki Trading",
+   "brand_id": 18802,
+   "brand_name": "Samsung",
+   "price": 3090000,
+   "original_price": 5990000,
+   "badges_new": [
+    {
+     "placement": "delivery_info",
+     "type": "delivery_info_badge",
+     "code": "tikinow",
+     "icon": "https://salt.tikicdn.com/ts/tka/a8/31/b6/802e2c99dcce64c67aa2648edb15dd25.png",
+     "icon_width": 32,
+     "icon_height": 16,
+     "text": "Giao siêu tốc 2h"
+    },
+    {
+     "placement": "under_product_image",
+     "type": "icon_badge",
+     "code": "authentic_brand",
+     "icon": "https://salt.tikicdn.com/ts/tka/69/cf/22/1be823299ae34c7ddcd922e73abd4909.png",
+     "icon_width": 89,
+     "icon_height": 20
+    },
+    {
+     "placement": "under_rating",
+     "type": "under_rating_text",
+     "code": "option_color",
+     "text": "Nhiều màu"
+    },
+    {
+     "placement": "above_product_name",
+     "type": "text_above_product_name",
+     "code": "brand_name",
+     "text": "SAMSUNG",
+     "text_color": "#808089"
+    }
+   ],
+   "badges_v3": [
+    {
+     "placement": "badge_overlay_product_image",
+     "type": "image_badge",
+     "code": "product_image_badge",
+     "image": "https://salt.tikicdn.com/ts/upload/c2/bc/6d/ff18cc8968e2bbb43f7ac58efbfafdff.png"
+    }
+   ],
+   "discount": 2900000,
+   "discount_rate": 48,
+   "rating_average": 5,
+   "review_count": 3,
+   "category_ids": [
+    1789,
+    1794
+   ],
+   "primary_category_path": "1/2/1789/1794",
+   "primary_category_name": "Máy tính bảng",
+   "thumbnail_url": "https://salt.tikicdn.com/cache/280x280/ts/product/4b/c0/89/bf3e4e298ff728769eaf7c94b54c2587.png",
+   "thumbnail_width": 280,
+   "thumbnail_height": 280,
+   "productset_id": 2645,
+   "seller_product_id": 279411768,
+   "seller_product_sku": "8123678432032",
+   "master_product_sku": "1702700737894",
+   "quantity_sold": {
+    "text": "Đã bán 186",
+    "value": 186
+   },
+   "shippable": true,
+   "isGiftAvailable": false,
+   "is_normal_delivery": false,
+   "is_tikinow_delivery": true,
+   "is_nextday_delivery": false,
+   "is_from_official_store": false,
+   "is_authentic": 1,
+   "tiki_verified": 0,
+   "tiki_hero": 0,
+   "origin": "China",
+   "impression_info": [
+    {
+     "impression_id": "thanos-YdMGJdkDfCsibKyX-Pbq5VONr",
+     "metadata": {
+      "request_id": "YdMGJdkDfCsibKyX",
+      "params": {
+       "include": "advertisement",
+       "_v": "web_ssr",
+       "limit": "40",
+       "page": "1",
+       "category": "1789",
+       "aggregations": "2",
+       "version": "home-persionalized",
+       "trackity_id": "455243a9-0d2f-29d8-f86a-079c5d7822c1"
+      },
+      "delivery_zone": "VN039006001",
+      "category": 1789,
+      "mpid": 279411764,
+      "spid": 279411768,
+      "quantity_sold": 186,
+      "astra_reward": 0,
+      "price": 3090000,
+      "discount_rate": 48,
+      "rating": 5,
+      "is_ad": 0,
+      "is_official_store": 0,
+      "is_trusted_store": 0,
+      "is_tikinow": 1,
+      "is_tikipro": 0,
+      "is_astra_plus": 0,
+      "position": 7,
+      "tiki_verified": 0,
+      "flags": {
+       "_v": "web_ssr"
+      }
+     }
+    }
+   ],
+   "visible_impression_info": {
+    "amplitude": {
+     "seller_type": "OFFICIAL_STORE",
+     "seller_id": 1,
+     "all_time_quantity_sold": 186,
+     "brand_name": "Samsung",
+     "category_l1_name": "Điện Thoại - Máy Tính Bảng",
+     "is_best_offer_available": false,
+     "is_flash_deal": false,
+     "is_gift_available": false,
+     "master_product_sku": "1702700737894",
+     "seller_product_id": 279411768,
+     "seller_product_sku": "8123678432032",
+     "number_of_reviews": 3,
+     "order_route": "same_province",
+     "partner_rewards_amount": 0,
+     "price": 3090000,
+     "primary_category_name": "Máy tính bảng",
+     "product_rating": 5,
+     "search_rank": 0,
+     "tiki_verified": 0,
+     "is_authentic": 1,
+     "standard_delivery_estimate": 0,
+     "earliest_delivery_estimate": 0,
+     "tikipro_delivery_estimate": 0,
+     "tikinow_delivery_estimate": 0.21,
+     "layout": "grid_view",
+     "variant": false,
+     "is_hero": false,
+     "is_imported": false,
+     "origin": "China",
+     "is_high_price_penalty": false,
+     "deboosted_high_price_diff_position": 0,
+     "joined_strategy_rerank": false,
+     "is_freeship_xtra": false,
+     "is_top_brand": true
+    }
+   },
+   "layout_type": "grid_view",
+   "is_high_price_penalty": false,
+   "is_top_brand": true,
+   "uiConfig": {
+    "showUnderProductImage": true,
+    "showUnderProductImage2": false,
+    "isShowOverlayProductImg": false
+   }
+  },
+  {
+   "id": 279402741,
+   "sku": "2500463210050",
+   "name": "Điện thoại Samsung Galaxy A07 5G (4GB/64GB) - Hàng chính hãng",
+   "url_key": "dien-thoai-samsung-galaxy-a07-5g-4gb-64gb-hang-chinh-hang-p279402741",
+   "url_path": "dien-thoai-samsung-galaxy-a07-5g-4gb-64gb-hang-chinh-hang-p279402741.html?spid=279402747",
+   "availability": 1,
+   "seller_id": 162514,
+   "seller_name": "Long Hưng Official Store",
+   "brand_id": 18802,
+   "brand_name": "Samsung",
+   "price": 4690000,
+   "original_price": 4690000,
+   "badges_new": [
+    {
+     "placement": "under_product_image",
+     "type": "icon_badge",
+     "code": "authentic_brand",
+     "icon": "https://salt.tikicdn.com/ts/tka/69/cf/22/1be823299ae34c7ddcd922e73abd4909.png",
+     "icon_width": 89,
+     "icon_height": 20
+    },
+    {
+     "placement": "under_rating",
+     "type": "under_rating_text",
+     "code": "option_color",
+     "text": "Nhiều màu"
+    },
+    {
+     "placement": "above_product_name",
+     "type": "text_above_product_name",
+     "code": "brand_name",
+     "text": "SAMSUNG",
+     "text_color": "#808089"
+    },
+    {
+     "placement": "delivery_info",
+     "type": "delivery_info_badge",
+     "code": "delivery_info_badge",
+     "text": "Giao thứ 3, 27/10"
+    }
+   ],
+   "badges_v3": [
+    {
+     "placement": "badge_overlay_product_image",
+     "type": "image_badge",
+     "code": "product_image_badge",
+     "image": "https://salt.tikicdn.com/ts/upload/f7/9e/83/ab28365ea395893fe5abac88b5103444.png"
+    }
+   ],
+   "discount": 0,
+   "discount_rate": 0,
+   "rating_average": 0,
+   "review_count": 0,
+   "category_ids": [
+    1789,
+    1795
+   ],
+   "primary_category_path": "1/2/1789/1795",
+   "primary_category_name": "Điện thoại Smartphone",
+   "thumbnail_url": "https://salt.tikicdn.com/cache/280x280/ts/product/f3/5f/90/8bbcc20a8f7571c20017f69227d38895.jpg",
+   "thumbnail_width": 280,
+   "thumbnail_height": 280,
+   "productset_id": 2647,
+   "seller_product_id": 279402747,
+   "seller_product_sku": "2500463210050",
+   "master_product_sku": "6621917969865",
+   "shippable": true,
+   "isGiftAvailable": false,
+   "fastest_delivery_time": "2026-10-27 18:00:00",
+   "order_route": "same_province",
+   "is_tikinow_delivery": false,
+   "is_nextday_delivery": false,
+   "is_from_official_store": false,
+   "is_authentic": 1,
+   "tiki_verified": 0,
+   "tiki_hero": 0,
+   "origin": "Việt Nam",
+   "freeship_campaign": "freeship_xtra",
+   "impression_info": [
+    {
+     "impression_id": "thanos-YdMGJdkDfCsibKyX-6DNbO5Y2",
+     "metadata": {
+      "request_id": "YdMGJdkDfCsibKyX",
+      "params": {
+       "include": "advertisement",
+       "_v": "web_ssr",
+       "limit": "40",
+       "page": "1",
+       "category": "1789",
+       "aggregations": "2",
+       "version": "home-persionalized",
+       "trackity_id": "455243a9-0d2f-29d8-f86a-079c5d7822c1"
+      },
+      "delivery_zone": "VN039006001",
+      "category": 1789,
+      "mpid": 279402741,
+      "spid": 279402747,
+      "quantity_sold": 0,
+      "delivery_info_badge_text": "Giao thứ 3, 27/10",
+      "delivery_date": "2026/10/27",
+      "astra_reward": 0,
+      "price": 4690000,
+      "discount_rate": 0,
+      "rating": 0,
+      "is_ad": 0,
+      "is_official_store": 0,
+      "is_trusted_store": 0,
+      "is_tikinow": 0,
+      "is_tikipro": 0,
+      "is_astra_plus": 0,
+      "position": 8,
+      "tiki_verified": 0,
+      "flags": {
+       "_v": "web_ssr"
+      }
+     }
+    }
+   ],
+   "visible_impression_info": {
+    "amplitude": {
+     "seller_type": "OFFICIAL_STORE",
+     "seller_id": 162514,
+     "all_time_quantity_sold": 0,
+     "brand_name": "Samsung",
+     "category_l1_name": "Điện Thoại - Máy Tính Bảng",
+     "is_best_offer_available": false,
+     "is_flash_deal": false,
+     "is_gift_available": false,
+     "master_product_sku": "6621917969865",
+     "seller_product_id": 279402747,
+     "seller_product_sku": "2500463210050",
+     "number_of_reviews": 0,
+     "order_route": "same_province",
+     "partner_rewards_amount": 0,
+     "price": 4690000,
+     "primary_category_name": "Điện thoại Smartphone",
+     "product_rating": 0,
+     "search_rank": 0,
+     "tiki_verified": 0,
+     "is_authentic": 1,
+     "standard_delivery_estimate": 2.994,
+     "earliest_delivery_estimate": 0,
+     "tikipro_delivery_estimate": 0,
+     "tikinow_delivery_estimate": 0,
+     "layout": "grid_view",
+     "variant": false,
+     "is_hero": false,
+     "is_imported": false,
+     "origin": "Việt Nam",
+     "is_high_price_penalty": false,
+     "deboosted_high_price_diff_position": 0,
+     "joined_strategy_rerank": false,
+     "is_freeship_xtra": true,
+     "is_top_brand": true
+    }
+   },
+   "layout_type": "grid_view",
+   "is_high_price_penalty": false,
+   "is_top_brand": true,
+   "uiConfig": {
+    "showUnderProductImage": true,
+    "showUnderProductImage2": false,
+    "isShowOverlayProductImg": false
+   }
+  },
+  {
+   "id": 279303104,
+   "sku": "8225949399670",
+   "name": "Điện Thoại Realme C85 5G 8GB/128GB - Hàng Chính Hãng",
+   "url_key": "dien-thoai-realme-c85-5g-8gb-128gb-hang-chinh-hang-p279303104",
+   "url_path": "dien-thoai-realme-c85-5g-8gb-128gb-hang-chinh-hang-p279303104.html?spid=279303106",
+   "availability": 1,
+   "seller_id": 29952,
+   "seller_name": "Hồng Hạnh Mobile",
+   "brand_id": 247549,
+   "brand_name": "Realme",
+   "price": 6499000,
+   "original_price": 8090000,
+   "badges_new": [
+    {
+     "placement": "under_product_image",
+     "type": "icon_badge",
+     "code": "authentic_brand",
+     "icon": "https://salt.tikicdn.com/ts/tka/69/cf/22/1be823299ae34c7ddcd922e73abd4909.png",
+     "icon_width": 89,
+     "icon_height": 20
+    },
+    {
+     "placement": "under_rating",
+     "type": "under_rating_text",
+     "code": "option_color",
+     "text": "Nhiều màu"
+    },
+    {
+     "placement": "above_product_name",
+     "type": "text_above_product_name",
+     "code": "brand_name",
+     "text": "REALME",
+     "text_color": "#808089"
+    },
+    {
+     "placement": "delivery_info",
+     "type": "delivery_info_badge",
+     "code": "delivery_info_badge",
+     "text": "Giao thứ 4, 28/10"
+    }
+   ],
+   "badges_v3": [
+    {
+     "placement": "badge_overlay_product_image",
+     "type": "image_badge",
+     "code": "product_image_badge",
+     "image": "https://salt.tikicdn.com/ts/upload/f7/9e/83/ab28365ea395893fe5abac88b5103444.png"
+    }
+   ],
+   "discount": 1591000,
+   "discount_rate": 20,
+   "rating_average": 0,
+   "review_count": 0,
+   "category_ids": [
+    1789,
+    1795
+   ],
+   "primary_category_path": "1/2/1789/1795",
+   "primary_category_name": "Điện thoại Smartphone",
+   "thumbnail_url": "https://salt.tikicdn.com/cache/280x280/ts/product/42/01/0a/0a214a3ebaa1d8850737ff7133424f8d.jpg",
+   "thumbnail_width": 280,
+   "thumbnail_height": 280,
+   "productset_id": 2647,
+   "seller_product_id": 279303106,
+   "seller_product_sku": "8225949399670",
+   "master_product_sku": "3698745564561",
+   "shippable": true,
+   "isGiftAvailable": false,
+   "fastest_delivery_time": "2026-10-28 19:00:00",
+   "order_route": "same_region",
+   "is_tikinow_delivery": false,
+   "is_nextday_delivery": false,
+   "is_from_official_store": false,
+   "is_authentic": 1,
+   "tiki_verified": 0,
+   "tiki_hero": 0,
+   "origin": "Trung Quốc",
+   "freeship_campaign": "freeship_xtra",
+   "impression_info": [
+    {
+     "impression_id": "thanos-YdMGJdkDfCsibKyX-GFZ00GfW",
+     "metadata": {
+      "request_id": "YdMGJdkDfCsibKyX",
+      "params": {
+       "include": "advertisement",
+       "_v": "web_ssr",
+       "limit": "40",
+       "page": "1",
+       "category": "1789",
+       "aggregations": "2",
+       "version": "home-persionalized",
+       "trackity_id": "455243a9-0d2f-29d8-f86a-079c5d7822c1"
+      },
+      "delivery_zone": "VN039006001",
+      "category": 1789,
+      "mpid": 279303104,
+      "spid": 279303106,
+      "quantity_sold": 0,
+      "delivery_info_badge_text": "Giao thứ 4, 28/10",
+      "delivery_date": "2026/10/28",
+      "astra_reward": 0,
+      "price": 6499000,
+      "discount_rate": 20,
+      "rating": 0,
+      "is_ad": 0,
+      "is_official_store": 0,
+      "is_trusted_store": 0,
+      "is_tikinow": 0,
+      "is_tikipro": 0,
+      "is_astra_plus": 0,
+      "position": 9,
+      "tiki_verified": 0,
+      "flags": {
+       "_v": "web_ssr"
+      }
+     }
+    }
+   ],
+   "visible_impression_info": {
+    "amplitude": {
+     "seller_type": "NONE",
+     "seller_id": 29952,
+     "all_time_quantity_sold": 0,
+     "brand_name": "Realme",
+     "category_l1_name": "Điện Thoại - Máy Tính Bảng",
+     "is_best_offer_available": false,
+     "is_flash_deal": false,
+     "is_gift_available": false,
+     "master_product_sku": "3698745564561",
+     "seller_product_id": 279303106,
+     "seller_product_sku": "8225949399670",
+     "number_of_reviews": 0,
+     "order_route": "same_region",
+     "partner_rewards_amount": 0,
+     "price": 6499000,
+     "primary_category_name": "Điện thoại Smartphone",
+     "product_rating": 0,
+     "search_rank": 0,
+     "tiki_verified": 0,
+     "is_authentic": 1,
+     "standard_delivery_estimate": 4.036,
+     "earliest_delivery_estimate": 0,
+     "tikipro_delivery_estimate": 0,
+     "tikinow_delivery_estimate": 0,
+     "layout": "grid_view",
+     "variant": false,
+     "is_hero": false,
+     "is_imported": false,
+     "origin": "Trung Quốc",
+     "is_high_price_penalty": false,
+     "deboosted_high_price_diff_position": 0,
+     "joined_strategy_rerank": false,
+     "is_freeship_xtra": true,
+     "is_top_brand": false
+    }
+   },
+   "layout_type": "grid_view",
+   "is_high_price_penalty": false,
+   "is_top_brand": false,
+   "uiConfig": {
+    "showUnderProductImage": true,
+    "showUnderProductImage2": false,
+    "isShowOverlayProductImg": false
+   }
+  },
+  {
+   "id": 278890829,
+   "sku": "5348118186666",
+   "name": "Điện Thoại Samsung Galaxy A17 5G, Camera 50MP & IOS, Kính Cường Lực Gorilla Victus, AI Gemini - Hàng Chính Hãng",
+   "url_key": "dien-thoai-samsung-galaxy-a17-5g-camera-50mp-ios-kinh-cuong-luc-gorilla-victus-ai-gemini-hang-chinh-hang-p278890829",
+   "url_path": "dien-thoai-samsung-galaxy-a17-5g-camera-50mp-ios-kinh-cuong-luc-gorilla-victus-ai-gemini-hang-chinh-hang-p278890829.html?spid=278890834",
+   "availability": 1,
+   "seller_id": 1,
+   "seller_name": "Tiki Trading",
+   "brand_id": 18802,
+   "brand_name": "Samsung",
+   "price": 4890000,
+   "original_price": 6990000,
+   "badges_new": [
+    {
+     "placement": "delivery_info",
+     "type": "delivery_info_badge",
+     "code": "tikinow",
+     "icon": "https://salt.tikicdn.com/ts/tka/a8/31/b6/802e2c99dcce64c67aa2648edb15dd25.png",
+     "icon_width": 32,
+     "icon_height": 16,
+     "text": "Giao siêu tốc 2h"
+    },
+    {
+     "placement": "under_product_image",
+     "type": "icon_badge",
+     "code": "authentic_brand",
+     "icon": "https://salt.tikicdn.com/ts/tka/69/cf/22/1be823299ae34c7ddcd922e73abd4909.png",
+     "icon_width": 89,
+     "icon_height": 20
+    },
+    {
+     "placement": "under_rating",
+     "type": "under_rating_text",
+     "code": "installment",
+     "text": "Trả góp"
+    },
+    {
+     "placement": "under_rating",
+     "type": "under_rating_text",
+     "code": "option_color",
+     "text": "Nhiều màu"
+    },
+    {
+     "placement": "above_product_name",
+     "type": "text_above_product_name",
+     "code": "brand_name",
+     "text": "SAMSUNG",
+     "text_color": "#808089"
+    }
+   ],
+   "badges_v3": [
+    {
+     "placement": "badge_overlay_product_image",
+     "type": "image_badge",
+     "code": "product_image_badge",
+     "image": "https://salt.tikicdn.com/ts/upload/c2/bc/6d/ff18cc8968e2bbb43f7ac58efbfafdff.png"
+    }
+   ],
+   "discount": 2100000,
+   "discount_rate": 30,
+   "rating_average": 5,
+   "review_count": 12,
+   "category_ids": [
+    1789,
+    1795
+   ],
+   "primary_category_path": "1/2/1789/1795",
+   "primary_category_name": "Điện thoại Smartphone",
+   "thumbnail_url": "https://salt.tikicdn.com/cache/280x280/ts/product/b2/4f/de/4ad3a2ca7a0f171a4296926a1aafecc5.jpg",
+   "thumbnail_width": 280,
+   "thumbnail_height": 280,
+   "productset_id": 2647,
+   "seller_product_id": 278890834,
+   "seller_product_sku": "5348118186666",
+   "master_product_sku": "8877388822450",
+   "quantity_sold": {
+    "text": "Đã bán 6207",
+    "value": 6207
+   },
+   "shippable": true,
+   "isGiftAvailable": false,
+   "is_tikinow_delivery": true,
+   "is_nextday_delivery": false,
+   "is_from_official_store": false,
+   "advertisement": {
+    "ad": [
+     {
+      "clickUrl": "//tka.tiki.vn/pixel/pixel?data=ML7SjX9PUsoEhn82vq_HWoJ6A_GffK4pcKJiswyJuqIfvOR-DMIAcPc_izzt9shFd00OlEdyphYGBSsGL5wiPBNOvTUgsne_PzfDLGN5k7OotqGvhMj6iD9Ta91MajjKnRK5vIyP6k63HtpFUUTvGCRiuIFYP_llWKeQ7-ul8xu7b5f5vptNhd7to0UyxqY6jQVlpXS3V4jbyT_aoIaX83LI1JJqRaDZsjtNUb3nQxToT_T8qxo5gZ70U8AB__B1V60lXHpPpHn1wCfax4vf6Qu1NSGKa1ZXthTsO-OqFEhOoazd0raeiPjaEYowHWHoQHwpmPsIIl7YSGMhTpJH8XLQe2H1VKGBnYYw6nim8QpGyxGCXlMO_kyUEx236-_YWqFWPT_BJhw1g_oVRzZFoASxxQm4nRxy23l0YJGM-X6wp_NhBDpF_yCag1raeeiiz-DKuADijgnw8NVO3jg60ukT9cLlp6VTK2W09zFmBdFczYffkCZeVomZHlwB3zw74DnqCWF4IvD2YZ2DES03a2pJT3zH5yjuLQ0u6N1VP7gkKGq5vzahslwb8-opGwruHOUnXlWN5aV3dZ20bmd5OGck9VxG1L0e6tq9Da-OaI5v6Q1lBI5aNYkVCRyfXmItDgY82k32yn_SV2qsR_LRZYS7HMSj42OcgWgKcl1xzU8dnHc2qZd-Box9DQro_DDQPh-ddepVHnigsB0olSQsO-o5sg5bds0GVrJGuDF_aAEgo79-9oVAbEFMEysqWbQxF9tu6J3djzmIGg9gC9pmpKiCE7OVIcnAwmxns_jwJ8c2c31iTzQezesc0W_aSOejYyKGX2MbgF202YuyZN7u8jWMZX38SxscsOz8zZpgZBY27LUvMhmS-Z_2mprvzyIbpK0htEC1AMncGiI5RU5hKw8nwFkTefyFnP6eYseouvGqsXPUIQ5sA8XyaS5n7wYz8ciX8r2jo_5bjybxJwe027BkqBZjzs93_RZwQlCpc2KnJ1AyamwRHNpLbq5Hy29OdJZfVp2Fv7rOXeMdSSakg3nO2DEoHFV1daGd_UQuPQf-KdgUZAK7rbvwiQ&reqid=YdMGJdkDfCsibKyX&type=CLICK&pos=1",
+      "impUrl": "//tka.tiki.vn/pixel/pixel?data=8N7umpTGV-2ARON2b-1oNAR2o1Hw3QyTTKGhn4J-ZymbFvx7NXC7hR3X2QWrB4QIj-mV4J9okk5cf24sti8t4HrLqbn_B35vR91eehyB7FgCLQ9Jo02DhBO3F7xsB8ADOsxkLKUpz_oVPUT-IwbcgPCoujhAPZ0uh4Vftv5noN-7Ln4c91nh05xDE5x0a4VqKD7MZ0dBzw7vsnZzCCAN3Hv_ySyoJ_6TB8wEtAGJmBOHcjDqVh3aW-iecJ3UD4ieu6Y6F1P17mvaGiIhmHI74jz4WpaCoxJ_9bFKb7RhlnvLw4VttCzUBO0nUbiuebowAvIoh1EfE9i8flvaQ3sWjsnle14N4ISPT_rDWRPpTjhFFsA-TxWnffdTbQPq_vZvz_68ABOcaOpTHGvmR7x7stwKX2k93hw_UXaEN-YKhs_b9CVP8zmvNWYk5S0NTG2NiFRYBlK7B5CoWPt6Qw0CQpF0SxvwAwkO51Ark7MJdpk42zafZY4m9ny2X3DqKrk9JAqAao6flFKemfKI8sxRuGSMOyHYzzZ6YHd_W53cmTMuoViK0DcZ1uASdp2_5fp65Z4vt9qSt37xhj6QYKlzmEV_1FzghEEdWKNDqx15pvWkKhqBObmXmOs_sRsoGt5aGy98ikewyBdhrwjvStY85TEF3CjoAM0kXQGM5FckBW40lZpVdLVHdePMsZiG0nNj1A&reqid=YdMGJdkDfCsibKyX&type=SHOW&pos=1",
+      "trueImpUrl": "//tka.tiki.vn/pixel/pixel?data=Dfcl_g37o3pnAB2umdHjQmzxa2-biy_YCA3lRIyuafm4I7gSm60i7MZlLE1V6es-H7DFBtgUUvS54DKdr0ba-pQVmBgHeQ0mH7hCiixa_AFH7957wVs0VgX1XyvkK6WZoAwjNcT23E8weRBnuHK7gljcYNX4hD3G1AaFO4gdKebIg-uILh1x3rkwabEwD7zgnsUAP5dBz17A2mK_l31z8SLai0pA4Terbus9TWP8qppz892R1s3oJemULl9HurgWJ_Q_QL3v-JwZcSIJWJfrh15iRRCsyOj4IhlO_7b46kL8HcWZZcPkedPHyhXoxcgyc8HoUGPbwxsJqk3OC4rznBARwpWlZ2khScOeaeJGr2teCAReY08kvR9pQlUqEh2sF5OGDDpZRkh3el4xMH-b0Wwh7CIr5FBBtWNtYOh-xRnPkjmJ0bIcArH012Q3jhp89TK8NX5mvlzfu2iHUBkrDSU1tK9jdX3c8cLVoxjjHwCg0_3ihp5Tt2oWCdebC7ZvNJt9p2lPolG8fsscD4QFNnx6pOFldhPRlbPBjTfqs0pmfOzuW0Fshsm6zt6-HWjyPG4dX39DaTLZMT5HFGkFz3AmkElC3C22RUNP6d_so37eozGnJJ1AzdoZwPsACzta5xKpuV8TOfRinpcPpoZbngPX35csqAVQ-Gb7fCOWe4FHmQFXEhnpdFQoeMvuyCJ1sg&reqid=YdMGJdkDfCsibKyX&type=VIEW&pos=1",
+      "properties": {
+       "product_id": "278890834",
+       "url": "https://tiki.vn/dien-thoai-samsung-galaxy-a17-5g-camera-50mp-ios-kinh-cuong-luc-gorilla-victus-ai-gemini-hang-chinh-hang-p278890829.html?itm_campaign=CTP_YPD_TKA_PLA_UNK_ALL_UNK_UNK_UNK_UNK_X.313414_Y.1895734_Z.4066699_CN.A17&itm_medium=CPC&itm_source=tiki-ads&spid=278890834",
+       "cta": "Xem thêm"
+      },
+      "type": "ProductAdvertType"
+     }
+    ]
+   },
+   "is_authentic": 1,
+   "tiki_verified": 0,
+   "tiki_hero": 0,
+   "origin": "Việt Nam",
+   "impression_info": [
+    {
+     "impression_id": "thanos-YdMGJdkDfCsibKyX-7df4H1PQ",
+     "metadata": {
+      "request_id": "YdMGJdkDfCsibKyX",
+      "params": {
+       "include": "advertisement",
+       "_v": "web_ssr",
+       "limit": "40",
+       "page": "1",
+       "category": "1789",
+       "aggregations": "2",
+       "version": "home-persionalized",
+       "trackity_id": "455243a9-0d2f-29d8-f86a-079c5d7822c1"
+      },
+      "delivery_zone": "VN039006001",
+      "category": 1789,
+      "mpid": 278890829,
+      "spid": 278890834,
+      "quantity_sold": 6207,
+      "astra_reward": 0,
+      "price": 4890000,
+      "discount_rate": 30,
+      "rating": 5,
+      "is_ad": 1,
+      "is_official_store": 0,
+      "is_trusted_store": 0,
+      "is_tikinow": 1,
+      "is_tikipro": 0,
+      "is_astra_plus": 0,
+      "position": 1,
+      "tiki_verified": 0,
+      "flags": {
+       "_v": "web_ssr"
+      }
+     }
+    }
+   ],
+   "visible_impression_info": {
+    "amplitude": {
+     "seller_type": "OFFICIAL_STORE",
+     "seller_id": 1,
+     "all_time_quantity_sold": 6207,
+     "brand_name": "Samsung",
+     "category_l1_name": "Điện Thoại - Máy Tính Bảng",
+     "is_best_offer_available": false,
+     "is_flash_deal": false,
+     "is_gift_available": false,
+     "master_product_sku": "8877388822450",
+     "seller_product_id": 278890834,
+     "seller_product_sku": "5348118186666",
+     "number_of_reviews": 12,
+     "order_route": "same_province",
+     "partner_rewards_amount": 0,
+     "price": 4890000,
+     "primary_category_name": "Điện thoại Smartphone",
+     "product_rating": 5,
+     "search_rank": 0,
+     "tiki_verified": 0,
+     "is_authentic": 1,
+     "standard_delivery_estimate": 0,
+     "earliest_delivery_estimate": 0,
+     "tikipro_delivery_estimate": 0,
+     "tikinow_delivery_estimate": 0.21,
+     "layout": "grid_view",
+     "variant": false,
+     "is_hero": false,
+     "is_imported": false,
+     "origin": "Việt Nam",
+     "is_high_price_penalty": false,
+     "deboosted_high_price_diff_position": 0,
+     "joined_strategy_rerank": false,
+     "is_freeship_xtra": false,
+     "is_top_brand": true
+    }
+   },
+   "layout_type": "grid_view",
+   "is_high_price_penalty": false,
+   "is_top_brand": true,
+   "uiConfig": {
+    "showUnderProductImage": true,
+    "showUnderProductImage2": false,
+    "isShowOverlayProductImg": false
+   }
+  },
+  {
+   "name": "Row without an id or a price (stub quarantine case)",
+   "brand_name": "Stub"
+  }
+ ],
+ "page_context": {
+  "categoryData": {
+   "id": 1789,
+   "parent_id": 2,
+   "name": "Điện Thoại - Máy Tính Bảng",
+   "type": null,
+   "url_key": "dien-thoai-may-tinh-bang",
+   "url_path": "dien-thoai-may-tinh-bang/c1789",
+   "level": 2,
+   "status": "active",
+   "include_in_menu": true,
+   "product_count": 344,
+   "is_leaf": false,
+   "meta_title": "Điện thoại, Máy tính bảng | Chính hãng, Giá rẻ hơn, Trả góp 0% tại Tiki.vn",
+   "meta_description": "Mua Điện Thoại, Máy tính bảng, máy đọc sách, trả góp 0%, giá rẻ hơn, giao hàng tận nơi toàn quốc, hàng chính hãng: Apple iPhone, Samsung, Oppo, Nokia, Xiaomi,....",
+   "meta_keywords": null,
+   "thumbnail_url": "https://salt.tikicdn.com/ts/category/54/c0/ff/fe98a4afa2d3e5142dc8096addc4e40b.png",
+   "ancestors": [
+    {
+     "id": 1789,
+     "level": 2,
+     "name": "Điện Thoại - Máy Tính Bảng",
+     "url_key": "dien-thoai-may-tinh-bang",
+     "full_url_key": "dien-thoai-may-tinh-bang/dien-thoai-may-tinh-bang",
+     "include_in_menu": "1",
+     "type": null,
+     "url_path": "dien-thoai-may-tinh-bang/c1789"
+    }
+   ]
+  },
+  "filters": [
+   {
+    "query_name": "category",
+    "display_name": "Danh Mục Sản Phẩm",
+    "values": [
+     {
+      "display_value": "Điện thoại Smartphone",
+      "count": 83,
+      "logo": "https://salt.tikicdn.com/cache/w100/ts/category/02/57/3e/89dd8e669f671e2417eeb330c52421ac.png",
+      "query_value": 1795,
+      "url_key": "dien-thoai-smartphone",
+      "selected": false
+     },
+     {
+      "display_value": "Máy tính bảng",
+      "count": 11,
+      "logo": "https://salt.tikicdn.com/cache/w100/ts/category/f5/e0/74/753fb4a026262e4c1464e3a403ee405e.png",
+      "query_value": 1794,
+      "url_key": "may-tinh-bang",
+      "selected": false
+     },
+     {
+      "display_value": "Máy đọc sách",
+      "count": 2,
+      "logo": "https://salt.tikicdn.com/cache/w100/ts/category/fc/ab/44/a492de1fa611e8e6122fadc24a1bb7b0.png",
+      "query_value": 28856,
+      "url_key": "may-doc-sach",
+      "selected": false
+     },
+     {
+      "display_value": "Điện thoại phổ thông",
+      "count": 1,
+      "logo": "https://salt.tikicdn.com/cache/w100/ts/category/14/f1/03/e59983e965d0425ebc9b8f037beeb34b.png",
+      "query_value": 1796,
+      "url_key": "dien-thoai-pho-thong",
+      "selected": false
+     },
+     {
+      "display_value": "Điện thoại bàn",
+      "count": 14,
+      "logo": "https://salt.tikicdn.com/cache/w100/ts/category/81/47/d5/77e88f43667abe21078da1bca915be36.png",
+      "query_value": 8061,
+      "url_key": "dien-thoai-ban",
+      "selected": false
+     }
+    ],
+    "collapsed": 5,
+    "multi_select": false,
+    "code": "category"
+   },
+   {
+    "query_name": "support_p2h_delivery",
+    "display_name": "Giao siêu tốc 2H",
+    "type": "service",
+    "service_name": "Dịch vụ",
+    "icon": "https://salt.tikicdn.com/ts/tka/a8/31/b6/802e2c99dcce64c67aa2648edb15dd25.png",
+    "icon_width": 40,
+    "icon_height": 17,
+    "sticky": true,
+    "values": [
+     {
+      "display_value": "Có",
+      "count": 16,
+      "query_value": "1",
+      "selected": false
+     }
+    ],
+    "collapsed": 5,
+    "multi_select": false,
+    "code": "support_p2h_delivery"
+   }
+  ],
+  "sellers": [],
+  "paging": {
+   "total": 111,
+   "total_text": "111",
+   "per_page": 40,
+   "current_page": 1,
+   "last_page": 3,
+   "from": 1,
+   "to": 40
+  },
+  "sort_options": [
+   {
+    "display_value": "Phổ biến",
+    "query_value": "default",
+    "selected": true
+   },
+   {
+    "display_value": "Bán chạy",
+    "query_value": "top_seller",
+    "selected": false
+   },
+   {
+    "display_value": "Hàng mới",
+    "query_value": "newest",
+    "selected": false
+   },
+   {
+    "display_value": "Giá thấp đến cao",
+    "query_value": "price,asc",
+    "selected": false
+   },
+   {
+    "display_value": "Giá cao đến thấp",
+    "query_value": "price,desc",
+    "selected": false
+   }
+  ],
+  "amplitude": {
+   "number_of_sponsored_product_ad": "5",
+   "number_of_display_ad": "0",
+   "number_of_brand_store_ad": "0",
+   "selected_sort_option": "",
+   "seller_product_sku": "...",
+   "search_experiment_variant": "",
+   "search_request": "...",
+   "search_location": "VN039006001",
+   "user_strategy": "web_ssr",
+   "model_name": "NoLtrModel"
+  },
+  "metaTitle": "Điện Thoại, Máy Tính Bảng Chính Hãng, Trả Góp 0%",
+  "h1": "Điện Thoại & Máy Tính Bảng"
+ }
+}

@@ -1,0 +1,101 @@
+"""An in-memory lake for the batch stages.
+
+The host Spark has no filesystem, so Silver and Gold are DataFrames held in
+memory: the stage logic and its Spark transforms run for real, the Parquet and
+S3A I/O is exercised in the Docker stack.
+"""
+from __future__ import annotations
+
+from pyspark.sql import functions as F
+
+from ecomdata.domain.records import record_json
+from ecomdata.processing.normalize import common
+
+
+class MemoryLake:
+    """The LakeIO port over DataFrames held in memory; records are decoded from the lines handed in."""
+
+    def __init__(self, spark, lines):
+        self.spark = spark
+        self.lines = list(lines)
+        self.written: dict[str, object] = {}
+        self.partitions: dict[str, tuple[str, ...]] = {}
+        self.gold: dict[tuple[str, str], object] = {}
+        # The star: every version of every table, kept across runs (version n is history[n]).
+        self.dw_history: dict[tuple[str, str], list] = {}
+
+    def read_records(self, *, days=None):
+        frame = common.decode_records(self.spark.createDataFrame([(line,) for line in self.lines], "value string"))
+        if days is not None:
+            frame = frame.filter(F.col("bronze_date").isin(*days))
+        return frame
+
+    def write_silver(self, name, frame, *, partition_by=(), whole=False):
+        # Like the lake: the partitions the frame has rows for are replaced, the
+        # others kept; ``whole`` replaces the dataset.
+        previous = self.written.get(name)
+        if previous is not None and partition_by and not whole:
+            replaced = frame.select(*partition_by).distinct()
+            kept = previous.join(replaced, [*partition_by], "left_anti").select(*previous.columns)
+            frame = kept.unionByName(frame, allowMissingColumns=True)
+        self.written[name] = stored(frame)
+        self.partitions[name] = tuple(partition_by)
+        return f"memory://silver/{name}"
+
+    def read_silver(self, name):
+        return self.written[name]
+
+    def write_gold(self, context, name, frame):
+        from ecomdata.processing.batch.context import GoldWriteResult
+
+        cached = stored(frame)
+        self.gold[(context.run_id, name)] = cached
+        return GoldWriteResult(name, context.gold_dataset_uri(name), cached.count())
+
+    def read_gold(self, context, name):
+        return self.gold[(context.run_id, name)]
+
+    def merge_dw(self, context, name, frame):
+        from ecomdata.domain.datasets import dataset
+        from ecomdata.processing.batch.context import DwWriteResult
+
+        key = (context.dw_root_uri, name)
+        cached = stored(frame.select(*dataset(name).columns))
+        # Like a Delta table, every merge is a new version, numbered from 0.
+        history = self.dw_history.setdefault(key, [])
+        if not history:
+            mode = "created"
+        elif history[-1].dtypes != cached.dtypes:
+            mode = "schema_replaced"
+        else:
+            mode = "merged"
+        history.append(cached)
+        return DwWriteResult(name, context.dw_dataset_uri(name), cached.count(), len(history) - 1, mode)
+
+    def read_dw(self, context, name, version=None):
+        history = self.dw_history[(context.dw_root_uri, name)]
+        return history[-1] if version is None else history[version]
+
+    def restore_dw(self, context, name, version):
+        history = self.dw_history[(context.dw_root_uri, name)]
+        history.append(history[version])
+        return len(history) - 1
+
+    @property
+    def dw(self):
+        """Each star table's latest version, by (dw root, table)."""
+        return {key: history[-1] for key, history in self.dw_history.items()}
+
+
+def stored(frame):
+    """``frame`` as a lake would hand it back: its rows materialised and its lineage cut.
+
+    A real write and read leaves a plan that starts at the files. Keeping the
+    whole lineage instead (Bronze to Silver to the star to the marts) grows the
+    plans until the driver runs out of heap.
+    """
+    return frame.localCheckpoint(eager=True)
+
+
+def lines_of(records):
+    return [record_json(r) for r in records]

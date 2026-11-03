@@ -1,0 +1,66 @@
+E1 kill speed at 2026-10-31T09:37:50.272Z
+E1a manual restart of speed at 2026-10-31T09:40:15.852Z (docker kill is a manual stop: restart policy not applied)
+E1b kill -9 Spark JVM inside rf-speed at 2026-10-31T09:40:58.271Z
+E1b result: container restarted by policy 0.6 s after the JVM kill (09:40:58.27 -> 09:40:58.87), queries restarted 09:41:05; no crawl data until 10:00 so first post-crash batch pending
+E1 note: docker kill = manual stop, restart policy not applied; watcher saw Exited(137) within one 5-min cycle; Grafana only after 10 min (speed no successful micro-batch)
+E4 kill -9 PID 1 of rf-crawl-worker at 2026-10-31T10:01:20.219Z, tiki leases held: 0
+E4 SIGKILL worker PID 57069 (VM side) at 2026-10-31T10:02:16.509Z; leases held: 4
+10:02:17 running restarts=1 started=2026-10-31T10:02:17.363152134Z
+task_a24d7613e12a56b532f35355afbd42bc3c5f7cd97e9daf8643d8b8c4a842ac9f|SUCCEEDED|2|1|2026-10-31 10:07:26.991329+00
+task_07cd4ea08754602a6683bd84c955bdcb799049f2809a81a5941abf6484c4ba8c|SUCCEEDED|2|1|2026-10-31 10:07:29.204991+00
+task_67d701087dbe2b4e77907934f7b07570e6655357787b54bc36d2c5545c409094|SUCCEEDED|2|1|2026-10-31 10:07:31.426148+00
+task_fa0bd8af425fee0c39856af7a23fb1ed7bb34a8fc644230e2eca0501d1db35ee|SUCCEEDED|2|1|2026-10-31 10:07:33.750645+00
+speed first ok batch with rows after E1b crash|2026-10-31 10:02:06.933245+00|1080
+tiki attempts 10:00-10:10|25|25
+E4 result: worker restarted 0.85 s after SIGKILL; 4 abandoned leases (expiry 10:07:14) recrawled 10:07:27-10:07:33 = 5m11s-5m17s after the crash; 1 attempt each, 25 attempts = 25 distinct tasks that hour (no duplicate, no loss). Restarted worker (same ID) does not reclaim its own leases; waits for the 300 s lease.
+E1b result: first post-crash batch with rows 10:02:06 (1080 rows), crawl started ~10:01:51; checkpoint offsets==commits, nothing stranded.
+E3 kafka stop requested 2026-10-31T11:02:00.980Z, stopped 2026-10-31T11:02:03.628Z, records offset before 157087
+E3 kafka start 2026-10-31T11:03:33.687Z, healthy 2026-10-31T11:03:40.608Z
+E3 attempts: FAILED|PUBLISH_ERROR|5|2026-10-31 11:02:00.878921+00|2026-10-31 11:03:37.945081+00|published 0 of 11 records: [Error 6] NotLeaderForPartitionError
+E3 attempts: SUCCEEDED|-|37|2026-10-31 11:01:57.896083+00|2026-10-31 11:07:45.058447+00|
+E3 tasks retried|5
+E3 parsed records published since T0-3m|1081
+E3 records offset after: 158127 (before 157087)
+E3 speed|SUCCEEDED|131|1080|2026-10-31 11:01:05.284072+00|2026-10-31 11:13:40.563348+00
+E3 container: /rf-speed running restarts=4
+E3 container: /rf-crawl-worker running restarts=1
+E3 container: /rf-es-projector running restarts=0
+E3 container: /rf-crawl-worker-lazada running restarts=0
+E3 result: Kafka down 90 s (11:02:03-11:03:33), healthy 7 s after start. Crawl: 5 attempts FAILED PUBLISH_ERROR (NotLeaderForPartition / broker gone), all 5 retried OK 1m45s-2m36s after failing; 37 attempts OK in window; raw kept (publish happens after Bronze write). Records: attempts completed after the offset snapshot parsed 1000, topic grew 1040 (+40 = at-least-once re-sends after partial publish), no loss. Speed: crashed on UnknownHostException kafka, restarted by policy 3 times (restarts 1->4), then processed 1080 rows, 0 duplicates/late/invalid. es-projector: no restart. Alert "Nhieu dong log loi" fired 11:05 (157 speed error lines / 10 min); "Endpoint" alerts did not fire (Kafka not probed, outage < 3 min).
+E3 batch check: mp-20261031T1100Z PROMOTED PASS; observation_id_unique, offer_listing_key_unique, silver_parse_attempt_reconciliation, raw lineage all PASS (0) -> re-sent records deduplicated, exactly-once at the output
+E2 stop rf-elasticsearch at 2026-10-31T12:02:08.385Z (restarts before: /rf-speed=4 /rf-crawl-worker=1 /rf-es-projector=0 /rf-crawl-worker-lazada=0 )
+E2 start 2026-10-31T12:03:42.334Z, healthy 2026-10-31T12:04:00.844Z
+E2 attempts: SUCCEEDED|-|37|2026-10-31 12:02:06.731527+00|2026-10-31 12:07:58.798855+00|
+E2 failed then ok|0|
+E2 speed|SUCCEEDED|134|1134|1112|0.082817|2026-10-31 12:01:10.229818+00|2026-10-31 12:14:00.486313+00|
+E2 speed latency after|120471|9240
+E2 restarts after: /rf-speed=8 /rf-crawl-worker=1 /rf-es-projector=0 /rf-crawl-worker-lazada=0 
+E2 result: ES down 94 s (12:02:08-12:03:42), healthy 18 s after start. Crawl unaffected (37/37 OK; crawl does not touch ES). Speed crashed on NameResolutionError elasticsearch and was restarted by policy 4 times (4->8), then all 134 batches OK, 1134 rows; latency max 120.5 s for rows held during the outage, p50 9.2 s after. Alerts: 'Container khoi dong lai lien tuc' + 'Nhieu dong log loi' fired 12:06, error-lines alert resolved 12:16. Design note: sink outage handled by process crash + Docker restart, not in-process retry with backoff.
+BEGIN
+UPDATE 5
+                                crawl_run_id                                | parsed_count 
+----------------------------------------------------------------------------+--------------
+ crawl_run_bd0fdda772be17fa81a0b2b369b8425a576d9beb714f440ea4769f4bc0f67541 |           40
+ crawl_run_f8b9e9d7164b3855325b888999e3e6dde587cb95deab0de50d5514fd0ed45b09 |           10
+ crawl_run_39f8fe866647e80e8bbfd99a3c321715623acbcb5d0e7a2e0591afff8a9c87b9 |           40
+ crawl_run_34ced6a741453462df05ae8238ec21ed399848dc020feab2f8d0b89c398d6fe0 |           40
+ crawl_run_29d97eaa368fa450640119b0bf8328ef137ead33d24f8b725af4a3d8b902b3f8 |           40
+(5 rows)
+
+COMMIT
+E3 follow-up BUG: batch mp-20261031T1200Z QUALITY_FAILED 12:21 on silver_parse_attempt_reconciliation (5 runs = the 5 E3 publish failures, 4 Tiki + 1 Lazada). Cause: worker audited a publish failure with parsed_count = Kafka-acknowledged rows (Silver-from-Kafka design) but Silver is built from the Bronze records file written before publish. Quality gate held the run: cache stayed on mp-20261031T1100Z; alerts batch-failed, DAG-failed, mandatory-quality fired 12:21. Without a fix every batch would be held until the runs left the reconciliation lookback.
+Fix: worker counts report.record_count for RecordPublishError (+tests); audit rows repaired from Bronze (40,10,40,40,40 listing rows); quality re-run with --resume via airflow clear -> PROMOTED PASS 12:26 (5 min after the hold).
+E5 stop rf-minio at 2026-10-31T13:02:35.742Z (restarts before: /rf-speed=8 /rf-crawl-worker=0 /rf-es-projector=0 /rf-crawl-worker-lazada=0 )
+E5 start 2026-10-31T13:04:06.366Z, healthy 2026-10-31T13:04:13.675Z
+E5 attempts: FAILED|STORAGE_ERROR|1|2026-10-31 13:02:34.346318+00|2026-10-31 13:03:14.196595+00|could not persist a raw part: HTTPConnectionPool(host='minio', port=9000): Max retries exceeded with url: /ecommerce-bronze/marketplace/raw/
+E5 attempts: SUCCEEDED|-|37|2026-10-31 13:02:33.100805+00|2026-10-31 13:08:16.814658+00|
+E5 failed then ok|1|00:00:57.741988
+E5 speed|SUCCEEDED|151|1080|1136|0.054603|2026-10-31 13:01:40.239598+00|2026-10-31 13:14:10.396637+00|
+E5 speed latency after|26352|7472
+E5 restarts after: /rf-speed=8 /rf-crawl-worker=0 /rf-es-projector=0 /rf-crawl-worker-lazada=0 
+E5 result: MinIO down 91 s (13:02:35-13:04:06), healthy 7 s after start. Crawl: only 1 attempt FAILED STORAGE_ERROR (S3 client retried ~40 s, so the worker stalled instead of failing many pages), recrawled OK 58 s later; 37 OK. Speed unaffected: 0 restarts, 151 batches OK, latency max 26.4 s (crawl delayed), p50 7.5 s. Batch reads MinIO only at :20, after recovery.
+E2 addendum: 54 duplicate_rows at 12:04 (batch of 108 rows) = the micro-batch replayed from the checkpoint after the crash; the stateful query recognised them and did not apply them twice (idempotent replay). No duplicates anywhere else all day.
+L1 (real edge, not an experiment): Lazada answered block/challenge from 14:06:37 after 11 OK pages that cycle (76th Lazada page of the day, ~5 h at 12-15 pages/h, ~10 s apart). 5 consecutive BLOCKED retried at +40 s, +1m40, +2m40, +5m12 (backoff), then circuit opened 14:16:59 for 15 min (until 14:31:59); alert 'Circuit breaker cua nguon dang mo' fired 14:20. raw_bytes 0 for blocked attempts. Tiki unaffected.
+L1 decision 14:28:31Z: Lazada worker stopped for the rest of the run (blocked since 14:06; avoid probing a site that blocks us; host RAM 1.3 GB free)
+M2 14:29:05Z: host memory pressure again (available 1.4 GB, commit 47.5/52.2 GB). Commit by process: vmmemWSL 14.0 GB (its cap), chrome 5.6 GB (31 procs), SignalRgb 5.0, claude 3.0, Zalo 2.0, msedgewebview2 1.1, OP.GG 0.9, Orca 0.9, docker backend 0.8, Slack 0.5. Claude Code reaped a background shell (bhbsb3hci). Action: Lazada worker stopped; VM page cache dropped (buff/cache 4.3 GB -> 0.8 GB inside the VM; WSL returns it to Windows gradually).
+L1 follow-up 15:21:58Z: Lazada READY/RETRY_WAIT frontier tasks set DISABLED (deliberate pause; re-enable with status READY). Healthcheck flagged 11 overdue Lazada tasks at 15:21 - correct detection of due work with no worker.

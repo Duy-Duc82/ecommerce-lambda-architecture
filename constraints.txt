@@ -1,0 +1,18 @@
+# The one place an exact version is pinned. pyproject.toml holds ranges; every
+# image installs with `pip install -c constraints.txt ...`, so a rebuilt image
+# gets the versions the end-to-end runs used.
+requests==2.34.2
+python-dotenv==1.0.1
+kafka-python-ng==2.2.3
+minio==7.2.20
+psycopg2-binary==2.9.10
+redis==7.4.0
+elasticsearch==8.18.0
+pyarrow==24.0.0
+# [spark]: the Spark image gets pyspark from /opt/spark/python (4.0.1, matching
+# its jars); these pins apply to hosts and tests that pip-install it.
+pyspark==4.0.4
+pandas==2.3.3
+numpy==2.2.6
+# [browser]: must equal the Playwright base image tag (v1.55.0-noble).
+playwright==1.55.0

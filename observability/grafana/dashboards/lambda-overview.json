@@ -1,0 +1,903 @@
+{
+ "uid": "lambda-overview",
+ "title": "Lambda — tổng quan",
+ "timezone": "Asia/Ho_Chi_Minh",
+ "refresh": "30s",
+ "time": {
+  "from": "now-3h",
+  "to": "now"
+ },
+ "schemaVersion": 39,
+ "tags": [
+  "lambda",
+  "overview"
+ ],
+ "links": [
+  {
+   "title": "Dashboards",
+   "type": "dashboards",
+   "tags": [
+    "lambda"
+   ],
+   "asDropdown": false,
+   "includeVars": false
+  }
+ ],
+ "templating": {
+  "list": []
+ },
+ "panels": [
+  {
+   "type": "row",
+   "title": "Sức khoẻ",
+   "id": 1,
+   "collapsed": false,
+   "gridPos": {
+    "h": 1,
+    "w": 24,
+    "x": 0,
+    "y": 0
+   },
+   "panels": []
+  },
+  {
+   "type": "stat",
+   "title": "Endpoint",
+   "description": "HTTP probe của Alloy tới từng web endpoint (blackbox).",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "expr": "probe_success",
+     "legendFormat": "{{instance}}",
+     "instant": true,
+     "range": false
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "unit": "short",
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "red",
+        "value": null
+       },
+       {
+        "color": "green",
+        "value": 1
+       }
+      ]
+     },
+     "mappings": [
+      {
+       "type": "value",
+       "options": {
+        "0": {
+         "text": "DOWN",
+         "color": "red"
+        },
+        "1": {
+         "text": "UP",
+         "color": "green"
+        }
+       }
+      }
+     ],
+     "noValue": "–"
+    },
+    "overrides": []
+   },
+   "options": {
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ]
+    },
+    "colorMode": "background",
+    "textMode": "value_and_name",
+    "graphMode": "none",
+    "justifyMode": "auto"
+   },
+   "id": 2,
+   "gridPos": {
+    "h": 4,
+    "w": 12,
+    "x": 0,
+    "y": 1
+   }
+  },
+  {
+   "type": "alertlist",
+   "title": "Cảnh báo đang bật",
+   "options": {
+    "viewMode": "list",
+    "groupMode": "default",
+    "maxItems": 20,
+    "sortOrder": 1,
+    "dashboardAlerts": false,
+    "alertName": "",
+    "alertInstanceLabelFilter": "",
+    "stateFilter": {
+     "firing": true,
+     "pending": true
+    }
+   },
+   "id": 3,
+   "gridPos": {
+    "h": 8,
+    "w": 12,
+    "x": 12,
+    "y": 1
+   }
+  },
+  {
+   "type": "stat",
+   "title": "RAM máy (VM Docker)",
+   "description": "",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "expr": "(1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes) * 100",
+     "legendFormat": "",
+     "instant": true,
+     "range": false
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "unit": "percent",
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "green",
+        "value": null
+       },
+       {
+        "color": "orange",
+        "value": 80
+       },
+       {
+        "color": "red",
+        "value": 90
+       }
+      ]
+     },
+     "mappings": [],
+     "noValue": "–"
+    },
+    "overrides": []
+   },
+   "options": {
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ]
+    },
+    "colorMode": "background",
+    "textMode": "auto",
+    "graphMode": "none",
+    "justifyMode": "auto"
+   },
+   "id": 4,
+   "gridPos": {
+    "h": 4,
+    "w": 4,
+    "x": 0,
+    "y": 9
+   }
+  },
+  {
+   "type": "stat",
+   "title": "CPU máy",
+   "description": "",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "expr": "(1 - avg(rate(node_cpu_seconds_total{mode=\"idle\"}[2m]))) * 100",
+     "legendFormat": "",
+     "instant": true,
+     "range": false
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "unit": "percent",
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "green",
+        "value": null
+       },
+       {
+        "color": "orange",
+        "value": 80
+       },
+       {
+        "color": "red",
+        "value": 95
+       }
+      ]
+     },
+     "mappings": [],
+     "noValue": "–"
+    },
+    "overrides": []
+   },
+   "options": {
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ]
+    },
+    "colorMode": "background",
+    "textMode": "auto",
+    "graphMode": "none",
+    "justifyMode": "auto"
+   },
+   "id": 5,
+   "gridPos": {
+    "h": 4,
+    "w": 4,
+    "x": 4,
+    "y": 9
+   }
+  },
+  {
+   "type": "stat",
+   "title": "Đĩa",
+   "description": "",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "expr": "max by (mountpoint) ((1 - node_filesystem_avail_bytes{mountpoint=~\"/|/mnt/docker-desktop-disk|/mnt/host/c\", fstype!~\"tmpfs|rootfs\"} / node_filesystem_size_bytes{mountpoint=~\"/|/mnt/docker-desktop-disk|/mnt/host/c\", fstype!~\"tmpfs|rootfs\"}) * 100)",
+     "legendFormat": "{{mountpoint}}",
+     "instant": true,
+     "range": false
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "unit": "percent",
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "green",
+        "value": null
+       },
+       {
+        "color": "orange",
+        "value": 75
+       },
+       {
+        "color": "red",
+        "value": 85
+       }
+      ]
+     },
+     "mappings": [],
+     "noValue": "–"
+    },
+    "overrides": []
+   },
+   "options": {
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ]
+    },
+    "colorMode": "background",
+    "textMode": "value_and_name",
+    "graphMode": "none",
+    "justifyMode": "auto"
+   },
+   "id": 6,
+   "gridPos": {
+    "h": 4,
+    "w": 4,
+    "x": 8,
+    "y": 9
+   }
+  },
+  {
+   "type": "row",
+   "title": "Độ tươi dữ liệu và luồng",
+   "id": 7,
+   "collapsed": false,
+   "gridPos": {
+    "h": 1,
+    "w": 24,
+    "x": 0,
+    "y": 13
+   },
+   "panels": []
+  },
+  {
+   "type": "stat",
+   "title": "Speed: batch thành công gần nhất",
+   "description": "",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "expr": "time() - max(mp_speed_last_last_success_timestamp)",
+     "legendFormat": "",
+     "instant": true,
+     "range": false
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "unit": "s",
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "green",
+        "value": null
+       },
+       {
+        "color": "orange",
+        "value": 120
+       },
+       {
+        "color": "red",
+        "value": 600
+       }
+      ]
+     },
+     "mappings": [],
+     "noValue": "–"
+    },
+    "overrides": []
+   },
+   "options": {
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ]
+    },
+    "colorMode": "background",
+    "textMode": "auto",
+    "graphMode": "none",
+    "justifyMode": "auto"
+   },
+   "id": 8,
+   "gridPos": {
+    "h": 4,
+    "w": 4,
+    "x": 0,
+    "y": 14
+   }
+  },
+  {
+   "type": "stat",
+   "title": "Batch: cửa sổ đã promote mới nhất",
+   "description": "Tuổi của as_of của run PROMOTED mới nhất. Hourly + 10 phút settle → bình thường < 1,5 giờ.",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "expr": "time() - max(mp_batch_promoted_last_as_of_timestamp > 0)",
+     "legendFormat": "",
+     "instant": true,
+     "range": false
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "unit": "s",
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "green",
+        "value": null
+       },
+       {
+        "color": "orange",
+        "value": 5400
+       },
+       {
+        "color": "red",
+        "value": 9000
+       }
+      ]
+     },
+     "mappings": [],
+     "noValue": "–"
+    },
+    "overrides": []
+   },
+   "options": {
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ]
+    },
+    "colorMode": "background",
+    "textMode": "auto",
+    "graphMode": "none",
+    "justifyMode": "auto"
+   },
+   "id": 9,
+   "gridPos": {
+    "h": 4,
+    "w": 4,
+    "x": 4,
+    "y": 14
+   }
+  },
+  {
+   "type": "stat",
+   "title": "Cache BI publish",
+   "description": "",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "expr": "time() - max(mp_serving_cache_published_timestamp)",
+     "legendFormat": "",
+     "instant": true,
+     "range": false
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "unit": "s",
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "green",
+        "value": null
+       },
+       {
+        "color": "orange",
+        "value": 5400
+       },
+       {
+        "color": "red",
+        "value": 9000
+       }
+      ]
+     },
+     "mappings": [],
+     "noValue": "–"
+    },
+    "overrides": []
+   },
+   "options": {
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ]
+    },
+    "colorMode": "background",
+    "textMode": "auto",
+    "graphMode": "none",
+    "justifyMode": "auto"
+   },
+   "id": 10,
+   "gridPos": {
+    "h": 4,
+    "w": 4,
+    "x": 8,
+    "y": 14
+   }
+  },
+  {
+   "type": "stat",
+   "title": "Crawl: bản ghi / 5 phút",
+   "description": "",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "expr": "sum(mp_crawl_5m_parsed_records) or vector(0)",
+     "legendFormat": "",
+     "instant": true,
+     "range": false
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "unit": "short",
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "red",
+        "value": null
+       },
+       {
+        "color": "green",
+        "value": 1
+       }
+      ]
+     },
+     "mappings": [],
+     "noValue": "–"
+    },
+    "overrides": []
+   },
+   "options": {
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ]
+    },
+    "colorMode": "background",
+    "textMode": "auto",
+    "graphMode": "none",
+    "justifyMode": "auto"
+   },
+   "id": 11,
+   "gridPos": {
+    "h": 4,
+    "w": 4,
+    "x": 12,
+    "y": 14
+   }
+  },
+  {
+   "type": "stat",
+   "title": "Speed lag (offset)",
+   "description": "Số offset Kafka mà query speed còn đi sau topic (Spark maxOffsetsBehindLatest).",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "expr": "max(mp_stream_5m_offsets_behind_latest)",
+     "legendFormat": "",
+     "instant": true,
+     "range": false
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "unit": "short",
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "green",
+        "value": null
+       },
+       {
+        "color": "orange",
+        "value": 1000
+       },
+       {
+        "color": "red",
+        "value": 5000
+       }
+      ]
+     },
+     "mappings": [],
+     "noValue": "–"
+    },
+    "overrides": []
+   },
+   "options": {
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ]
+    },
+    "colorMode": "background",
+    "textMode": "auto",
+    "graphMode": "none",
+    "justifyMode": "auto"
+   },
+   "id": 12,
+   "gridPos": {
+    "h": 4,
+    "w": 4,
+    "x": 16,
+    "y": 14
+   }
+  },
+  {
+   "type": "stat",
+   "title": "Batch run mới nhất",
+   "description": "",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "expr": "max by (run_id, status) (mp_batch_latest_as_of_timestamp)",
+     "legendFormat": "{{status}}",
+     "instant": true,
+     "range": false
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "unit": "short",
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "green",
+        "value": null
+       }
+      ]
+     },
+     "mappings": [],
+     "noValue": "–"
+    },
+    "overrides": []
+   },
+   "options": {
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ]
+    },
+    "colorMode": "none",
+    "textMode": "name",
+    "graphMode": "none",
+    "justifyMode": "auto"
+   },
+   "id": 13,
+   "gridPos": {
+    "h": 4,
+    "w": 4,
+    "x": 20,
+    "y": 14
+   }
+  },
+  {
+   "type": "row",
+   "title": "Tài nguyên theo layer",
+   "id": 14,
+   "collapsed": false,
+   "gridPos": {
+    "h": 1,
+    "w": 24,
+    "x": 0,
+    "y": 18
+   },
+   "panels": []
+  },
+  {
+   "type": "timeseries",
+   "title": "CPU theo layer (core)",
+   "description": "",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "expr": "sum by (layer) (container:cpu_usage_cores)",
+     "legendFormat": "{{layer}}",
+     "instant": false,
+     "range": true
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "unit": "short",
+     "custom": {
+      "drawStyle": "line",
+      "fillOpacity": 10,
+      "lineWidth": 1,
+      "showPoints": "never",
+      "stacking": {
+       "mode": "normal"
+      }
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "legend": {
+     "displayMode": "list",
+     "placement": "bottom"
+    },
+    "tooltip": {
+     "mode": "multi",
+     "sort": "desc"
+    }
+   },
+   "id": 15,
+   "gridPos": {
+    "h": 8,
+    "w": 8,
+    "x": 0,
+    "y": 19
+   }
+  },
+  {
+   "type": "timeseries",
+   "title": "RAM theo layer",
+   "description": "",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "expr": "sum by (layer) (container:memory_working_set_bytes)",
+     "legendFormat": "{{layer}}",
+     "instant": false,
+     "range": true
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "unit": "bytes",
+     "custom": {
+      "drawStyle": "line",
+      "fillOpacity": 10,
+      "lineWidth": 1,
+      "showPoints": "never",
+      "stacking": {
+       "mode": "normal"
+      }
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "legend": {
+     "displayMode": "list",
+     "placement": "bottom"
+    },
+    "tooltip": {
+     "mode": "multi",
+     "sort": "desc"
+    }
+   },
+   "id": 16,
+   "gridPos": {
+    "h": 8,
+    "w": 8,
+    "x": 8,
+    "y": 19
+   }
+  },
+  {
+   "type": "timeseries",
+   "title": "Dòng log lỗi / 5 phút theo layer",
+   "description": "",
+   "datasource": {
+    "type": "loki",
+    "uid": "loki"
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "loki",
+      "uid": "loki"
+     },
+     "expr": "sum by (layer) (count_over_time({level=\"error\"}[5m]))",
+     "legendFormat": "{{layer}}"
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "unit": "short",
+     "custom": {
+      "drawStyle": "bars",
+      "fillOpacity": 60,
+      "lineWidth": 1,
+      "showPoints": "never",
+      "stacking": {
+       "mode": "normal"
+      }
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "legend": {
+     "displayMode": "list",
+     "placement": "bottom"
+    },
+    "tooltip": {
+     "mode": "multi",
+     "sort": "desc"
+    }
+   },
+   "id": 17,
+   "gridPos": {
+    "h": 8,
+    "w": 8,
+    "x": 16,
+    "y": 19
+   }
+  }
+ ],
+ "editable": true
+}
