@@ -55,6 +55,8 @@ legacy = [
 ecomdata-ops = "ecomdata.ops.__main__:main"
 # The batch stages as a console script: what a Databricks python_wheel_task names as its entry point.
 ecomdata-batch = "ecomdata.processing.batch.cli:main"
+# The speed layer on a lakehouse (Bronze -> Delta, no Kafka): the Databricks speed job's entry point.
+ecomdata-speed-lakehouse = "ecomdata.processing.speed.lakehouse:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
