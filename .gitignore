@@ -20,3 +20,7 @@ data/ops/
 .ruff_cache/
 .import_linter_cache/
 .import_linter_cache/
+
+# Databricks bundle: local state and the built wheel
+.databricks/
+dist/

@@ -84,3 +84,64 @@ Chạy lúc 2026-10-25, một bảng Silver chia partition theo `observed_date`:
 | `VACUUM` | chạy, không lỗi |
 
 Chỉ kiểm hệ tệp cục bộ. Delta trên S3A (MinIO) và trên bucket cloud chưa chạy: cần kiểm ở bước sau, vì S3A không có rename nguyên tử và Delta dùng cơ chế log riêng cho trường hợp đó.
+
+## 8. Triển khai (nhánh `phase-11/databricks`, 2026-11-05)
+
+Quyết định 2026-11-05: chọn hướng lai. Batch và speed chạy trên Databricks, đọc và ghi Delta trên S3. Crawler, frontier, Kafka, PostgreSQL `cache.*`, Superset, Elasticsearch và Redis giữ ở stack local. Crawler từ IP datacenter dễ bị chặn, và stream chạy 24/7 trên cloud thì tốn tiền.
+
+```
+Laptop: crawler -> Bronze (MinIO) --mc mirror--> S3 bronze
+                                                    |
+Databricks job ecomdata-marketplace-batch:  silver -> dimensions -> facts -> marts -> quality  (S3 silver, gold, Delta)
+Databricks job ecomdata-marketplace-speed:  Bronze/records -> gold/speed/{observations, offer_state, price_changes, outputs, records_dlq, stream_progress}
+```
+
+### Mã
+
+| Việc | Chỗ |
+|---|---|
+| `--skip-postgres` không lấy khoá advisory trong PostgreSQL; chống chạy chồng bằng `max_concurrent_runs: 1` | `processing/batch/bootstrap.py` |
+| Speed trên lakehouse: cùng normaliser và cùng phép so trạng thái, nhưng nguồn là tệp Bronze (Auto Loader) và đích là bảng Delta. Ghi lặp không nhân đôi (`txnAppId`/`txnVersion`, MERGE) | `processing/speed/lakehouse.py`, console script `ecomdata-speed-lakehouse` |
+| Trigger `availableNow` cho query có trạng thái | `processing/speed/service.py` (`start_query`) |
+| Asset Bundle: wheel, hai job, cluster một node chế độ dedicated (DBR 17.3 LTS, Spark 4.0, Python 3.12) | `databricks.yml`, `databricks/resources/jobs.yml` |
+
+Bundle dùng cluster classic, không chạy được trên Free Edition (chỉ có serverless). Cần một workspace trả phí hoặc dùng thử trên AWS.
+
+### Người dùng chuẩn bị (một lần)
+
+1. **Workspace Databricks** trên AWS, region `ap-southeast-1` nếu được chọn. Đặt AWS Budgets $1 và $5 trước.
+2. **Ba bucket S3** cùng region, tên duy nhất toàn cầu, ví dụ `ecomdata-<tên>-bronze`, `-silver`, `-gold`.
+3. **Một IAM user** chỉ có quyền `s3:GetObject`, `PutObject`, `DeleteObject`, `ListBucket` trên ba bucket đó. Tạo access key cho user này.
+4. **Databricks CLI**: `winget install Databricks.DatabricksCLI`, rồi đăng nhập OAuth trong trình duyệt:
+   ```powershell
+   databricks auth login --host https://<workspace>.cloud.databricks.com
+   ```
+   Token nằm trong `~/.databrickscfg` và bộ nhớ đệm token của CLI. Không đưa token vào repo hay vào chat.
+5. **Secret scope**, khoá nhập ở prompt, không nằm trong lịch sử lệnh:
+   ```powershell
+   databricks secrets create-scope ecomdata
+   databricks secrets put-secret ecomdata aws_access_key
+   databricks secrets put-secret ecomdata aws_secret_key
+   ```
+
+### Chạy
+
+```powershell
+# Bronze: một cửa sổ vài ngày từ MinIO lên S3 (records và crawl audit)
+docker run --rm --network host minio/mc sh -c "mc alias set local http://localhost:<MINIO_API_HOST_PORT> <minio-user> <minio-pass> && mc alias set s3 https://s3.ap-southeast-1.amazonaws.com <key> <secret> && mc mirror local/ecommerce-bronze/marketplace s3/<bucket-bronze>/marketplace"
+
+$env:BUNDLE_VAR_bucket_bronze = "<bucket-bronze>"; $env:BUNDLE_VAR_bucket_silver = "<bucket-silver>"; $env:BUNDLE_VAR_bucket_gold = "<bucket-gold>"
+databricks bundle validate
+databricks bundle deploy -t dev
+databricks bundle run -t dev marketplace_batch --params as_of=2026-11-05T00:00:00Z
+databricks bundle run -t dev marketplace_speed                                   # availableNow: xử lý những gì đã có rồi dừng
+databricks bundle run -t dev marketplace_speed --params mode=--run-minutes=120   # cửa sổ demo chạy liên tục 2 giờ
+```
+
+Batch local trên cùng cửa sổ Bronze và cùng `--as-of` là bản đối chứng. So `dataset_counts`, `quality_status`, số dòng và version của các bảng `dw/`. Lưu kết quả vào `docs/evidence/databricks-<ngày>/`.
+
+### Rủi ro chưa kiểm
+
+- Wheel kéo theo dependency của nó (`pyarrow>=24`, `psycopg2-binary`, `elasticsearch`, ...). Nếu runtime có pyarrow cũ hơn, cài đè có thể làm hỏng các API pandas của Spark. Lần chạy đầu cần xem log cài thư viện của cluster.
+- `ProcessingTimeTimeout` (offer bị coi là cũ sau `stale_after_seconds`) chỉ chạy khi query sống liên tục. Với `availableNow` các change STALE có thể không sinh ra.
+- Delta trên S3A từ Databricks: dùng S3 commit service của nền tảng. Chưa kiểm đường `s3a://` cùng khoá trong `spark_conf` trên DBR 17.3.

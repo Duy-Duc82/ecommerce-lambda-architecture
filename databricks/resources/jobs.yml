@@ -1,0 +1,100 @@
+resources:
+  jobs:
+    marketplace_batch:
+      name: ecomdata-marketplace-batch
+      description: >-
+        silver -> dimensions -> facts -> marts -> quality on the S3 lake, Delta tables.
+        publish and promote stay local: they write PostgreSQL cache.*.
+      # Without PostgreSQL there is no advisory lock: the platform keeps two runs from overlapping.
+      max_concurrent_runs: 1
+      parameters:
+        - name: as_of
+          default: ""
+      job_clusters:
+        - job_cluster_key: ecomdata
+          new_cluster: &ecomdata_cluster
+            # A dedicated (single user) classic cluster: the stateful speed query needs applyInPandasWithState,
+            # and the S3A keys are cluster Spark settings, which serverless compute does not accept.
+            spark_version: ${var.spark_version}
+            node_type_id: ${var.node_type}
+            num_workers: 0
+            data_security_mode: SINGLE_USER
+            spark_conf:
+              spark.master: "local[*, 4]"
+              spark.databricks.cluster.profile: singleNode
+              spark.sql.session.timeZone: UTC
+              spark.sql.sources.partitionOverwriteMode: dynamic
+              spark.hadoop.fs.s3a.access.key: "{{secrets/${var.secret_scope}/aws_access_key}}"
+              spark.hadoop.fs.s3a.secret.key: "{{secrets/${var.secret_scope}/aws_secret_key}}"
+              spark.hadoop.fs.s3a.endpoint: s3.${var.region}.amazonaws.com
+            custom_tags:
+              ResourceClass: SingleNode
+              project: ecomdata
+            spark_env_vars:
+              SPARK_RUNTIME: databricks
+              DATA_LAKE_PROFILE: s3
+              DATA_LAKE_REGION: ${var.region}
+              DATA_LAKE_TABLE_FORMAT: delta
+              DATA_LAKE_ACCESS_KEY: "{{secrets/${var.secret_scope}/aws_access_key}}"
+              DATA_LAKE_SECRET_KEY: "{{secrets/${var.secret_scope}/aws_secret_key}}"
+              MINIO_BUCKET_BRONZE: ${var.bucket_bronze}
+              MINIO_BUCKET_SILVER: ${var.bucket_silver}
+              MINIO_BUCKET_GOLD: ${var.bucket_gold}
+              MARKETPLACE_CRAWL_AUDIT_SOURCE: lake
+      tasks:
+        - task_key: batch
+          job_cluster_key: ecomdata
+          python_wheel_task:
+            package_name: ecomdata
+            entry_point: ecomdata-batch
+            parameters:
+              - run
+              - --run-id
+              - "dbx-{{job.run_id}}"
+              - --as-of
+              - "{{job.parameters.as_of}}"
+              - --stage
+              - silver
+              - --stage
+              - dimensions
+              - --stage
+              - facts
+              - --stage
+              - marts
+              - --stage
+              - quality
+              - --skip-postgres
+          libraries:
+            - whl: ./dist/*.whl
+          timeout_seconds: 7200
+
+    marketplace_speed:
+      name: ecomdata-marketplace-speed
+      description: >-
+        The speed layer on the lakehouse: new Bronze record files -> Delta observations, offer_state,
+        price_changes. available-now processes what arrived and stops; run it on the schedule, or with
+        --run-minutes for an always-on demo window.
+      max_concurrent_runs: 1
+      parameters:
+        - name: mode
+          default: --available-now
+      job_clusters:
+        - job_cluster_key: ecomdata
+          new_cluster: *ecomdata_cluster
+      tasks:
+        - task_key: speed
+          job_cluster_key: ecomdata
+          python_wheel_task:
+            package_name: ecomdata
+            entry_point: ecomdata-speed-lakehouse
+            parameters:
+              - "{{job.parameters.mode}}"
+              - --auto-loader
+          libraries:
+            - whl: ./dist/*.whl
+          timeout_seconds: 21600
+      # Paused: turn it on for a demo window only (each run starts a cluster).
+      schedule:
+        quartz_cron_expression: "0 0/15 * * * ?"
+        timezone_id: Asia/Ho_Chi_Minh
+        pause_status: PAUSED
