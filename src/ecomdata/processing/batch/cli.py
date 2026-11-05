@@ -31,7 +31,7 @@ def build_parser(silver_root: str, gold_root: str) -> argparse.ArgumentParser:
         "--gold-root-uri", default=gold_root, help="a root other than the default is a scratch run that never publishes"
     )
     run.add_argument(
-        "--skip-postgres", action="store_true", help="no audit row and no cache; the crawl audit is still read"
+        "--skip-postgres", action="store_true", help="no audit row, no cache and no lock in PostgreSQL; the crawl audit is still read"
     )
     run.add_argument(
         "--resume", action="store_true", help="continue a FAILED or QUALITY_FAILED run from where it stopped"

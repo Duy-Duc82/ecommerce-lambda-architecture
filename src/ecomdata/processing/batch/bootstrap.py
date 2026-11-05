@@ -84,8 +84,8 @@ def star_snapshot(settings: Settings | None = None) -> dict:
 def batch_dependencies(settings: Settings, *, publish_cache: bool = True):
     """The real adapters of a batch run: PostgreSQL audit, object store, Spark lake, advisory lock.
 
-    ``publish_cache=False`` (``--skip-postgres``) keeps the audit and the quality results in memory and
-    publishes no cache. The crawl audit is read from the lake, or from PostgreSQL when
+    ``publish_cache=False`` (``--skip-postgres``) keeps the audit and the quality results in memory,
+    publishes no cache and takes no PostgreSQL lock. The crawl audit is read from the lake, or from PostgreSQL when
     ``MARKETPLACE_CRAWL_AUDIT_SOURCE=postgres`` (a lake written before the crawler kept its audit there).
     """
     from ecomdata.infra.object_store import object_store_for
@@ -125,5 +125,7 @@ def batch_dependencies(settings: Settings, *, publish_cache: bool = True):
         spark_provider=provider,
         crawl_audit=crawl_audit,
         publisher=MarketplaceCachePublisher(factory, url, props) if publish_cache else None,
-        lock=lambda: exclusive_batch(connection_factory(pg), key=settings.batch.lock_key),
+        # Without PostgreSQL (a Databricks job) the platform keeps runs from overlapping:
+        # the job's max_concurrent_runs = 1 (databricks/databricks.yml).
+        lock=(lambda: exclusive_batch(connection_factory(pg), key=settings.batch.lock_key)) if publish_cache else None,
     )
