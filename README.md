@@ -103,7 +103,8 @@ Kafka 4.2 (KRaft), Spark 4.0 (Python 3.12), MinIO (S3A), PostgreSQL 18, Elastics
 | [`docs/RUNBOOK.md`](docs/RUNBOOK.md) | vận hành: seed, backfill, drill, backup |
 | [`docs/DEMO_RUNBOOK.md`](docs/DEMO_RUNBOOK.md) | chạy và trình diễn stack dài hạn |
 | [`docs/OBSERVABILITY.md`](docs/OBSERVABILITY.md) | metric, log, dashboard Grafana, cảnh báo |
-| [`docs/evidence/`](docs/evidence/) | bằng chứng chạy thật: refactor (25/10), end-to-end (31/10) |
+| [`docs/DANH_GIA_HE_THONG_20261113.md`](docs/DANH_GIA_HE_THONG_20261113.md) | đánh giá hiện trạng so với yêu cầu và kế hoạch ổn định hoá (13/11) |
+| [`docs/evidence/`](docs/evidence/) | bằng chứng chạy thật: refactor (25/10), end-to-end (31/10), toàn luồng (07/11) |
 | [`docs/archive/`](docs/archive/) | kế hoạch, nhật ký và báo cáo của các giai đoạn trước |
 
 Shopee không được crawl; hướng hợp lệ duy nhất là Affiliate Open API (ADR-0006).
