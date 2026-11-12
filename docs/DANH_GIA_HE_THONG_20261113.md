@@ -100,9 +100,11 @@ Chấp nhận khi: `validate` PASS mỗi ngày, `counter_invalid_transition_rate
 - Worker: khi khởi động, nhận lại ngay các task đang `LEASED` bởi chính `worker_id` của nó. Chấp nhận: drill E4 không còn khoảng chờ 5 phút.
 - Nợ code: `build_offer_change_daily` gọi `change_rules`; tách `drills.py`.
 
-### 5.4 P3, từ 20/11 khi có ≥ 2 tuần dữ liệu: ML giảm giá ảo
+### 5.4 P3: bài toán phân tích, đã chọn và cài đặt (ADR-0009, nhánh `feat/discount-credibility`)
 
-Theo kế hoạch 03/11 §3.1, chạy như một stage batch đọc `dw`. Ba kiểu đã thấy trong dữ liệu 07/11 (mục 7 nhật ký) là nhãn khởi đầu: A giá nhảy lên niêm yết rồi giảm lại; B niêm yết ảo rồi bật sale; C đổi biến thể/người bán (cần cờ "niêm yết đổi cùng lúc giá bán"). Dự báo nhu cầu chỉ làm nếu tới 01/12 có ≥ 3 tuần; nếu không, trình bày baseline và ghi giới hạn.
+Bài toán: **độ tin cậy của khuyến mãi** (giảm giá ảo). Mức giảm hiển thị của mỗi offer-ngày được so với lịch sử giá của chính offer đó: giá tham chiếu là giá thấp nhất 30 ngày trước (quy tắc Omnibus), trần 50 % theo Nghị định 81/2018. Năm luật có lý do đọc được từ cột của mart; Isolation Forest (scikit-learn) chỉ xếp hạng để xem tay. Hai mart mới `discount_credibility_daily` và `discount_daily` dựng trong stage `marts`, qua cổng chất lượng và publish như mười mart cũ. Chạy thử trên Gold thật 31/10: `docs/evidence/discount-credibility-20261113/`. Dự báo nhu cầu để lại cho đến khi có ≥ 3 tuần dữ liệu liên tục (ADR-0009 nêu lý do).
+
+Việc còn lại của P3: gán nhãn tay ~100 offer-ngày top để đo precision@k khi có ≥ 7 ngày dữ liệu; dựng chart Superset theo spec `serving/superset/marketplace_promotion_dashboard.py`.
 
 ### 5.5 P4: dashboard
 

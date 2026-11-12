@@ -31,6 +31,8 @@ Gold là một star schema trên Delta Lake (`dw`), cập nhật tăng dần b�
 
 Chi tiết từng bảng, khoá và luật chất lượng: [`docs/DATA_MODEL.md`](docs/DATA_MODEL.md).
 
+**Bài toán phân tích** (ADR-0009): độ tin cậy của khuyến mãi. Mức giảm mà trang hiển thị được so với lịch sử giá của chính offer (giá tham chiếu = giá thấp nhất 30 ngày trước, trần 50 %); năm luật cho lý do, Isolation Forest chỉ xếp hạng. Kết quả ở hai mart `discount_credibility_daily` và `discount_daily`.
+
 ## Cấu trúc mã
 
 ```text
