@@ -53,6 +53,8 @@ SPEED_OUTPUT_SCHEMA = StructType(
         StructField("source_offset", LongType(), True),
         StructField("error_type", StringType(), True),
         StructField("error_message", StringType(), True),
+        # The Kafka value of an INVALID row, for its DLQ record; null on every other kind.
+        StructField("payload_text", StringType(), True),
     ]
 )
 
@@ -127,6 +129,7 @@ def decode_observation_stream(raw: DataFrame) -> tuple[DataFrame, DataFrame]:
         F.lit("INVALID").alias("output_kind"),
         F.lit("OBSERVATION_CONTRACT").alias("error_type"),
         F.lit("invalid marketplace observation envelope, key, or lineage").alias("error_message"),
+        F.col("value").alias("payload_text"),
     )
     return valid, invalid
 
@@ -157,6 +160,7 @@ def _process_group(rows: Iterable[dict], previous=None, config: ChangeRuleConfig
                     source_offset=row.get("source_offset"),
                     error_type="OBSERVATION_CONTRACT",
                     error_message=str(exc)[:500],
+                    payload_text=row.get("event_json"),
                 )
             )
 
