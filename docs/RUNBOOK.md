@@ -51,6 +51,38 @@ the advisory lock; nothing was started.
 `*_HOST_PORT` variables in `.env`. Delete an old override file, or it keeps
 applying its own `!override` ports and images.
 
+### Bringing a stack back (the checklist from the run of 2026-11-07)
+
+A stack that was stopped keeps its volumes, and with them two things that bite
+on the way back (`docs/evidence/run-20261107/NHAT-KY-LOI.md`, items 1-3):
+
+1. **Airflow keeps each DAG's paused flag.** If the DAGs were paused to stop
+   the pipeline, nothing runs after `up` until they are unpaused:
+
+   ```powershell
+   .\scripts\mp.ps1 -EnvFile env/refactor.env up -With crawl,speed,orchestration,serve,ops
+   .\scripts\mp.ps1 -EnvFile env/refactor.env dags            # lists the flags
+   .\scripts\mp.ps1 -EnvFile env/refactor.env dags unpause    # marketplace_batch, source_discovery
+   ```
+
+   `marketplace_maintenance` stays paused unless Bronze/raw should be pruned,
+   and `marketplace_reprocess` is only ever triggered by hand. To stop the
+   pipeline but keep BI up: `dags pause`.
+2. **A manual trigger needs no logical date any more**, but one may be given
+   to name the window: `airflow dags trigger marketplace_batch --logical-date
+   2026-11-07T05:00:00+00:00`. Without it the run's `as_of` is the instant it
+   was triggered.
+3. **After a code upgrade that moved the crawl audit into the lake (ADR-0008)**,
+   crawls made under the older code exist only in PostgreSQL. Copy them once,
+   or the gate's `silver_parse_attempt_reconciliation` is SKIPPED and the run
+   is QUALITY_FAILED:
+
+   ```powershell
+   docker exec rf-crawl-worker python -m ecomdata.ops audit-export   # idempotent
+   ```
+
+Then `validate` (below) says whether the stack is whole.
+
 ## Four stacks on one machine (Phase 9 plan section 5)
 
 Live collection runs for 30 days and must never stop for a test. Every other
