@@ -47,6 +47,7 @@ def context_for(settings: Settings, *, run_id: str, as_of: datetime, silver_uri:
         anomaly_mad_threshold=batch.anomaly_mad_threshold,
         anomaly_iqr_multiplier=batch.anomaly_iqr_multiplier,
         anomaly_rule_version=batch.anomaly_rule_version,
+        discount_rules=batch.discount_rules,
         quality_rule_version=quality.rule_version,
         future_tolerance_seconds=quality.future_tolerance_seconds,
         reconciliation_settle_seconds=quality.reconciliation_settle_seconds,

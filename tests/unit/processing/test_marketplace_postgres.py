@@ -135,8 +135,8 @@ def _counts(staged, **overrides):
 
 
 # 33
-def test_exactly_ten_datasets_with_explicit_columns_are_declared():
-    assert len(DATASETS) == 10
+def test_exactly_twelve_datasets_with_explicit_columns_are_declared():
+    assert len(DATASETS) == 12
     assert set(DATASETS) == set(DATASET_COLUMNS)
     for name in DATASETS:
         assert DATASET_COLUMNS[name], name

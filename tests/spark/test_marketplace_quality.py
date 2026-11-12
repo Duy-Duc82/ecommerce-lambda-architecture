@@ -75,13 +75,13 @@ def test_check_names_are_unique_and_expectations_are_stated():
 
 
 # 18
-def test_exactly_sixteen_mandatory_and_five_advisory_rules_are_registered():
+def test_exactly_sixteen_mandatory_and_six_advisory_rules_are_registered():
     mandatory = rules_with_severity(MANDATORY)
     advisory = rules_with_severity(ADVISORY)
 
     assert len(mandatory) == 16
-    assert len(advisory) == 5
-    assert len(QUALITY_RULES) == 21
+    assert len(advisory) == 6
+    assert len(QUALITY_RULES) == 22
     assert mandatory_rule_names() == tuple(rule.check_name for rule in mandatory)
 
 

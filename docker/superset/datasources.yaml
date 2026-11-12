@@ -44,6 +44,10 @@ databases:
         schema: cache
       - table_name: marketplace_price_anomaly_daily
         schema: cache
+      - table_name: marketplace_discount_credibility_daily
+        schema: cache
+      - table_name: marketplace_discount_daily
+        schema: cache
       # Read-only exception to "Superset reads cache": when the quality gate
       # blocks publication nothing reaches cache, and that is precisely when
       # the audit dashboard has to be able to show what happened.
