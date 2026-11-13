@@ -27,3 +27,9 @@
 ### Giờ 3 (04:47 VN)
 - Run 2100Z PROMOTED, quality PASS; speed failed=0, DLQ=0; crawl OK=1272/giờ; không lỗi 30 phút. Không PROBLEM.
 - Báo cáo ML: 11/12 tiêu chí PASS (stability đã PASS). `quality.flag_share` FAIL: 5686/16284 = 34,9% dòng ngày 13/11 bị gắn cờ, khoảng cho phép 1–10%. `rule_ml_agreement` lift 2,17 (ngưỡng 2,0) PASS. Giữ nguyên ngưỡng; tìm nguyên nhân khi chốt (xem phân bố trạng thái theo nhóm/danh mục).
+
+### Giờ 4 (05:43 VN): crawl/10m = 0
+- Hiện tượng: `crawl/10m=0`, `changes/10m=0`; log crawl-worker `leased=0` liên tục; speed vẫn failed=0, DLQ=0.
+- Nguyên nhân gốc: không phải lỗi. `audit.crawl_frontier` chỉ còn 25 task ACTIVE hẹn 22:54–22:55 UTC và 4235 task SWEEP hẹn 14/11 18:32–21:54 UTC; lượt quét SWEEP hiện tại (~10.8 nghìn task thành công từ 18:00) đã xong, lượt sau mới đến hạn sau ~19 giờ. Không có RATE_LIMITED/CLIENT_ERROR, container không restart.
+- Hệ quả: dữ liệu mới trong các giờ còn lại chỉ đến từ tầng ACTIVE (25 task/lượt); batch và ML vẫn chạy đều trên dữ liệu hiện có. Không can thiệp lịch crawl (ngoài phạm vi kịch bản); ghi vào KET-QUA.md.
+- Run 2200Z PROMOTED, quality PASS.
