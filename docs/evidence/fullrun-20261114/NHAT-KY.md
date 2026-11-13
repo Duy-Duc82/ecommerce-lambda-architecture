@@ -33,3 +33,6 @@
 - Nguyên nhân gốc: không phải lỗi. `audit.crawl_frontier` chỉ còn 25 task ACTIVE hẹn 22:54–22:55 UTC và 4235 task SWEEP hẹn 14/11 18:32–21:54 UTC; lượt quét SWEEP hiện tại (~10.8 nghìn task thành công từ 18:00) đã xong, lượt sau mới đến hạn sau ~19 giờ. Không có RATE_LIMITED/CLIENT_ERROR, container không restart.
 - Hệ quả: dữ liệu mới trong các giờ còn lại chỉ đến từ tầng ACTIVE (25 task/lượt); batch và ML vẫn chạy đều trên dữ liệu hiện có. Không can thiệp lịch crawl (ngoài phạm vi kịch bản); ghi vào KET-QUA.md.
 - Run 2200Z PROMOTED, quality PASS.
+
+### Giờ 5 (06:40 VN)
+- Run 2300Z PROMOTED, quality PASS (gold 1962392 không đổi so với 2200Z vì crawl chỉ còn 25 task ACTIVE/giờ). Speed failed=0, DLQ=0, không container thoát. Lỗi 30 phút: airflow-scheduler 4, kibana 5 (không kèm hiện tượng; không xử lý). Không PROBLEM.
