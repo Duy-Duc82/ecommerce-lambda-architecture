@@ -206,3 +206,38 @@ rf-elasticsearch 1.258GiB / 13.65GiB
 rf-minio 1.835GiB / 13.65GiB
 rf-speed 1.991GiB / 13.65GiB
 == end 2026-11-13T20:51:13Z
+== mp-refactor 2026-11-13T21:46:21Z (VN 04:46)
+crawl/10m=208 speedbatches/3m=6 changes/10m=269 dlq/30m=0
+batch: mp-20261113T2100Z PROMOTED q=PASS gold=1862012
+batch: mp-20261113T2000Z PROMOTED q=PASS gold=1716366
+batch: mp-20261113T1900Z PROMOTED q=PASS gold=1519575
+FAILED|13 RETRY_WAIT|3 DISABLED|14 READY|4257 SUCCEEDED|14445 
+errors/30m {}
+host RAM free 6.3 GB
+rf-speed 1.843GiB / 13.65GiB;rf-superset 36.82MiB / 13.65GiB;rf-kafka 884.8MiB / 13.65GiB;rf-elasticsearch 1.138GiB / 13.65GiB;
+-- batch (3h)
+mp-20261113T1900Z PROMOTED
+mp-20261113T2000Z PROMOTED
+mp-20261113T2100Z PROMOTED
+quality ADVISORY FAIL counter_invalid_transition_rate observed=0.6125067090936973
+quality ADVISORY FAIL price_anomaly_evaluation_coverage observed=0
+-- speed (1h)
+batches=120 failed=0 input=35809 invalid=0 changes=4108 p95_ms=62175
+observations DLQ messages (total)=0
+-- crawl (1h)
+OK=1272
+-- ml
+snapshot mp-20261113T2100Z: 59522 dòng
+CREDIBLE=176
+INSUFFICIENT_HISTORY=10422
+NO_DISCOUNT=43238
+QUESTIONABLE=1902
+SUSPECT=3784
+-- host
+free_ram_gb=6.1
+rf-postgres-dw 692.4MiB / 13.65GiB
+rf-kafka 891.1MiB / 13.65GiB
+rf-elasticsearch 1.138GiB / 13.65GiB
+rf-speed 1.845GiB / 13.65GiB
+rf-minio 1.951GiB / 13.65GiB
+== end 2026-11-13T21:47:33Z

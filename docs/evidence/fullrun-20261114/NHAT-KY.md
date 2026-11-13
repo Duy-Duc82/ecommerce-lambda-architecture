@@ -23,3 +23,7 @@
 
 ### Giờ 2 (03:50 VN)
 - Run 2000Z PROMOTED, quality PASS; speed failed=0, DLQ=0; crawl OK=1278/giờ; RAM trống 6.1 GB. Không PROBLEM.
+
+### Giờ 3 (04:47 VN)
+- Run 2100Z PROMOTED, quality PASS; speed failed=0, DLQ=0; crawl OK=1272/giờ; không lỗi 30 phút. Không PROBLEM.
+- Báo cáo ML: 11/12 tiêu chí PASS (stability đã PASS). `quality.flag_share` FAIL: 5686/16284 = 34,9% dòng ngày 13/11 bị gắn cờ, khoảng cho phép 1–10%. `rule_ml_agreement` lift 2,17 (ngưỡng 2,0) PASS. Giữ nguyên ngưỡng; tìm nguyên nhân khi chốt (xem phân bố trạng thái theo nhóm/danh mục).
