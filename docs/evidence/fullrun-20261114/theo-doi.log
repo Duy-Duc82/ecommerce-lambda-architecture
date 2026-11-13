@@ -1,0 +1,173 @@
+== mp-refactor 2026-11-13T18:53:15Z (VN 01:53)
+crawl/10m=164 speedbatches/3m=6 changes/10m=608 dlq/30m=0
+batch: mp-20261113T1800Z QUALITY_PASSED q=PASS gold=1432017
+batch: mp-20261107T1000Z PROMOTED q=PASS gold=1244033
+batch: mp-20261107T0900Z PROMOTED q=PASS gold=1244033
+PROBLEM batch: newest promoted window is 152.9 h old
+FAILED|13 LEASED|7 RETRY_WAIT|3 DISABLED|14 READY|4250 SUCCEEDED|10768 
+errors/30m {'airflow-task': '4', 'crawl-worker': '17', 'airflow-scheduler': '2', 'es-projector': '42', 'speed': '4', 'postgres-dw': '6'}
+host RAM free 5.6 GB
+rf-speed 2.006GiB / 13.65GiB;rf-superset 237MiB / 13.65GiB;rf-kafka 975.6MiB / 13.65GiB;rf-elasticsearch 1.533GiB / 13.65GiB;
+-- batch (3h)
+mp-20261113T1800Z QUALITY_PASSED
+quality ADVISORY FAIL counter_invalid_transition_rate observed=0.5549882472759647
+quality ADVISORY FAIL price_anomaly_evaluation_coverage observed=0
+-- speed (1h)
+batches=179 failed=0 input=9988 invalid=0 changes=58448 p95_ms=173633
+observations DLQ messages (total)=0
+-- crawl (1h)
+OK=434
+STORAGE_ERROR=1
+-- ml
+snapshot mp-20261113T1800Z: 72756 d�ng
+ERROR:  aggregate functions are not allowed in GROUP BY
+LINE 1: SELECT credibility_status || '=' || count(*) FROM cache.mark...
+                                            ^
+-- host
+free_ram_gb=5.7
+rf-postgres-dw 575.3MiB / 13.65GiB
+rf-kibana 612.3MiB / 13.65GiB
+rf-kafka 832.1MiB / 13.65GiB
+rf-elasticsearch 1.446GiB / 13.65GiB
+rf-speed 2.028GiB / 13.65GiB
+== end 2026-11-13T18:54:27Z
+== mp-refactor 2026-11-13T18:54:36Z (VN 01:54)
+crawl/10m=168 speedbatches/3m=6 changes/10m=659 dlq/30m=0
+batch: mp-20261113T1800Z PROMOTED q=PASS gold=1432017
+batch: mp-20261107T1000Z PROMOTED q=PASS gold=1244033
+batch: mp-20261107T0900Z PROMOTED q=PASS gold=1244033
+FAILED|13 LEASED|9 RETRY_WAIT|3 DISABLED|14 READY|4248 SUCCEEDED|10796 
+errors/30m {'airflow-task': '4', 'crawl-worker': '17', 'airflow-scheduler': '2', 'es-projector': '42', 'speed': '4', 'postgres-dw': '7'}
+host RAM free 5.7 GB
+rf-speed 2.049GiB / 13.65GiB;rf-superset 216.3MiB / 13.65GiB;rf-kafka 834.5MiB / 13.65GiB;rf-elasticsearch 1.447GiB / 13.65GiB;
+-- batch (3h)
+mp-20261113T1800Z PROMOTED
+quality ADVISORY FAIL counter_invalid_transition_rate observed=0.5549882472759647
+quality ADVISORY FAIL price_anomaly_evaluation_coverage observed=0
+-- speed (1h)
+batches=182 failed=0 input=10845 invalid=0 changes=58587 p95_ms=173633
+observations DLQ messages (total)=0
+-- crawl (1h)
+OK=463
+STORAGE_ERROR=1
+-- ml
+Traceback (most recent call last):
+  File "C:\code\data-refactor\docs\evidence\fullrun-20261114\danh_gia_ml.py", line 487, in <module>
+    main()
+  File "C:\code\data-refactor\docs\evidence\fullrun-20261114\danh_gia_ml.py", line 466, in main
+    snapshot(conn)
+  File "C:\code\data-refactor\docs\evidence\fullrun-20261114\danh_gia_ml.py", line 106, in snapshot
+    print(f"\u0111� c� snapshot c\u1ee7a {version['run_id']}")
+  File "C:\Users\Admin\AppData\Roaming\uv\python\cpython-3.12-windows-x86_64-none\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u0111' in position 0: character maps to <undefined>
+INSUFFICIENT_HISTORY=18453
+NO_DISCOUNT=53882
+QUESTIONABLE=421
+-- host
+free_ram_gb=5.8
+rf-postgres-dw 577.3MiB / 13.65GiB
+rf-kibana 628.5MiB / 13.65GiB
+rf-kafka 841.5MiB / 13.65GiB
+rf-elasticsearch 1.478GiB / 13.65GiB
+rf-speed 2.067GiB / 13.65GiB
+== end 2026-11-13T18:55:47Z
+== mp-refactor 2026-11-13T18:55:55Z (VN 01:55)
+crawl/10m=162 speedbatches/3m=6 changes/10m=622 dlq/30m=0
+batch: mp-20261113T1800Z PROMOTED q=PASS gold=1432017
+batch: mp-20261107T1000Z PROMOTED q=PASS gold=1244033
+batch: mp-20261107T0900Z PROMOTED q=PASS gold=1244033
+FAILED|13 RETRY_WAIT|3 DISABLED|14 READY|4257 SUCCEEDED|10825 
+errors/30m {'airflow-task': '4', 'crawl-worker': '17', 'airflow-scheduler': '2', 'es-projector': '42', 'speed': '4', 'postgres-dw': '7'}
+host RAM free 5.6 GB
+rf-speed 2.067GiB / 13.65GiB;rf-superset 216.7MiB / 13.65GiB;rf-kafka 838.5MiB / 13.65GiB;rf-elasticsearch 1.478GiB / 13.65GiB;
+-- batch (3h)
+mp-20261113T1800Z PROMOTED
+quality ADVISORY FAIL counter_invalid_transition_rate observed=0.5549882472759647
+quality ADVISORY FAIL price_anomaly_evaluation_coverage observed=0
+-- speed (1h)
+batches=184 failed=0 input=11264 invalid=0 changes=58663 p95_ms=173633
+observations DLQ messages (total)=0
+-- crawl (1h)
+OK=490
+STORAGE_ERROR=1
+-- ml
+đã có snapshot của mp-20261113T1800Z
+INSUFFICIENT_HISTORY=18453
+NO_DISCOUNT=53882
+QUESTIONABLE=421
+-- host
+free_ram_gb=5.7
+rf-minio 585.7MiB / 13.65GiB
+rf-kibana 628.3MiB / 13.65GiB
+rf-kafka 845.1MiB / 13.65GiB
+rf-elasticsearch 1.483GiB / 13.65GiB
+rf-speed 2.083GiB / 13.65GiB
+== end 2026-11-13T18:57:06Z
+== mp-refactor 2026-11-13T18:57:13Z (VN 01:57)
+crawl/10m=167 speedbatches/3m=6 changes/10m=618 dlq/30m=0
+batch: mp-20261113T1800Z PROMOTED q=PASS gold=1432017
+batch: mp-20261107T1000Z PROMOTED q=PASS gold=1244033
+batch: mp-20261107T0900Z PROMOTED q=PASS gold=1244033
+FAILED|13 LEASED|3 RETRY_WAIT|3 DISABLED|14 READY|4254 SUCCEEDED|10852 
+errors/30m {'airflow-task': '4', 'crawl-worker': '17', 'airflow-scheduler': '2', 'es-projector': '42', 'speed': '4', 'postgres-dw': '7'}
+host RAM free 5.7 GB
+rf-speed 2.083GiB / 13.65GiB;rf-superset 216.7MiB / 13.65GiB;rf-kafka 845.2MiB / 13.65GiB;rf-elasticsearch 1.485GiB / 13.65GiB;
+-- batch (3h)
+mp-20261113T1800Z PROMOTED
+quality ADVISORY FAIL counter_invalid_transition_rate observed=0.5549882472759647
+quality ADVISORY FAIL price_anomaly_evaluation_coverage observed=0
+-- speed (1h)
+batches=187 failed=0 input=11813 invalid=0 changes=58782 p95_ms=173633
+observations DLQ messages (total)=0
+-- crawl (1h)
+OK=517
+STORAGE_ERROR=1
+-- ml
+đã có snapshot của mp-20261113T1800Z
+INSUFFICIENT_HISTORY=18453
+NO_DISCOUNT=53882
+QUESTIONABLE=421
+-- host
+free_ram_gb=5.7
+rf-kibana 628.5MiB / 13.65GiB
+rf-minio 638.4MiB / 13.65GiB
+rf-kafka 850.8MiB / 13.65GiB
+rf-elasticsearch 1.487GiB / 13.65GiB
+rf-speed 2.089GiB / 13.65GiB
+== end 2026-11-13T18:58:24Z
+== mp-refactor 2026-11-13T19:53:32Z (VN 02:53)
+crawl/10m=209 speedbatches/3m=5 changes/10m=539 dlq/30m=0
+batch: mp-20261113T1900Z PROMOTED q=PASS gold=1519575
+batch: mp-20261113T1800Z PROMOTED q=PASS gold=1432017
+batch: mp-20261107T1000Z PROMOTED q=PASS gold=1244033
+FAILED|13 LEASED|8 RETRY_WAIT|3 DISABLED|14 READY|4249 SUCCEEDED|12047 
+errors/30m {}
+host RAM free 6.0 GB
+rf-speed 1.844GiB / 13.65GiB;rf-superset 76.66MiB / 13.65GiB;rf-kafka 999.5MiB / 13.65GiB;rf-elasticsearch 1.287GiB / 13.65GiB;
+-- batch (3h)
+mp-20261113T1800Z PROMOTED
+mp-20261113T1900Z PROMOTED
+quality ADVISORY FAIL counter_invalid_transition_rate observed=0.5766341238978212
+quality ADVISORY FAIL price_anomaly_evaluation_coverage observed=0
+-- speed (1h)
+batches=120 failed=0 input=31580 invalid=0 changes=5331 p95_ms=61389
+observations DLQ messages (total)=0
+-- crawl (1h)
+OK=1273
+-- ml
+snapshot mp-20261113T1900Z: 12104 dòng
+CREDIBLE=35
+INSUFFICIENT_HISTORY=1275
+NO_DISCOUNT=10197
+QUESTIONABLE=310
+SUSPECT=287
+-- host
+free_ram_gb=5.9
+rf-postgres-dw 601.8MiB / 13.65GiB
+rf-kafka 1006MiB / 13.65GiB
+rf-elasticsearch 1.288GiB / 13.65GiB
+rf-minio 1.749GiB / 13.65GiB
+rf-speed 1.847GiB / 13.65GiB
+== end 2026-11-13T19:54:44Z

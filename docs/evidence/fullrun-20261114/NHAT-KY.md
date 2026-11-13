@@ -15,3 +15,8 @@
 ### Giờ 0 (01:57 VN): `danh_gia_ml.py snapshot` chết khi in tiếng Việt
 - Hiện tượng: `UnicodeEncodeError: 'charmap' codec` khi stdout bị pipe (Python Windows dùng cp1252). Chỉ xảy ra khi snapshot đã tồn tại và nhánh "đã có snapshot" in ra.
 - Sửa: `export PYTHONIOENCODING=utf-8` trong `theo-doi.sh`. Không đổi ngưỡng hay logic đo.
+
+### Giờ 1 (02:54 VN)
+- Run `20261113T1800Z` và `20261113T1900Z` đều PROMOTED, quality PASS. Speed failed=0, DLQ=0, crawl OK=1273/giờ, không lỗi trong 30 phút.
+- `danh_gia_ml.py report` (không PYTHONIOENCODING) lại chết ở dòng in cuối, cùng nguyên nhân cp1252 như trên; khi chạy tay phải đặt `PYTHONIOENCODING=utf-8`.
+- Báo cáo sớm: `quality.flag_share` FAIL, `correctness.stability` CHUA_DU (mới 2 snapshot). Không đổi ngưỡng; sẽ ghi nguyên nhân ở KET-QUA.md.

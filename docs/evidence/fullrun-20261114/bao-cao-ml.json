@@ -1,0 +1,182 @@
+{
+  "generated_at": "2026-11-13T19:54:52.943526+00:00",
+  "thresholds": {
+    "stability_min": 0.99,
+    "marts_growth_max": 0.3,
+    "marts_baseline_seconds": null,
+    "fit_seconds_max": 60.0,
+    "flag_share_min": 0.01,
+    "flag_share_max": 0.1,
+    "agreement_lift_min": 2.0,
+    "top_k": 30
+  },
+  "correctness": {
+    "batch_runs": {
+      "runs": [
+        {
+          "run_id": "mp-20261113T1800Z",
+          "status": "PROMOTED",
+          "started_at": "2026-11-13 18:31:48.265895+00:00",
+          "completed_at": "2026-11-13 18:53:57.513743+00:00"
+        },
+        {
+          "run_id": "mp-20261113T1900Z",
+          "status": "PROMOTED",
+          "started_at": "2026-11-13 19:10:07.597811+00:00",
+          "completed_at": "2026-11-13 19:19:53.109305+00:00"
+        }
+      ],
+      "finished": 2,
+      "promoted": 2,
+      "verdict": "PASS"
+    },
+    "coverage_rule": {
+      "latest": {
+        "run_id": "mp-20261113T1900Z",
+        "status": "PASS",
+        "observed_value": 0.03257282249964127
+      },
+      "verdict": "PASS"
+    },
+    "grain": {
+      "credibility": 191094,
+      "price_history": 191094,
+      "verdict": "PASS"
+    },
+    "row_invariants": {
+      "score_out_of_range": 0,
+      "reasons_not_array": 0,
+      "ranked_without_rank": 0,
+      "ranked_without_reduction": 0,
+      "verdict": "PASS"
+    },
+    "history_rules": {
+      "by_day": [
+        {
+          "observed_date": "2026-10-25",
+          "reason": "DISCOUNT_OVER_CAP",
+          "n": 245
+        },
+        {
+          "observed_date": "2026-10-31",
+          "reason": "DISCOUNT_OVER_CAP",
+          "n": 293
+        },
+        {
+          "observed_date": "2026-11-07",
+          "reason": "DISCOUNT_OVER_CAP",
+          "n": 419
+        },
+        {
+          "observed_date": "2026-11-07",
+          "reason": "PRICE_ABOVE_LIST",
+          "n": 2
+        },
+        {
+          "observed_date": "2026-11-13",
+          "reason": "CLAIM_EXCEEDS_HISTORY",
+          "n": 287
+        },
+        {
+          "observed_date": "2026-11-13",
+          "reason": "DISCOUNT_OVER_CAP",
+          "n": 38
+        },
+        {
+          "observed_date": "2026-11-13",
+          "reason": "LIST_PRICE_RAISED",
+          "n": 5
+        },
+        {
+          "observed_date": "2026-11-13",
+          "reason": "NOT_BELOW_REFERENCE",
+          "n": 557
+        }
+      ],
+      "latest_day": "2026-11-13",
+      "history_reasons_latest_day": 849,
+      "verdict": "PASS"
+    },
+    "category_reconciles": {
+      "mismatches": [],
+      "verdict": "PASS"
+    },
+    "stability": {
+      "pairs": [],
+      "worst_share": null,
+      "threshold": 0.99,
+      "verdict": "CHUA_DU"
+    }
+  },
+  "performance": {
+    "stage_seconds": {
+      "mp-20261113T1800Z": {
+        "silver": 38.621,
+        "dimensions": 259.067,
+        "facts": 93.511,
+        "marts": 88.367,
+        "quality": 89.195,
+        "publish": 42.766,
+        "promote": 0.15
+      },
+      "mp-20261113T1900Z": {
+        "silver": 38.088,
+        "dimensions": 217.05,
+        "facts": 91.979,
+        "marts": 92.004,
+        "quality": 82.188,
+        "publish": 38.691,
+        "promote": 0.128
+      }
+    },
+    "marts": {
+      "baseline_seconds": 88.367,
+      "worst_seconds": 92.004,
+      "growth": 0.041157898310455264,
+      "threshold": 0.3,
+      "baseline_from_this_run": true,
+      "verdict": "PASS"
+    },
+    "fit": {
+      "lines": [
+        {
+          "event": "discount_ml_fitted",
+          "model": "IsolationForest",
+          "sample_rows": 48783,
+          "eligible_rows": 48783,
+          "fit_seconds": 0.12,
+          "rule_version": "discount-rules.v1"
+        }
+      ],
+      "count": 1,
+      "max_seconds": 0.12,
+      "threshold": 60.0,
+      "verdict": "PASS"
+    },
+    "ranked_rows": {
+      "ranked": 48783,
+      "showing_reduction": 48783,
+      "verdict": "PASS"
+    }
+  },
+  "quality": {
+    "latest_day": "2026-11-13",
+    "flag_share": {
+      "showing": 1907,
+      "flagged": 597,
+      "share": 0.3130571578395385,
+      "range": [
+        0.01,
+        0.1
+      ],
+      "verdict": "FAIL"
+    },
+    "rule_ml_agreement": {
+      "strong": 287,
+      "strong_in_top5": 51,
+      "lift_over_random": 3.554006968641115,
+      "threshold": 2.0,
+      "verdict": "PASS"
+    }
+  }
+}
