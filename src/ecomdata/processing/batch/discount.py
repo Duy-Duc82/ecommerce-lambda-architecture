@@ -31,6 +31,8 @@ graded QUESTIONABLE or SUSPECT.
 """
 from __future__ import annotations
 
+import json
+import time
 from collections.abc import Callable, Iterator
 from datetime import date
 from decimal import Decimal
@@ -246,7 +248,23 @@ def rank_with_isolation_forest(
     sample_pd = sample.limit(config.ml_sample_rows).toPandas()
     if len(sample_pd) < ML_MIN_ROWS:
         return none
+    began = time.monotonic()
     model.fit(_feature_matrix(sample_pd))
+    # One line per run, read back by the evaluation of the full run (Loki, docker logs):
+    # how long the fit took, on how many rows, out of how many eligible.
+    print(
+        json.dumps(
+            {
+                "event": "discount_ml_fitted",
+                "model": type(model).__name__,
+                "sample_rows": len(sample_pd),
+                "eligible_rows": int(total),
+                "fit_seconds": round(time.monotonic() - began, 3),
+                "rule_version": config.rule_version,
+            }
+        ),
+        flush=True,
+    )
     broadcast = judged.sparkSession.sparkContext.broadcast(model)
 
     key = ("marketplace", "offer_id", "observed_date", "currency")

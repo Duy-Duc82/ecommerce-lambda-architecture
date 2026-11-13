@@ -211,6 +211,18 @@ def test_the_forest_ranks_the_odd_reduction_highest_and_leaves_the_rest_to_the_r
     assert out["odd"].credibility_status == d.STATUS_QUESTIONABLE and reasons(out["odd"].asDict()) == [d.DISCOUNT_OVER_CAP]
 
 
+def test_a_fit_reports_its_rows_and_duration_on_one_line(spark, capsys):
+    pytest.importorskip("sklearn")
+
+    build(_many(spark), d.DiscountRuleConfig(ml_enabled=True)).collect()
+
+    (line,) = [json.loads(x) for x in capsys.readouterr().out.splitlines() if "discount_ml_fitted" in x]
+    # _many: 60 offers at 100-(i%10) against a list price of 100 (the six at 100 show no
+    # reduction), plus the odd one: 55 reductions, all of them under the sample size.
+    assert line["model"] == "IsolationForest" and line["sample_rows"] == line["eligible_rows"] == 55
+    assert line["fit_seconds"] >= 0 and line["rule_version"] == d.DISCOUNT_RULE_VERSION
+
+
 def test_too_few_reductions_leave_the_forest_out(spark):
     pytest.importorskip("sklearn")
     enabled = d.DiscountRuleConfig(ml_enabled=True)
