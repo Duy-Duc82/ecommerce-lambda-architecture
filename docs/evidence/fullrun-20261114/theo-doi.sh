@@ -9,6 +9,7 @@ export MSYS_NO_PATHCONV=1
 HERE=docs/evidence/fullrun-20261114
 LOG=$HERE/theo-doi.log
 PY=${PY:-/c/code/data/.venv/Scripts/python}
+export PYTHONIOENCODING=utf-8
 PG=rf-postgres-dw
 q() { docker exec "$PG" sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -tAc "$1"' sh "$1"; }
 
@@ -54,7 +55,7 @@ q() { docker exec "$PG" sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -tAc "
   "$PY" "$HERE/danh_gia_ml.py" snapshot
   q "SELECT credibility_status || '=' || count(*) FROM cache.marketplace_discount_credibility_daily
      WHERE observed_date = (SELECT max(observed_date) FROM cache.marketplace_discount_credibility_daily)
-     GROUP BY 1 ORDER BY 1"
+     GROUP BY credibility_status ORDER BY credibility_status"
 
   # 6. Tài nguyên host (máy dùng chung; dưới 3 GB trống là nguy cơ, xem 07/11 mục 6).
   echo "-- host"
