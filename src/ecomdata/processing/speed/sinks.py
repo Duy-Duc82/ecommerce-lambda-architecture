@@ -11,6 +11,9 @@ from datetime import UTC, datetime
 from typing import Any
 
 from ecomdata.domain.change_rules import offer_state_from_json
+from ecomdata.domain.dlq import DlqStage, MarketplaceObservationDlqV1, create_observation_dlq
+from ecomdata.domain.serialization import serialize_for_wire
+from ecomdata.domain.topics import MARKETPLACE_OBSERVATIONS_DLQ
 from ecomdata.domain.wire import marketplace_change_from_wire
 from ecomdata.processing.speed.change_producer import publish_changes
 
@@ -30,6 +33,55 @@ class SpeedOutput:
     source_offset: int | None = None
     error_type: str | None = None
     error_message: str | None = None
+    # The Kafka value of an INVALID row, so the DLQ record keeps the evidence.
+    payload_text: str | None = None
+
+
+def dead_letters(rows: Iterable[SpeedOutput], *, failed_at: datetime) -> list[MarketplaceObservationDlqV1]:
+    """The DLQ record of every INVALID row that carries its Kafka coordinates and payload.
+
+    The record's id is deterministic in (topic, partition, offset, stage), so a
+    micro-batch replayed after a failure dead-letters the same row under the
+    same id. An INVALID row without coordinates or payload (one an older
+    query produced before they were carried) is counted in the audit but cannot
+    be quarantined with its evidence, and is left out.
+    """
+    letters = []
+    for row in rows:
+        if row.output_kind != "INVALID" or not row.payload_text or not row.source_topic:
+            continue
+        if row.source_partition is None or row.source_offset is None:
+            continue
+        letters.append(
+            create_observation_dlq(
+                failed_at=failed_at,
+                stage=DlqStage.CONTRACT_VALIDATION,
+                source_topic=row.source_topic,
+                source_partition=int(row.source_partition),
+                source_offset=int(row.source_offset),
+                source_key=None,
+                payload_text=row.payload_text,
+                error=row.error_message or "",
+                error_type=row.error_type or "OBSERVATION_CONTRACT",
+                marketplace=row.marketplace,
+            )
+        )
+    return letters
+
+
+def publish_dead_letters(
+    producer: Any, letters: Iterable[MarketplaceObservationDlqV1], *, ack_timeout_seconds: int
+) -> list[Any]:
+    """Send every DLQ record keyed by its id, flush once, then wait for each ack (as ``publish_changes``)."""
+    if ack_timeout_seconds <= 0:
+        raise ValueError("ack_timeout_seconds must be positive")
+    futures = [
+        producer.send(MARKETPLACE_OBSERVATIONS_DLQ.name, key=letter.dlq_id, value=serialize_for_wire(letter))
+        for letter in letters
+    ]
+    if futures and hasattr(producer, "flush"):
+        producer.flush()
+    return [future.get(timeout=ack_timeout_seconds) for future in futures]
 
 
 @dataclass(frozen=True)
@@ -251,6 +303,10 @@ class MarketplaceSpeedSinks:
                 if r.output_kind == "CHANGE" and r.change_json
             ]
             publish_changes(self.producer, changes, ack_timeout_seconds=self.change_ack_timeout_seconds)
+            # Incident 2026-11-07: an INVALID row was only a count in the audit; its
+            # content was gone. It now goes to the observations DLQ with the event.
+            letters = dead_letters(rows, failed_at=started)
+            publish_dead_letters(self.producer, letters, ack_timeout_seconds=self.change_ack_timeout_seconds)
             kafka_ms, began = _elapsed_ms(began), time.monotonic()
             es_actions = []
             change_rows = [r for r in rows if r.output_kind == "CHANGE" and r.change_json]
@@ -331,7 +387,7 @@ class MarketplaceSpeedSinks:
                     **counts.__dict__,
                     "input_rows": sum(r.output_kind != "CHANGE" for r in rows),
                     "change_rows": len(changes),
-                    "kafka_rows": len(changes),
+                    "kafka_rows": len(changes) + len(letters),
                     "es_rows": len(changes) + len(states),
                     "redis_rows": len(changes) + len(states),
                 }

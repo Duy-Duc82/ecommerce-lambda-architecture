@@ -6,6 +6,7 @@
 # `python -m ecomdata.ops ...` inside the `ops` container, so it works from any shell.
 #
 #   .\scripts\mp.ps1 up [-With crawl,speed,batch,serve,ops]
+#   .\scripts\mp.ps1 dags [list|unpause|pause [dag_id ...]]   (Airflow keeps the paused flag across restarts)
 #   .\scripts\mp.ps1 down [-Volumes]
 #   .\scripts\mp.ps1 status
 #   .\scripts\mp.ps1 migrate
@@ -35,7 +36,7 @@
 param(
     [Parameter(Position = 0, Mandatory = $true)]
     [ValidateSet("up", "down", "status", "migrate", "seed", "smoke", "validate", "batch", "drill",
-                 "backup", "restore", "bench", "evaluate", "demo", "evidence")]
+                 "backup", "restore", "bench", "evaluate", "demo", "evidence", "dags")]
     [string]$Command,
     [string[]]$With = @("crawl", "speed", "batch"),
     [switch]$Volumes,
@@ -295,6 +296,31 @@ try {
     switch ($Command) {
         "up" {
             Invoke-Docker ($Compose + (Get-ProfileArgs $With) + @("up", "-d", "--build"))
+            if (($With -join ",") -match "orchestration") {
+                Write-Host "Airflow keeps each DAG's paused flag across restarts. To run the pipeline:" -ForegroundColor Yellow
+                Write-Host "  .\scripts\mp.ps1 dags unpause        (marketplace_batch, source_discovery)" -ForegroundColor Yellow
+            }
+        }
+        "dags" {
+            # Airflow stores a DAG's paused flag in its metadata database, so a
+            # stack brought back after `down` or `stop` has every DAG exactly as
+            # it was left -- paused, when it was paused to stop the pipeline
+            # (incident 2026-11-07, item 1: no batch ran for 10 minutes after a
+            # restart). `dags unpause` resumes the pipeline DAGs, `dags pause`
+            # stops them, `dags` alone lists them with their flag. DAG ids after
+            # the verb override the default pair; marketplace_maintenance prunes
+            # Bronze and marketplace_reprocess is triggered by hand, so neither
+            # is in it.
+            $verb = if ($Rest.Count -gt 0) { $Rest[0] } else { "list" }
+            $names = if ($Rest.Count -gt 1) { $Rest[1..($Rest.Count - 1)] } else { @("marketplace_batch", "source_discovery") }
+            $scheduler = $Compose + @("--profile", "orchestration", "exec", "-T", "airflow-scheduler", "airflow", "dags")
+            switch ($verb) {
+                "list" { Invoke-Docker ($scheduler + @("list", "-o", "table")) }
+                { $_ -eq "pause" -or $_ -eq "unpause" } {
+                    foreach ($name in $names) { Invoke-Docker ($scheduler + @($verb, $name)) }
+                }
+                default { throw "dags: expected list, pause or unpause, got '$verb'" }
+            }
         }
         "down" {
             if ($Volumes) {

@@ -44,12 +44,6 @@ dev = [
     # tests/unit/orchestration renders the DAG command templates as Airflow does.
     "Jinja2>=3.1",
 ]
-legacy = [
-    "scikit-learn>=1.6.1",
-    "darts>=0.27.0",
-    "pyod>=1.1.0",
-    "torch>=2.3.0,<2.6",
-]
 
 [project.scripts]
 ecomdata-ops = "ecomdata.ops.__main__:main"
@@ -67,14 +61,13 @@ include = ["ecomdata*"]
 # ---------------------------------------------------------------- pytest
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-# Repository root on sys.path: the tests package and legacy/ are imported
-# from it. ecomdata itself comes from the editable install.
+# Repository root on sys.path: the tests package is imported from it.
+# ecomdata itself comes from the editable install.
 pythonpath = ["."]
 markers = [
     "drill: a Phase 8 failure drill against a running stack (ecomdata.ops.drills)",
     "spark: needs a local Spark session (tests/spark)",
     "integration: reaches a live marketplace over the network (tests/integration)",
-    "legacy: the Kaggle pipeline kept under legacy/kaggle (tests/legacy)",
     "airflow: needs apache-airflow importable (run inside the Airflow image)",
 ]
 addopts = "-m 'not drill and not integration'"
@@ -84,11 +77,11 @@ addopts = "-m 'not drill and not integration'"
 target-version = "py312"
 line-length = 120
 src = ["src", "tests", "services"]
-extend-exclude = ["legacy", "docs", "observability"]
+extend-exclude = ["docs", "observability"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP"]
-# Exceptions, recorded in docs/REFACTOR_REPORT.md (AC3):
+# Exceptions, recorded in docs/archive/REFACTOR_REPORT.md (AC3):
 # E501  line length is left to `ruff format` (line-length 120); long SQL and
 #       message strings are not split by hand.
 # UP042 `class X(str, Enum)` stays: StrEnum changes what str() and format()
@@ -106,12 +99,6 @@ known-first-party = ["ecomdata", "tests", "services"]
 [tool.importlinter]
 root_packages = ["ecomdata"]
 include_external_packages = true
-
-[[tool.importlinter.contracts]]
-name = "ecomdata never imports legacy"
-type = "forbidden"
-source_modules = ["ecomdata"]
-forbidden_modules = ["legacy"]
 
 [[tool.importlinter.contracts]]
 name = "ecomdata layers"

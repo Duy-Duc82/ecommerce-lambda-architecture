@@ -16,8 +16,7 @@ orders, no payments, no carts, no users, and the model never invents them.
 > calls the result demand.
 
 Section 4 is the Gold model: a star schema (dimensions and facts) and the
-serving marts built from it. The Kaggle behavior model the project started
-from is still here, in section 9, and belongs to the `legacy` profile only.
+serving marts built from it.
 
 ## 1. The three frozen contracts
 
@@ -150,10 +149,10 @@ A replay reads the star at those versions. Readers keep accepting v1.
 ## 4. Gold: the dimensional model and the serving marts
 
 > **Status.** This section is the Phase 10 design
-> ([plan](PLAN_PHASE10_DIMENSIONAL_MODEL.md)), approved in P0, revised for two
+> ([plan](archive/PLAN_PHASE10_DIMENSIONAL_MODEL.md)), approved in P0, revised for two
 > sources and the wide Silver tables
-> ([revised plan](PLAN_PHASE10_REVISED.md) §3.4, D0 of
-> [the plan on the refactor](PLAN_PHASE10_ON_REFACTOR.md)), and built in
+> ([revised plan](archive/PLAN_PHASE10_REVISED.md) §3.4, D0 of
+> [the plan on the refactor](archive/PLAN_PHASE10_ON_REFACTOR.md)), and built in
 > D1–D5. Until then the batch builds the ten marts of 4.9 straight from Silver
 > (`processing/batch/marts.py`), and the mart tables in 4.9 describe what runs
 > today. The column-level definitions live in
@@ -480,19 +479,12 @@ erDiagram
 | Public counters — `fact_counter_daily` | ✓ | ✓ | ✓ | | | | |
 | Category page — `fact_category_page_daily` | ✓ | ✓ | | | | ✓ (page) | |
 | Crawling — `fact_crawl_attempt` | ✓ | ✓ | | | | ✓ (page) | |
-| Kaggle behaviour — `fact_behavior_event` (section 9) | ✓ | | | | | | |
 
 `dim_category` plays two roles on `fact_offer_observation`: `category_key` is
 the category the listing itself declares, `page_category_key` the category
 page the crawler found it on. They differ when a listing shows up on a parent
 page or in another category's results, so "what is on this page" and "what
 category is this product" stay two questions.
-
-`dim_date` is the only dimension the marketplace star shares with the Kaggle
-star. A Kaggle product (a Russian store, 2019–2020) and a Tiki listing are two
-different populations, so no product, user or category dimension can be
-conformed across them, and the model never draws one fact joining into the
-other.
 
 ### 4.4 Dimensions
 
@@ -515,14 +507,11 @@ leaves it `NULL`, which means *unknown*, never *false*.
 
 Every dimension also holds an **unknown member** with key `-1` (section 4.5).
 
-**`dim_date`** is one builder shared by both stars. It carries the columns the
-Kaggle star already had (`day_of_week`, `day_name`, `week_of_year`, `month`,
-`month_name`, `quarter`, `year`, `is_weekend`) and three more that matter for
-Vietnamese retail prices: `is_double_day_sale` (1/1, 2/2 … 12/12, the
-marketplace sale days), `is_vn_holiday` (a fixed list in code, lunar holidays
-included) and the ISO week. A conformed dimension means the same rows and the
-same meanings for both stars, so the Kaggle star moves to this builder in P1
-instead of keeping its own.
+**`dim_date`** carries the usual calendar columns (`day_of_week`, `day_name`,
+`week_of_year`, `month`, `month_name`, `quarter`, `year`, `is_weekend`) and
+three more that matter for Vietnamese retail prices: `is_double_day_sale`
+(1/1, 2/2 … 12/12, the marketplace sale days), `is_vn_holiday` (a fixed list
+in code, lunar holidays included) and the ISO week.
 
 **`dim_marketplace`** comes from the registered marketplaces in configuration,
 plus `first_crawled_at` from the first observation. It has two real rows,
@@ -644,8 +633,7 @@ fact keeps it next to `search_rank`.
 
 ### 4.5 Keys
 
-- **Surrogate keys are deterministic:** `xxhash64` of the natural key, the
-  same function the Kaggle star uses (`batch_layer/warehouse_job.py`).
+- **Surrogate keys are deterministic:** `xxhash64` of the natural key.
   `listing_key = xxhash64(offer_id, valid_from)`;
   `category_key = xxhash64(marketplace_code, category_id)`;
   `brand_key = xxhash64(marketplace_code, brand_id)`. Rebuilding the
@@ -753,6 +741,14 @@ affected offer from the fact itself.
 **`fact_counter_daily`** keeps the counter rules unchanged: transitions are
 judged over the offer's whole ordered history, a negative delta is kept and
 flagged (`counter_reset_or_invalid`, `invalid_reasons_json`), never clamped.
+A transition longer than `MARKETPLACE_COUNTER_MAX_GAP_SECONDS` is
+`GAP_TOO_LONG`: its delta is not a rate. The gap defaults to 48 h, twice the
+slowest crawl tier (SWEEP, once a day), so one missed sweep is tolerated and
+two are not; the settings refuse a gap under 1.5 times the slowest cadence,
+because then every transition of that tier would be invalid by construction
+(run of 2026-11-07, item 4). A crawl outage longer than the gap still shows up
+as a wave of `GAP_TOO_LONG` on the first sightings after it; that is the rule
+doing its job, not a reason to widen it.
 
 **`fact_category_page_daily`** describes what a category page showed on a
 day, by the page's category (`page_category_key` of the sightings), not by the
@@ -948,9 +944,7 @@ facts still carry `category_key` directly, so the common query stays one join.
 category and seller change while we watch, and a price only means something
 next to what was being sold at that moment. Overwriting would rewrite past
 facts with today's description. Sellers and categories have no history we
-could observe — only aggregates and a name — so SCD1 is enough. The Kaggle
-star is SCD1 for the same reason in the opposite direction: it is a closed
-historical file, nothing changes after the fact.
+could observe — only aggregates and a name — so SCD1 is enough.
 
 **Why a durable key next to the version key.** `listing_key` answers "which
 description applied to this sighting"; `offer_key` answers "the same offer,
@@ -1088,96 +1082,7 @@ Phase 10 adds the star — `gold/marketplace/dw` and the `dw` schema — to that
 list, since the marts of every later run are built from it. Kafka, Elasticsearch, Redis and the speed checkpoints are **not** backed up —
 they are derived, and they refill from new crawls.
 
-## 9. Legacy: the Kaggle behavior model
-
-Belongs to the `legacy` and `jobs` profiles. Kept because the project started
-here and the report compares the two.
-
-The Kaggle Multi-Category Store dataset contains only `view`, `cart` and
-`purchase` events — no orders, payments, reviews, fraud or geography — and the
-model never invents them. The one canonical event contract is in
-`config/schema.py`: `event_time`, `event_type`, `user_id`, `user_session`,
-`product_id`, `category_id`, `category_code`, `brand`, `price`.
-
-Zones: `bronze/ecommerce_events`, `silver/behavior_events` (plus a
-quarantine), `gold/warehouse/*` and `gold/mart/*`.
-
-```mermaid
-erDiagram
-    DIM_DATE ||--o{ FACT_BEHAVIOR_EVENT : occurs_on
-    DIM_USER ||--o{ FACT_BEHAVIOR_EVENT : performed_by
-    DIM_PRODUCT ||--o{ FACT_BEHAVIOR_EVENT : targets
-    DIM_CATEGORY ||--o{ DIM_PRODUCT : classifies
-    DIM_EVENT_TYPE ||--o{ FACT_BEHAVIOR_EVENT : describes
-
-    DIM_DATE {
-        int date_key PK
-        date full_date UK
-        smallint month
-        smallint quarter
-        smallint year
-        boolean is_weekend
-    }
-    DIM_USER {
-        bigint user_key PK
-        string source_user_id UK
-        timestamp first_seen_at
-        timestamp last_seen_at
-    }
-    DIM_CATEGORY {
-        bigint category_key PK
-        string category_code UK
-        string category_level_1
-        string category_level_2
-    }
-    DIM_PRODUCT {
-        bigint product_key PK
-        string source_product_id UK
-        bigint category_key FK
-        string brand
-    }
-    DIM_EVENT_TYPE {
-        smallint event_type_key PK
-        string event_type UK
-    }
-    FACT_BEHAVIOR_EVENT {
-        string event_key PK
-        int date_key FK
-        bigint user_key FK
-        bigint product_key FK
-        smallint event_type_key FK
-        string session_id
-        timestamp event_time
-        decimal price
-        string run_id
-    }
-```
-
-`fact_behavior_event` has one row per valid source event; `event_key` is
-`SHA-256(event_type ‖ user_id ‖ product_id ‖ session_id ‖ event_time)`, so
-reprocessing never duplicates a fact.
-
-The dimensions of **this** star are SCD Type 1: every run rebuilds them from
-Silver and keeps the latest value. That fits a closed historical file, where
-nothing changes after the fact. It does not fit the marketplace, whose listings
-change while they are watched, which is why `dim_product_listing` (section 4.6)
-is SCD Type 2. `dim_date` is the one dimension both stars share; from Phase 10
-it is built by one builder with the columns of section 4.4.
-
-Marts in `cache`: `funnel_daily`, `product_daily`, `category_daily`,
-`session_daily`, `daily_revenue`. `revenue` sums `price` over purchase events
-and is never described as an order metric; funnel rates are same-day
-population ratios, not ordered-path attribution. ML outputs go to
-`cache.predictions` (Darts N-BEATS and LSTM) and `cache.anomalies` (PyOD
-AutoEncoder).
-
-Its audit is `audit.pipeline_run` and `audit.data_quality_result` — separate
-tables from the marketplace ones on purpose: that pair belongs to the
-behavioural pipeline, its `checked_at` is a naive timestamp, and its key has
-no room for severity or dataset. Sharing them would couple two unrelated
-pipelines through one migration.
-
-## Publish consistency (both pipelines)
+## Publish consistency
 
 Spark writes each mart to the `staging` schema, then one transaction truncates
 and refills the `cache` tables. Superset therefore always sees either the last

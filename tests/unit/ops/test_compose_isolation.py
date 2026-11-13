@@ -22,7 +22,6 @@ COMPOSE = (COMPOSE_DIR / "docker-compose.yml").read_text(encoding="utf-8")
 PUBLISHING = (
     COMPOSE
     + (COMPOSE_DIR / "docker-compose.observability.yml").read_text(encoding="utf-8")
-    + (COMPOSE_DIR / "docker-compose.legacy.yml").read_text(encoding="utf-8")
 )
 ISOLATED = ("bench", "demo", "refactor", "tiki-html")
 # Stacks whose crawler reads the offline stub; the others read the live sites.
@@ -39,9 +38,6 @@ PORTS = (
     "ES_HOST_PORT",
     "KIBANA_HOST_PORT",
     "SUPERSET_HOST_PORT",
-    "SPARK_UI_HOST_PORT",
-    "SPARK_RPC_HOST_PORT",
-    "SPARK_WORKER_UI_HOST_PORT",
     "AIRFLOW_HOST_PORT",
     "LOKI_HOST_PORT",
     "GRAFANA_HOST_PORT",
@@ -188,7 +184,6 @@ def _profiles_of(text: str) -> list[str]:
 
 
 PROFILES = _profiles_of(COMPOSE)
-LEGACY_PROFILES = _profiles_of((COMPOSE_DIR / "docker-compose.legacy.yml").read_text(encoding="utf-8"))
 
 
 def _compose(files, profiles, stack, *tail):
@@ -232,14 +227,12 @@ def test_docker_compose_config_is_valid_for_every_stack_with_every_profile(stack
     assert result.returncode == 0, result.stderr
 
 
-def test_the_legacy_and_observability_files_extend_the_main_one():
+def test_the_observability_file_extends_the_main_one():
     if not _docker_ready():
         pytest.skip("docker compose is not available")
 
-    legacy = _compose([MAIN, COMPOSE_DIR / "docker-compose.legacy.yml"], [*PROFILES, *LEGACY_PROFILES], "refactor", "config", "--quiet")
     observability = _compose([MAIN, COMPOSE_DIR / "docker-compose.observability.yml"], PROFILES, "refactor", "config", "--quiet")
 
-    assert legacy.returncode == 0, legacy.stderr
     assert observability.returncode == 0, observability.stderr
 
 

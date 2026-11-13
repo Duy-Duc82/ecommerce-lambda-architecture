@@ -1,6 +1,5 @@
 # Batch stages and the speed query. Tag: ecommerce/spark-marketplace:4.0.1-r4.
 # Spark 4.0.1 matches the jars below; pyspark itself comes from /opt/spark/python.
-# The legacy Kaggle image (legacy/kaggle/docker/spark-warehouse, 3.5.1) is separate.
 FROM apache/spark:4.0.1
 
 USER root

@@ -1,6 +1,6 @@
 # ADR-0007: Run sở hữu một cửa sổ ngày; star chỉ được giữ khi đã qua cổng chất lượng
 
-Trạng thái: chấp nhận (2026-10-27). Kế hoạch: `docs/PLAN_PIPELINE_HARDENING.md` (H1, H3, H4).
+Trạng thái: chấp nhận (2026-10-27). Kế hoạch: `docs/archive/PLAN_PIPELINE_HARDENING.md` (H1, H3, H4).
 
 ## Bối cảnh
 

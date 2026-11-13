@@ -39,7 +39,6 @@ Table dw.dim_date {
   is_weekend boolean
   is_double_day_sale boolean [note: '1/1, 2/2 ... 12/12']
   is_vn_holiday boolean
-  Note: 'Conformed with the Kaggle behavior star: one builder for both.'
 }
 
 Table dw.dim_marketplace {
