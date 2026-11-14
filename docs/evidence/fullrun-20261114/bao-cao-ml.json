@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-11-13T21:47:33.575202+00:00",
+  "generated_at": "2026-11-14T04:09:07.668529+00:00",
   "thresholds": {
     "stability_min": 0.99,
     "marts_growth_max": 0.3,
@@ -36,23 +36,59 @@
           "status": "PROMOTED",
           "started_at": "2026-11-13 21:10:16.669280+00:00",
           "completed_at": "2026-11-13 21:21:41.504805+00:00"
+        },
+        {
+          "run_id": "mp-20261113T2200Z",
+          "status": "PROMOTED",
+          "started_at": "2026-11-13 22:10:15.559740+00:00",
+          "completed_at": "2026-11-13 22:21:54.303488+00:00"
+        },
+        {
+          "run_id": "mp-20261113T2300Z",
+          "status": "PROMOTED",
+          "started_at": "2026-11-13 23:10:14.813983+00:00",
+          "completed_at": "2026-11-13 23:23:28.458351+00:00"
+        },
+        {
+          "run_id": "mp-20261114T0000Z",
+          "status": "PROMOTED",
+          "started_at": "2026-11-14 00:10:15.839462+00:00",
+          "completed_at": "2026-11-14 00:21:49.548758+00:00"
+        },
+        {
+          "run_id": "mp-20261114T0100Z",
+          "status": "PROMOTED",
+          "started_at": "2026-11-14 01:10:14.759708+00:00",
+          "completed_at": "2026-11-14 01:21:49.410304+00:00"
+        },
+        {
+          "run_id": "mp-20261114T0200Z",
+          "status": "PROMOTED",
+          "started_at": "2026-11-14 02:10:13.575530+00:00",
+          "completed_at": "2026-11-14 02:21:50.929172+00:00"
+        },
+        {
+          "run_id": "mp-20261114T0300Z",
+          "status": "PROMOTED",
+          "started_at": "2026-11-14 03:10:14.320570+00:00",
+          "completed_at": "2026-11-14 03:22:06.435443+00:00"
         }
       ],
-      "finished": 4,
-      "promoted": 4,
+      "finished": 10,
+      "promoted": 10,
       "verdict": "PASS"
     },
     "coverage_rule": {
       "latest": {
-        "run_id": "mp-20261113T2100Z",
+        "run_id": "mp-20261114T0300Z",
         "status": "PASS",
-        "observed_value": 0.10796390120329323
+        "observed_value": 0.14782114210463307
       },
       "verdict": "PASS"
     },
     "grain": {
-      "credibility": 238512,
-      "price_history": 238512,
+      "credibility": 253198,
+      "price_history": 253198,
       "verdict": "PASS"
     },
     "row_invariants": {
@@ -87,26 +123,36 @@
         {
           "observed_date": "2026-11-13",
           "reason": "CLAIM_EXCEEDS_HISTORY",
-          "n": 3784
+          "n": 5568
         },
         {
           "observed_date": "2026-11-13",
           "reason": "DISCOUNT_OVER_CAP",
-          "n": 284
+          "n": 364
         },
         {
           "observed_date": "2026-11-13",
           "reason": "LIST_PRICE_RAISED",
-          "n": 14
+          "n": 23
         },
         {
           "observed_date": "2026-11-13",
           "reason": "NOT_BELOW_REFERENCE",
-          "n": 5361
+          "n": 8066
+        },
+        {
+          "observed_date": "2026-11-14",
+          "reason": "CLAIM_EXCEEDS_HISTORY",
+          "n": 39
+        },
+        {
+          "observed_date": "2026-11-14",
+          "reason": "NOT_BELOW_REFERENCE",
+          "n": 151
         }
       ],
-      "latest_day": "2026-11-13",
-      "history_reasons_latest_day": 9159,
+      "latest_day": "2026-11-14",
+      "history_reasons_latest_day": 190,
       "verdict": "PASS"
     },
     "category_reconciles": {
@@ -128,9 +174,44 @@
           "common": 39273,
           "same": 39272,
           "share": 0.999974537213862
+        },
+        {
+          "from": "mp-20261113T2100Z",
+          "to": "mp-20261113T2200Z",
+          "common": 59522,
+          "same": 59520,
+          "share": 0.9999663989785289
+        },
+        {
+          "from": "mp-20261113T2200Z",
+          "to": "mp-20261113T2300Z",
+          "common": 73589,
+          "same": 73589,
+          "share": 1.0
+        },
+        {
+          "from": "mp-20261113T2300Z",
+          "to": "mp-20261114T0000Z",
+          "common": 73589,
+          "same": 73589,
+          "share": 1.0
+        },
+        {
+          "from": "mp-20261114T0100Z",
+          "to": "mp-20261114T0200Z",
+          "common": 594,
+          "same": 594,
+          "share": 1.0
+        },
+        {
+          "from": "mp-20261114T0200Z",
+          "to": "mp-20261114T0300Z",
+          "common": 605,
+          "same": 605,
+          "share": 1.0
         }
       ],
-      "worst_share": 0.999974537213862,
+      "worst_share": 0.9999663989785289,
       "threshold": 0.99,
       "verdict": "PASS"
     }
@@ -172,18 +253,88 @@
         "quality": 89.726,
         "publish": 43.532,
         "promote": 0.165
+      },
+      "mp-20261113T2200Z": {
+        "silver": 100.414,
+        "dimensions": 248.206,
+        "facts": 94.238,
+        "marts": 99.685,
+        "quality": 87.185,
+        "publish": 45.695,
+        "promote": 0.136
+      },
+      "mp-20261113T2300Z": {
+        "silver": 189.371,
+        "dimensions": 254.052,
+        "facts": 97.799,
+        "marts": 101.67,
+        "quality": 82.563,
+        "publish": 47.287,
+        "promote": 0.134
+      },
+      "mp-20261114T0000Z": {
+        "silver": 102.93,
+        "dimensions": 250.205,
+        "facts": 93.8,
+        "marts": 100.907,
+        "quality": 84.786,
+        "publish": 39.337,
+        "promote": 0.133
+      },
+      "mp-20261114T0100Z": {
+        "silver": 99.77,
+        "dimensions": 254.893,
+        "facts": 92.512,
+        "marts": 99.826,
+        "quality": 82.42,
+        "publish": 44.089,
+        "promote": 0.119
+      },
+      "mp-20261114T0200Z": {
+        "silver": 99.948,
+        "dimensions": 249.88,
+        "facts": 96.475,
+        "marts": 103.476,
+        "quality": 83.402,
+        "publish": 43.72,
+        "promote": 0.12
+      },
+      "mp-20261114T0300Z": {
+        "silver": 103.591,
+        "dimensions": 257.572,
+        "facts": 92.838,
+        "marts": 105.415,
+        "quality": 87.915,
+        "publish": 44.65,
+        "promote": 0.12
       }
     },
     "marts": {
       "baseline_seconds": 88.367,
-      "worst_seconds": 104.404,
-      "growth": 0.18148177487070954,
+      "worst_seconds": 105.415,
+      "growth": 0.19292269738703363,
       "threshold": 0.3,
       "baseline_from_this_run": true,
       "verdict": "PASS"
     },
     "fit": {
       "lines": [
+        {
+          "event": "discount_ml_fitted",
+          "model": "IsolationForest",
+          "sample_rows": 66575,
+          "eligible_rows": 66575,
+          "fit_seconds": 0.114,
+          "rule_version": "discount-rules.v1"
+        },
+        {
+          "event": "discount_ml_fitted",
+          "model": "IsolationForest",
+          "sample_rows": 66575,
+          "eligible_rows": 66575,
+          "fit_seconds": 0.115,
+          "rule_version": "discount-rules.v1"
+        },
         {
           "event": "discount_ml_fitted",
           "model": "IsolationForest",
@@ -209,23 +360,23 @@
           "rule_version": "discount-rules.v1"
         }
       ],
-      "count": 3,
+      "count": 9,
       "max_seconds": 0.127,
       "threshold": 60.0,
       "verdict": "PASS"
     },
     "ranked_rows": {
-      "ranked": 63160,
-      "showing_reduction": 63160,
+      "ranked": 66824,
+      "showing_reduction": 66824,
       "verdict": "PASS"
     }
   },
   "quality": {
-    "latest_day": "2026-11-13",
+    "latest_day": "2026-11-14",
     "flag_share": {
-      "showing": 16284,
-      "flagged": 5686,
-      "share": 0.3491771063620732,
+      "showing": 249,
+      "flagged": 151,
+      "share": 0.606425702811245,
       "range": [
         0.01,
         0.1
@@ -233,9 +384,9 @@
       "verdict": "FAIL"
     },
     "rule_ml_agreement": {
-      "strong": 3784,
-      "strong_in_top5": 411,
-      "lift_over_random": 2.1723044397463,
+      "strong": 39,
+      "strong_in_top5": 12,
+      "lift_over_random": 6.153846153846154,
       "threshold": 2.0,
       "verdict": "PASS"
     }

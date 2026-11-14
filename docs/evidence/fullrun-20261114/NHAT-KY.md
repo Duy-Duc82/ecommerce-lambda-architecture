@@ -48,3 +48,7 @@
 
 ### Giờ 9 (10:25 VN)
 - Run 0300Z PROMOTED, quality PASS, gold 1966878. Speed failed=0, DLQ=0, không lỗi 30 phút. RAM trống 4.3 GB. Không PROBLEM.
+
+### Giờ 9,2 (11:05 VN): RAM host trống 2,6 GB
+- Hiện tượng: free RAM 2,6 GB (<3 GB); wait nền của Claude Code bị hệ thống dừng vì thiếu RAM.
+- Xử lý theo mục 5 kịch bản: dừng `rf-kibana` (Superset giữ lại). Pipeline vẫn sạch (0300Z PROMOTED, failed=0, DLQ=0).

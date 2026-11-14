@@ -448,3 +448,71 @@ rf-elasticsearch 924.6MiB / 13.65GiB
 rf-speed 1.554GiB / 13.65GiB
 rf-minio 1.677GiB / 13.65GiB
 == end 2026-11-14T03:25:59Z
+== mp-refactor 2026-11-14T04:05:48Z (VN 11:05)
+crawl/10m=25 speedbatches/3m=6 changes/10m=3 dlq/30m=0
+batch: mp-20261114T0300Z PROMOTED q=PASS gold=1966878
+batch: mp-20261114T0200Z PROMOTED q=PASS gold=1966774
+batch: mp-20261114T0100Z PROMOTED q=PASS gold=1966697
+FAILED|13 DISABLED|14 READY|4260 SUCCEEDED|14793 
+errors/30m {}
+host RAM free 2.7 GB
+rf-speed 2.509GiB / 13.65GiB;rf-superset 30.68MiB / 13.65GiB;rf-kafka 771.2MiB / 13.65GiB;rf-elasticsearch 982.5MiB / 13.65GiB;
+-- batch (3h)
+mp-20261114T0100Z PROMOTED
+mp-20261114T0200Z PROMOTED
+mp-20261114T0300Z PROMOTED
+quality ADVISORY FAIL counter_invalid_transition_rate observed=0.5918893942336628
+quality ADVISORY FAIL price_anomaly_evaluation_coverage observed=0
+-- speed (1h)
+batches=120 failed=0 input=658 invalid=0 changes=20465 p95_ms=59208
+observations DLQ messages (total)=0
+-- crawl (1h)
+OK=25
+-- ml
+đã có snapshot của mp-20261114T0300Z
+INSUFFICIENT_HISTORY=98
+NO_DISCOUNT=370
+QUESTIONABLE=112
+SUSPECT=39
+-- host
+free_ram_gb=2.6
+rf-postgres-dw 677.4MiB / 13.65GiB
+rf-kafka 774.2MiB / 13.65GiB
+rf-elasticsearch 983.6MiB / 13.65GiB
+rf-minio 2.189GiB / 13.65GiB
+rf-speed 2.509GiB / 13.65GiB
+== end 2026-11-14T04:07:01Z
+== mp-refactor 2026-11-14T04:07:53Z (VN 11:07)
+crawl/10m=0 speedbatches/3m=6 changes/10m=0 dlq/30m=0
+batch: mp-20261114T0300Z PROMOTED q=PASS gold=1966878
+batch: mp-20261114T0200Z PROMOTED q=PASS gold=1966774
+batch: mp-20261114T0100Z PROMOTED q=PASS gold=1966697
+FAILED|13 DISABLED|14 READY|4260 SUCCEEDED|14793 
+errors/30m {'kibana': '2'}
+host RAM free 2.6 GB
+rf-speed 2.509GiB / 13.65GiB;rf-superset 30.74MiB / 13.65GiB;rf-kafka 777.8MiB / 13.65GiB;rf-elasticsearch 990.1MiB / 13.65GiB;
+-- batch (3h)
+mp-20261114T0100Z PROMOTED
+mp-20261114T0200Z PROMOTED
+mp-20261114T0300Z PROMOTED
+quality ADVISORY FAIL counter_invalid_transition_rate observed=0.5918893942336628
+quality ADVISORY FAIL price_anomaly_evaluation_coverage observed=0
+-- speed (1h)
+batches=120 failed=0 input=658 invalid=0 changes=19294 p95_ms=59208
+observations DLQ messages (total)=0
+-- crawl (1h)
+OK=25
+-- ml
+đã có snapshot của mp-20261114T0300Z
+INSUFFICIENT_HISTORY=98
+NO_DISCOUNT=370
+QUESTIONABLE=112
+SUSPECT=39
+-- host
+free_ram_gb=3.1
+rf-postgres-dw 677.7MiB / 13.65GiB
+rf-kafka 778.3MiB / 13.65GiB
+rf-elasticsearch 991.4MiB / 13.65GiB
+rf-minio 2.19GiB / 13.65GiB
+rf-speed 2.51GiB / 13.65GiB
+== end 2026-11-14T04:09:07Z
