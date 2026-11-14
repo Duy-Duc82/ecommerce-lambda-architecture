@@ -1,1 +1,0 @@
-"""Kaggle batch layer."""

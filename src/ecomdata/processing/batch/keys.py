@@ -1,9 +1,9 @@
 """Surrogate keys and the unknown member for the marketplace star.
 
 ``docs/DATA_MODEL.md`` section 4.5. A surrogate key is ``xxhash64`` of the
-natural key, the function the Kaggle star already uses, so the same data gives
-the same keys in every run, in any order, and a fact can compute its foreign
-keys without reading the dimension's assignments back.
+natural key, so the same data gives the same keys in every run, in any order,
+and a fact can compute its foreign keys without reading the dimension's
+assignments back.
 
 Every dimension carries one row keyed ``-1`` so that no fact foreign key is
 ever NULL: an inner join keeps the row, a dashboard labels it Unknown, and the

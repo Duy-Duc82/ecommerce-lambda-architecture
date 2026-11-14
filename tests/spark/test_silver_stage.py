@@ -341,7 +341,7 @@ def test_the_ten_marts_of_the_new_path_equal_those_of_the_pre_elt_path_on_the_ti
     old_marts = build_marketplace_marts(old, attempts, runs, context)
     new_marts = build_marketplace_marts(new, attempts, runs, context)
 
-    assert sorted(old_marts) == sorted(new_marts) and len(old_marts) == 10
+    assert sorted(old_marts) == sorted(new_marts) and len(old_marts) == 12
     for name in sorted(old_marts):
         columns = old_marts[name].columns
         assert new_marts[name].columns == columns, name

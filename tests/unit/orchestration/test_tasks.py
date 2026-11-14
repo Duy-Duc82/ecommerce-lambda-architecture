@@ -20,8 +20,8 @@ def test_a_stage_command_names_the_stage_the_run_the_instant_and_resumes_on_a_re
     command = tasks.batch_stage_command("marts")
 
     assert command.startswith("python3 -m ecomdata.processing.batch run --stage marts ")
-    assert "--run-id mp-{{ data_interval_end.strftime('%Y%m%dT%H%MZ') }}" in command
-    assert "--as-of {{ data_interval_end.strftime('%Y-%m-%dT%H:%M:%SZ') }}" in command
+    assert f"--run-id mp-{{{{ {tasks.RUN_INSTANT}.strftime('%Y%m%dT%H%MZ') }}}}" in command
+    assert f"--as-of {{{{ {tasks.RUN_INSTANT}.strftime('%Y-%m-%dT%H:%M:%SZ') }}}}" in command
     assert "{% if params.allow_backfill %}--allow-backfill{% endif %}" in command
 
     class Ti:
@@ -34,6 +34,39 @@ def test_a_stage_command_names_the_stage_the_run_the_instant_and_resumes_on_a_re
 
     assert "--resume" not in render(1)
     assert "--resume" in render(2)
+
+
+def test_a_run_triggered_by_hand_without_a_logical_date_takes_the_instant_it_was_created():
+    """Incident 2026-11-07, item 2: Airflow 3 gives a manual run without ``--logical-date``
+    no data interval, and renders with StrictUndefined, so ``data_interval_end`` raised at
+    render time; the run then blocked the next scheduled window (``max_active_runs=1``)."""
+    from jinja2 import Environment, StrictUndefined
+
+    class DagRun:
+        run_after = datetime(2026, 11, 7, 4, 11, 25, tzinfo=UTC)
+
+    class Ti:
+        try_number = 1
+
+    strict = Environment(undefined=StrictUndefined)
+    command = strict.from_string(tasks.batch_stage_command("silver"))
+    # The DAG declares the param with a default, so it is always in the context.
+    params = {"allow_backfill": False}
+
+    without = command.render(dag_run=DagRun(), params=params, ti=Ti()).split()
+    assert without[without.index("--as-of") + 1] == "2026-11-07T04:11:25Z"
+    assert without[without.index("--run-id") + 1] == "mp-20261107T0411Z"
+
+    # Present but empty, as a run without a data interval may also appear.
+    as_none = command.render(data_interval_end=None, dag_run=DagRun(), params=params, ti=Ti()).split()
+    assert as_none[as_none.index("--as-of") + 1] == "2026-11-07T04:11:25Z"
+
+    # A scheduled run still closes its own window, never the trigger instant.
+    scheduled = command.render(
+        data_interval_end=datetime(2026, 11, 7, 5, tzinfo=UTC), dag_run=DagRun(), params=params, ti=Ti()
+    ).split()
+    assert scheduled[scheduled.index("--as-of") + 1] == "2026-11-07T05:00:00Z"
+    assert scheduled[scheduled.index("--run-id") + 1] == "mp-20261107T0500Z"
 
 
 def test_a_reprocessing_run_takes_its_window_from_its_params():

@@ -1,6 +1,5 @@
 # Batch stages and the speed query. Tag: ecommerce/spark-marketplace:4.0.1-r4.
 # Spark 4.0.1 matches the jars below; pyspark itself comes from /opt/spark/python.
-# The legacy Kaggle image (legacy/kaggle/docker/spark-warehouse, 3.5.1) is separate.
 FROM apache/spark:4.0.1
 
 USER root
@@ -42,10 +41,11 @@ RUN set -eux; \
     python3 --version
 
 # The package without its [spark] extra: pyspark is the image's own. pandas and
-# numpy are installed on their own, at the pins of constraints.txt.
+# numpy are installed on their own, at the pins of constraints.txt; [ml] brings
+# scikit-learn for the discount-credibility rank (ADR-0009).
 COPY pyproject.toml constraints.txt README.md /build/
 COPY src /build/src
-RUN python3.12 -m pip install --no-cache-dir -c /build/constraints.txt /build pandas numpy \
+RUN python3.12 -m pip install --no-cache-dir -c /build/constraints.txt "/build[ml]" pandas numpy \
  && rm -rf /build
 
 # The jars are baked in: an empty SPARK_KAFKA_PACKAGE stops the speed service

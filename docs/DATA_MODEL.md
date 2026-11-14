@@ -16,8 +16,7 @@ orders, no payments, no carts, no users, and the model never invents them.
 > calls the result demand.
 
 Section 4 is the Gold model: a star schema (dimensions and facts) and the
-serving marts built from it. The Kaggle behavior model the project started
-from is still here, in section 9, and belongs to the `legacy` profile only.
+serving marts built from it.
 
 ## 1. The three frozen contracts
 
@@ -150,10 +149,10 @@ A replay reads the star at those versions. Readers keep accepting v1.
 ## 4. Gold: the dimensional model and the serving marts
 
 > **Status.** This section is the Phase 10 design
-> ([plan](PLAN_PHASE10_DIMENSIONAL_MODEL.md)), approved in P0, revised for two
+> ([plan](archive/PLAN_PHASE10_DIMENSIONAL_MODEL.md)), approved in P0, revised for two
 > sources and the wide Silver tables
-> ([revised plan](PLAN_PHASE10_REVISED.md) §3.4, D0 of
-> [the plan on the refactor](PLAN_PHASE10_ON_REFACTOR.md)), and built in
+> ([revised plan](archive/PLAN_PHASE10_REVISED.md) §3.4, D0 of
+> [the plan on the refactor](archive/PLAN_PHASE10_ON_REFACTOR.md)), and built in
 > D1–D5. Until then the batch builds the ten marts of 4.9 straight from Silver
 > (`processing/batch/marts.py`), and the mart tables in 4.9 describe what runs
 > today. The column-level definitions live in
@@ -480,19 +479,12 @@ erDiagram
 | Public counters — `fact_counter_daily` | ✓ | ✓ | ✓ | | | | |
 | Category page — `fact_category_page_daily` | ✓ | ✓ | | | | ✓ (page) | |
 | Crawling — `fact_crawl_attempt` | ✓ | ✓ | | | | ✓ (page) | |
-| Kaggle behaviour — `fact_behavior_event` (section 9) | ✓ | | | | | | |
 
 `dim_category` plays two roles on `fact_offer_observation`: `category_key` is
 the category the listing itself declares, `page_category_key` the category
 page the crawler found it on. They differ when a listing shows up on a parent
 page or in another category's results, so "what is on this page" and "what
 category is this product" stay two questions.
-
-`dim_date` is the only dimension the marketplace star shares with the Kaggle
-star. A Kaggle product (a Russian store, 2019–2020) and a Tiki listing are two
-different populations, so no product, user or category dimension can be
-conformed across them, and the model never draws one fact joining into the
-other.
 
 ### 4.4 Dimensions
 
@@ -515,14 +507,11 @@ leaves it `NULL`, which means *unknown*, never *false*.
 
 Every dimension also holds an **unknown member** with key `-1` (section 4.5).
 
-**`dim_date`** is one builder shared by both stars. It carries the columns the
-Kaggle star already had (`day_of_week`, `day_name`, `week_of_year`, `month`,
-`month_name`, `quarter`, `year`, `is_weekend`) and three more that matter for
-Vietnamese retail prices: `is_double_day_sale` (1/1, 2/2 … 12/12, the
-marketplace sale days), `is_vn_holiday` (a fixed list in code, lunar holidays
-included) and the ISO week. A conformed dimension means the same rows and the
-same meanings for both stars, so the Kaggle star moves to this builder in P1
-instead of keeping its own.
+**`dim_date`** carries the usual calendar columns (`day_of_week`, `day_name`,
+`week_of_year`, `month`, `month_name`, `quarter`, `year`, `is_weekend`) and
+three more that matter for Vietnamese retail prices: `is_double_day_sale`
+(1/1, 2/2 … 12/12, the marketplace sale days), `is_vn_holiday` (a fixed list
+in code, lunar holidays included) and the ISO week.
 
 **`dim_marketplace`** comes from the registered marketplaces in configuration,
 plus `first_crawled_at` from the first observation. It has two real rows,
@@ -644,8 +633,7 @@ fact keeps it next to `search_rank`.
 
 ### 4.5 Keys
 
-- **Surrogate keys are deterministic:** `xxhash64` of the natural key, the
-  same function the Kaggle star uses (`batch_layer/warehouse_job.py`).
+- **Surrogate keys are deterministic:** `xxhash64` of the natural key.
   `listing_key = xxhash64(offer_id, valid_from)`;
   `category_key = xxhash64(marketplace_code, category_id)`;
   `brand_key = xxhash64(marketplace_code, brand_id)`. Rebuilding the
@@ -753,6 +741,14 @@ affected offer from the fact itself.
 **`fact_counter_daily`** keeps the counter rules unchanged: transitions are
 judged over the offer's whole ordered history, a negative delta is kept and
 flagged (`counter_reset_or_invalid`, `invalid_reasons_json`), never clamped.
+A transition longer than `MARKETPLACE_COUNTER_MAX_GAP_SECONDS` is
+`GAP_TOO_LONG`: its delta is not a rate. The gap defaults to 48 h, twice the
+slowest crawl tier (SWEEP, once a day), so one missed sweep is tolerated and
+two are not; the settings refuse a gap under 1.5 times the slowest cadence,
+because then every transition of that tier would be invalid by construction
+(run of 2026-11-07, item 4). A crawl outage longer than the gap still shows up
+as a wave of `GAP_TOO_LONG` on the first sightings after it; that is the rule
+doing its job, not a reason to widen it.
 
 **`fact_category_page_daily`** describes what a category page showed on a
 day, by the page's category (`page_category_key` of the sightings), not by the
@@ -855,8 +851,10 @@ only the source behind them moves from Silver to the star.
 | `marketplace_crawl_reliability_daily` | `(marketplace, request_date)` | requests, successes, failures, latency avg and p95, raw bytes, and a count for each of the five error kinds a crawl produces (rate limited, transport, server, parse, validation) |
 | `marketplace_counter_delta_daily` | `(marketplace, offer_id, observed_date, counter_name)` | raw and valid delta sums, a velocity proxy, and the invalid-transition evidence |
 | `marketplace_price_anomaly_daily` | `(marketplace, offer_id, observed_date, currency)` | a robust outlier verdict against this offer's own recent history |
+| `marketplace_discount_credibility_daily` | `(marketplace, offer_id, observed_date, currency)` | the displayed reduction judged against the offer's own prior prices (ADR-0009): reference prices, effective reduction, the reasons that fired, a graded verdict, and an optional Isolation Forest rank |
+| `marketplace_discount_daily` | `(marketplace, category_path, observed_date, currency)` | offers showing a reduction and their share, p25/median/p75/max of the displayed reduction, offers over the legal cap, and how many the rules graded QUESTIONABLE or SUSPECT |
 
-Four of them carry a rule version in every row — `freshness_rule_version` on
+Six of them carry a rule version in every row — `freshness_rule_version` on
 freshness and coverage, `counter_rule_version`, `anomaly_rule_version` — so a
 stored verdict stays checkable after the configuration moves on.
 
@@ -899,19 +897,49 @@ that a price is wrong, dishonest or a bargain.
 P4 accepts this rebuild only if, on the same `as_of`, every rebuilt mart
 matches the old one row for row; any difference is listed with its reason.
 
-#### Three new marts
+#### The discount marts (ADR-0009)
 
 | Mart | Grain | Built from | Answers |
 |---|---|---|---|
-| `category_price_index_daily` | marketplace × category node (any level) × day × currency | `fact_price_snapshot_daily` × `bridge_category_ancestry` | median close price of the offers under the node, as an index with the node's first day = 100 |
-| `listing_price_volatility` | offer × window (7 and 30 days) × day | `fact_price_snapshot_daily`, `fact_price_change` | standard deviation and coefficient of variation of the daily close price, number of price changes |
-| `discount_daily` | marketplace × category node × day | `fact_price_snapshot_daily` × `dim_listing_flags` × bridge | share of offers on discount, p25/median/p75 of the discount percentage |
+| `discount_credibility_daily` | offer × day × currency | `offer_price_history_daily` (the same numbers the anomaly mart reads) | can the reduction the page shows be taken at face value, judged against the offer's own prior prices |
+| `discount_daily` | marketplace × category path × day × currency | the sightings (last sighting of each offer-day) × `discount_credibility_daily` | how many offers show a reduction, how deep, how many over the legal cap, how many the rules graded QUESTIONABLE or SUSPECT |
 
-The category index compares price *levels* by category without matching
-products across marketplaces, which per-product comparison would require.
-It is a median over whichever offers were seen that day, so a change in the
-mix of offers moves it as well as a change in prices; the mart publishes the
-offer count next to the index so that can be read.
+**How a row of `discount_credibility_daily` is judged.** The *displayed*
+reduction is `(list_price - price) / list_price` of the day's last sighting,
+negative when the price sits above its list price. The *reference* is the
+offer's own history in the `reference_window_days` calendar days before the
+day, that day excluded: `reference_min_price` (the Omnibus "lowest prior
+price"), `reference_median_price`, `reference_max_list_price` and
+`reference_sample_size` (observed days in the window). The *effective*
+reduction is against `reference_min_price`; `claim_gap_percent` is displayed
+minus effective. Five reasons can fire, each readable from the row:
+
+| Reason | Fires when | Needs history |
+|---|---|---|
+| `PRICE_ABOVE_LIST` | the price is above the list price it is "reduced from" | no |
+| `DISCOUNT_OVER_CAP` | the displayed reduction exceeds `legal_cap_percent` (50 %) | no |
+| `LIST_PRICE_RAISED` | the list price is above every list price of the window | yes |
+| `CLAIM_EXCEEDS_HISTORY` | the claim gap exceeds `claim_gap_percent` (20 points) | yes |
+| `NOT_BELOW_REFERENCE` | a reduction is shown, yet the price is not below the prior lowest | yes |
+
+`rule_score` is the capped sum of the reasons' weights
+(`domain/discount_rules.py`); `credibility_status` is `NO_DISCOUNT` (nothing
+shown, nothing contradicting), `SUSPECT` (score ≥ 50), `QUESTIONABLE` (≥ 20),
+`CREDIBLE` (no reason, at least `min_history_days` observed days in the
+window) or `INSUFFICIENT_HISTORY` (no reason, but too little history to
+vouch). `ml_rank_percent` is the Isolation Forest's percent rank of the
+row's feature vector among the reductions shown that marketplace-day; it
+orders review and decides nothing, and is null with `ml_method = NONE` where
+scikit-learn is absent or fewer than 50 reductions were shown. The rule
+parameters travel with the row (`reference_window_days`,
+`discount_rule_version`); the status wording is contract: a verdict is a
+graded statement about a displayed figure, never a claim about the seller.
+
+Two marts the Phase 10 plan sketched are not built: `category_price_index_daily`
+(a median over whichever offers were seen that day moves with the mix of
+offers as much as with prices) and `listing_price_volatility` (its inputs,
+`distinct_price_count` and the reference statistics, are already columns of
+the credibility mart).
 
 ### 4.10 Storage and publication
 
@@ -948,9 +976,7 @@ facts still carry `category_key` directly, so the common query stays one join.
 category and seller change while we watch, and a price only means something
 next to what was being sold at that moment. Overwriting would rewrite past
 facts with today's description. Sellers and categories have no history we
-could observe — only aggregates and a name — so SCD1 is enough. The Kaggle
-star is SCD1 for the same reason in the opposite direction: it is a closed
-historical file, nothing changes after the fact.
+could observe — only aggregates and a name — so SCD1 is enough.
 
 **Why a durable key next to the version key.** `listing_key` answers "which
 description applied to this sighting"; `offer_key` answers "the same offer,
@@ -1088,96 +1114,7 @@ Phase 10 adds the star — `gold/marketplace/dw` and the `dw` schema — to that
 list, since the marts of every later run are built from it. Kafka, Elasticsearch, Redis and the speed checkpoints are **not** backed up —
 they are derived, and they refill from new crawls.
 
-## 9. Legacy: the Kaggle behavior model
-
-Belongs to the `legacy` and `jobs` profiles. Kept because the project started
-here and the report compares the two.
-
-The Kaggle Multi-Category Store dataset contains only `view`, `cart` and
-`purchase` events — no orders, payments, reviews, fraud or geography — and the
-model never invents them. The one canonical event contract is in
-`config/schema.py`: `event_time`, `event_type`, `user_id`, `user_session`,
-`product_id`, `category_id`, `category_code`, `brand`, `price`.
-
-Zones: `bronze/ecommerce_events`, `silver/behavior_events` (plus a
-quarantine), `gold/warehouse/*` and `gold/mart/*`.
-
-```mermaid
-erDiagram
-    DIM_DATE ||--o{ FACT_BEHAVIOR_EVENT : occurs_on
-    DIM_USER ||--o{ FACT_BEHAVIOR_EVENT : performed_by
-    DIM_PRODUCT ||--o{ FACT_BEHAVIOR_EVENT : targets
-    DIM_CATEGORY ||--o{ DIM_PRODUCT : classifies
-    DIM_EVENT_TYPE ||--o{ FACT_BEHAVIOR_EVENT : describes
-
-    DIM_DATE {
-        int date_key PK
-        date full_date UK
-        smallint month
-        smallint quarter
-        smallint year
-        boolean is_weekend
-    }
-    DIM_USER {
-        bigint user_key PK
-        string source_user_id UK
-        timestamp first_seen_at
-        timestamp last_seen_at
-    }
-    DIM_CATEGORY {
-        bigint category_key PK
-        string category_code UK
-        string category_level_1
-        string category_level_2
-    }
-    DIM_PRODUCT {
-        bigint product_key PK
-        string source_product_id UK
-        bigint category_key FK
-        string brand
-    }
-    DIM_EVENT_TYPE {
-        smallint event_type_key PK
-        string event_type UK
-    }
-    FACT_BEHAVIOR_EVENT {
-        string event_key PK
-        int date_key FK
-        bigint user_key FK
-        bigint product_key FK
-        smallint event_type_key FK
-        string session_id
-        timestamp event_time
-        decimal price
-        string run_id
-    }
-```
-
-`fact_behavior_event` has one row per valid source event; `event_key` is
-`SHA-256(event_type ‖ user_id ‖ product_id ‖ session_id ‖ event_time)`, so
-reprocessing never duplicates a fact.
-
-The dimensions of **this** star are SCD Type 1: every run rebuilds them from
-Silver and keeps the latest value. That fits a closed historical file, where
-nothing changes after the fact. It does not fit the marketplace, whose listings
-change while they are watched, which is why `dim_product_listing` (section 4.6)
-is SCD Type 2. `dim_date` is the one dimension both stars share; from Phase 10
-it is built by one builder with the columns of section 4.4.
-
-Marts in `cache`: `funnel_daily`, `product_daily`, `category_daily`,
-`session_daily`, `daily_revenue`. `revenue` sums `price` over purchase events
-and is never described as an order metric; funnel rates are same-day
-population ratios, not ordered-path attribution. ML outputs go to
-`cache.predictions` (Darts N-BEATS and LSTM) and `cache.anomalies` (PyOD
-AutoEncoder).
-
-Its audit is `audit.pipeline_run` and `audit.data_quality_result` — separate
-tables from the marketplace ones on purpose: that pair belongs to the
-behavioural pipeline, its `checked_at` is a naive timestamp, and its key has
-no room for severity or dataset. Sharing them would couple two unrelated
-pipelines through one migration.
-
-## Publish consistency (both pipelines)
+## Publish consistency
 
 Spark writes each mart to the `staging` schema, then one transaction truncates
 and refills the `cache` tables. Superset therefore always sees either the last

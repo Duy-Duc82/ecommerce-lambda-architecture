@@ -141,6 +141,12 @@ QUALITY_RULES: tuple[QualityRule, ...] = (
         "the share of offer-days with enough baseline history to be evaluated is reported for review",
     ),
     QualityRule(
+        "discount_credibility_evaluation_coverage",
+        ADVISORY,
+        "discount_credibility_daily",
+        "the share of offer-days showing a reduction whose history is long enough for a verdict is reported for review",
+    ),
+    QualityRule(
         "source_coverage_rate_denominator_present",
         ADVISORY,
         "source_coverage_daily",

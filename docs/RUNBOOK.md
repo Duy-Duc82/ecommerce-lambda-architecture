@@ -16,12 +16,10 @@ docker compose up -d                         # core only
 docker compose --profile crawl --profile speed up -d     # crawl needs a seeded frontier
 docker compose --profile orchestration up -d # Airflow runs the batch (ADR-0002)
 docker compose --profile serve up -d         # Kibana, Superset
-.\legacy\kaggle\scripts\start_all.ps1         # the legacy Kaggle demo
 ```
 
 `docker-compose.yml` at the root only includes `compose/docker-compose.yml`.
-Add `-f compose/docker-compose.legacy.yml` or
-`-f compose/docker-compose.observability.yml` for those layers.
+Add `-f compose/docker-compose.observability.yml` for the monitoring layer.
 Observability (Alloy, Prometheus, Loki, Grafana, alerts): docs/OBSERVABILITY.md.
 
 | Profile | Services |
@@ -37,7 +35,6 @@ Observability (Alloy, Prometheus, Loki, Grafana, alerts): docs/OBSERVABILITY.md.
 | `ops` | ops (a `run --rm` tool container; `backup`, `restore`, `validate`), es-projector (a loop service) |
 | `smoke` | stub-source, the offline Tiki stub |
 | `bench`, `demo` | the services those stacks need, listed in `compose/docker-compose.yml` |
-| `legacy`, `jobs` | in `compose/docker-compose.legacy.yml`: spark, spark-worker, kibana-setup, warehouse-job |
 
 Operator batch run, for example a resume or a backfill:
 
@@ -53,6 +50,38 @@ the advisory lock; nothing was started.
 `docker-compose.override.yml` is no longer needed: host ports come from the
 `*_HOST_PORT` variables in `.env`. Delete an old override file, or it keeps
 applying its own `!override` ports and images.
+
+### Bringing a stack back (the checklist from the run of 2026-11-07)
+
+A stack that was stopped keeps its volumes, and with them two things that bite
+on the way back (`docs/evidence/run-20261107/NHAT-KY-LOI.md`, items 1-3):
+
+1. **Airflow keeps each DAG's paused flag.** If the DAGs were paused to stop
+   the pipeline, nothing runs after `up` until they are unpaused:
+
+   ```powershell
+   .\scripts\mp.ps1 -EnvFile env/refactor.env up -With crawl,speed,orchestration,serve,ops
+   .\scripts\mp.ps1 -EnvFile env/refactor.env dags            # lists the flags
+   .\scripts\mp.ps1 -EnvFile env/refactor.env dags unpause    # marketplace_batch, source_discovery
+   ```
+
+   `marketplace_maintenance` stays paused unless Bronze/raw should be pruned,
+   and `marketplace_reprocess` is only ever triggered by hand. To stop the
+   pipeline but keep BI up: `dags pause`.
+2. **A manual trigger needs no logical date any more**, but one may be given
+   to name the window: `airflow dags trigger marketplace_batch --logical-date
+   2026-11-07T05:00:00+00:00`. Without it the run's `as_of` is the instant it
+   was triggered.
+3. **After a code upgrade that moved the crawl audit into the lake (ADR-0008)**,
+   crawls made under the older code exist only in PostgreSQL. Copy them once,
+   or the gate's `silver_parse_attempt_reconciliation` is SKIPPED and the run
+   is QUALITY_FAILED:
+
+   ```powershell
+   docker exec rf-crawl-worker python -m ecomdata.ops audit-export   # idempotent
+   ```
+
+Then `validate` (below) says whether the stack is whole.
 
 ## Four stacks on one machine (Phase 9 plan section 5)
 
@@ -236,7 +265,7 @@ is checked.
 publish but not the promotion, so the pointer ends up naming a run whose rows
 never reached `cache`, and `validate`'s `pointer_matches_cache` fails. Use it
 only to inspect Gold, never on a stack anyone is serving from
-(`PROGRESS.md` section 10.6). The offline smoke that Phase 6 section 16 and
+(`archive/PROGRESS.md` section 10.6). The offline smoke that Phase 6 section 16 and
 Phase 7 section 18 once described around this flag does not exist: the crawl
 audit is read over JDBC unconditionally, so `mp smoke` replaced it.
 
@@ -281,7 +310,7 @@ docker compose -f docker-compose.yml up -d                      # the dev stack 
 
 On a stack that also holds host-run crawls with a `local` lake,
 `bronze_present` fails: those attempts recorded `file:///D:/...` raw URIs that
-no container can read (`PROGRESS.md` §16.4).
+no container can read (`archive/PROGRESS.md` §16.4).
 
 ### Drills D1-D11 (plan section 10)
 
@@ -421,7 +450,7 @@ That `.ndjson` is **generated**, not hand-edited. Change
 python -m display.kibana.marketplace_dashboards
 ```
 
-`tests/test_kibana_marketplace.py` fails if the committed file and the
+`tests/unit/serving/test_kibana_marketplace.py` fails if the committed file and the
 builder disagree.
 
 ### The projector
@@ -654,7 +683,7 @@ docker load -i minio-images.tar
 
 Elasticsearch and Kibana are on 8.18.1 rather than 8.18.0 because the 8.18.0
 image on the development machine was pulled while the disk was full and
-stayed corrupt across re-pulls (`PROGRESS.md` §13.4).
+stayed corrupt across re-pulls (`archive/PROGRESS.md` §13.4).
 
 The jar versions in `docker/spark/Dockerfile` and their sources
 are listed in that file.

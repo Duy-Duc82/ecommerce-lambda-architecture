@@ -1,6 +1,6 @@
 # Compatibility entry point: the services live in compose/docker-compose.yml.
 # Paths inside that file are relative to compose/, so the repository root is
-# still what gets mounted at /app. Add compose/docker-compose.legacy.yml or
-# compose/docker-compose.observability.yml with a second -f.
+# still what gets mounted at /app. Add compose/docker-compose.observability.yml
+# with a second -f.
 include:
   - compose/docker-compose.yml

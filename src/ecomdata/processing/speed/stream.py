@@ -26,7 +26,7 @@ from ecomdata.domain.change_rules import (
 )
 from ecomdata.domain.ordering import order_key
 from ecomdata.domain.topics import MARKETPLACE_OBSERVATIONS
-from ecomdata.domain.wire import marketplace_observation_from_wire
+from ecomdata.domain.wire import WireContractError, marketplace_observation_from_wire
 from ecomdata.processing.speed.sinks import SpeedOutput
 
 
@@ -53,6 +53,8 @@ SPEED_OUTPUT_SCHEMA = StructType(
         StructField("source_offset", LongType(), True),
         StructField("error_type", StringType(), True),
         StructField("error_message", StringType(), True),
+        # The Kafka value of an INVALID row, for its DLQ record; null on every other kind.
+        StructField("payload_text", StringType(), True),
     ]
 )
 
@@ -127,6 +129,7 @@ def decode_observation_stream(raw: DataFrame) -> tuple[DataFrame, DataFrame]:
         F.lit("INVALID").alias("output_kind"),
         F.lit("OBSERVATION_CONTRACT").alias("error_type"),
         F.lit("invalid marketplace observation envelope, key, or lineage").alias("error_message"),
+        F.col("value").alias("payload_text"),
     )
     return valid, invalid
 
@@ -136,7 +139,30 @@ def _process_group(rows: Iterable[dict], previous=None, config: ChangeRuleConfig
         raise ValueError("a ChangeRuleConfig is required")
     state = previous
     result: list[SpeedOutput] = []
-    decoded = [(row, marketplace_observation_from_wire(json.loads(row["event_json"]))) for row in rows]
+    decoded = []
+    for row in rows:
+        # The column checks in decode_observation_stream cover the envelope and
+        # lineage, not every domain rule; the strict contract here is the rest.
+        # A row that fails it is reported INVALID like one the column checks
+        # reject. Raising would fail the micro-batch, and since its offsets are
+        # never committed the restarted query would replay the same row forever.
+        try:
+            decoded.append((row, marketplace_observation_from_wire(json.loads(row["event_json"]))))
+        except (WireContractError, ValueError) as exc:
+            result.append(
+                SpeedOutput(
+                    SpeedOutputKind.INVALID.value,
+                    row.get("marketplace"),
+                    row.get("offer_id"),
+                    row.get("observation_id"),
+                    source_topic=row.get("source_topic"),
+                    source_partition=row.get("source_partition"),
+                    source_offset=row.get("source_offset"),
+                    error_type="OBSERVATION_CONTRACT",
+                    error_message=str(exc)[:500],
+                    payload_text=row.get("event_json"),
+                )
+            )
 
     def position(pair):
         observation = pair[1].payload.observation

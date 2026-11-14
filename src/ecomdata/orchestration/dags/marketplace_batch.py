@@ -5,7 +5,9 @@ each other only through storage (Silver v2, the star, Gold, the manifest) and th
 audit row, so a failed task is retried alone and later tasks wait for it.
 ``as_of`` is the end of the data interval, ``run_id`` follows from it
 (``run_id_for``), and ``max_active_runs=1`` keeps two runs from racing for the
-``current`` pointer (the batch also holds an advisory lock).
+``current`` pointer (the batch also holds an advisory lock). A run triggered by
+hand without ``--logical-date`` has no data interval; its ``as_of`` is then the
+instant it was triggered.
 
 The run waits ``MARKETPLACE_BATCH_SETTLE_MINUTES`` after its window closes, so
 pages fetched just before the end are in Bronze when Silver reads the window.

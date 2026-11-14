@@ -4,8 +4,6 @@ Hệ thống quan sát **trạng thái công khai của catalog và giá** trên
 
 Cấu trúc là Lambda: một lần crawl nuôi **đường batch** (chính xác, chạy lại được, có phiên bản) và **đường speed** (sự kiện thay đổi độ trễ thấp). Pipeline thu thập theo kiểu **ELT**: crawler lưu nguyên vẹn dòng dữ liệu của nguồn, Spark chuẩn hoá ở phía sau (ADR-0001).
 
-Pipeline Kaggle cũ (dữ liệu hành vi) nằm trong `legacy/kaggle/`, chạy bằng `compose/docker-compose.legacy.yml`; `ecomdata` không import nó.
-
 Quyết định kiến trúc nằm trong `docs/adr/`:
 
 | ADR | Nội dung |
@@ -40,7 +38,6 @@ Luật được `import-linter` kiểm trong `pyproject.toml` (4 contract) và `
 
 - tầng trên import tầng dưới, không ngược lại; `ingestion` và `processing` **không import lẫn nhau**;
 - `ecomdata.domain` không import `pyspark`, `requests`, `psycopg2`, `kafka`, `minio`, `boto3`, `playwright`, `redis`, `elasticsearch`, `ecomdata.settings`, `ecomdata.infra`;
-- `ecomdata` không import `legacy`;
 - settings chỉ được đọc ở composition root (`bootstrap.py`, `cli.py`, `service.py`, `dags/*`);
 - literal riêng của site (`"tiki"`, `"lazada"`, `tiki.vn`, `lazada.vn`) chỉ nằm trong `ingestion/sources/<site>/`, `processing/normalize/sources/<site>.py`, `domain/sources.py` (cùng tests, ops/drills, env, docs).
 
@@ -162,7 +159,7 @@ python -m ecomdata.processing.batch run --run-id <id> --as-of <ISO> --stage <tê
 | Thành phần | Vị trí |
 |---|---|
 | Image | `docker/python` (`ecommerce/marketplace-python:3`), `docker/spark` (`ecommerce/spark-marketplace:4.0.1-r4`), `docker/crawler-browser` (`ecommerce/crawler-browser:1`, nền Playwright `v1.55.0-noble`), `docker/airflow` (`ecommerce/airflow:3.3.2-r3`) |
-| Compose | `compose/docker-compose.yml` (lõi và profile `crawl`, `crawl-browser`, `speed`, `batch`, `orchestration`, `legacy-scheduler`, `serve`, `ops`, `smoke`), `compose/docker-compose.legacy.yml`, `compose/docker-compose.observability.yml`; `docker-compose.yml` ở gốc include file chính |
+| Compose | `compose/docker-compose.yml` (lõi và profile `crawl`, `crawl-browser`, `speed`, `batch`, `orchestration`, `legacy-scheduler`, `serve`, `ops`, `smoke`), `compose/docker-compose.observability.yml`; `docker-compose.yml` ở gốc include file chính |
 | Môi trường | `env/base.env` + `env/ports.<stack>.env` + `env/<stack>.env`; mỗi stack có project, prefix container và port riêng (`tests/unit/ops/test_compose_isolation.py`) |
 | Phiên bản | `constraints.txt` là nơi duy nhất pin phiên bản chính xác; `pyproject.toml` giữ khoảng phiên bản |
 
@@ -173,7 +170,3 @@ python -m ecomdata.processing.batch run --run-id <id> --as-of <ISO> --stage <tê
 | `observability/grafana/dashboards/*.json`, `observability/grafana/provisioning/alerting/rules.yaml` (xem `docs/OBSERVABILITY.md`) | `python observability/build_grafana_dashboard.py` |
 | dashboard Kibana (`marketplace_dashboards.ndjson`) | `python observability/build_kibana_demo_dashboard.py` |
 | dashboard Superset `marketplace-batch-gold` | `python observability/build_superset_batch_dashboard.py` |
-
-## 9. Pipeline Kaggle cũ
-
-`legacy/kaggle/` giữ producer, speed layer 3.5.1, warehouse job, ML, serving và notebook. Chạy bằng `docker compose -f compose/docker-compose.yml -f compose/docker-compose.legacy.yml --profile legacy up`. Test nằm ở `tests/legacy/` (marker `legacy`).

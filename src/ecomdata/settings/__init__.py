@@ -19,6 +19,7 @@ from dataclasses import dataclass, field, fields
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
+from ecomdata.domain.discount_rules import DiscountRuleConfig
 from ecomdata.domain.sources import SOURCES
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -355,7 +356,11 @@ class BatchSettings:
     freshness_seconds: int = 21600
     freshness_rule_version: str = "freshness-rules.v1"
     counter_rule_version: str = "counter-rules.v1"
-    counter_max_gap_seconds: int = 86400
+    # Two sightings of a counter further apart than this make a delta that is not
+    # a rate (GAP_TOO_LONG). Twice the slowest crawl tier (SWEEP, one day): one
+    # missed sweep is tolerated, two are not. Run 2026-11-07: with the gap equal
+    # to the sweep cadence, every sweep-tier transition was GAP_TOO_LONG.
+    counter_max_gap_seconds: int = 172800
     percentile_accuracy: int = 10000
     # Scheduler loop (legacy-scheduler profile): windows close on interval
     # boundaries and are cut once the lag has passed.
@@ -374,6 +379,8 @@ class BatchSettings:
     # Where the batch reads the crawl audit: "lake" (the copy of record the
     # crawler writes to Bronze) or "postgres" (the operational copy, over JDBC).
     crawl_audit_source: str = "lake"
+    # The discount-credibility rules (ADR-0009); the dataclass checks itself.
+    discount_rules: DiscountRuleConfig = DiscountRuleConfig()
 
 
 @dataclass(frozen=True)
@@ -458,6 +465,26 @@ class Settings:
     airflow: AirflowSettings = field(default_factory=AirflowSettings)
 
 
+def _discount_rules(env: _Env) -> DiscountRuleConfig:
+    defaults = DiscountRuleConfig()
+    enabled = env.text("MARKETPLACE_DISCOUNT_ML_ENABLED", "true" if defaults.ml_enabled else "false").strip().lower()
+    if enabled not in ("true", "false", "1", "0", "yes", "no"):
+        raise SettingsError(f"MARKETPLACE_DISCOUNT_ML_ENABLED must be true or false, got {enabled!r}")
+    try:
+        return DiscountRuleConfig(
+            rule_version=env.text("MARKETPLACE_DISCOUNT_RULE_VERSION", defaults.rule_version),
+            reference_window_days=env.integer("MARKETPLACE_DISCOUNT_REFERENCE_WINDOW_DAYS", defaults.reference_window_days),
+            min_history_days=env.integer("MARKETPLACE_DISCOUNT_MIN_HISTORY_DAYS", defaults.min_history_days),
+            legal_cap_percent=env.decimal("MARKETPLACE_DISCOUNT_LEGAL_CAP_PERCENT", str(defaults.legal_cap_percent)),
+            claim_gap_percent=env.decimal("MARKETPLACE_DISCOUNT_CLAIM_GAP_PERCENT", str(defaults.claim_gap_percent)),
+            ml_enabled=enabled in ("true", "1", "yes"),
+            ml_sample_rows=env.integer("MARKETPLACE_DISCOUNT_ML_SAMPLE_ROWS", defaults.ml_sample_rows),
+            ml_seed=env.integer("MARKETPLACE_DISCOUNT_ML_SEED", defaults.ml_seed),
+        )
+    except ValueError as exc:
+        raise SettingsError(f"MARKETPLACE_DISCOUNT_*: {exc}") from None
+
+
 def _read(env: _Env) -> Settings:
     batch_defaults, quality_defaults, speed_defaults = BatchSettings(), QualitySettings(), SpeedSettings()
     return Settings(
@@ -528,6 +555,7 @@ def _read(env: _Env) -> Settings:
             crawl_audit_source=env.text("MARKETPLACE_CRAWL_AUDIT_SOURCE", batch_defaults.crawl_audit_source)
             .strip()
             .lower(),
+            discount_rules=_discount_rules(env),
         ),
         quality=QualitySettings(
             rule_version=env.text("MARKETPLACE_QUALITY_RULE_VERSION", quality_defaults.rule_version),
@@ -647,6 +675,16 @@ def validate(settings: Settings) -> Settings:
         # No row could ever reach the minimum: the whole mart would read
         # INSUFFICIENT_HISTORY without anything looking broken.
         raise SettingsError("MARKETPLACE_ANOMALY_MIN_SAMPLES cannot exceed MARKETPLACE_ANOMALY_WINDOW_DAYS")
+    slowest_tier, slowest_minutes = max(crawl.cadence_minutes.items(), key=lambda item: item[1])
+    if batch.counter_max_gap_seconds < slowest_minutes * 60 * 3 // 2:
+        # A target in the slowest tier is seen once per cadence, plus the hours a
+        # sweep takes: with the gap at or under the cadence, its every counter
+        # transition is GAP_TOO_LONG and the counter marts hold no valid rate
+        # for that tier, while nothing looks broken (run 2026-11-07, item 4).
+        raise SettingsError(
+            "MARKETPLACE_COUNTER_MAX_GAP_SECONDS must be at least 1.5 times the slowest crawl cadence "
+            f"(CRAWL_{slowest_tier}_CADENCE_MINUTES={slowest_minutes}, so {slowest_minutes * 60 * 3 // 2} s)"
+        )
     if quality.reconciliation_lookback_seconds <= quality.reconciliation_settle_seconds:
         raise SettingsError(
             "MARKETPLACE_QUALITY_RECONCILIATION_LOOKBACK_SECONDS must exceed "
