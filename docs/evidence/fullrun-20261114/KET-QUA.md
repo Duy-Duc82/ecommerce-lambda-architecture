@@ -48,3 +48,18 @@ Chưa gán nhãn (mục 6). `nhan-tay.csv` có 30 dòng top luật và 30 dòng 
 Chu kỳ tier trong `src/ecomdata/ingestion/scheduling.py:45`: `ACTIVE` 60 phút, `SWEEP` 1440 phút. Lượt quét `SWEEP` (14.023 task thành công) chạy khoảng 18:00–21:54 UTC 13/11, tức ngay đầu lượt này; sau đó mỗi task được hẹn lại đúng 24 giờ (4.235 task `READY`, hẹn 14/11 18:32–21:54 UTC). Từ giờ 4, crawl chỉ lấy 25 trang `ACTIVE` mỗi giờ, nên gold gần như không đổi (1.962.392 đến 1.966.878) và các phép đo độ ổn định/hiệu năng ML chủ yếu chạy lặp trên cùng dữ liệu. Đây không phải sự cố; không ép quét thêm trong lượt này.
 
 Backup cuối lượt: `data/ops/backups/bk-20261114T040954Z` (không commit). Hai DAG đã pause.
+
+## 6. Phần chạy tiếp (04:58–05:39 UTC) và báo cáo ML cuối
+
+Sau khi chốt ở mục 1–5, người dùng yêu cầu chạy tiếp để bù tới khoảng 10 giờ. Stack được bật lại không có Kibana/Superset, thêm run `mp-20261114T0500Z` (PROMOTED, quality PASS). Tổng 11 run, 11/11 PROMOTED. Run `0400Z` không tồn tại vì stack đang dừng.
+
+Báo cáo ML cuối (`bao-cao-ml.json`, 05:39 UTC) khác mục 2 ở các dòng sau; ngưỡng không đổi:
+
+| Tiêu chí | Số đo | Ngưỡng | Kết quả |
+|---|---|---|---|
+| marts (hiệu năng) | tệ nhất 172,8 s so với cơ sở 88,4 s, tăng 95,5 % | ≤ 30 % | **FAIL** |
+| fit | không đọc được log `discount_ml_fitted` (Loki tắt) | < 60 s | CHUA_DU (ở mục 2 đã PASS với 0,11–0,13 s) |
+| flag_share | ngày 14/11: 154/254 = 60,6 % | 1–10 % | FAIL |
+| rule_ml_agreement | lift 4,10 (mẫu 39 dòng mạnh) | ≥ 2,0 | PASS |
+
+Các tiêu chí còn lại giữ PASS. Nguyên nhân khả dĩ của `marts` FAIL: run `0500Z` chạy khi RAM host chỉ còn 1,7 GB (10 run trước nằm trong 88–105 s); chưa kiểm chứng. Vì vậy kết quả hiệu năng đáng tin nhất là của 10 run đầu (mục 2–3), và run `0500Z` là phép đo dưới áp lực RAM, không phải đo ổn định.

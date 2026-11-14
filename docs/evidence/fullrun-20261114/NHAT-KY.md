@@ -52,3 +52,12 @@
 ### Giờ 9,2 (11:05 VN): RAM host trống 2,6 GB
 - Hiện tượng: free RAM 2,6 GB (<3 GB); wait nền của Claude Code bị hệ thống dừng vì thiếu RAM.
 - Xử lý theo mục 5 kịch bản: dừng `rf-kibana` (Superset giữ lại). Pipeline vẫn sạch (0300Z PROMOTED, failed=0, DLQ=0).
+
+### Tiếp tục lượt chạy (theo yêu cầu "tiếp tục đi")
+- Sau khi đã backup, pause DAG, dừng stack và push ở mốc 9 giờ 16 phút, người dùng yêu cầu chạy tiếp để bù tới khoảng 10 giờ. Bật lại stack không Kibana/Superset (RAM trống 7,9 GB), unpause DAG lúc 04:58 UTC. Mục tiêu: ít nhất hai run batch nữa (0400Z, 0500Z), chạy lại báo cáo ML, cập nhật KET-QUA.md.
+
+### Kết quả phần chạy tiếp (04:58–05:39 UTC)
+- Run `mp-20261114T0500Z` PROMOTED, quality PASS, gold 1.966.968, nhưng chạy 05:10–05:30 (khoảng 20 phút, các run trước 10–12 phút). Không có run `0400Z`: stack đang dừng ở giờ đó (đã dừng sau backup), nên cửa sổ này bị bỏ qua, không phải lỗi pipeline.
+- Lúc đó RAM host trống 1,7 GB, và Loki/Alloy/Grafana/Prometheus đang tắt (Alloy thoát mã 2 với stack trace trong `statsd_exporter`, chưa tìm nguyên nhân).
+- `performance.marts` chuyển thành **FAIL**: tệ nhất 172,8 s so với cơ sở 88,4 s (+95,5 %, ngưỡng 30 %). Nguyên nhân khả dĩ là thiếu RAM khi chạy lại; chưa kiểm chứng.
+- `performance.fit` chuyển thành CHUA_DU vì Loki tắt nên không đọc được dòng `discount_ml_fitted`.

@@ -516,3 +516,73 @@ rf-elasticsearch 991.4MiB / 13.65GiB
 rf-minio 2.19GiB / 13.65GiB
 rf-speed 2.51GiB / 13.65GiB
 == end 2026-11-14T04:09:07Z
+== mp-refactor 2026-11-14T05:30:47Z (VN 12:30)
+PROBLEM container: rf-superset Exited (137) 57 minutes ago
+PROBLEM container: rf-alloy Exited (2) 57 minutes ago
+crawl/10m=0 speedbatches/3m=6 changes/10m=0 dlq/30m=0
+batch: mp-20261114T0500Z PROMOTED q=PASS gold=1966968
+batch: mp-20261114T0300Z PROMOTED q=PASS gold=1966878
+batch: mp-20261114T0200Z PROMOTED q=PASS gold=1966774
+FAILED|13 DISABLED|14 READY|4260 SUCCEEDED|14818 
+PROBLEM observability: Loki does not answer
+host RAM free 1.9 GB
+rf-speed 1.73GiB / 13.65GiB;rf-kafka 485.7MiB / 13.65GiB;rf-elasticsearch 1.509GiB / 13.65GiB;
+-- batch (3h)
+mp-20261114T0300Z PROMOTED
+mp-20261114T0500Z PROMOTED
+quality ADVISORY FAIL counter_invalid_transition_rate observed=0.5892347603274529
+quality ADVISORY FAIL price_anomaly_evaluation_coverage observed=0
+-- speed (1h)
+batches=69 failed=0 input=658 invalid=0 changes=1 p95_ms=60135
+observations DLQ messages (total)=0
+-- crawl (1h)
+OK=25
+-- ml
+snapshot mp-20261114T0500Z: 631 dòng
+INSUFFICIENT_HISTORY=100
+NO_DISCOUNT=377
+QUESTIONABLE=115
+SUSPECT=39
+-- host
+free_ram_gb=1.7
+rf-airflow-scheduler 606.6MiB / 13.65GiB
+rf-postgres-dw 691.6MiB / 13.65GiB
+rf-elasticsearch 1.509GiB / 13.65GiB
+rf-minio 1.618GiB / 13.65GiB
+rf-speed 1.73GiB / 13.65GiB
+== end 2026-11-14T05:32:06Z
+== mp-refactor 2026-11-14T05:38:58Z (VN 12:38)
+PROBLEM container: rf-superset Exited (137) About an hour ago
+PROBLEM container: rf-alloy Exited (2) About an hour ago
+crawl/10m=0 speedbatches/3m=6 changes/10m=0 dlq/30m=0
+batch: mp-20261114T0500Z PROMOTED q=PASS gold=1966968
+batch: mp-20261114T0300Z PROMOTED q=PASS gold=1966878
+batch: mp-20261114T0200Z PROMOTED q=PASS gold=1966774
+FAILED|13 DISABLED|14 READY|4260 SUCCEEDED|14818 
+PROBLEM observability: Loki does not answer
+host RAM free 2.4 GB
+rf-speed 1.739GiB / 13.65GiB;rf-kafka 653.3MiB / 13.65GiB;rf-elasticsearch 1.519GiB / 13.65GiB;
+-- batch (3h)
+mp-20261114T0300Z PROMOTED
+mp-20261114T0500Z PROMOTED
+quality ADVISORY FAIL counter_invalid_transition_rate observed=0.5892347603274529
+quality ADVISORY FAIL price_anomaly_evaluation_coverage observed=0
+-- speed (1h)
+batches=81 failed=0 input=658 invalid=0 changes=1 p95_ms=60135
+observations DLQ messages (total)=0
+-- crawl (1h)
+OK=25
+-- ml
+đã có snapshot của mp-20261114T0500Z
+INSUFFICIENT_HISTORY=100
+NO_DISCOUNT=377
+QUESTIONABLE=115
+SUSPECT=39
+-- host
+free_ram_gb=2.3
+rf-airflow-scheduler 608.2MiB / 13.65GiB
+rf-postgres-dw 692MiB / 13.65GiB
+rf-elasticsearch 1.519GiB / 13.65GiB
+rf-speed 1.74GiB / 13.65GiB
+rf-minio 2.161GiB / 13.65GiB
+== end 2026-11-14T05:40:16Z
