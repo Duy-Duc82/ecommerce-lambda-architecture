@@ -42,3 +42,9 @@ Mốc `marts` lấy từ run đầu của chính lượt này (88,4 s), không c
 4. RAM trống 2,6 GB ở giờ 9,2: dừng `rf-kibana`.
 
 Chưa gán nhãn (mục 6). `nhan-tay.csv` có 30 dòng top luật và 30 dòng top ML nhưng **0 dòng baseline `ANOMALOUS_LOW`**, vì ngày mới nhất không có dòng nào ở trạng thái đó; cần xem lại khi bàn cách gán nhãn.
+
+## 5. Giới hạn của lượt chạy: crawl nghỉ phần lớn thời gian
+
+Chu kỳ tier trong `src/ecomdata/ingestion/scheduling.py:45`: `ACTIVE` 60 phút, `SWEEP` 1440 phút. Lượt quét `SWEEP` (14.023 task thành công) chạy khoảng 18:00–21:54 UTC 13/11, tức ngay đầu lượt này; sau đó mỗi task được hẹn lại đúng 24 giờ (4.235 task `READY`, hẹn 14/11 18:32–21:54 UTC). Từ giờ 4, crawl chỉ lấy 25 trang `ACTIVE` mỗi giờ, nên gold gần như không đổi (1.962.392 đến 1.966.878) và các phép đo độ ổn định/hiệu năng ML chủ yếu chạy lặp trên cùng dữ liệu. Đây không phải sự cố; không ép quét thêm trong lượt này.
+
+Backup cuối lượt: `data/ops/backups/bk-20261114T040954Z` (không commit). Hai DAG đã pause.
