@@ -36,3 +36,6 @@
 
 ### Giờ 5 (06:40 VN)
 - Run 2300Z PROMOTED, quality PASS (gold 1962392 không đổi so với 2200Z vì crawl chỉ còn 25 task ACTIVE/giờ). Speed failed=0, DLQ=0, không container thoát. Lỗi 30 phút: airflow-scheduler 4, kibana 5 (không kèm hiện tượng; không xử lý). Không PROBLEM.
+
+### Giờ 6 (07:36 VN)
+- Run 20261114T0000Z PROMOTED (qua nửa đêm UTC), quality PASS. Speed failed=0, DLQ=0, không lỗi 30 phút. `changes/10m=810` dù crawl=0: chưa giải thích, ghi nhận để xem khi chốt. Không PROBLEM.
