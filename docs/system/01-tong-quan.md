@@ -21,77 +21,80 @@ Hệ thống theo kiến trúc **Lambda**, thu thập theo kiểu **ELT** (ADR-0
 - **Batch** (đúng, chạy lại được, có phiên bản): mỗi giờ dựng Silver, star `dw`, 12 mart, qua cổng chất lượng rồi publish vào PostgreSQL.
 - **Speed** (nhanh): Kafka → Spark Structured Streaming → phát hiện 7 loại thay đổi theo offer → Kafka, Elasticsearch, Redis.
 
-```mermaid
-flowchart LR
-    classDef src fill:#E5E7EB,stroke:#6B7280,color:#111
-    classDef acq fill:#DBEAFE,stroke:#2563EB,color:#111
-    classDef lake fill:#FEF3C7,stroke:#D97706,color:#111
-    classDef batch fill:#FFEDD5,stroke:#EA580C,color:#111
-    classDef speed fill:#EDE9FE,stroke:#7C3AED,color:#111
-    classDef kafka fill:#FEE2E2,stroke:#DC2626,color:#111
-    classDef serve fill:#DCFCE7,stroke:#16A34A,color:#111
-    classDef ops fill:#CCFBF1,stroke:#0D9488,color:#111
+**Hình 1.1 — Toàn cảnh kiến trúc Lambda**
 
-    subgraph SRC["Nguồn ngoài"]
-        tiki["Tiki<br/>HTTP, __NEXT_DATA__"]:::src
-        laz["Lazada<br/>Playwright, XHR JSON"]:::src
-    end
+> Loại hình: flowchart trái → phải. Ý chính người xem phải thấy: Bronze được ghi trước và là điểm rẽ nhánh; speed đọc bản sao trên Kafka, batch đọc lại Bronze; chỉ run qua cổng chất lượng mới tới PostgreSQL và Superset.
 
-    subgraph ACQ["Thu thập"]
-        frontier[("PostgreSQL<br/>audit.crawl_frontier")]:::acq
-        worker("crawl-worker<br/>Fetcher → Extractor"):::acq
-    end
+Khung (nhóm):
 
-    subgraph BRONZE["Bronze (MinIO/S3) — nguồn sự thật"]
-        raw[("raw<br/>part-N.bin.gz + metadata.json")]:::lake
-        rec[("records<br/>JSONL.gz, marketplace-record.v1")]:::lake
-        caud[("crawl_audit<br/>JSONL.gz")]:::lake
-    end
+| Khung | Màu tầng | Chứa node |
+|---|---|---|
+| Nguồn ngoài | nguồn | 1, 2 |
+| Thu thập | thu thập | 3, 4 |
+| Bronze (MinIO/S3) — nguồn sự thật | lake | 5, 6, 7 |
+| Speed layer | speed (topic tô màu Kafka) | 8–12 |
+| Batch layer (mỗi giờ) | batch (kho tô màu lake) | 13–17 |
+| Phục vụ | phục vụ | 18–22 |
+| (đứng riêng) | điều phối, giám sát | 23, 24 |
 
-    subgraph SPEED["Speed layer"]
-        krec{{"marketplace.records.v1"}}:::kafka
-        norm("normalizer<br/>foreachBatch"):::speed
-        kobs{{"marketplace.observations.v1"}}:::kafka
-        state("stateful query<br/>7 loại thay đổi"):::speed
-        kchg{{"marketplace.changes.v1"}}:::kafka
-    end
+Node:
 
-    subgraph BATCH["Batch layer (mỗi giờ)"]
-        silver[("Silver<br/>Delta")]:::lake
-        dw[("Gold dw<br/>star: 8 dim/bridge, 6 fact")]:::lake
-        marts[("Gold runs<br/>12 mart theo run")]:::lake
-        qg{"quality gate<br/>22 luật"}:::batch
-        cur[("current.json")]:::lake
-    end
+| # | Nhãn trên hình | Hình dạng | Tầng/màu | Ghi chú |
+|---|---|---|---|---|
+| 1 | Tiki — HTTP, `__NEXT_DATA__` | chữ nhật | nguồn | nguồn chính |
+| 2 | Lazada — Playwright, XHR JSON | chữ nhật | nguồn | nguồn minh hoạ |
+| 3 | PostgreSQL `audit.crawl_frontier` | trụ | thu thập | hàng đợi việc crawl |
+| 4 | crawl-worker (Fetcher → Extractor) | bo góc | thu thập | |
+| 5 | raw — `part-N.bin.gz` + `metadata.json` | trụ | lake | |
+| 6 | records — JSONL.gz, `marketplace-record.v1` | trụ | lake | điểm rẽ nhánh batch/speed |
+| 7 | crawl_audit — JSONL.gz | trụ | lake | |
+| 8 | `marketplace.records.v1` | lục giác | Kafka | |
+| 9 | normalizer (foreachBatch) | bo góc | speed | |
+| 10 | `marketplace.observations.v1` | lục giác | Kafka | |
+| 11 | stateful query — 7 loại thay đổi | bo góc | speed | |
+| 12 | `marketplace.changes.v1` | lục giác | Kafka | |
+| 13 | Silver (Delta) | trụ | lake | |
+| 14 | Gold `dw` — star: 8 dim/bridge, 6 fact | trụ | lake | |
+| 15 | Gold runs — 12 mart theo run | trụ | lake | |
+| 16 | quality gate — 22 luật | thoi | batch | |
+| 17 | `current.json` | trụ | lake | pointer tới run đang phục vụ |
+| 18 | PostgreSQL `cache.*` | trụ | phục vụ | |
+| 19 | Elasticsearch | trụ | phục vụ | |
+| 20 | Redis `rt:*` | trụ | phục vụ | |
+| 21 | Superset | chữ nhật | phục vụ | |
+| 22 | Kibana | chữ nhật | phục vụ | |
+| 23 | Airflow — 4 DAG | chữ nhật | điều phối | |
+| 24 | Alloy · Prometheus · Loki · Grafana | chữ nhật | giám sát | |
 
-    subgraph SERVE["Phục vụ"]
-        pg[("PostgreSQL cache.*")]:::serve
-        es[("Elasticsearch")]:::serve
-        redis[("Redis rt:*")]:::serve
-        superset["Superset"]:::serve
-        kibana["Kibana"]:::serve
-    end
+Cạnh:
 
-    airflow["Airflow<br/>4 DAG"]:::ops
-    grafana["Alloy · Prometheus · Loki · Grafana"]:::ops
-
-    tiki & laz --> worker
-    frontier -. lease .-> worker
-    worker ==> raw
-    worker ==> rec
-    worker --> caud
-    rec ==> krec --> norm --> kobs --> state
-    state --> kchg & es & redis
-    rec ==> silver ==> dw ==> marts ==> qg
-    caud --> dw
-    qg ==>|PASS| pg
-    qg -->|promote| cur
-    pg --> superset
-    es --> kibana
-    airflow -. lập lịch .-> silver
-    airflow -. seed SWEEP .-> frontier
-    grafana -. đọc audit, metrics .-> pg
-```
+| Từ | Tới | Nhãn trên cạnh | Nét |
+|---|---|---|---|
+| 1 Tiki | 4 crawl-worker | | liền |
+| 2 Lazada | 4 crawl-worker | | liền |
+| 3 frontier | 4 crawl-worker | lease | đứt |
+| 4 crawl-worker | 5 raw | | đậm |
+| 4 crawl-worker | 6 records | | đậm |
+| 4 crawl-worker | 7 crawl_audit | | liền |
+| 6 records | 8 `records.v1` | | đậm |
+| 8 `records.v1` | 9 normalizer | | liền |
+| 9 normalizer | 10 `observations.v1` | | liền |
+| 10 `observations.v1` | 11 stateful query | | liền |
+| 11 stateful query | 12 `changes.v1` | | liền |
+| 11 stateful query | 19 Elasticsearch | | liền |
+| 11 stateful query | 20 Redis | | liền |
+| 6 records | 13 Silver | | đậm |
+| 13 Silver | 14 `dw` | | đậm |
+| 7 crawl_audit | 14 `dw` | | liền |
+| 14 `dw` | 15 Gold runs | | đậm |
+| 15 Gold runs | 16 quality gate | | đậm |
+| 16 quality gate | 18 PostgreSQL `cache.*` | PASS | đậm |
+| 16 quality gate | 17 `current.json` | promote | liền |
+| 18 PostgreSQL `cache.*` | 21 Superset | | liền |
+| 19 Elasticsearch | 22 Kibana | | liền |
+| 23 Airflow | 13 Silver (hoặc cả khung Batch) | lập lịch | đứt |
+| 23 Airflow | 3 frontier | seed SWEEP | đứt |
+| 24 Grafana | 18 PostgreSQL | đọc audit, metrics | đứt |
 
 *Hình 1.1. Toàn cảnh. Bronze được ghi trước và là nguồn sự thật. Kafka chỉ là bản sao nhanh của Bronze/records. Batch đọc lại Bronze theo cửa sổ ngày; PostgreSQL chỉ giữ bản cache của run đã được promote.*
 
@@ -117,27 +120,28 @@ Nguyên tắc lưu trữ (ADR-0008, memory dự án 2026-10-26): **lake là bả
 
 Code nằm trong một package `ecomdata` (`src/ecomdata/`), chia theo Ports & Adapters (ADR-0003). `import-linter` kiểm luật import trong CI.
 
-```mermaid
-flowchart TB
-    classDef ops fill:#CCFBF1,stroke:#0D9488,color:#111
-    classDef app fill:#DBEAFE,stroke:#2563EB,color:#111
-    classDef infra fill:#FFEDD5,stroke:#EA580C,color:#111
-    classDef dom fill:#FEF3C7,stroke:#D97706,color:#111
+**Hình 1.2 — Tầng module trong code**
 
-    subgraph L1["Tầng 1: điều phối, vận hành, trình bày"]
-        orch["orchestration<br/>DAG Airflow, tasks.py"]:::ops
-        opsm["ops<br/>CLI vận hành, backup, drill, bench"]:::ops
-        serv["serving<br/>es_projector, Kibana, Superset"]:::ops
-    end
-    subgraph L2["Tầng 2: ứng dụng (không import lẫn nhau)"]
-        ing["ingestion<br/>fetcher, extractor, pipeline, frontier, worker"]:::app
-        proc["processing<br/>normalize · batch · speed"]:::app
-    end
-    infra["Tầng 3: infra<br/>Spark, Postgres, Kafka, object store, HTTP, Playwright"]:::infra
-    settings["Tầng 4: settings<br/>dataclass frozen, load_settings()"]:::infra
-    domain["Tầng 5: domain (thuần, không I/O)<br/>sources, records, observations, change_rules,<br/>quality_rules, discount_rules, datasets, batch_run"]:::dom
-    L1 --> L2 --> infra --> settings --> domain
-```
+> Loại hình: sơ đồ khối xếp chồng trên → dưới (5 tầng). Ý chính người xem phải thấy: tầng trên chỉ import tầng dưới; `ingestion` và `processing` nằm cùng tầng nhưng không import nhau.
+
+Node (mỗi tầng là một khối ngang, tầng 1 trên cùng):
+
+| # | Nhãn trên hình | Hình dạng | Tầng/màu | Ghi chú |
+|---|---|---|---|---|
+| 1 | Tầng 1: điều phối, vận hành, trình bày — 3 ô con: `orchestration` (DAG Airflow, `tasks.py`), `ops` (CLI vận hành, backup, drill, bench), `serving` (es_projector, Kibana, Superset) | khung chứa 3 chữ nhật | điều phối | |
+| 2 | Tầng 2: ứng dụng (không import lẫn nhau) — 2 ô con: `ingestion` (fetcher, extractor, pipeline, frontier, worker), `processing` (normalize · batch · speed) | khung chứa 2 chữ nhật | thu thập | vẽ vạch ngăn giữa 2 ô để thể hiện "không import nhau" |
+| 3 | Tầng 3: `infra` — Spark, Postgres, Kafka, object store, HTTP, Playwright | chữ nhật | batch | |
+| 4 | Tầng 4: `settings` — dataclass frozen, `load_settings()` | chữ nhật | batch | |
+| 5 | Tầng 5: `domain` (thuần, không I/O) — sources, records, observations, change_rules, quality_rules, discount_rules, datasets, batch_run | chữ nhật | lake | |
+
+Cạnh:
+
+| Từ | Tới | Nhãn trên cạnh | Nét |
+|---|---|---|---|
+| Tầng 1 | Tầng 2 | import | liền |
+| Tầng 2 | Tầng 3 | import | liền |
+| Tầng 3 | Tầng 4 | import | liền |
+| Tầng 4 | Tầng 5 | import | liền |
 
 *Hình 1.2. Tầng trên chỉ import tầng dưới. `ingestion` và `processing` không biết nhau: chúng chỉ gặp nhau qua hợp đồng dữ liệu trong `domain` (envelope `marketplace-record.v1`) và qua Bronze.*
 
@@ -169,88 +173,109 @@ Hai điểm khiến batch và speed cho cùng một kết quả:
 
 Mỗi stack là một compose project riêng (`env/base.env` + `env/ports.<stack>.env` + `env/<stack>.env`), được điều khiển bằng `scripts/mp.ps1`. Chi tiết từng service ở [04-pipeline.md §4.9](04-pipeline.md#49-triển-khai-và-tài-nguyên).
 
-```mermaid
-flowchart TB
-    classDef core fill:#FEF3C7,stroke:#D97706,color:#111
-    classDef acq fill:#DBEAFE,stroke:#2563EB,color:#111
-    classDef speed fill:#EDE9FE,stroke:#7C3AED,color:#111
-    classDef batch fill:#FFEDD5,stroke:#EA580C,color:#111
-    classDef serve fill:#DCFCE7,stroke:#16A34A,color:#111
-    classDef ops fill:#CCFBF1,stroke:#0D9488,color:#111
+**Hình 1.3 — Triển khai local: Docker Compose theo profile**
 
-    subgraph CORE["Lõi (luôn chạy)"]
-        kafka[("kafka :9092")]:::core
-        minio[("minio :9000")]:::core
-        pg[("postgres-dw :5433")]:::core
-        redis[("redis :6379")]:::core
-        es[("elasticsearch :9200")]:::core
-    end
-    subgraph P_CRAWL["profile crawl / crawl-browser"]
-        cw("crawl-worker (Tiki)"):::acq
-        cwl("crawl-worker-lazada"):::acq
-    end
-    subgraph P_SPEED["profile speed"]
-        sp("speed<br/>2 streaming query"):::speed
-    end
-    subgraph P_BATCH["profile batch / orchestration"]
-        bo("batch-once (công cụ)"):::batch
-        af("airflow-scheduler, api-server,<br/>dag-processor"):::ops
-    end
-    subgraph P_SERVE["profile serve / ops"]
-        kb("kibana :5601"):::serve
-        ss("superset :8088"):::serve
-        ep("es-projector"):::serve
-    end
-    subgraph P_OBS["compose observability"]
-        obs("alloy · prometheus · loki · grafana :3001"):::ops
-    end
-    cw & cwl --> minio & kafka & pg
-    sp --> kafka & es & redis & pg
-    af -. DockerOperator .-> bo
-    bo --> minio & pg
-    ep --> pg & es & redis
-    kb --> es
-    ss --> pg
-    obs -. scrape .-> CORE
-```
+> Loại hình: flowchart trên → dưới, mỗi profile là một khung. Ý chính người xem phải thấy: lõi luôn chạy, mỗi profile bật thêm một nhóm service; batch được Airflow gọi bằng DockerOperator.
+
+Khung (nhóm):
+
+| Khung | Màu tầng | Chứa node |
+|---|---|---|
+| Lõi (luôn chạy) | lake | 1–5 |
+| profile `crawl` / `crawl-browser` | thu thập | 6, 7 |
+| profile `speed` | speed | 8 |
+| profile `batch` / `orchestration` | batch, điều phối | 9, 10 |
+| profile `serve` / `ops` | phục vụ | 11, 12, 13 |
+| compose observability | giám sát | 14 |
+
+Node:
+
+| # | Nhãn trên hình | Hình dạng | Tầng/màu | Ghi chú |
+|---|---|---|---|---|
+| 1 | kafka :9092 | trụ | lake | |
+| 2 | minio :9000 | trụ | lake | |
+| 3 | postgres-dw :5433 | trụ | lake | |
+| 4 | redis :6379 | trụ | lake | |
+| 5 | elasticsearch :9200 | trụ | lake | |
+| 6 | crawl-worker (Tiki) | bo góc | thu thập | |
+| 7 | crawl-worker-lazada | bo góc | thu thập | |
+| 8 | speed — 2 streaming query | bo góc | speed | |
+| 9 | batch-once (công cụ) | bo góc | batch | |
+| 10 | airflow-scheduler, api-server, dag-processor | bo góc | điều phối | |
+| 11 | kibana :5601 | bo góc | phục vụ | |
+| 12 | superset :8088 | bo góc | phục vụ | |
+| 13 | es-projector | bo góc | phục vụ | |
+| 14 | alloy · prometheus · loki · grafana :3001 | bo góc | giám sát | |
+
+Cạnh:
+
+| Từ | Tới | Nhãn trên cạnh | Nét |
+|---|---|---|---|
+| 6, 7 crawl-worker | 2 minio | | liền |
+| 6, 7 crawl-worker | 1 kafka | | liền |
+| 6, 7 crawl-worker | 3 postgres-dw | | liền |
+| 8 speed | 1 kafka | | liền |
+| 8 speed | 5 elasticsearch | | liền |
+| 8 speed | 4 redis | | liền |
+| 8 speed | 3 postgres-dw | | liền |
+| 10 airflow | 9 batch-once | DockerOperator | đứt |
+| 9 batch-once | 2 minio | | liền |
+| 9 batch-once | 3 postgres-dw | | liền |
+| 13 es-projector | 3 postgres-dw | | liền |
+| 13 es-projector | 5 elasticsearch | | liền |
+| 13 es-projector | 4 redis | | liền |
+| 11 kibana | 5 elasticsearch | | liền |
+| 12 superset | 3 postgres-dw | | liền |
+| 14 observability | khung Lõi | scrape | đứt |
+
+*Hình 1.3. Mỗi stack là một compose project riêng, điều khiển bằng `scripts/mp.ps1`.*
 
 ### Hybrid: batch và speed lakehouse trên Databricks
 
 Từ 2026-11-05 (nhánh `phase-11/databricks`) phần tính toán chạy được trên Databricks; phần dính tới mạng nội bộ ở lại máy local.
 
-```mermaid
-flowchart LR
-    classDef src fill:#E5E7EB,stroke:#6B7280,color:#111
-    classDef lake fill:#FEF3C7,stroke:#D97706,color:#111
-    classDef batch fill:#FFEDD5,stroke:#EA580C,color:#111
-    classDef speed fill:#EDE9FE,stroke:#7C3AED,color:#111
-    classDef serve fill:#DCFCE7,stroke:#16A34A,color:#111
+**Hình 1.4 — Triển khai hybrid: batch và speed lakehouse trên Databricks**
 
-    subgraph LOCAL["Máy local (Docker)"]
-        crawler("crawler + frontier"):::src
-        minio[("MinIO bronze")]:::lake
-        kafkaL[("Kafka · speed Kafka")]:::src
-        pgc[("PostgreSQL cache.*")]:::serve
-        bi["Superset · Kibana"]:::serve
-    end
-    subgraph AWS["AWS S3 (ap-southeast-1)"]
-        s3b[("bronze: records, crawl_audit")]:::lake
-        s3s[("silver Delta")]:::lake
-        s3g[("gold: dw, runs, manifests,<br/>speed/*")]:::lake
-    end
-    subgraph DBX["Databricks (single node, DBR 17.3)"]
-        jb("ecomdata-marketplace-batch<br/>silver→quality, --skip-postgres"):::batch
-        js("ecomdata-marketplace-speed<br/>Auto Loader, available-now"):::speed
-    end
-    crawler --> minio
-    minio -- "mc mirror (tay)" --> s3b
-    s3b --> jb --> s3s & s3g
-    s3b --> js --> s3g
-    s3g -. "publish chưa tự động" .-> pgc
-    pgc --> bi
-```
+> Loại hình: flowchart trái → phải, 3 khung theo nơi chạy. Ý chính người xem phải thấy: Bronze lên S3 bằng `mc mirror` chạy tay; Databricks tính trên S3; kết quả chưa tự động quay về PostgreSQL local.
 
-*Hình 1.3. Job batch trên Databricks dừng ở `quality` vì `publish` và `promote` cần PostgreSQL. Job speed chạy available-now hoặc trong một cửa sổ demo, không chạy 24/7 (`databricks/resources/jobs.yml`).*
+Khung (nhóm):
+
+| Khung | Màu tầng | Chứa node |
+|---|---|---|
+| Máy local (Docker) | theo từng node | 1–5 |
+| AWS S3 (ap-southeast-1) | lake | 6, 7, 8 |
+| Databricks (single node, DBR 17.3) | batch, speed | 9, 10 |
+
+Node:
+
+| # | Nhãn trên hình | Hình dạng | Tầng/màu | Ghi chú |
+|---|---|---|---|---|
+| 1 | crawler + frontier | bo góc | nguồn | |
+| 2 | MinIO bronze | trụ | lake | |
+| 3 | Kafka · speed Kafka | trụ | nguồn | |
+| 4 | PostgreSQL `cache.*` | trụ | phục vụ | |
+| 5 | Superset · Kibana | chữ nhật | phục vụ | |
+| 6 | bronze: records, crawl_audit | trụ | lake | |
+| 7 | silver Delta | trụ | lake | |
+| 8 | gold: dw, runs, manifests, speed/* | trụ | lake | |
+| 9 | `ecomdata-marketplace-batch` — silver→quality, `--skip-postgres` | bo góc | batch | |
+| 10 | `ecomdata-marketplace-speed` — Auto Loader, available-now | bo góc | speed | |
+
+Cạnh:
+
+| Từ | Tới | Nhãn trên cạnh | Nét |
+|---|---|---|---|
+| 1 crawler | 2 MinIO | | liền |
+| 2 MinIO | 6 S3 bronze | `mc mirror` (tay) | liền |
+| 6 S3 bronze | 9 job batch | | liền |
+| 9 job batch | 7 silver | | liền |
+| 9 job batch | 8 gold | | liền |
+| 6 S3 bronze | 10 job speed | | liền |
+| 10 job speed | 8 gold | | liền |
+| 8 gold | 4 PostgreSQL `cache.*` | publish chưa tự động | đứt |
+| 4 PostgreSQL `cache.*` | 5 Superset · Kibana | | liền |
+
+*Hình 1.4. Job batch trên Databricks dừng ở `quality` vì `publish` và `promote` cần PostgreSQL. Job speed chạy available-now hoặc trong một cửa sổ demo, không chạy 24/7 (`databricks/resources/jobs.yml`).*
 
 ## 1.7 Nguyên tắc thiết kế
 

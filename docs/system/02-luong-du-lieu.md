@@ -8,75 +8,87 @@ Tài liệu này theo **một dữ liệu** đi từ trang của sàn tới dash
 
 Hình có ba làn: speed ở trên, thu thập và Bronze ở giữa, batch ở dưới. Số trên cạnh là số chặng (H1…H9) dùng trong các mục sau.
 
-```mermaid
-flowchart LR
-    classDef src fill:#E5E7EB,stroke:#6B7280,color:#111
-    classDef acq fill:#DBEAFE,stroke:#2563EB,color:#111
-    classDef lake fill:#FEF3C7,stroke:#D97706,color:#111
-    classDef batch fill:#FFEDD5,stroke:#EA580C,color:#111
-    classDef speed fill:#EDE9FE,stroke:#7C3AED,color:#111
-    classDef kafka fill:#FEE2E2,stroke:#DC2626,color:#111
-    classDef serve fill:#DCFCE7,stroke:#16A34A,color:#111
+**Hình 2.1 — Luồng dữ liệu chi tiết (H1–H9)**
 
-    page["Trang danh mục<br/>tiki.vn/{slug}/c{id}"]:::src
-    frontier[("audit.crawl_frontier")]:::acq
-    worker("crawl-worker<br/>pipeline.acquire_listing_page"):::acq
+> Loại hình: flowchart trái → phải, ba làn ngang: speed ở trên, thu thập và Bronze ở giữa, batch ở dưới. Ý chính người xem phải thấy: Bronze/records là điểm rẽ nhánh duy nhất; speed đọc bản sao trên Kafka, batch đọc lại chính file. Số chặng H1…H9 ghi trên cạnh.
 
-    subgraph BR["Bronze · ecommerce-bronze"]
-        raw[("marketplace/raw/…/raw_artifact_id=…/<br/>part-N.bin.gz · metadata.json")]:::lake
-        rec[("marketplace/records/source=…/<br/>observed_date=…/hour=…/{raw_artifact_id}.jsonl.gz")]:::lake
-        caud[("marketplace/crawl_audit/…/<br/>{crawl_run_id}.jsonl.gz")]:::lake
-    end
+Khung (nhóm):
 
-    subgraph SP["Speed"]
-        krec{{"marketplace.records.v1"}}:::kafka
-        norm("normalizer query<br/>foreachBatch"):::speed
-        kdlq1{{"records.v1.dlq"}}:::kafka
-        kobs{{"marketplace.observations.v1"}}:::kafka
-        stf("stateful query<br/>applyInPandasWithState(offer_id)"):::speed
-        kdlq2{{"observations.v1.dlq"}}:::kafka
-        kchg{{"marketplace.changes.v1"}}:::kafka
-        es[("ES marketplace-changes-v1<br/>marketplace-offers-current-v1")]:::serve
-        rd[("Redis rt:offer:*, rt:change:*,<br/>rt:changes:recent")]:::serve
-    end
+| Khung | Màu tầng | Chứa node |
+|---|---|---|
+| (ngoài khung, bên trái) | — | 1, 2, 3 |
+| Bronze · `ecommerce-bronze` | lake | 4, 5, 6 |
+| Speed | speed | 7–15 |
+| Batch (mỗi giờ, theo `run_id` + `as_of`) | batch | 16–27 |
+| (ngoài khung, bên phải) | — | 28, 29 |
 
-    subgraph BA["Batch (mỗi giờ, theo run_id + as_of)"]
-        ssil("stage silver"):::batch
-        silver[("Silver · Delta<br/>offer_observations_v2 · tiki_listing_wide ·<br/>lazada_listing_wide · page_context · quarantine")]:::lake
-        sstar("stage dimensions · facts"):::batch
-        dw[("Gold dw · Delta MERGE<br/>7 dim + 1 bridge · 6 fact")]:::lake
-        smart("stage marts"):::batch
-        runs[("Gold runs/run_id=…<br/>12 mart")]:::lake
-        sq{"stage quality<br/>22 luật"}:::batch
-        man[("manifests/run_id=…/manifest.json")]:::lake
-        spub("stage publish"):::batch
-        cache[("PostgreSQL cache.marketplace_* (12)")]:::serve
-        sprom("stage promote"):::batch
-        cur[("current.json")]:::lake
-    end
+Node:
 
-    frontier -. lease .-> worker
-    page -->|H1 GET| worker
-    worker ==>|H1| raw
-    worker ==>|H2| rec
-    worker -->|kết thúc crawl run| caud
-    rec ==>|H3 publish, acks=all| krec
-    krec -->|H4| norm
-    norm --> kobs
-    norm --> kdlq1
-    kobs -->|H5| stf
-    stf --> kchg & es & rd
-    stf --> kdlq2
-    rec ==>|H6 cửa sổ ngày| ssil --> silver
-    silver ==>|H7| sstar --> dw
-    caud --> sstar
-    dw ==>|H8 VERSION AS OF, cắt as_of| smart --> runs
-    runs ==>|H9| sq --> man
-    sq -->|PASS| spub --> cache
-    spub --> sprom --> cur
-    cache --> superset["Superset"]:::serve
-    es --> kibana["Kibana"]:::serve
-```
+| # | Nhãn trên hình | Hình dạng | Tầng/màu | Ghi chú |
+|---|---|---|---|---|
+| 1 | Trang danh mục `tiki.vn/{slug}/c{id}` | chữ nhật | nguồn | |
+| 2 | `audit.crawl_frontier` | trụ | thu thập | |
+| 3 | crawl-worker `pipeline.acquire_listing_page` | chữ nhật bo góc | thu thập | |
+| 4 | `marketplace/raw/…/raw_artifact_id=…/` `part-N.bin.gz` · `metadata.json` | trụ | lake | |
+| 5 | `marketplace/records/source=…/observed_date=…/hour=…/{raw_artifact_id}.jsonl.gz` | trụ | lake | điểm rẽ nhánh, nên vẽ nổi bật |
+| 6 | `marketplace/crawl_audit/…/{crawl_run_id}.jsonl.gz` | trụ | lake | |
+| 7 | `marketplace.records.v1` | lục giác | Kafka | |
+| 8 | normalizer query `foreachBatch` | chữ nhật bo góc | speed | |
+| 9 | `records.v1.dlq` | lục giác | Kafka | |
+| 10 | `marketplace.observations.v1` | lục giác | Kafka | |
+| 11 | stateful query `applyInPandasWithState(offer_id)` | chữ nhật bo góc | speed | |
+| 12 | `observations.v1.dlq` | lục giác | Kafka | |
+| 13 | `marketplace.changes.v1` | lục giác | Kafka | |
+| 14 | ES `marketplace-changes-v1`, `marketplace-offers-current-v1` | trụ | phục vụ | |
+| 15 | Redis `rt:offer:*`, `rt:change:*`, `rt:changes:recent` | trụ | phục vụ | |
+| 16 | stage silver | chữ nhật bo góc | batch | |
+| 17 | Silver · Delta: `offer_observations_v2` · `tiki_listing_wide` · `lazada_listing_wide` · `page_context` · `quarantine` | trụ | lake | |
+| 18 | stage dimensions · facts | chữ nhật bo góc | batch | |
+| 19 | Gold dw · Delta MERGE: 7 dim + 1 bridge · 6 fact | trụ | lake | |
+| 20 | stage marts | chữ nhật bo góc | batch | |
+| 21 | Gold `runs/run_id=…`: 12 mart | trụ | lake | |
+| 22 | stage quality: 22 luật | thoi | batch | |
+| 23 | `manifests/run_id=…/manifest.json` | trụ | lake | |
+| 24 | stage publish | chữ nhật bo góc | batch | |
+| 25 | PostgreSQL `cache.marketplace_*` (12) | trụ | phục vụ | |
+| 26 | stage promote | chữ nhật bo góc | batch | |
+| 27 | `current.json` | trụ | lake | |
+| 28 | Superset | chữ nhật | phục vụ | |
+| 29 | Kibana | chữ nhật | phục vụ | |
+
+Cạnh:
+
+| Từ | Tới | Nhãn trên cạnh | Nét |
+|---|---|---|---|
+| 2 frontier | 3 crawl-worker | lease | đứt |
+| 1 trang | 3 crawl-worker | H1 GET | liền |
+| 3 crawl-worker | 4 raw | H1 | đậm |
+| 3 crawl-worker | 5 records | H2 | đậm |
+| 3 crawl-worker | 6 crawl_audit | kết thúc crawl run | liền |
+| 5 records | 7 `records.v1` | H3 publish, acks=all | đậm |
+| 7 `records.v1` | 8 normalizer | H4 | liền |
+| 8 normalizer | 10 `observations.v1` | | liền |
+| 8 normalizer | 9 `records.v1.dlq` | | liền |
+| 10 `observations.v1` | 11 stateful query | H5 | liền |
+| 11 stateful query | 13 `changes.v1` | | liền |
+| 11 stateful query | 14 ES | | liền |
+| 11 stateful query | 15 Redis | | liền |
+| 11 stateful query | 12 `observations.v1.dlq` | | liền |
+| 5 records | 16 stage silver | H6 cửa sổ ngày | đậm |
+| 16 stage silver | 17 Silver | | liền |
+| 17 Silver | 18 stage dimensions · facts | H7 | đậm |
+| 18 stage dimensions · facts | 19 Gold dw | | liền |
+| 6 crawl_audit | 18 stage dimensions · facts | | liền |
+| 19 Gold dw | 20 stage marts | H8 VERSION AS OF, cắt as_of | đậm |
+| 20 stage marts | 21 Gold runs | | liền |
+| 21 Gold runs | 22 stage quality | H9 | đậm |
+| 22 stage quality | 23 manifest | | liền |
+| 22 stage quality | 24 stage publish | PASS | liền |
+| 24 stage publish | 25 cache | | liền |
+| 24 stage publish | 26 stage promote | | liền |
+| 26 stage promote | 27 `current.json` | | liền |
+| 25 cache | 28 Superset | | liền |
+| 14 ES | 29 Kibana | | liền |
 
 *Hình 2.1. Đường đi của dữ liệu. Bronze/records là điểm rẽ nhánh: speed đọc bản sao trên Kafka, batch đọc lại chính file. Hai đường dùng chung normalizer nên định nghĩa một observation giống nhau.*
 
@@ -160,24 +172,41 @@ Sau khi file records đã ghi xong, `publishing_executor` (`ingestion/service.py
 
 **Biến đổi** (`stages/silver.py:105-176`, `processing/normalize/common.py`):
 
-```mermaid
-flowchart LR
-    classDef lake fill:#FEF3C7,stroke:#D97706,color:#111
-    classDef batch fill:#FFEDD5,stroke:#EA580C,color:#111
-    classDef dec fill:#FFF,stroke:#EA580C,color:#111
+**Hình 2.2 — Xử lý trong stage `silver` (H6)**
 
-    rec[("Bronze/records<br/>cửa sổ ngày")]:::lake --> dd("drop_replayed_records<br/>dedup record_id"):::batch
-    dd --> env{"schema_version đúng,<br/>source đã đăng ký?"}:::dec
-    env -- không --> q[("quarantine<br/>unsupported_envelope ·<br/>unknown_source")]:::lake
-    env -- page_context --> pc[("page_context")]:::lake
-    env -- listing_row --> canon("normalizer nguồn<br/>to_offer_observation"):::batch
-    env -- listing_row --> wide("to_wide<br/>from_json(PAYLOAD_SCHEMA)"):::batch
-    canon --> split{"split_quarantine<br/>lý do đầu tiên khớp"}:::dec
-    split -- lỗi --> q
-    split -- hợp lệ --> obs[("offer_observations_v2<br/>53 cột canonical")]:::lake
-    wide --> w[("tiki_listing_wide ·<br/>lazada_listing_wide")]:::lake
-    wide -. payload_drift .-> sum[("_runs/run_id=…/silver.json")]:::lake
-```
+> Loại hình: flowchart trái → phải. Ý chính người xem phải thấy: record đi qua hai cổng kiểm (envelope, rồi `split_quarantine`); lỗi ở cả hai cổng đổ về cùng bảng `quarantine`, còn `listing_row` hợp lệ tách thành hai đầu ra song song (bảng canonical và bảng rộng theo nguồn).
+
+Node:
+
+| # | Nhãn trên hình | Hình dạng | Tầng/màu | Ghi chú |
+|---|---|---|---|---|
+| 1 | Bronze/records — cửa sổ ngày | trụ | lake | |
+| 2 | `drop_replayed_records` — dedup `record_id` | chữ nhật bo góc | batch | |
+| 3 | `schema_version` đúng, source đã đăng ký? | thoi | batch | |
+| 4 | `quarantine`: `unsupported_envelope` · `unknown_source` | trụ | lake | nhận lỗi từ cả node 3 và node 7 |
+| 5 | `page_context` | trụ | lake | |
+| 6 | normalizer nguồn `to_offer_observation` | chữ nhật bo góc | batch | |
+| 7 | `split_quarantine` — lý do đầu tiên khớp | thoi | batch | |
+| 8 | `offer_observations_v2` — 53 cột canonical | trụ | lake | |
+| 9 | `to_wide` — `from_json(PAYLOAD_SCHEMA)` | chữ nhật bo góc | batch | |
+| 10 | `tiki_listing_wide` · `lazada_listing_wide` | trụ | lake | |
+| 11 | `_runs/run_id=…/silver.json` | trụ | lake | |
+
+Cạnh:
+
+| Từ | Tới | Nhãn trên cạnh | Nét |
+|---|---|---|---|
+| 1 Bronze/records | 2 dedup | | liền |
+| 2 dedup | 3 kiểm envelope | | liền |
+| 3 kiểm envelope | 4 quarantine | không | liền |
+| 3 kiểm envelope | 5 `page_context` | page_context | liền |
+| 3 kiểm envelope | 6 normalizer | listing_row | liền |
+| 3 kiểm envelope | 9 `to_wide` | listing_row | liền |
+| 6 normalizer | 7 `split_quarantine` | | liền |
+| 7 `split_quarantine` | 4 quarantine | lỗi | liền |
+| 7 `split_quarantine` | 8 `offer_observations_v2` | hợp lệ | liền |
+| 9 `to_wide` | 10 bảng rộng | | liền |
+| 9 `to_wide` | 11 `silver.json` | payload_drift | đứt |
 
 Ánh xạ trường nguồn → cột canonical (Tiki, `normalize/sources/tiki.py:229-258`):
 
@@ -228,25 +257,51 @@ Lý do quarantine, lấy lý do **đầu tiên** khớp (`common.py:436-447`): `
 | `fact_category_page_daily` (trang danh mục × ngày × tiền tệ) | ✓ | ✓ | | | | ✓ trang | |
 | `fact_crawl_attempt` (một HTTP attempt) | ✓ | ✓ | | | | ✓ trang | |
 
-```mermaid
-erDiagram
-    dim_date ||--o{ fact_offer_observation : date_key
-    dim_marketplace ||--o{ fact_offer_observation : marketplace_key
-    dim_product_listing ||--o{ fact_offer_observation : listing_key
-    dim_seller ||--o{ fact_offer_observation : seller_key
-    dim_brand ||--o{ fact_offer_observation : brand_key
-    dim_category ||--o{ fact_offer_observation : "category_key, page_category_key"
-    dim_listing_flags ||--o{ fact_offer_observation : flags_key
-    dim_category ||--o{ bridge_category_ancestry : "ancestor/descendant"
-    dim_product_listing ||--o{ fact_price_snapshot_daily : listing_key
-    dim_product_listing ||--o{ fact_price_change : listing_key
-    dim_product_listing ||--o{ fact_counter_daily : listing_key
-    dim_category ||--o{ fact_category_page_daily : category_key
-    dim_category ||--o{ fact_crawl_attempt : category_key
-    dim_date ||--o{ fact_crawl_attempt : date_key
-```
+**Hình 2.3 — Star schema rút gọn (`gold/marketplace/dw`)**
 
-*Hình 2.2. Star schema rút gọn. Cột đầy đủ ở `docs/model/star-schema.dbml`.*
+> Loại hình: ER, quan hệ một-nhiều từ dimension sang fact. Ý chính người xem phải thấy: `fact_offer_observation` ở giữa nối với cả 7 dimension; các fact còn lại chỉ nối với vài dimension; `dim_category` có bridge tổ tiên/hậu duệ riêng.
+
+Thực thể:
+
+| Bảng | Loại | Khoá | Khoá ngoại vẽ trên hình |
+|---|---|---|---|
+| `dim_date` | dim | `date_key` | |
+| `dim_marketplace` | dim | `marketplace_key` | |
+| `dim_product_listing` | dim | `listing_key` | |
+| `dim_seller` | dim | `seller_key` | |
+| `dim_brand` | dim | `brand_key` | |
+| `dim_category` | dim | `category_key` | |
+| `dim_listing_flags` | dim | `flags_key` | |
+| `bridge_category_ancestry` | bridge | ancestor/descendant | |
+| `fact_offer_observation` | fact | | `date_key, marketplace_key, listing_key, seller_key, brand_key, category_key, page_category_key, flags_key` |
+| `fact_price_snapshot_daily` | fact | | `listing_key` |
+| `fact_price_change` | fact | | `listing_key` |
+| `fact_counter_daily` | fact | | `listing_key` |
+| `fact_category_page_daily` | fact | | `category_key` |
+| `fact_crawl_attempt` | fact | | `category_key, date_key` |
+
+Quan hệ (mọi quan hệ là một-nhiều, đầu "một" ở dimension):
+
+| Từ (một) | Tới (nhiều) | Nhãn trên cạnh |
+|---|---|---|
+| `dim_date` | `fact_offer_observation` | `date_key` |
+| `dim_marketplace` | `fact_offer_observation` | `marketplace_key` |
+| `dim_product_listing` | `fact_offer_observation` | `listing_key` |
+| `dim_seller` | `fact_offer_observation` | `seller_key` |
+| `dim_brand` | `fact_offer_observation` | `brand_key` |
+| `dim_category` | `fact_offer_observation` | `category_key, page_category_key` |
+| `dim_listing_flags` | `fact_offer_observation` | `flags_key` |
+| `dim_category` | `bridge_category_ancestry` | ancestor/descendant |
+| `dim_product_listing` | `fact_price_snapshot_daily` | `listing_key` |
+| `dim_product_listing` | `fact_price_change` | `listing_key` |
+| `dim_product_listing` | `fact_counter_daily` | `listing_key` |
+| `dim_category` | `fact_category_page_daily` | `category_key` |
+| `dim_category` | `fact_crawl_attempt` | `category_key` |
+| `dim_date` | `fact_crawl_attempt` | `date_key` |
+
+Hình chỉ vẽ các quan hệ này cho gọn; đủ khoá ngoại của từng fact xem bus matrix phía trên.
+
+*Hình 2.3. Star schema rút gọn. Cột đầy đủ ở `docs/model/star-schema.dbml`.*
 
 **Đầu ra.** 14 bảng Delta ở `gold/marketplace/dw/<bảng>/`, nằm ngoài thư mục run. Fact partition theo `date_key`. Số dòng, version Delta và chế độ ghi của từng bảng được ghi vào `_runs/run_id=…/{dimensions,facts}.json`.
 
@@ -279,22 +334,38 @@ Mart ghi vào `gold/marketplace/runs/run_id=<run>/<mart>/`. Mart theo ngày quan
 
 ### H9. mart → manifest → PostgreSQL cache → pointer
 
-```mermaid
-flowchart LR
-    classDef lake fill:#FEF3C7,stroke:#D97706,color:#111
-    classDef batch fill:#FFEDD5,stroke:#EA580C,color:#111
-    classDef serve fill:#DCFCE7,stroke:#16A34A,color:#111
+**Hình 2.4 — Quality, publish, promote (H9)**
 
-    runs[("12 mart của run")]:::lake --> q{"quality<br/>16 luật bắt buộc"}:::batch
-    q -->|FAIL| rest("RESTORE star về<br/>dw_versions của current"):::batch
-    q --> man[("manifest.json v2<br/>datasets, quality, dw_versions")]:::lake
-    q -->|PASS| stg("staging.mp_{mart}_{hash}<br/>JDBC overwrite"):::batch
-    stg --> tx("1 transaction + advisory lock:<br/>TRUNCATE cache.* → INSERT SELECT<br/>upsert audit.marketplace_cache_version"):::batch
-    tx --> cache[("cache.marketplace_*")]:::serve
-    tx --> prom{"promote: CAS<br/>pointer == expected?"}:::batch
-    prom -->|đúng| cur[("current.json<br/>= bytes của manifest")]:::lake
-    prom -->|sai| held("HELD: PROMOTION_CONFLICT"):::batch
-```
+> Loại hình: flowchart trái → phải. Ý chính người xem phải thấy: manifest luôn được ghi; chỉ run PASS mới đi tới cache; cache được thay trong một transaction, sau đó pointer mới được promote bằng compare-and-swap.
+
+Node:
+
+| # | Nhãn trên hình | Hình dạng | Tầng/màu | Ghi chú |
+|---|---|---|---|---|
+| 1 | 12 mart của run | trụ | lake | |
+| 2 | quality — 16 luật bắt buộc | thoi | batch | |
+| 3 | RESTORE star về `dw_versions` của current | chữ nhật bo góc | batch | nhánh lỗi |
+| 4 | `manifest.json` v2: datasets, quality, `dw_versions` | trụ | lake | |
+| 5 | `staging.mp_{mart}_{hash}` — JDBC overwrite | chữ nhật bo góc | batch | |
+| 6 | 1 transaction + advisory lock: TRUNCATE `cache.*` → INSERT SELECT; upsert `audit.marketplace_cache_version` | chữ nhật bo góc | batch | |
+| 7 | `cache.marketplace_*` | trụ | phục vụ | |
+| 8 | promote: CAS — pointer == expected? | thoi | batch | |
+| 9 | `current.json` = bytes của manifest | trụ | lake | |
+| 10 | HELD: `PROMOTION_CONFLICT` | chữ nhật bo góc | batch | nhánh lỗi |
+
+Cạnh:
+
+| Từ | Tới | Nhãn trên cạnh | Nét |
+|---|---|---|---|
+| 1 mart | 2 quality | | liền |
+| 2 quality | 3 RESTORE | FAIL | liền |
+| 2 quality | 4 manifest | | liền |
+| 2 quality | 5 staging | PASS | liền |
+| 5 staging | 6 transaction | | liền |
+| 6 transaction | 7 cache | | liền |
+| 6 transaction | 8 promote | | liền |
+| 8 promote | 9 `current.json` | đúng | liền |
+| 8 promote | 10 HELD | sai | liền |
 
 Chặng này không đổi dữ liệu, chỉ đổi **nơi phục vụ**. Lake giữ mọi run; PostgreSQL chỉ giữ đúng một run, run mà `current.json` trỏ tới. Manifest ghi version Delta của từng bảng `dw` (`dw_versions`), nên một run có thể được tái lập trên đúng star mà nó đã đọc.
 
@@ -357,21 +428,30 @@ Query `marketplace-speed-v1` giải mã và kiểm hợp đồng từng event. E
 
 Mọi tầng giữ lineage của tầng trước, nên từ một con số trên Superset đi ngược được tới byte HTTP mà crawler đã nhận.
 
-```mermaid
-flowchart RL
-    classDef lake fill:#FEF3C7,stroke:#D97706,color:#111
-    classDef serve fill:#DCFCE7,stroke:#16A34A,color:#111
-    classDef acq fill:#DBEAFE,stroke:#2563EB,color:#111
+**Hình 2.5 — Truy ngược lineage từ mart về byte gốc**
 
-    m[("cache.marketplace_offer_current<br/>offer_id, current_observation_id, raw_uri")]:::serve
-    f[("dw.fact_offer_observation<br/>observation_id → raw_uri, raw_sha256, crawl_run_id")]:::lake
-    s[("silver.offer_observations_v2<br/>observation_id, record_id, raw_artifact_id")]:::lake
-    r[("bronze/records/…/{raw_artifact_id}.jsonl.gz<br/>dòng có record_id, payload nguyên văn")]:::lake
-    w[("bronze/raw/…/raw_artifact_id=…/<br/>metadata.json + part-N.bin.gz")]:::lake
-    a[("audit.crawl_request_attempt<br/>crawl_run_id, task_id, http_status, latency")]:::acq
-    m -->|observation_id| f -->|observation_id| s -->|record_id| r -->|raw_artifact_id| w
-    f -->|crawl_run_id| a
-    w -. "reparse: kiểm SHA-256,<br/>extract lại, so record" .-> r
-```
+> Loại hình: flowchart phải → trái (từ dashboard ngược về Bronze). Ý chính người xem phải thấy: mỗi tầng giữ khoá của tầng trước, nên chuỗi `observation_id → record_id → raw_artifact_id` dẫn về byte HTTP; `crawl_run_id` rẽ sang audit.
 
-*Hình 2.3. Truy ngược lineage. `ingestion/reparse.py` kiểm SHA-256 của từng part trước khi parse lại. Một artifact hỏng không bao giờ được đưa vào parser; kết quả là IDENTICAL, DIVERGED, RECORDS_MISSING, CHECKSUM_MISMATCH, PARSE_FAILED hoặc ADAPTER_VERSION_CHANGED.*
+Node:
+
+| # | Nhãn trên hình | Hình dạng | Tầng/màu | Ghi chú |
+|---|---|---|---|---|
+| 1 | `cache.marketplace_offer_current`: `offer_id`, `current_observation_id`, `raw_uri` | trụ | phục vụ | điểm bắt đầu, đặt bên phải |
+| 2 | `dw.fact_offer_observation`: `observation_id` → `raw_uri`, `raw_sha256`, `crawl_run_id` | trụ | lake | |
+| 3 | `silver.offer_observations_v2`: `observation_id`, `record_id`, `raw_artifact_id` | trụ | lake | |
+| 4 | `bronze/records/…/{raw_artifact_id}.jsonl.gz`: dòng có `record_id`, payload nguyên văn | trụ | lake | |
+| 5 | `bronze/raw/…/raw_artifact_id=…/`: `metadata.json` + `part-N.bin.gz` | trụ | lake | điểm cuối, đặt bên trái |
+| 6 | `audit.crawl_request_attempt`: `crawl_run_id`, `task_id`, `http_status`, latency | trụ | thu thập | nhánh rẽ |
+
+Cạnh:
+
+| Từ | Tới | Nhãn trên cạnh | Nét |
+|---|---|---|---|
+| 1 cache | 2 fact | `observation_id` | liền |
+| 2 fact | 3 Silver | `observation_id` | liền |
+| 3 Silver | 4 records | `record_id` | liền |
+| 4 records | 5 raw | `raw_artifact_id` | liền |
+| 2 fact | 6 audit | `crawl_run_id` | liền |
+| 5 raw | 4 records | reparse: kiểm SHA-256, extract lại, so record | đứt |
+
+*Hình 2.5. Truy ngược lineage. `ingestion/reparse.py` kiểm SHA-256 của từng part trước khi parse lại. Một artifact hỏng không bao giờ được đưa vào parser; kết quả là IDENTICAL, DIVERGED, RECORDS_MISSING, CHECKSUM_MISMATCH, PARSE_FAILED hoặc ADAPTER_VERSION_CHANGED.*

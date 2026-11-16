@@ -6,7 +6,7 @@ Bộ tài liệu này mô tả hệ thống **như code đang chạy**, không t
 
 ## Đọc theo thứ tự nào
 
-| # | File | Trả lời câu hỏi | Sơ đồ chính |
+| # | File | Trả lời câu hỏi | Spec hình chính |
 |---|---|---|---|
 | 1 | [01-tong-quan.md](01-tong-quan.md) | Hệ thống làm gì, gồm những tầng nào, chạy ở đâu? | Toàn cảnh Lambda; tầng module; triển khai local và hybrid Databricks |
 | 2 | [02-luong-du-lieu.md](02-luong-du-lieu.md) | Một byte từ trang Tiki biến đổi thế nào qua từng tầng cho tới dashboard? | Luồng chi tiết; 9 chặng biến đổi; schema từng chặng; truy ngược lineage |
@@ -23,7 +23,15 @@ Tài liệu tham chiếu sâu hơn, không chép lại ở đây:
 
 ## Quy ước sơ đồ
 
-Mọi sơ đồ là Mermaid, render được trên GitHub và VS Code. Cần hình đẹp hơn cho báo cáo thì vẽ lại bằng draw.io theo đúng node và cạnh trong Mermaid.
+Bộ tài liệu không nhúng hình vẽ sẵn. Mỗi hình được viết thành một **spec để vẽ** bằng công cụ bất kỳ (draw.io, Excalidraw, Lucidchart, Figma…). Một spec gồm:
+
+1. Tiêu đề `Hình X.Y — <tên>` và một dòng **Loại hình** (flowchart trái → phải, sequence, state, ER, Gantt…) kèm **ý chính** người xem phải thấy.
+2. Bảng **Khung**: các nhóm cần vẽ thành khung bao, màu tầng của khung (nếu hình có nhóm).
+3. Bảng **Node**: số thứ tự, nhãn ghi trên hình, hình dạng, màu tầng.
+4. Bảng **Cạnh**: từ node nào tới node nào, nhãn trên cạnh, kiểu nét. Sequence diagram thay bằng bảng thông điệp theo thứ tự; state diagram thay bằng bảng trạng thái và bảng chuyển trạng thái.
+5. Caption in nghiêng `*Hình X.Y. …*` để đặt dưới hình trong báo cáo.
+
+Vẽ đủ node và cạnh trong bảng là đủ ý. Bố cục, kích thước và icon tuỳ người vẽ.
 
 **Màu theo tầng** (giống nhau ở mọi hình):
 
@@ -38,9 +46,9 @@ Mọi sơ đồ là Mermaid, render được trên GitHub và VS Code. Cần hì
 | Phục vụ | xanh lá `#DCFCE7` | PostgreSQL `cache`, Elasticsearch, Redis, Superset, Kibana |
 | Điều phối, giám sát | xanh ngọc `#CCFBF1` | Airflow, Grafana, Databricks Jobs |
 
-**Hình dạng:** hình trụ `[( )]` là nơi lưu dữ liệu; lục giác `{{ }}` là topic Kafka; chữ nhật bo góc `( )` là tiến trình; hình thoi `{ }` là quyết định.
+**Hình dạng:** hình trụ là nơi lưu dữ liệu; lục giác là topic Kafka; chữ nhật bo góc là tiến trình; hình thoi là quyết định; chữ nhật thường là hệ thống ngoài hoặc công cụ người dùng (Superset, Kibana).
 
-**Nét:** nét liền `-->` là dữ liệu chảy; nét đứt `-.->` là điều khiển (lập lịch, đọc trạng thái); nét đậm `==>` là đường chính của hình.
+**Nét:** nét liền là dữ liệu chảy; nét đứt là điều khiển (lập lịch, lease, đọc trạng thái); nét đậm là đường chính của hình.
 
 **Tên:** giữ nguyên tên trong code (`offer_observations_v2`, `marketplace.records.v1`); giải thích viết tiếng Việt.
 

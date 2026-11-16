@@ -16,75 +16,86 @@
 | P8 | Bảo trì | theo lịch | DAG `marketplace_maintenance`, `@weekly` | DockerOperator (image python) | prune raw, backup, đo dung lượng | `python -m ecomdata.ops prune-raw / backup / storage-snapshot` |
 | P9 | Chiếu audit sang ES | tiến trình dài hạn | vòng lặp 30 s | container `es-projector` | `audit.*`, DLQ, Redis → ES `marketplace-*-v1` | `python -m ecomdata.serving.es_projector` |
 
-```mermaid
-flowchart LR
-    classDef acq fill:#DBEAFE,stroke:#2563EB,color:#111
-    classDef lake fill:#FEF3C7,stroke:#D97706,color:#111
-    classDef batch fill:#FFEDD5,stroke:#EA580C,color:#111
-    classDef speed fill:#EDE9FE,stroke:#7C3AED,color:#111
-    classDef kafka fill:#FEE2E2,stroke:#DC2626,color:#111
-    classDef serve fill:#DCFCE7,stroke:#16A34A,color:#111
-    classDef ops fill:#CCFBF1,stroke:#0D9488,color:#111
+**Hình 4.1 — Bản đồ pipeline**
 
-    af["Airflow"]:::ops
-    dbx["Databricks Jobs"]:::ops
+> Loại hình: flowchart trái → phải. Ý chính người xem phải thấy: 9 pipeline P1–P9 đọc/ghi những kho nào, và ai khởi động chúng (Airflow, Databricks Jobs hoặc tự chạy liên tục).
 
-    P2("P2 discovery<br/>@daily"):::acq
-    P1("P1 thu thập<br/>liên tục"):::acq
-    P3("P3 speed Kafka<br/>30 s"):::speed
-    P4("P4 speed lakehouse<br/>available-now"):::speed
-    P5("P5 batch<br/>@hourly"):::batch
-    P6("P6 reprocess<br/>tay"):::batch
-    P7("P7 batch Databricks<br/>tay"):::batch
-    P8("P8 bảo trì<br/>@weekly"):::ops
-    P9("P9 es-projector<br/>30 s"):::serve
+Node:
 
-    fr[("frontier")]:::acq
-    bronze[("Bronze")]:::lake
-    k{{"Kafka"}}:::kafka
-    lake[("Silver · dw · runs")]:::lake
-    pg[("cache.* · audit.*")]:::serve
-    es[("ES · Redis")]:::serve
-    s3[("S3 lake")]:::lake
+| # | Nhãn trên hình | Hình dạng | Tầng/màu | Ghi chú |
+|---|---|---|---|---|
+| 1 | Airflow | chữ nhật | điều phối | bộ lập lịch |
+| 2 | Databricks Jobs | chữ nhật | điều phối | bộ lập lịch cloud |
+| 3 | P2 discovery · @daily | chữ nhật bo góc | thu thập | |
+| 4 | P1 thu thập · liên tục | chữ nhật bo góc | thu thập | |
+| 5 | P3 speed Kafka · 30 s | chữ nhật bo góc | speed | |
+| 6 | P4 speed lakehouse · available-now | chữ nhật bo góc | speed | |
+| 7 | P5 batch · @hourly | chữ nhật bo góc | batch | |
+| 8 | P6 reprocess · tay | chữ nhật bo góc | batch | |
+| 9 | P7 batch Databricks · tay | chữ nhật bo góc | batch | |
+| 10 | P8 bảo trì · @weekly | chữ nhật bo góc | điều phối | |
+| 11 | P9 es-projector · 30 s | chữ nhật bo góc | phục vụ | |
+| 12 | frontier | trụ | thu thập | `audit.crawl_frontier` |
+| 13 | Bronze | trụ | lake | |
+| 14 | Kafka | lục giác | Kafka | |
+| 15 | Silver · dw · runs | trụ | lake | |
+| 16 | cache.\* · audit.\* | trụ | phục vụ | PostgreSQL |
+| 17 | ES · Redis | trụ | phục vụ | |
+| 18 | S3 lake | trụ | lake | |
 
-    af -.-> P2 & P5 & P6 & P8
-    dbx -.-> P4 & P7
-    P2 --> fr --> P1 --> bronze & k
-    P1 --> pg
-    k --> P3 --> es
-    P3 --> pg
-    bronze --> P5 & P6 --> lake
-    P5 & P6 --> pg
-    bronze -. mc mirror .-> s3
-    s3 --> P4 & P7 --> s3
-    P8 --> bronze
-    P8 -. backup .-> lake
-    pg --> P9 --> es
-```
+Cạnh:
+
+| Từ | Tới | Nhãn trên cạnh | Nét |
+|---|---|---|---|
+| Airflow | P2 | | đứt |
+| Airflow | P5 | | đứt |
+| Airflow | P6 | | đứt |
+| Airflow | P8 | | đứt |
+| Databricks Jobs | P4 | | đứt |
+| Databricks Jobs | P7 | | đứt |
+| P2 | frontier | | liền |
+| frontier | P1 | | liền |
+| P1 | Bronze | | liền |
+| P1 | Kafka | | liền |
+| P1 | cache.\* · audit.\* | | liền |
+| Kafka | P3 | | liền |
+| P3 | ES · Redis | | liền |
+| P3 | cache.\* · audit.\* | | liền |
+| Bronze | P5 | | liền |
+| Bronze | P6 | | liền |
+| P5 | Silver · dw · runs | | liền |
+| P6 | Silver · dw · runs | | liền |
+| P5 | cache.\* · audit.\* | | liền |
+| P6 | cache.\* · audit.\* | | liền |
+| Bronze | S3 lake | mc mirror | đứt |
+| S3 lake | P4 | | liền |
+| S3 lake | P7 | | liền |
+| P4 | S3 lake | | liền |
+| P7 | S3 lake | | liền |
+| P8 | Bronze | | liền |
+| P8 | Silver · dw · runs | backup | đứt |
+| cache.\* · audit.\* | P9 | | liền |
+| P9 | ES · Redis | | liền |
 
 *Hình 4.1. Bản đồ pipeline. Nét đứt là điều khiển (lập lịch). P1, P3, P9 là tiến trình dài hạn; P2, P5, P6, P8 do Airflow khởi động; P4, P7 do Databricks khởi động.*
 
 ### Một giờ vận hành điển hình
 
-```mermaid
-gantt
-    title Một giờ (UTC), stack local đầy đủ
-    dateFormat HH:mm
-    axisFormat %H:%M
-    section P1 thu thập
-    ACTIVE (25 trang/giờ) + SWEEP đến hạn      :active, 10:00, 60m
-    section P3 speed
-    micro-batch mỗi 30 s                         :active, 10:00, 60m
-    section P5 batch (run mp-…T1000Z)
-    window_settled (chờ 10 phút)                 :crit, 10:00, 10m
-    silver                                       :10:10, 2m
-    dimensions                                   :10:12, 4m
-    facts                                        :10:16, 2m
-    marts                                        :10:18, 2m
-    quality → publish → promote                  :10:20, 3m
-    section P9 projector
-    vòng 30 s                                    :active, 10:00, 60m
-```
+**Hình 4.2 — Một giờ vận hành điển hình**
+
+> Loại hình: Gantt, trục ngang là giờ UTC từ 10:00 tới 11:00, stack local đầy đủ. Ý chính người xem phải thấy: P1, P3, P9 chạy suốt giờ; run batch `mp-…T1000Z` chờ 10 phút rồi chạy tuần tự các stage và xong trong khoảng nửa đầu giờ.
+
+| Làn (section) | Bước | Bắt đầu | Thời lượng | Phụ thuộc | Ghi chú vẽ |
+|---|---|---|---|---|---|
+| P1 thu thập | ACTIVE (25 trang/giờ) + SWEEP đến hạn | 10:00 | 60 phút | | thanh liên tục |
+| P3 speed | micro-batch mỗi 30 s | 10:00 | 60 phút | | thanh liên tục |
+| P5 batch (run `mp-…T1000Z`) | window_settled (chờ 10 phút) | 10:00 | 10 phút | | tô nổi bật (đường găng) |
+| P5 batch | silver | 10:10 | 2 phút | window_settled | |
+| P5 batch | dimensions | 10:12 | 4 phút | silver | |
+| P5 batch | facts | 10:16 | 2 phút | dimensions | |
+| P5 batch | marts | 10:18 | 2 phút | facts | |
+| P5 batch | quality → publish → promote | 10:20 | 3 phút | marts | |
+| P9 projector | vòng 30 s | 10:00 | 60 phút | | thanh liên tục |
 
 *Hình 4.2. Thời lượng từng stage chỉ là minh hoạ theo bậc độ lớn đo ngày 13–14/11: `dimensions` 217–259 s, `marts` 88–105 s, `silver` 38–189 s (`docs/evidence/fullrun-20261114/KET-QUA.md`). `max_active_runs = 1` nên các run không chồng lên nhau.*
 
@@ -92,45 +103,50 @@ gantt
 
 **Mục đích.** Biến một task của frontier thành bằng chứng trong Bronze và một luồng record trên Kafka.
 
-```mermaid
-sequenceDiagram
-    autonumber
-    participant F as PostgreSQL<br/>audit.crawl_frontier
-    participant W as crawl-worker
-    participant S as Site (Tiki/Lazada)
-    participant R as Bronze/raw
-    participant C as Bronze/records
-    participant K as Kafka records.v1
-    participant A as audit.crawl_* + lake crawl_audit
+**Hình 4.3 — Một lượt thu thập (P1)**
 
-    W->>F: recover_expired_leases()
-    W->>F: lease_due(10) FOR UPDATE SKIP LOCKED
-    F-->>W: task (LEASED, attempts+1)
-    W->>A: circuit của nguồn đang mở?
-    alt circuit mở
-        W->>F: mark_retry(RATE_LIMITED, 900 s)
-    else circuit đóng
-        W->>A: start_run (RUNNING)
-        W->>S: robots.txt (cache 1 h), throttle ≥ 2 s + jitter
-        W->>S: GET trang (hoặc Playwright + bắt XHR)
-        S-->>W: phản hồi
-        W->>R: part-N.bin.gz rồi metadata.json
-        Note over W: kiểm HTTP status SAU khi đã lưu raw
-        W->>W: extract → bỏ PII → build_records
-        W->>C: {raw_artifact_id}.jsonl.gz
-        loop từng listing_row
-            W->>K: send(acks=all).get(30 s)
-        end
-        alt thành công
-            W->>F: SUCCEEDED + chèn READY lần sau (cùng transaction)
-        else lỗi tạm thời
-            W->>F: RETRY_WAIT, backoff 30·2^(n-1) s
-        else lỗi vĩnh viễn / hết 5 lần
-            W->>F: FAILED
-        end
-        W->>A: attempt + finish_run, ghi bản lake JSONL.gz
-    end
-```
+> Loại hình: sequence, các cột (lifeline) xếp trái → phải theo bảng dưới. Ý chính người xem phải thấy: raw được lưu trước khi kiểm HTTP status, rồi tới records, rồi mới gửi Kafka; kết quả cuối cùng quyết định trạng thái task trong frontier.
+
+Cột (lifeline), theo thứ tự trái → phải:
+
+| Ký hiệu | Nhãn | Tầng/màu |
+|---|---|---|
+| F | PostgreSQL `audit.crawl_frontier` | thu thập |
+| W | crawl-worker | thu thập |
+| S | Site (Tiki/Lazada) | nguồn |
+| R | Bronze/raw | lake |
+| C | Bronze/records | lake |
+| K | Kafka `records.v1` | Kafka |
+| A | `audit.crawl_*` + lake `crawl_audit` | thu thập |
+
+Thông điệp (đánh số trên hình):
+
+| # | Từ | Tới | Thông điệp | Ghi chú |
+|---|---|---|---|---|
+| 1 | W | F | `recover_expired_leases()` | |
+| 2 | W | F | `lease_due(10) FOR UPDATE SKIP LOCKED` | |
+| 3 | F | W | task (LEASED, attempts+1) | mũi tên trả về (nét đứt) |
+| 4 | W | A | circuit của nguồn đang mở? | |
+| — | | | **khối alt: circuit mở** | |
+| 5 | W | F | `mark_retry(RATE_LIMITED, 900 s)` | kết thúc nhánh |
+| — | | | **khối alt (else): circuit đóng** | các bước 6–… nằm trong nhánh này |
+| 6 | W | A | `start_run` (RUNNING) | |
+| 7 | W | S | robots.txt (cache 1 h), throttle ≥ 2 s + jitter | |
+| 8 | W | S | GET trang (hoặc Playwright + bắt XHR) | |
+| 9 | S | W | phản hồi | mũi tên trả về (nét đứt) |
+| 10 | W | R | `part-N.bin.gz` rồi `metadata.json` | |
+| — | | | Note trên W: kiểm HTTP status **SAU** khi đã lưu raw | ô ghi chú |
+| 11 | W | W | extract → bỏ PII → build_records | tự gọi |
+| 12 | W | C | `{raw_artifact_id}.jsonl.gz` | |
+| — | | | **khối loop: từng listing_row** | bao quanh bước 13 |
+| 13 | W | K | `send(acks=all).get(30 s)` | |
+| — | | | **khối alt: thành công** | |
+| 14 | W | F | SUCCEEDED + chèn READY lần sau (cùng transaction) | |
+| — | | | **else: lỗi tạm thời** | |
+| 15 | W | F | RETRY_WAIT, backoff 30·2^(n-1) s | |
+| — | | | **else: lỗi vĩnh viễn / hết 5 lần** | |
+| 16 | W | F | FAILED | |
+| 17 | W | A | attempt + `finish_run`, ghi bản lake JSONL.gz | sau khối alt, vẫn trong nhánh circuit đóng |
 
 *Hình 4.3. Một lượt thu thập. Thứ tự raw → records → Kafka đảm bảo không tầng sau nào có dữ liệu mà tầng trước không có.*
 
@@ -158,19 +174,38 @@ DAG `source_discovery` (`@daily`, `catchup=False`) có **một task cho mỗi ng
 
 ## 4.5 P4 — Speed lakehouse (Databricks)
 
-```mermaid
-flowchart LR
-    classDef lake fill:#FEF3C7,stroke:#D97706,color:#111
-    classDef speed fill:#EDE9FE,stroke:#7C3AED,color:#111
-    src[("S3 bronze<br/>marketplace/records/")]:::lake --> q1("Query 1<br/>Auto Loader cloudFiles (text)<br/>normalize_micro_batch"):::speed
-    q1 --> obs[("gold/speed/observations")]:::lake
-    q1 --> dlq[("gold/speed/records_dlq")]:::lake
-    obs --> q2("Query 2<br/>Delta stream → cột giả Kafka<br/>service.start_query (cùng luật)"):::speed
-    q2 --> out[("outputs")]:::lake
-    q2 --> st[("offer_state · MERGE tiến")]:::lake
-    q2 --> ch[("price_changes · MERGE theo change_id")]:::lake
-    q2 --> pr[("stream_progress")]:::lake
-```
+**Hình 4.4 — Speed lakehouse trên Databricks (P4)**
+
+> Loại hình: flowchart trái → phải. Ý chính người xem phải thấy: hai query nối nhau qua bảng Delta `gold/speed/observations` thay cho Kafka; query 2 dùng cùng luật với speed local.
+
+Node:
+
+| # | Nhãn trên hình | Hình dạng | Tầng/màu | Ghi chú |
+|---|---|---|---|---|
+| 1 | S3 bronze · `marketplace/records/` | trụ | lake | |
+| 2 | Query 1 · Auto Loader cloudFiles (text) · `normalize_micro_batch` | chữ nhật bo góc | speed | |
+| 3 | `gold/speed/observations` | trụ | lake | |
+| 4 | `gold/speed/records_dlq` | trụ | lake | |
+| 5 | Query 2 · Delta stream → cột giả Kafka · `service.start_query` (cùng luật) | chữ nhật bo góc | speed | |
+| 6 | outputs | trụ | lake | |
+| 7 | offer_state · MERGE tiến | trụ | lake | |
+| 8 | price_changes · MERGE theo change_id | trụ | lake | |
+| 9 | stream_progress | trụ | lake | |
+
+Cạnh (tất cả nét liền):
+
+| Từ | Tới | Nhãn trên cạnh | Nét |
+|---|---|---|---|
+| S3 bronze | Query 1 | | liền |
+| Query 1 | `gold/speed/observations` | | liền |
+| Query 1 | `gold/speed/records_dlq` | | liền |
+| `gold/speed/observations` | Query 2 | | liền |
+| Query 2 | outputs | | liền |
+| Query 2 | offer_state | | liền |
+| Query 2 | price_changes | | liền |
+| Query 2 | stream_progress | | liền |
+
+*Hình 4.4. Speed lakehouse: Auto Loader đọc Bronze/records trên S3, query 2 chạy lại đúng luật của speed local trên Delta.*
 
 Với `--available-now`, query 2 chỉ bắt đầu khi query 1 đã xử lý hết file hiện có, sau đó cả hai dừng. Job: `ecomdata-marketplace-speed`, timeout 6 giờ, lịch quartz `0 0/15 * * * ?` (Asia/Ho_Chi_Minh), **đang PAUSED**. Biến thể này không ghi Kafka, ES hay Redis.
 
@@ -180,13 +215,26 @@ Rủi ro chưa kiểm (`docs/DATABRICKS_READINESS.md` §8): `ProcessingTimeTimeo
 
 ### DAG `marketplace_batch`
 
-```mermaid
-flowchart LR
-    classDef ops fill:#CCFBF1,stroke:#0D9488,color:#111
-    classDef batch fill:#FFEDD5,stroke:#EA580C,color:#111
-    classDef gate fill:#FEE2E2,stroke:#DC2626,color:#111
-    ws("window_settled<br/>TimeDeltaSensor 10 phút"):::ops --> s("silver"):::batch --> d("dimensions"):::batch --> f("facts"):::batch --> m("marts"):::batch --> q("quality<br/>retries = 0"):::gate --> p("publish"):::batch --> pr("promote"):::batch
-```
+**Hình 4.5 — DAG `marketplace_batch`**
+
+> Loại hình: flowchart trái → phải, một chuỗi thẳng 8 task. Ý chính người xem phải thấy: thứ tự stage cố định, `quality` là cổng chặn (không retry) đứng trước `publish` và `promote`.
+
+Node:
+
+| # | Nhãn trên hình | Hình dạng | Tầng/màu | Ghi chú |
+|---|---|---|---|---|
+| 1 | window_settled · TimeDeltaSensor 10 phút | chữ nhật bo góc | điều phối | |
+| 2 | silver | chữ nhật bo góc | batch | |
+| 3 | dimensions | chữ nhật bo góc | batch | |
+| 4 | facts | chữ nhật bo góc | batch | |
+| 5 | marts | chữ nhật bo góc | batch | |
+| 6 | quality · retries = 0 | chữ nhật bo góc | cổng: tô đỏ nhạt (màu Kafka) để nổi bật | |
+| 7 | publish | chữ nhật bo góc | batch | |
+| 8 | promote | chữ nhật bo góc | batch | |
+
+Cạnh: window_settled → silver → dimensions → facts → marts → quality → publish → promote, mỗi mũi tên một cạnh, nét liền, không nhãn.
+
+*Hình 4.5. DAG theo giờ: sensor chờ cửa sổ dữ liệu ổn định 10 phút rồi chạy 7 stage tuần tự.*
 
 | Thuộc tính | Giá trị |
 |---|---|
@@ -199,31 +247,54 @@ flowchart LR
 
 ### State machine của một run (ADR-0005)
 
-```mermaid
-stateDiagram-v2
-    [*] --> CREATED
-    CREATED --> SILVER_BUILT: silver
-    SILVER_BUILT --> DIMENSIONS_BUILT: dimensions
-    DIMENSIONS_BUILT --> FACTS_BUILT: facts
-    FACTS_BUILT --> GOLD_WRITTEN: marts
-    GOLD_WRITTEN --> QUALITY_PASSED: quality PASS
-    GOLD_WRITTEN --> QUALITY_FAILED: quality FAIL<br/>(RESTORE star)
-    QUALITY_PASSED --> PUBLISHED: publish
-    QUALITY_PASSED --> HELD: quality-only / scratch /<br/>backfill bị từ chối / pointer conflict
-    PUBLISHED --> PROMOTED: promote (CAS)
-    PUBLISHED --> HELD: PROMOTION_CONFLICT
-    HELD --> PUBLISHED: chạy lại (vd. --allow-backfill)
-    HELD --> PROMOTED
-    CREATED --> FAILED: ngoại lệ ở bất kỳ stage
-    SILVER_BUILT --> FAILED
-    DIMENSIONS_BUILT --> FAILED
-    FACTS_BUILT --> FAILED
-    QUALITY_FAILED --> GOLD_WRITTEN: --resume (chạy lại quality)
-    FAILED --> CREATED: --resume về last_completed_status
-    PROMOTED --> [*]
-```
+**Hình 4.6 — State machine của một run batch**
 
-*Hình 4.4. Trạng thái của run trong `audit.marketplace_batch_run`. `FAILED`, `QUALITY_FAILED`, `PROMOTED` là trạng thái cuối. `--resume` mở lại run ở `last_completed_status`; stage nào đã đạt mốc thì bị bỏ qua.*
+> Loại hình: state diagram, đường chính đi thẳng từ trái sang phải (CREATED → … → PROMOTED), các trạng thái lỗi/giữ đặt bên dưới. Ý chính người xem phải thấy: mỗi stage đẩy run lên một mốc; lỗi đưa về FAILED hoặc QUALITY_FAILED và `--resume` mở lại từ mốc cuối.
+
+Trạng thái:
+
+| Trạng thái | Loại | Ghi chú vẽ |
+|---|---|---|
+| (bắt đầu) | điểm đầu | chấm đen |
+| CREATED | thường | |
+| SILVER_BUILT | thường | |
+| DIMENSIONS_BUILT | thường | |
+| FACTS_BUILT | thường | |
+| GOLD_WRITTEN | thường | |
+| QUALITY_PASSED | thường | |
+| QUALITY_FAILED | cuối (lỗi) | đặt dưới đường chính |
+| PUBLISHED | thường | |
+| HELD | giữ lại | đặt dưới đường chính |
+| PROMOTED | cuối (thành công) | |
+| FAILED | cuối (lỗi) | đặt dưới đường chính |
+| (kết thúc) | điểm cuối | chấm đen có viền, sau PROMOTED |
+
+Chuyển trạng thái:
+
+| Từ | Tới | Điều kiện (nhãn cạnh) |
+|---|---|---|
+| (bắt đầu) | CREATED | |
+| CREATED | SILVER_BUILT | silver |
+| SILVER_BUILT | DIMENSIONS_BUILT | dimensions |
+| DIMENSIONS_BUILT | FACTS_BUILT | facts |
+| FACTS_BUILT | GOLD_WRITTEN | marts |
+| GOLD_WRITTEN | QUALITY_PASSED | quality PASS |
+| GOLD_WRITTEN | QUALITY_FAILED | quality FAIL (RESTORE star) |
+| QUALITY_PASSED | PUBLISHED | publish |
+| QUALITY_PASSED | HELD | quality-only / scratch / backfill bị từ chối / pointer conflict |
+| PUBLISHED | PROMOTED | promote (CAS) |
+| PUBLISHED | HELD | PROMOTION_CONFLICT |
+| HELD | PUBLISHED | chạy lại (vd. `--allow-backfill`) |
+| HELD | PROMOTED | |
+| CREATED | FAILED | ngoại lệ ở bất kỳ stage |
+| SILVER_BUILT | FAILED | |
+| DIMENSIONS_BUILT | FAILED | |
+| FACTS_BUILT | FAILED | |
+| QUALITY_FAILED | GOLD_WRITTEN | `--resume` (chạy lại quality) |
+| FAILED | CREATED | `--resume` về `last_completed_status` |
+| PROMOTED | (kết thúc) | |
+
+*Hình 4.6. Trạng thái của run trong `audit.marketplace_batch_run`. `FAILED`, `QUALITY_FAILED`, `PROMOTED` là trạng thái cuối. `--resume` mở lại run ở `last_completed_status`; stage nào đã đạt mốc thì bị bỏ qua.*
 
 ### Đầu vào, đầu ra từng stage
 
@@ -302,16 +373,34 @@ Mọi service chạy **một bản**. Tham số chung do Airflow truyền vào c
 
 DAG `marketplace_maintenance` (`@weekly`): `prune_raw` → `backup` → `storage_snapshot`.
 
-```mermaid
-flowchart LR
-    classDef ops fill:#CCFBF1,stroke:#0D9488,color:#111
-    classDef lake fill:#FEF3C7,stroke:#D97706,color:#111
-    pr("prune-raw<br/>xoá bronze/raw > 30 ngày"):::ops --> bk("backup<br/>(giữ batch lock)"):::ops --> ss("storage-snapshot<br/>kích thước từng kho, chỉ đọc"):::ops
-    bk --> g[("Gold: manifests, current.json,<br/>run được trỏ tới")]:::lake
-    bk --> bs[("Bronze, Silver")]:::lake
-    bk --> pgd[("pg_dump schema audit, cache")]:::lake
-    bk --> sha[("SHA-256 từng file<br/>/reports/backups")]:::lake
-```
+**Hình 4.7 — DAG `marketplace_maintenance` và nội dung backup**
+
+> Loại hình: flowchart trái → phải. Ý chính người xem phải thấy: ba task chạy tuần tự; backup giữ batch lock và chép bốn nhóm dữ liệu.
+
+Node:
+
+| # | Nhãn trên hình | Hình dạng | Tầng/màu | Ghi chú |
+|---|---|---|---|---|
+| 1 | prune-raw · xoá bronze/raw > 30 ngày | chữ nhật bo góc | điều phối | |
+| 2 | backup · (giữ batch lock) | chữ nhật bo góc | điều phối | |
+| 3 | storage-snapshot · kích thước từng kho, chỉ đọc | chữ nhật bo góc | điều phối | |
+| 4 | Gold: manifests, current.json, run được trỏ tới | trụ | lake | |
+| 5 | Bronze, Silver | trụ | lake | |
+| 6 | pg_dump schema audit, cache | trụ | lake | |
+| 7 | SHA-256 từng file · /reports/backups | trụ | lake | |
+
+Cạnh:
+
+| Từ | Tới | Nhãn trên cạnh | Nét |
+|---|---|---|---|
+| prune-raw | backup | | liền |
+| backup | storage-snapshot | | liền |
+| backup | Gold: manifests… | | liền |
+| backup | Bronze, Silver | | liền |
+| backup | pg_dump | | liền |
+| backup | SHA-256 từng file | | liền |
+
+*Hình 4.7. Bảo trì hằng tuần: dọn raw cũ, sao lưu, đo dung lượng.*
 
 - Backup chép Gold **trước**, sau đó tới Bronze và Silver. Backup bị từ chối nếu `run_id` của pointer khác `audit.marketplace_cache_version.run_id`.
 - Restore ghi `current.json` **cuối cùng**, sau đó chạy các kiểm tra `validate --restored`.

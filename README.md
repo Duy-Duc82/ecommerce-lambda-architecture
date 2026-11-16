@@ -99,7 +99,7 @@ Kafka 4.2 (KRaft), Spark 4.0 (Python 3.12), MinIO (S3A), PostgreSQL 18, Elastics
 
 | Tài liệu | Nội dung |
 |---|---|
-| [`docs/system/`](docs/system/README.md) | **báo cáo hệ thống**: tổng quan, luồng và biến đổi dữ liệu qua từng tầng, xử lý trong tầng, các pipeline, sơ đồ Mermaid (16/11) |
+| [`docs/system/`](docs/system/README.md) | **báo cáo hệ thống**: tổng quan, luồng và biến đổi dữ liệu qua từng tầng, xử lý trong tầng, các pipeline, spec từng hình để vẽ (16/11) |
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | thiết kế chi tiết, luật phụ thuộc, cách thêm một nguồn |
 | [`docs/adr/`](docs/adr/) | các quyết định kiến trúc |
 | [`docs/DATA_MODEL.md`](docs/DATA_MODEL.md) | hợp đồng dữ liệu, bảng, khoá |
