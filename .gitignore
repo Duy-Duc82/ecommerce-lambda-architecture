@@ -29,3 +29,9 @@ logs/
 .vscode/
 .DS_Store
 Thumbs.db
+
+
+# Databricks bundle: local state and the built wheel
+.databricks/
+dist/
+build/

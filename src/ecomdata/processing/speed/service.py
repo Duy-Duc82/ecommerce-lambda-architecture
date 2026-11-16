@@ -66,16 +66,13 @@ def start_query(
     checkpoint: str,
     trigger: str = "30 seconds",
     query_name: str = "marketplace-speed-v1",
+    available_now: bool = False,
 ) -> Any:
+    """``available_now``: process what the source holds, then stop (``lakehouse`` runs it as a scheduled job)."""
     outputs = speed_outputs(read(spark), config)
-    return (
-        outputs.writeStream.queryName(query_name)
-        .option("checkpointLocation", checkpoint)
-        .trigger(processingTime=trigger)
-        .outputMode("append")
-        .foreachBatch(write_batch)
-        .start()
-    )
+    writer = outputs.writeStream.queryName(query_name).option("checkpointLocation", checkpoint)
+    writer = writer.trigger(availableNow=True) if available_now else writer.trigger(processingTime=trigger)
+    return writer.outputMode("append").foreachBatch(write_batch).start()
 
 
 def read_marketplace_records(spark: SparkSession, bootstrap_servers: str) -> DataFrame:

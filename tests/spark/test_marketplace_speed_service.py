@@ -73,6 +73,12 @@ def test_the_query_carries_its_name_checkpoint_trigger_and_sink(monkeypatch):
     assert query.name == speed.query_name
 
 
+def test_an_available_now_query_processes_what_is_there_and_stops(monkeypatch):
+    _, log = _start(monkeypatch, trigger="30 seconds", available_now=True)
+
+    assert log["trigger"] == {"availableNow": True}
+
+
 # 13
 def test_the_checkpoint_root_can_be_moved_but_keeps_its_version(tmp_path):
     speed = load_settings({"MARKETPLACE_SPEED_CHECKPOINT_ROOT": str(tmp_path / "ckpt")}).speed

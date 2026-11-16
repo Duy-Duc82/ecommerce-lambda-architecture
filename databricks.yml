@@ -1,0 +1,51 @@
+# Databricks Asset Bundle: the batch and the lakehouse speed layer as Databricks jobs.
+#
+#   databricks auth login --host https://<workspace>.cloud.databricks.com   (once; OAuth in the browser)
+#   databricks bundle validate
+#   databricks bundle deploy -t dev
+#   databricks bundle run -t dev marketplace_batch --params as_of=2026-11-05T00:00:00Z
+#   databricks bundle run -t dev marketplace_speed
+#
+# Only the batch and the speed layer run here. The crawler, Kafka, PostgreSQL cache.*, Superset,
+# Elasticsearch and Redis stay on the local stack (docs/DATABRICKS_READINESS.md section 8).
+bundle:
+  name: ecomdata
+
+include:
+  - databricks/resources/*.yml
+
+# The wheel is the package itself; its console scripts are the jobs' entry points.
+artifacts:
+  ecomdata:
+    type: whl
+    build: python -m pip wheel --no-deps --wheel-dir dist .
+    path: .
+
+# The jobs run the wheel; the bundle needs none of the repo's files in the workspace.
+sync:
+  exclude:
+    - "**"
+
+variables:
+  # No default for the buckets: pass --var bucket_bronze=... or set BUNDLE_VAR_bucket_bronze.
+  bucket_bronze:
+    description: S3 bucket of the Bronze zone (records and crawl audit the local crawler wrote)
+  bucket_silver:
+    description: S3 bucket of the Silver zone
+  bucket_gold:
+    description: S3 bucket of the Gold zone (runs, dw/ star, speed tables)
+  region:
+    default: ap-southeast-1
+  secret_scope:
+    description: Databricks secret scope holding aws_access_key and aws_secret_key
+    default: ecomdata
+  spark_version:
+    description: Spark 4.0 and Python 3.12, as the project's pyspark 4.0 pin needs
+    default: 17.3.x-scala2.13
+  node_type:
+    default: m5d.large
+
+targets:
+  dev:
+    mode: development
+    default: true
