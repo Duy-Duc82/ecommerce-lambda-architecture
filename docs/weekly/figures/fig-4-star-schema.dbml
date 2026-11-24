@@ -1,0 +1,144 @@
+// Hình 4 – star schema dw, bản rút gọn cho báo cáo (khoá + vài cột chính).
+// Bản đầy đủ: docs/model/star-schema.dbml. Dán file này vào https://dbdiagram.io/d để chỉnh tay.
+
+Table dim_date {
+  date_key int [pk]
+  full_date date
+  is_weekend boolean
+  is_double_day_sale boolean
+}
+
+Table dim_marketplace {
+  marketplace_key bigint [pk]
+  marketplace_code varchar
+}
+
+Table dim_seller {
+  seller_key bigint [pk]
+  seller_name varchar
+  is_official_store boolean
+}
+
+Table dim_brand {
+  brand_key bigint [pk]
+  brand_name varchar
+}
+
+Table dim_category {
+  category_key bigint [pk]
+  parent_key bigint
+  category_name varchar
+  level smallint
+}
+
+Table bridge_category_ancestry {
+  ancestor_key bigint
+  descendant_key bigint
+  depth smallint
+}
+
+Table dim_product_listing {
+  listing_key bigint [pk, note: 'SCD2']
+  offer_key bigint
+  product_title text
+  brand_key bigint
+  category_key bigint
+  seller_key bigint
+  valid_from timestamptz
+  valid_to timestamptz
+  is_current boolean
+}
+
+Table dim_listing_flags {
+  listing_flags_key bigint [pk]
+  availability varchar
+  has_discount boolean
+  is_flash_deal boolean
+}
+
+Table fact_offer_observation {
+  observation_id varchar [pk]
+  date_key int
+  listing_key bigint
+  seller_key bigint
+  brand_key bigint
+  category_key bigint
+  listing_flags_key bigint
+  current_price numeric
+  list_price numeric
+  discount_percent numeric
+  sold_count bigint
+}
+
+Table fact_price_snapshot_daily {
+  date_key int [pk]
+  offer_key bigint [pk]
+  listing_key bigint
+  open_price numeric
+  close_price numeric
+  min_price numeric
+  max_price numeric
+}
+
+Table fact_price_change {
+  observation_id varchar [pk]
+  date_key int
+  listing_key bigint
+  old_price numeric
+  new_price numeric
+  pct_change numeric
+}
+
+Table fact_counter_daily {
+  date_key int [pk]
+  offer_key bigint [pk]
+  counter_name varchar [pk]
+  listing_key bigint
+  valid_delta_sum bigint
+}
+
+Table fact_category_page_daily {
+  date_key int [pk]
+  category_key bigint [pk]
+  observed_offer_count int
+  median_price numeric
+  discounted_offer_ratio numeric
+}
+
+Table fact_crawl_attempt {
+  attempt_id bigint [pk]
+  date_key int
+  marketplace_key bigint
+  status varchar
+  latency_ms bigint
+  parsed_count bigint
+}
+
+Ref: dim_category.parent_key > dim_category.category_key
+Ref: bridge_category_ancestry.ancestor_key > dim_category.category_key
+Ref: bridge_category_ancestry.descendant_key > dim_category.category_key
+Ref: dim_product_listing.brand_key > dim_brand.brand_key
+Ref: dim_product_listing.category_key > dim_category.category_key
+Ref: dim_product_listing.seller_key > dim_seller.seller_key
+
+Ref: fact_offer_observation.date_key > dim_date.date_key
+Ref: fact_offer_observation.listing_key > dim_product_listing.listing_key
+Ref: fact_offer_observation.seller_key > dim_seller.seller_key
+Ref: fact_offer_observation.brand_key > dim_brand.brand_key
+Ref: fact_offer_observation.category_key > dim_category.category_key
+Ref: fact_offer_observation.listing_flags_key > dim_listing_flags.listing_flags_key
+
+Ref: fact_price_snapshot_daily.date_key > dim_date.date_key
+Ref: fact_price_snapshot_daily.listing_key > dim_product_listing.listing_key
+
+Ref: fact_price_change.date_key > dim_date.date_key
+Ref: fact_price_change.listing_key > dim_product_listing.listing_key
+
+Ref: fact_counter_daily.date_key > dim_date.date_key
+Ref: fact_counter_daily.listing_key > dim_product_listing.listing_key
+
+Ref: fact_category_page_daily.date_key > dim_date.date_key
+Ref: fact_category_page_daily.category_key > dim_category.category_key
+
+Ref: fact_crawl_attempt.date_key > dim_date.date_key
+Ref: fact_crawl_attempt.marketplace_key > dim_marketplace.marketplace_key
