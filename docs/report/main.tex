@@ -1,0 +1,64 @@
+% =====================================================================
+%  Tài liệu thiết kế hệ thống (System Design Document)
+%  Marketplace Price Intelligence — Lambda, ELT đa nguồn
+%
+%  Biên dịch:  latexmk -xelatex main.tex      (hoặc: tectonic main.tex)
+%  Sơ đồ:      thả file vào figures/<tên>.pdf|png|jpg; danh sách ở Phụ lục D
+%              và figures/README.md. Thiếu file thì báo cáo hiện ô trống.
+% =====================================================================
+\documentclass[11pt,a4paper,oneside,openany]{report}
+
+% ---------- Thông tin tài liệu (sửa ở đây) ----------
+\newcommand{\DocTitle}{Marketplace Price Intelligence}
+\newcommand{\DocSubtitle}{Tài liệu thiết kế hệ thống dữ liệu\\Kiến trúc Lambda, ELT đa nguồn}
+\newcommand{\DocShortTitle}{Marketplace Price Intelligence}
+\newcommand{\DocId}{DE-SDD-001}
+\newcommand{\DocVersion}{1.0}
+\newcommand{\DocStatus}{Bản nháp chờ duyệt}
+\newcommand{\DocDate}{23/11/2026}
+\newcommand{\DocAuthor}{\StudentName}
+\newcommand{\DocBaseline}{nhánh \texttt{docs/system-report}, commit \texttt{93d7ea3}}
+
+% ---------- Trang bìa kiểu Bách khoa (điền thông tin thật vào đây) ----------
+\newcommand{\University}{ĐẠI HỌC BÁCH KHOA HÀ NỘI}
+\newcommand{\School}{TRƯỜNG CÔNG NGHỆ THÔNG TIN VÀ TRUYỀN THÔNG}
+\newcommand{\SchoolShort}{Công nghệ Thông tin và Truyền thông}
+\newcommand{\ReportType}{ĐỒ ÁN TỐT NGHIỆP}
+\newcommand{\StudentName}{Dương Đức Duy}
+\newcommand{\StudentId}{20225828}
+\newcommand{\StudentEmail}{email@sis.hust.edu.vn}
+\newcommand{\Major}{Khoa học Dữ liệu}
+\newcommand{\Supervisor}{Trần Văn Đặng}
+\newcommand{\Department}{Hệ thống Thông tin}
+\newcommand{\PlaceDate}{HÀ NỘI, 11/2026}
+
+\input{preamble}
+
+\begin{document}
+
+\pagenumbering{roman}
+\input{chapters/00-trang-bia}
+\tableofcontents
+\listoffigures
+\listoftables
+
+\cleardoublepage
+\pagenumbering{arabic}
+\input{chapters/01-gioi-thieu}
+\input{chapters/02-yeu-cau}
+\input{chapters/03-kien-truc}
+\input{chapters/04-thu-thap}
+\input{chapters/05-luu-tru-mo-hinh}
+\input{chapters/06-xu-ly}
+\input{chapters/07-pipeline-dieu-phoi}
+\input{chapters/08-chat-luong-quan-tri}
+\input{chapters/09-phuc-vu}
+\input{chapters/10-trien-khai}
+\input{chapters/11-van-hanh}
+\input{chapters/12-hieu-nang}
+\input{chapters/13-rui-ro-lo-trinh}
+
+\appendix
+\input{chapters/A-phu-luc}
+
+\end{document}

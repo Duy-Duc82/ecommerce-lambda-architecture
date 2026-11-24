@@ -1,0 +1,94 @@
+% =====================================================================
+\chapter{Hiệu năng và kết quả đo}\label{chap:perf}
+% =====================================================================
+\src{docs/evidence/fullrun-20261114/, docs/DANH_GIA_HE_THONG_20261113.md, docs/evidence/e2e-run-20261031/}
+
+\section{Lượt chạy toàn luồng 13--14/11/2026}
+\begin{itemize}
+  \item \textbf{Thời gian}: 18:53 UTC 13/11 đến 04:09 UTC 14/11, khoảng \textbf{9 giờ 16 phút}; dừng sớm vì RAM host còn 2,6 GB.
+  \item \textbf{Lớp đã bật}: crawl Tiki, Kafka, speed, es-projector, Elasticsearch, Redis, MinIO, PostgreSQL, Airflow (batch mỗi giờ, discovery),
+        Loki/Prometheus/Grafana/Alloy, Superset, Kibana.
+  \item \textbf{Batch}: 10 run (\code{mp-20261113T1800Z} đến \code{mp-20261114T0300Z}), \textbf{10/10 PROMOTED, quality PASS}.
+        Phần chạy bù sau đó thêm run \code{mp-20261114T0500Z}: tổng 11/11 PROMOTED.
+  \item \textbf{Speed}: mọi lượt theo dõi \code{failed=0}, \code{invalid=0}, DLQ = 0; p95 giảm từ 173,6 s (đang đuổi tồn đọng Kafka) xuống khoảng 59--62 s.
+  \item \textbf{Crawl}: khoảng 1.270 lượt OK/giờ trong 4 giờ đầu (lượt quét SWEEP 14.023 task), sau đó chỉ 25 trang ACTIVE/giờ vì frontier hết task đến hạn.
+\end{itemize}
+
+\begin{xltabular}{\linewidth}{@{}L{58mm}L{42mm}Y@{}}
+  \caption{Quy mô và hiệu năng đã đo}\label{tab:measured}\\
+  \toprule
+  \textbf{Số đo} & \textbf{Giá trị} & \textbf{Ngày, nguồn} \\
+  \midrule
+  \endfirsthead
+  \toprule \textbf{Số đo} & \textbf{Giá trị} & \textbf{Ngày, nguồn} \\ \midrule
+  \endhead
+  Lượt chạy liên tục dài nhất & 9 h 16 phút, 10 run, 10/10 PROMOTED & 13--14/11, \code{fullrun-20261114/KET-QUA.md} \\
+  Dòng Gold mỗi run & 1.432.017 \ra\ 1.966.878 & như trên \\
+  Stage \code{dimensions} (nặng nhất) & 217--259 s & như trên \\
+  Stage \code{marts} & 88--105 s (10 run đầu) & như trên \\
+  Stage \code{silver} & 38 s \ra\ 100--189 s & như trên; chưa rõ nguyên nhân tăng \\
+  Độ trễ speed p95 & 59--62 s sau khi đuổi kịp (trigger 30 s) & như trên \\
+  Task SWEEP thành công một lượt & 14.023 (khoảng 4 giờ) & như trên \\
+  Micro-batch speed & 6.429, 0 thất bại; p50 8,8 s với trigger 5 s & 31/10, \code{DANH_GIA_HE_THONG_20261113.md} \\
+  Tăng trưởng Bronze & 385 MB raw + 74 MB records trong 6 giờ crawl Tiki & 31/10, như trên \\
+  Fit Isolation Forest & 0,11--0,13 s trên 56--67 nghìn dòng & 14/11, \code{fullrun-20261114} \\
+  \bottomrule
+\end{xltabular}
+
+\chartslot{fig-12-1-gold-rows-theo-run}
+  {Biểu đồ: số dòng Gold theo run}
+  {Biểu đồ đường/cột, trục ngang là 10 run \texttt{1800Z}--\texttt{0300Z}, trục dọc là tổng dòng Gold (1,43 triệu \ra\ 1,97 triệu); thấy tăng nhanh trong 4 giờ đầu (lượt SWEEP) rồi gần như phẳng.}
+  {số liệu trong \texttt{docs/evidence/fullrun-20261114/snapshots/} và \texttt{theo-doi.log}}
+  {Số dòng Gold mỗi run trong lượt chạy 13--14/11/2026.}
+
+\chartslot{fig-12-2-thoi-gian-stage}
+  {Biểu đồ: thời gian từng stage theo run}
+  {Cột chồng theo run: silver, dimensions, facts, marts, quality, publish, promote (giây); \texttt{dimensions} lớn nhất (217--259 s), \texttt{marts} ổn định 88--105 s.}
+  {\texttt{\_runs/run\_id=<run>/timings/<stage>.json} hoặc snapshot trong \texttt{docs/evidence/fullrun-20261114/}}
+  {Thời gian từng stage batch qua 10 run.}
+
+\chartslot{fig-12-3-do-tre-speed}
+  {Biểu đồ: độ trễ speed p50/p95 theo thời gian}
+  {Đường p50 và p95 theo giờ chạy; p95 từ 173,6 s (giờ 0, đuổi tồn đọng) xuống khoảng 59--62 s.}
+  {\texttt{audit.marketplace\_speed\_batch} hoặc \texttt{theo-doi.log}}
+  {Độ trễ speed layer trong lượt chạy 13--14/11/2026.}
+
+\section{Đánh giá bài toán độ tin cậy khuyến mãi}
+Tiêu chí theo \code{docs/evidence/fullrun-20261114/CHIEN-LUOC-DANH-GIA-ML.md}, số đo từ \code{bao-cao-ml.json} lúc 04:09 UTC 14/11.
+
+\begin{xltabular}{\linewidth}{@{}L{35mm}Y L{30mm}C{14mm}@{}}
+  \caption{Tiêu chí đánh giá ML và kết quả}\label{tab:ml-criteria}\\
+  \toprule
+  \textbf{Tiêu chí} & \textbf{Số đo} & \textbf{Ngưỡng} & \textbf{Kết quả} \\
+  \midrule
+  \endfirsthead
+  \toprule \textbf{Tiêu chí} & \textbf{Số đo} & \textbf{Ngưỡng} & \textbf{Kết quả} \\ \midrule
+  \endhead
+  batch\_runs & 10 run xong, 10 PROMOTED & mọi run sau run đầu & PASS \\
+  coverage\_rule & quality PASS, observed 0,148 & PASS và $> 0$ & PASS \\
+  grain & 253.198 = 253.198 & bằng nhau & PASS \\
+  row\_invariants & 0 vi phạm ở 4 kiểm tra & 0 & PASS \\
+  history\_rules & 14/11: 190 dòng có lý do từ lịch sử & $> 0$ & PASS \\
+  category\_reconciles & không lệch & lệch 0 & PASS \\
+  stability & tệ nhất 99,997\,\% giữ nguyên (7 cặp run) & $\ge$ 99\,\% & PASS \\
+  marts (hiệu năng) & cơ sở 88,4 s, tệ nhất 105,4 s (+19,3\,\%) & $\le$ 30\,\% & PASS \\
+  fit & 0,11--0,13 s, mẫu 56.243--66.575 dòng & $<$ 60 s, mẫu $\le$ 200.000 & PASS \\
+  ranked\_rows & 66.824 dòng có hạng & khớp & PASS \\
+  \textbf{flag\_share} & 14/11: 151/249 = 60,6\,\%; 13/11: 5.686/16.284 = 34,9\,\% & 1--10\,\% & \textbf{FAIL} \\
+  rule\_ml\_agreement & lift 6,15 (13/11: 2,17) & $\ge$ 2,0 & PASS \\
+  \bottomrule
+\end{xltabular}
+
+\begin{riskbox}[Diễn giải]
+\textbf{flag\_share FAIL}: luật lịch sử của \code{discount-rules.v1} gắn cờ một phần lớn giảm giá hiển thị trên dữ liệu mới 4 ngày lịch sử
+(13/11: 5.568 dòng SUSPECT đều mang \code{CLAIM_EXCEEDS_HISTORY}). Có thể luật quá chặt hoặc dữ liệu thật như vậy; chỉ phân biệt được bằng gán nhãn tay
+(chưa làm). Ngưỡng và luật không đổi trong lượt này. Ở phần chạy bù, run \code{0500Z} chạy khi RAM host còn 1,7 GB nên \code{marts} lên 172,8 s (FAIL);
+đây là phép đo dưới áp lực bộ nhớ, không phải đo ổn định.
+\end{riskbox}
+
+\section{Giới hạn của phép đo}
+\begin{itemize}
+  \item Từ giờ thứ 4 crawl chỉ lấy 25 trang/giờ, nên các phép đo ổn định chủ yếu chạy lặp trên cùng dữ liệu.
+  \item Một máy, một bản mỗi service; con số không ngoại suy cho cụm nhiều node.
+  \item Đồng hồ VM Docker lệch khoảng 30 s so với Windows: độ trễ host--container có sai số tương ứng.
+\end{itemize}

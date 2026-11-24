@@ -1,0 +1,374 @@
+% =====================================================================
+%  Báo cáo kỹ thuật hệ thống Marketplace Price Intelligence
+%  Biên dịch: xelatex bao-cao-ky-thuat.tex (2 lần)  hoặc  tectonic bao-cao-ky-thuat.tex
+%  Hình: đặt file vào figures/<tên>.pdf|png|jpg, tên file in ở góc mỗi ô trống.
+% =====================================================================
+\documentclass[11pt,a4paper]{article}
+\newcommand{\ReportTitle}{Marketplace Price Intelligence}
+\newcommand{\ReportPeriod}{Báo cáo kỹ thuật}
+\newcommand{\StudentName}{Dương Đức Duy}
+\newcommand{\StudentId}{20225828}
+\newcommand{\Supervisor}{Trần Văn Đặng}
+\newcommand{\Baseline}{nhánh \texttt{docs/system-report}, commit \texttt{93d7ea3}}
+\input{weekly-preamble}
+
+\begin{document}
+
+{\sffamily
+{\Large\bfseries\color{brand} Báo cáo kỹ thuật}\\[2pt]
+{\large Hệ thống Marketplace Price Intelligence}\\[6pt]
+\small
+\begin{tabular}{@{}ll@{}}
+Sinh viên: & \StudentName\ (MSSV \StudentId) \\
+GVHD: & \Supervisor \\
+\end{tabular}}
+
+\tableofcontents
+
+% =====================================================================
+\section{Tổng quan hệ thống}
+% =====================================================================
+\subsection{Mục tiêu và phạm vi}
+Hệ thống thu thập định kỳ trang danh mục của sàn TMĐT (Tiki là nguồn chính, Lazada dùng để kiểm tra khả năng thêm nguồn), lưu lại toàn bộ
+dữ liệu gốc, rồi dựng kho dữ liệu phục vụ hai nhu cầu: phân tích lịch sử giá theo giờ/ngày (biến động giá, khuyến mãi đáng ngờ, độ phủ nguồn)
+và phát hiện thay đổi giá gần thời gian thực. Shopee nằm ngoài phạm vi vì có anti-bot (ADR-0006).
+
+\subsection{Kiến trúc tổng thể}
+Kiến trúc Lambda, nạp theo kiểu ELT với ba tầng Bronze/Silver/Gold.
+Crawler ghi dữ liệu vào Bronze trước, sau đó mới đẩy sang Kafka; từ Bronze tách ra hai nhánh xử lý:
+\begin{itemize}
+  \item \textbf{Batch} (mỗi giờ): Bronze \ra\ Silver (Delta) \ra\ star schema \code{dw} \ra\ 12 mart \ra\ kiểm tra chất lượng \ra\ publish vào PostgreSQL \ra\ promote.
+  \item \textbf{Speed}: Kafka \code{records.v1} \ra\ chuẩn hoá \ra\ so sánh với trạng thái từng offer \ra\ sự kiện thay đổi ra Kafka, Elasticsearch, Redis.
+\end{itemize}
+
+\figslot{fig-1-kien-truc-tong-the}{80mm}{Kiến trúc tổng thể: nguồn, Bronze, nhánh batch, nhánh speed, lớp phục vụ}
+
+\begin{xltabular}{\linewidth}{@{}L{32mm}L{50mm}Y@{}}
+  \toprule
+  \textbf{Thành phần} & \textbf{Công nghệ} & \textbf{Vai trò} \\
+  \midrule
+  Thu thập & Python, requests, Playwright & crawl trang danh mục, frontier trong PostgreSQL \\
+  Data lake & MinIO (S3); S3 trên Databricks & Bronze, Silver, Gold \\
+  Định dạng bảng & Delta Lake & Silver, Gold, time travel theo version \\
+  Xử lý & Spark 4 (batch + Structured Streaming) & chuẩn hoá, mô hình, mart, speed \\
+  Hàng đợi & Kafka (5 topic) & đường dữ liệu cho speed \\
+  Điều phối & Airflow 3.3.2, DockerOperator & 4 DAG \\
+  Phục vụ & PostgreSQL \code{cache.*}, Superset; Elasticsearch, Kibana, Redis & batch view; realtime view \\
+  Giám sát & Alloy, Prometheus, Loki, Grafana & metrics, log, cảnh báo \\
+  \bottomrule
+\end{xltabular}
+
+\subsection{Nguyên tắc thiết kế}
+\begin{itemize}
+  \item Lake là nơi lưu chính. PostgreSQL chỉ giữ cache của run đang phục vụ và trạng thái vận hành; Kafka, Elasticsearch, Redis đều dựng lại được từ Bronze.
+  \item Mọi ID sinh tất định từ khoá tự nhiên (SHA-256, \code{xxhash64}), nên ghi lại hoặc replay không tạo bản trùng. Kafka dùng at-least-once.
+  \item Mỗi run batch ghi ra thư mục riêng và chỉ được phục vụ sau khi qua cổng chất lượng và promote bằng compare-and-swap con trỏ \code{current.json}.
+\end{itemize}
+
+% =====================================================================
+\section{Thu thập dữ liệu}
+% =====================================================================
+\src{src/ecomdata/ingestion/, infra/http.py, domain/sources.py}
+
+\subsection{Nguồn}
+\begin{xltabular}{\linewidth}{@{}L{30mm}YY@{}}
+  \toprule
+  & \textbf{Tiki} & \textbf{Lazada} \\
+  \midrule
+  Danh sách danh mục & sitemap \ra\ URL \code{<slug>/c<id>} & 20 danh mục khai báo tĩnh \\
+  Cách tải & HTTP GET (\code{requests}) & Playwright Chromium, bắt XHR \code{ajax=true} \\
+  Vị trí dữ liệu & JSON \code{__NEXT_DATA__} trong HTML & \code{mods.listItems} trong XHR \\
+  Phân trang & chỉ trang 1 (40 sản phẩm) & tối đa 102 trang \\
+  Delay tối thiểu & 2 s/host & 5 s/host \\
+  Nhận biết bị chặn & không có \code{__NEXT_DATA__} & URL/HTML chứa \code{punish}, \code{captcha} \\
+  \bottomrule
+\end{xltabular}
+
+Mọi request đi qua robots.txt (cache 1 giờ; không đọc được thì coi như cấm), throttle theo host (delay + jitter 0--1 s) và user-agent riêng của dự án.
+
+\subsection{Frontier và lập lịch}
+Hàng đợi việc là bảng \code{audit.crawl_frontier}; mỗi dòng là một lần crawl của một target (danh mục $\times$ trang) tại thời điểm \code{scheduled_for}.
+Worker lấy tối đa 10 task mỗi lần:
+
+\begin{codeblock}
+WITH due AS (
+  SELECT task_id FROM audit.crawl_frontier
+  WHERE ((status IN ('READY','RETRY_WAIT') AND scheduled_for <= :now)
+      OR (status = 'LEASED' AND lease_expires_at <= :now))
+  ORDER BY priority DESC, scheduled_for ASC
+  LIMIT :limit
+  FOR UPDATE SKIP LOCKED)
+UPDATE audit.crawl_frontier f
+SET status='LEASED', lease_owner=:worker, lease_expires_at=:now+300s,
+    attempts = f.attempts + 1
+FROM due WHERE f.task_id = due.task_id
+RETURNING ...;
+\end{codeblock}
+
+Khi task thành công, cùng transaction đó chèn task kế tiếp với \code{scheduled_for = completed_at + cadence}. Cadence theo tier:
+\code{ACTIVE} 1 h, \code{NORMAL} 4 h, \code{COLD} 12 h, \code{SWEEP} 24 h. DAG \code{source_discovery} seed các target SWEEP mỗi ngày.
+
+\figslot{fig-2-luong-crawl}{70mm}{Luồng crawl: frontier, worker, Bronze, Kafka, audit}
+
+\subsection{Một lượt tải trang}
+URL \ra\ robots \ra\ throttle \ra\ fetch \ra\ ghi raw \ra\ kiểm HTTP status \ra\ trích xuất \ra\ bỏ PII \ra\ ghi records \ra\ publish Kafka (\code{acks=all}) \ra\ ghi audit.
+Raw được ghi trước bước kiểm status nên phản hồi 429/503 vẫn được lưu lại.
+
+\subsection{Xử lý lỗi}
+\begin{itemize}
+  \item Retry: \code{RATE_LIMITED}, \code{TRANSIENT_NETWORK}, \code{SERVER_ERROR}, \code{BLOCKED}, \code{STORAGE_ERROR}, \code{PUBLISH_ERROR}. Không retry: \code{ROBOTS_DENIED}, \code{PARSE_ERROR}, \code{VALIDATION_ERROR}, \code{CLIENT_ERROR}.
+  \item Backoff theo \code{Retry-After} nếu có, nếu không $30 \cdot 2^{n-1}$ s (trần 1800 s, jitter $\pm 20\%$), tối đa 5 lần.
+  \item Circuit breaker theo nguồn: 5 lỗi retry liên tiếp thì mở 900 s; trong thời gian mở, task được trả lại hàng đợi mà không gọi site.
+\end{itemize}
+
+% =====================================================================
+\section{Lưu trữ và định dạng dữ liệu}
+% =====================================================================
+\begin{xltabular}{\linewidth}{@{}L{25mm}L{39mm}L{25mm}L{25mm}Y@{}}
+  \toprule
+  \textbf{Tầng} & \textbf{Vị trí} & \textbf{Định dạng} & \textbf{Partition} & \textbf{Cách ghi, lưu giữ} \\
+  \midrule
+  \endfirsthead
+  \toprule \textbf{Tầng} & \textbf{Vị trí} & \textbf{Định dạng} & \textbf{Partition} & \textbf{Cách ghi} \\ \midrule
+  \endhead
+  Bronze/raw & \code{ecommerce-bronze/marketplace/raw/} & \code{.bin.gz} + \code{metadata.json} & marketplace, ngày, giờ, crawl run & append-only, giữ 30 ngày \\
+  Bronze/records & \code{.../marketplace/records/} & JSONL.gz, 1 file/trang & source, ngày, giờ & giữ vĩnh viễn \\
+  Bronze/\allowbreak crawl\_audit & \code{.../marketplace/crawl_audit/} & JSONL.gz & ngày, giờ & bản sao audit crawl \\
+  Kafka & 5 topic, 3 partition & JSON & key theo nguồn/offer & at-least-once, giữ 7 ngày \\
+  Silver & \code{ecommerce-silver/marketplace/} & Delta & \code{source_code}, \code{observed_date} & ghi đè partition ngày trong cửa sổ \\
+  Gold \code{dw} & \code{ecommerce-gold/marketplace/dw/} & Delta & fact theo \code{date_key} & \code{MERGE} theo khoá \\
+  Gold runs & \code{.../runs/run_id=<run>/} & Delta & theo ngày & một thư mục mỗi run \\
+  Manifest & \code{manifests/}, \code{current.json} & JSON & --- & compare-and-swap \\
+  Cache & PostgreSQL \code{cache.marketplace_*} & bảng & --- & TRUNCATE + INSERT, 1 transaction \\
+  Speed & Elasticsearch, Redis \code{rt:*} & document, hash & --- & upsert theo id; Redis TTL 24 h \\
+  \bottomrule
+\end{xltabular}
+
+\figslot{fig-3-du-lieu-qua-cac-tang}{65mm}{Dữ liệu qua các tầng: raw \ra\ records \ra\ Silver \ra\ star \ra\ mart \ra\ cache}
+
+Bronze/records giữ nguyên payload của sàn, chỉ bọc thêm thông tin lineage (rút gọn):
+\begin{codeblock}
+{"schema_version":"marketplace-record.v1", "record_id":"rec_9f2c...",
+ "source_code":"tiki", "record_kind":"listing_row", "record_index":7,
+ "raw_artifact_id":"raw_51ab...", "raw_uri":"s3a://ecommerce-bronze/.../part-0.bin.gz",
+ "body_sha256":"e3b0...", "crawl_run_id":"crawl_run_...",
+ "request_target":"dien-thoai-may-tinh-bang/c1789", "request_page":1,
+ "fetched_at":"2026-11-14T03:12:45Z", "http_status":200,
+ "payload":{"id":..., "price":..., "list_price":..., "discount_rate":..., ...}}
+\end{codeblock}
+Tầng này không đổi tên, ép kiểu hay lọc trường (ELT, ADR-0001), nên có thể chuẩn hoá lại từ đầu khi đổi logic.
+
+% =====================================================================
+\section{Chuẩn hoá: Bronze \ra\ Silver}
+% =====================================================================
+\src{src/ecomdata/processing/normalize/, processing/batch/stages/silver.py}
+
+Mỗi run dựng lại Silver cho cửa sổ gồm ngày của \code{as_of} và 1 ngày trước đó (để nhận dữ liệu đến muộn), thay toàn bộ các partition ngày đó.
+Các bước:
+\begin{enumerate}
+  \item Bỏ record trùng theo \code{record_id}.
+  \item Kiểm envelope (\code{schema_version}, nguồn đã đăng ký); sai thì vào quarantine.
+  \item Normalizer của từng nguồn chuyển \code{listing_row} sang dạng canonical và dạng wide theo nguồn.
+  \item Tách quarantine theo lý do: thiếu listing id, trùng trên trang, thiếu tiêu đề, giá thiếu/sai, thiếu \code{fetched_at}, thiếu lineage.
+  \item Ghi 4 nhóm bảng Delta: \code{offer_observations_v2} (53 cột), \code{tiki_listing_wide}/\code{lazada_listing_wide}, \code{page_context}, \code{quarantine}.
+\end{enumerate}
+
+\begin{xltabular}{\linewidth}{@{}L{38mm}L{44mm}Y@{}}
+  \toprule
+  \textbf{Cột canonical} & \textbf{Trường nguồn (Tiki)} & \textbf{Quy tắc} \\
+  \midrule
+  \code{current_price} & \code{price} & \code{decimal(38,6)}, $\ge 0$ \\
+  \code{list_price} & \code{list_price} / \code{original_price} & giữ nếu $> 0$ \\
+  \code{discount_percent} & \code{discount_rate} & ngoài $[0,100]$ \ra\ null \\
+  \code{sold_count} & \code{quantity_sold.value} & số nguyên $\ge 0$ \\
+  \code{availability} & \code{availability}, \code{shippable} & \code{IN_STOCK} / \code{OUT_OF_STOCK} / \code{UNKNOWN} \\
+  \code{is_advertisement} & \code{advertisement} & giữ dòng, gắn cờ \\
+  \code{ranking_position} & thứ tự dòng organic & $(\text{page}-1)\cdot 40 + \text{rank}$ \\
+  \code{offer_id} & sha256(code, listing id) & ổn định qua các lần crawl \\
+  \code{observation_id} & sha256(code, listing id, observed\_at, body\_sha256) & duy nhất mỗi lần thấy \\
+  \code{observed_date} & \code{to_date(observed_at)} & theo session timezone UTC \\
+  \bottomrule
+\end{xltabular}
+
+% =====================================================================
+\section{Mô hình dữ liệu Gold}
+% =====================================================================
+\src{src/ecomdata/processing/batch/ (dimensions.py, facts.py, marts.py, discount.py)}
+
+\subsection{Star schema \texttt{dw}}
+\begin{itemize}
+  \item 7 dimension: \code{dim_date}, \code{dim_marketplace}, \code{dim_seller}, \code{dim_brand}, \code{dim_category}, \code{dim_product_listing}, \code{dim_listing_flags};
+        1 bridge \code{bridge_category_ancestry}.
+  \item 6 fact: \code{fact_offer_observation}, \code{fact_price_snapshot_daily}, \code{fact_price_change}, \code{fact_counter_daily}, \code{fact_category_page_daily}, \code{fact_crawl_attempt}.
+  \item Surrogate key \code{xxhash64} của khoá tự nhiên; giá trị thiếu dùng khoá $-1$.
+  \item \code{dim_product_listing} là SCD2 theo tiêu đề, brand, category, seller.
+  \item Ghi bằng \code{MERGE} (update / insert / delete khi không còn ở nguồn) từ toàn bộ Silver.
+\end{itemize}
+
+\figslot{fig-4-star-schema}{90mm}{Star schema \texttt{dw}: fact, dimension và bridge}
+
+\subsection{Mart}
+Stage \code{marts} đọc star tại đúng version Delta vừa ghi, lọc \code{observed_at <= as_of}, bỏ dòng quảng cáo và dựng 12 mart:
+\code{offer_current}, \code{seller_current}, \code{offer_price_history_daily}, \code{offer_change_daily}, \code{offer_freshness}, \code{category_price_daily},
+\code{source_coverage_daily}, \code{crawl_reliability_daily}, \code{counter_delta_daily}, \code{price_anomaly_daily}, \code{discount_credibility_daily}, \code{discount_daily}.
+Manifest của run ghi version Delta của từng bảng star để tái lập.
+
+\subsection{Logic phân tích}
+\begin{itemize}
+  \item Giá bất thường: robust z-score so với 14 ngày trước của chính offer (cần $\ge 7$ ngày), ngưỡng 3,5; MAD $= 0$ thì dùng IQR.
+  \item Độ tin cậy khuyến mãi: giá tham chiếu là giá thấp nhất 30 ngày trước; 5 luật có trọng số (giá cao hơn giá niêm yết, giảm $>50\%$, tăng giá niêm yết,
+        mức giảm công bố vượt lịch sử, giá không thấp hơn tham chiếu); tổng điểm $\ge 50$ là SUSPECT, $\ge 20$ là QUESTIONABLE. Isolation Forest chỉ dùng để xếp hạng.
+  \item Counter (đã bán, đánh giá): mỗi bước chuyển gắn nhãn \code{VALID}, \code{GAP_TOO_LONG}, \code{COUNTER_DECREASED}; không suy ra số đơn hàng.
+\end{itemize}
+
+% =====================================================================
+\section{Speed layer}
+% =====================================================================
+\src{src/ecomdata/processing/speed/, domain/change_rules.py}
+
+Một ứng dụng Spark Structured Streaming chạy hai query, trigger 30 s:
+\begin{enumerate}
+  \item \textbf{Normalizer}: \code{records.v1} \ra\ dùng lại normalizer của batch \ra\ bỏ quảng cáo \ra\ \code{observations.v1}; dòng lỗi \ra\ \code{records.v1.dlq}.
+  \item \textbf{Stateful}: kiểm hợp đồng (lỗi \ra\ \code{observations.v1.dlq}), \code{groupBy(offer_id)} + \code{applyInPandasWithState}, state là quan sát mới nhất của offer.
+        Bản trùng và bản đến muộn bị bỏ; bản mới được so với state để sinh sự kiện.
+\end{enumerate}
+
+Sự kiện: \code{NEW_OFFER}, \code{PRICE_CHANGED}, \code{LARGE_PRICE_DROP} ($\ge 100.000$đ hoặc $\ge 20\%$), \code{RATING_CHANGED}, \code{COUNTER_CHANGED},
+\code{AVAILABILITY_CHANGED}, \code{OFFER_STALE} (6 giờ không thấy). Ghi lần lượt ra Kafka \code{changes.v1}, Elasticsearch, Redis, audit;
+micro-batch đã ghi thành công thì bỏ qua khi replay.
+
+\figslot{fig-5-speed}{60mm}{Speed layer: hai query, topic Kafka, DLQ và các sink}
+
+% =====================================================================
+\section{Chất lượng dữ liệu và phát hành}
+% =====================================================================
+\src{src/ecomdata/domain/quality_rules.py, processing/batch/stages/ (quality.py, publish.py, promote.py)}
+
+\begin{xltabular}{\linewidth}{@{}L{30mm}Y@{}}
+  \toprule
+  \textbf{Nhóm luật} & \textbf{Nội dung} \\
+  \midrule
+  Lineage & checksum, URI của raw tồn tại \\
+  Duy nhất & \code{observation_id}, khoá listing, một dòng/offer ở mart hiện hành \\
+  Miền giá trị & giá $\ge 0$, tiền tệ hợp lệ, \code{observed_at} không ở tương lai \\
+  Đối soát & Silver + quarantine = \code{parsed_count} của audit; số dòng, tổng giá khớp giữa fact và mart \\
+  Star & khoá ngoại hợp lệ, surrogate key duy nhất, SCD2 liên tục và có đúng 1 version hiện hành \\
+  \bottomrule
+\end{xltabular}
+
+Tổng 22 luật, 16 bắt buộc. Một luật bắt buộc không đạt thì run thành \code{QUALITY_FAILED} và star được \code{RESTORE} về version của run đang phục vụ.
+Run đạt thì:
+\begin{itemize}
+  \item \textbf{Publish}: ghi các mart vào \code{staging.*}, sau đó trong một transaction (có advisory lock) TRUNCATE và INSERT 12 bảng \code{cache.*}.
+  \item \textbf{Promote}: compare-and-swap \code{current.json}; nếu con trỏ đã bị run khác đổi thì run chuyển sang \code{HELD}.
+\end{itemize}
+Đã kiểm tra trường hợp lỗi: run 07/11 11:00 bị \code{QUALITY_FAILED}, Superset vẫn giữ dữ liệu của run trước.
+
+% =====================================================================
+\section{Điều phối}
+% =====================================================================
+\src{src/ecomdata/orchestration/dags/, processing/batch/runner.py}
+
+\begin{xltabular}{\linewidth}{@{}L{48mm}L{22mm}Y@{}}
+  \toprule
+  \textbf{DAG} & \textbf{Lịch} & \textbf{Nội dung} \\
+  \midrule
+  \code{marketplace_batch} & hằng giờ & sensor 10 phút, rồi 7 stage tuần tự \\
+  \code{marketplace_reprocess} & thủ công & chạy lại một khoảng hoặc rebuild toàn bộ \\
+  \code{source_discovery} & hằng ngày & tìm danh mục, seed frontier SWEEP \\
+  \code{marketplace_maintenance} & hằng tuần & dọn raw quá hạn, bảo trì \\
+  \bottomrule
+\end{xltabular}
+
+Mỗi stage của \code{marketplace_batch} là một task \code{DockerOperator} chạy container Spark riêng:
+\code{silver} \ra\ \code{dimensions} \ra\ \code{facts} \ra\ \code{marts} \ra\ \code{quality} \ra\ \code{publish} \ra\ \code{promote}.
+\code{max_active_runs=1}, retry 2 lần (trừ \code{quality}), timeout 45 phút/stage. Trạng thái run lưu ở \code{audit.marketplace_batch_run};
+stage đã hoàn thành được bỏ qua khi chạy lại. Advisory lock chặn hai batch chạy song song.
+
+\figslot{fig-6-dag-batch}{45mm}{DAG \texttt{marketplace\_batch} và các trạng thái của run}
+
+% =====================================================================
+\section{Giám sát}
+% =====================================================================
+\src{observability/ (alloy/, grafana/dashboards/, grafana/provisioning/alerting/rules.yaml)}
+
+\begin{itemize}
+  \item Grafana Alloy thu log container và log task Airflow vào Loki, metrics vào Prometheus.
+  \item Metrics hạ tầng: cAdvisor, Kafka consumer lag, Redis, Elasticsearch, StatsD của Airflow, probe HTTP.
+  \item Metrics nghiệp vụ: Alloy chạy truy vấn SQL trên các bảng \code{audit.*} mỗi phút, sinh các nhóm \code{mp_crawl_*}, \code{mp_batch_*}, \code{mp_quality_*},
+        \code{mp_speed_*}, \code{mp_serving_cache}, \code{mp_storage}.
+\end{itemize}
+
+\begin{codeblock}
+-- mp_crawl_5m: số lượt crawl 5 phút gần nhất theo nguồn, trạng thái, loại lỗi
+SELECT f.marketplace_code AS marketplace, a.status,
+       COALESCE(a.error_kind,'NONE') AS error_kind,
+       count(*) AS attempts, sum(a.raw_bytes) AS raw_bytes
+FROM audit.crawl_request_attempt a JOIN audit.crawl_frontier f USING (task_id)
+WHERE a.completed_at > now() - interval '5 minutes'
+GROUP BY 1,2,3;
+\end{codeblock}
+
+\figslot{fig-7-giam-sat}{55mm}{Luồng tín hiệu giám sát: nguồn metrics/log, Alloy, Prometheus, Loki, Grafana}
+
+Grafana có 5 dashboard (overview, pipeline, resources, orchestration, logs) và 19 luật cảnh báo:
+\begin{xltabular}{\linewidth}{@{}L{22mm}Y@{}}
+  \toprule
+  \textbf{Nhóm} & \textbf{Cảnh báo} \\
+  \midrule
+  Hạ tầng & endpoint không phản hồi; RAM $>90\%$; đĩa $>85\%$; OOM kill; container khởi động lại liên tục; Alloy mất metrics \\
+  Pipeline & crawl ngừng; tỉ lệ bị chặn $>20\%$; circuit mở; speed không có micro-batch thành công; lag $>5000$ offset; không có run promote trong 2,5 h;
+             batch lỗi hoặc HELD; luật quality bắt buộc FAIL; DLQ $>100$/30 phút; consumer lag $>10.000$; nhiều log lỗi \\
+  Điều phối & DAG run gần nhất lỗi; scheduler mất heartbeat $>120$ s \\
+  \bottomrule
+\end{xltabular}
+
+% =====================================================================
+\section{Kết quả vận hành}
+% =====================================================================
+Lượt chạy toàn luồng 13--14/11/2026 trên một laptop (\code{docs/evidence/fullrun-20261114/}):
+
+\begin{xltabular}{\linewidth}{@{}L{55mm}Y@{}}
+  \toprule
+  \textbf{Chỉ số} & \textbf{Giá trị} \\
+  \midrule
+  Thời gian chạy & 9 giờ 16 phút (dừng khi RAM host còn 2,6 GB) \\
+  Run batch & 10/10 PROMOTED, quality PASS \\
+  Số dòng Gold mỗi run & 1.432.017 \ra\ 1.966.878 \\
+  Thời gian stage & \code{silver} 38--189 s; \code{dimensions} 217--259 s; \code{marts} 88--105 s \\
+  Crawl & khoảng 1.270 trang/giờ trong 4 giờ đầu, sau đó 25 trang/giờ \\
+  Speed & 0 lỗi, DLQ 0; độ trễ p95 59--62 s sau khi hết tồn đọng \\
+  Khuyến mãi đáng ngờ & 34,9\% dòng có giảm giá bị gắn cờ (ngày 13/11) \\
+  \bottomrule
+\end{xltabular}
+
+\figslot{chart-1-crawl-theo-gio}{55mm}{Số trang crawl thành công theo giờ, 13--14/11}
+\figslot{chart-2-thoi-gian-stage}{55mm}{Thời gian từng stage batch qua các run}
+
+% =====================================================================
+\section{Hạn chế hiện tại}
+% =====================================================================
+\begin{xltabular}{\linewidth}{@{}L{22mm}YY@{}}
+  \toprule
+  \textbf{Phần} & \textbf{Hạn chế} & \textbf{Hướng xử lý} \\
+  \midrule
+  \endfirsthead
+  \toprule \textbf{Phần} & \textbf{Hạn chế} & \textbf{Hướng xử lý} \\ \midrule
+  \endhead
+  Thu thập & Tiki chỉ lấy trang 1 nên mẫu là nhóm sản phẩm sàn đẩy lên đầu & ghi rõ phạm vi kết luận \\
+  Thu thập & Lịch SWEEP dồn vào khoảng 4 giờ rồi nghỉ khoảng 20 giờ & rải \code{scheduled_for} trong ngày \\
+  Thu thập & \code{attempts} tăng cả khi task bị trả về do circuit/lease hết hạn, có thể vượt \code{max_attempts} và làm lỗi cả lô lease & chỉ lease khi \code{attempts < max_attempts} \\
+  Lưu trữ & Records 1 file/trang, khoảng 10 KB/file & compaction theo giờ \\
+  Lưu trữ & Chưa có \code{OPTIMIZE}/\code{VACUUM}, thư mục run Gold cũ không bị xoá & thêm vào DAG maintenance \\
+  Chuẩn hoá & Ngày nghiệp vụ tính theo UTC, lệch 7 giờ so với ngày ở Việt Nam & tính cột ngày theo \code{Asia/Ho_Chi_Minh} \\
+  Chuẩn hoá & Quarantine chỉ lưu lý do đầu tiên & lưu mảng lý do \\
+  Gold & Dimension, fact, mart dựng lại từ toàn bộ lịch sử mỗi giờ, thời gian tăng theo số ngày dữ liệu & fact incremental theo partition ngày \\
+  Gold & Luật khuyến mãi gắn cờ 34,9\% khi mới có khoảng 4 ngày lịch sử & chỉ bật luật lịch sử khi đủ số ngày; gán nhãn tay để đánh giá \\
+  Speed & State của offer không bị xoá khi timeout, tăng theo số offer từng thấy & \code{state.remove()} sau thời gian dài không thấy \\
+  Speed & Sink lỗi tạm thời làm query dừng, phụ thuộc Docker khởi động lại & retry có backoff trong sink \\
+  Phục vụ & Batch view và realtime view phục vụ riêng, chưa có view hợp nhất & --- \\
+  Giám sát & Metrics nghiệp vụ phụ thuộc PostgreSQL vận hành; chưa có cảnh báo độ tươi theo nguồn & thêm cảnh báo theo nguồn \\
+  \bottomrule
+\end{xltabular}
+
+\end{document}

@@ -1,0 +1,105 @@
+% =====================================================================
+\chapter{Vận hành: giám sát, sao lưu, xử lý sự cố}\label{chap:ops}
+% =====================================================================
+\src{observability/, src/ecomdata/ops/, scripts/init_postgres.sql, docs/RUNBOOK.md, docs/OBSERVABILITY.md}
+
+\section{Audit vận hành}
+Mọi tầng ghi trạng thái vận hành vào schema \code{audit} của PostgreSQL (danh sách bảng ở Phụ lục~\ref{app:audit}).
+Bản lưu dài hạn của crawl audit, run batch và kết quả quality nằm trong lake (ADR-0008); bảng \code{audit.*} là bản vận hành
+mà circuit breaker, Grafana và es-projector đọc.
+
+\section{Giám sát}
+\textbf{Grafana Alloy} là collector duy nhất: gom log container và log task Airflow vào Loki; đẩy metrics sang Prometheus gồm cAdvisor,
+Kafka lag, Redis, Elasticsearch, StatsD của Airflow, các probe HTTP, và \textbf{truy vấn SQL trên bảng \code{audit.*}}
+(\code{mp_crawl_*}, \code{mp_batch_*}, \code{mp_quality_*}, \code{mp_speed_*}\ldots). Grafana có 5 dashboard:
+\code{lambda-overview}, \code{lambda-pipeline}, \code{lambda-resources}, \code{lambda-orchestration}, \code{lambda-logs}.
+
+\diagramslot{fig-11-1-giam-sat}
+  {Kiến trúc giám sát}
+  {Container, Airflow và bảng \texttt{audit.*} \ra\ Alloy \ra\ Prometheus (metrics) và Loki (log) \ra\ Grafana (5 dashboard, 19 cảnh báo).}
+  {không có spec riêng; tham khảo \texttt{docs/OBSERVABILITY.md} và \texttt{docs/system/03-xu-ly-trong-tang.md} §3.10}
+  {Luồng giám sát: Alloy là collector duy nhất, Grafana đọc Prometheus và Loki.}
+
+\begin{xltabular}{\linewidth}{@{}L{24mm}Y@{}}
+  \caption{19 luật cảnh báo Grafana}\label{tab:alerts}\\
+  \toprule
+  \textbf{Nhóm} & \textbf{Cảnh báo} \\
+  \midrule
+  Hạ tầng & endpoint-down, host-memory $>$ 90\,\%, disk $>$ 85\,\%, OOM, restart-loop, no-metrics \\
+  Pipeline & crawl-stopped, crawl-blocked ($>$ 20\,\% RATE\_LIMITED/BLOCKED), circuit-open, speed-stale, speed-lag ($>$ 5000 offset),
+             batch-stale (window promote mới nhất $>$ 2,5 h), batch-failed, quality-mandatory FAIL, dlq-burst ($>$ 100/30 phút),
+             consumer-lag ($>$ 10.000), error-burst (Loki) \\
+  Điều phối & dag-failed, scheduler-heartbeat ($>$ 120 s) \\
+  \bottomrule
+\end{xltabular}
+
+\section{Mục tiêu mức dịch vụ (SLO) vận hành}
+\begin{xltabular}{\linewidth}{@{}L{36mm}Y L{40mm}@{}}
+  \toprule
+  \textbf{Chỉ số (SLI)} & \textbf{Mục tiêu} & \textbf{Cảnh báo tương ứng} \\
+  \midrule
+  Độ tươi batch & run promote mới nhất không cũ hơn 2,5 giờ & batch-stale \\
+  Tỉ lệ run thành công & mọi run sau run đầu đều PROMOTED & batch-failed, quality-mandatory \\
+  Độ trễ speed & micro-batch kịp trigger, lag $\le$ 5000 offset & speed-lag, consumer-lag, speed-stale \\
+  Thu thập & có lượt crawl thành công; tỉ lệ bị chặn $\le$ 20\,\% & crawl-stopped, crawl-blocked, circuit-open \\
+  Hàng lỗi & DLQ $\le$ 100 bản tin / 30 phút & dlq-burst \\
+  \bottomrule
+\end{xltabular}
+
+\section{Bảo trì, sao lưu và khôi phục (P8)}
+DAG \code{marketplace_maintenance} (\code{@weekly}): \code{prune_raw} \ra\ \code{backup} \ra\ \code{storage_snapshot}.
+
+\diagramslot{fig-4-7-dag-bao-tri}
+  {DAG \texttt{marketplace\_maintenance} và nội dung backup}
+  {Ba task chạy tuần tự; backup giữ batch lock và chép bốn nhóm: Gold (manifests, \texttt{current.json}, run được trỏ tới), Bronze và Silver, \texttt{pg\_dump} schema audit/cache, SHA-256 từng file.}
+  {Hình 4.7 — \texttt{docs/system/04-pipeline.md} §4.10 (7 node)}
+  {Bảo trì hằng tuần: dọn raw cũ, sao lưu, đo dung lượng.}
+
+\begin{itemize}
+  \item Backup chép Gold \textbf{trước}, sau đó Bronze và Silver; bị từ chối nếu \code{run_id} của pointer khác \code{audit.marketplace_cache_version.run_id}.
+  \item Restore ghi \code{current.json} \textbf{cuối cùng}, sau đó chạy \code{validate --restored}.
+  \item Không sao lưu: Kafka, Elasticsearch, Redis, checkpoint speed; những thứ này dựng lại được từ Bronze.
+  \item Chưa có bảo trì Delta (\code{OPTIMIZE}, \code{VACUUM}) và chưa xoá run Gold cũ (rủi ro R4, Mục~\ref{sec:risks}).
+\end{itemize}
+
+\section{Ma trận lỗi}\label{sec:failure-matrix}
+\begin{xltabular}{\linewidth}{@{}L{26mm}Y L{34mm}Y@{}}
+  \caption{Hỏng chỗ nào thì mất gì}\label{tab:failure-matrix}\\
+  \toprule
+  \textbf{Thành phần hỏng} & \textbf{Ảnh hưởng tức thời} & \textbf{Mất dữ liệu?} & \textbf{Phục hồi} \\
+  \midrule
+  \endfirsthead
+  \toprule \textbf{Thành phần hỏng} & \textbf{Ảnh hưởng tức thời} & \textbf{Mất dữ liệu?} & \textbf{Phục hồi} \\ \midrule
+  \endhead
+  Site chặn, rate limit & circuit mở 15 phút, task chuyển RETRY\_WAIT & không & tự động; cảnh báo crawl-blocked, circuit-open \\
+  MinIO & crawler \code{STORAGE_ERROR} (retry), batch dừng & không: raw chưa ghi thì task chưa thành công & tự động khi MinIO lên lại \\
+  Kafka & crawler \code{PUBLISH_ERROR} (retry); speed dừng & không: Bronze đã có; batch không phụ thuộc Kafka & tự động; speed đọc tiếp từ checkpoint \\
+  Container speed & không có thay đổi mới trên Kibana & không & restart, tiếp tục từ checkpoint (diễn tập E1--E5 ngày 31/10) \\
+  ES, Redis & micro-batch speed lỗi, replay & không & restart; ghi idempotent \\
+  Một stage batch & run FAILED; cache giữ run trước & không & Airflow retry với \code{--resume} \\
+  Quality FAIL & run QUALITY\_FAILED, star được RESTORE & không; Superset giữ bản tốt cuối & sửa nguyên nhân, \code{--resume} \\
+  PostgreSQL & frontier dừng, batch không publish & cache dựng lại được từ Gold; audit có bản trong lake & khôi phục từ backup hoặc publish lại từ lake \\
+  \bottomrule
+\end{xltabular}
+
+\section{Diễn tập sự cố}
+\code{mp.ps1 drill <id>} chạy các kịch bản trong \code{src/ecomdata/ops/drills.py} và kiểm hệ thống phục hồi đúng như ma trận lỗi.
+Quy trình xử lý từng cảnh báo ở \code{docs/RUNBOOK.md}.
+
+\begin{xltabular}{\linewidth}{@{}L{12mm}L{58mm}Y@{}}
+  \caption{Kịch bản diễn tập sự cố}\label{tab:drills}\\
+  \toprule
+  \textbf{Mã} & \textbf{Hàm} & \textbf{Kịch bản} \\
+  \midrule
+  d1 & \code{d1_source_errors} & nguồn trả lỗi \\
+  d2 & \code{d2_kafka_down_during_crawl} & Kafka dừng khi đang crawl \\
+  d4 & \code{d4_sinks_down_during_speed} & sink (ES, Redis) dừng khi speed đang chạy \\
+  d5 & \code{d5_speed_restart} & khởi động lại speed \\
+  d6 & \code{d6_expired_lease} & lease hết hạn \\
+  d7 & \code{d7_parser_schema_drift} & parser gặp schema drift \\
+  d8 & \code{d8_quality_failure} & quality FAIL \\
+  d9 & \code{d9_publish_failure} & publish lỗi \\
+  d10 & \code{d10_concurrent_batches} & hai batch chạy đồng thời \\
+  d11 & \code{d11_backup_and_restore} & sao lưu và khôi phục (chạy cuối vì dừng cả stack) \\
+  \bottomrule
+\end{xltabular}

@@ -1,0 +1,163 @@
+% =====================================================================
+\chapter{Kiến trúc tổng thể}\label{chap:arch}
+% =====================================================================
+\src{src/ecomdata/, compose/docker-compose.yml, databricks.yml, databricks/resources/jobs.yml}
+
+\section{Kiểu kiến trúc}
+Hệ thống theo kiến trúc \textbf{Lambda}, thu thập theo kiểu \textbf{ELT} (ADR-0001). Crawler lưu nguyên vẹn phản hồi
+và từng dòng nguồn vào Bronze; mọi chuẩn hoá làm sau, trong Spark. Từ cùng một Bronze có hai đường:
+
+\begin{itemize}
+  \item \textbf{Batch layer} (đúng, chạy lại được, có phiên bản): mỗi giờ dựng Silver, star \code{dw}, 12 mart,
+        qua cổng chất lượng rồi publish vào PostgreSQL.
+  \item \textbf{Speed layer} (nhanh): Kafka \ra\ Spark Structured Streaming \ra\ phát hiện 7 loại thay đổi theo offer
+        \ra\ Kafka, Elasticsearch, Redis.
+\end{itemize}
+
+Lake theo mô hình \textbf{medallion}: Bronze (nguyên bản, append-only), Silver (chuẩn hoá, có kiểu),
+Gold (star schema dùng chung và mart theo run). Lake là bản lưu duy nhất; PostgreSQL, Elasticsearch, Redis
+và Kafka đều dựng lại được từ lake.
+
+\diagramslot{fig-1-1-toan-canh-lambda}
+  {Toàn cảnh kiến trúc Lambda}
+  {Bronze được ghi trước và là điểm rẽ nhánh; speed đọc bản sao trên Kafka, batch đọc lại Bronze; chỉ run qua cổng chất lượng mới tới PostgreSQL và Superset.}
+  {Hình 1.1 — \texttt{docs/system/01-tong-quan.md} §1.2 (24 node, 25 cạnh)}
+  {Toàn cảnh kiến trúc. Bronze là nguồn sự thật; Kafka chỉ là bản sao nhanh của Bronze/records. Batch đọc lại Bronze theo cửa sổ ngày; PostgreSQL chỉ giữ bản cache của run đã được promote.}
+
+\section{Các thành phần chính}
+\begin{xltabular}{\linewidth}{@{}L{34mm}Y L{42mm}@{}}
+  \caption{Thành phần chính của hệ thống}\label{tab:components}\\
+  \toprule
+  \textbf{Thành phần} & \textbf{Trách nhiệm} & \textbf{Mã nguồn} \\
+  \midrule
+  \endfirsthead
+  \toprule \textbf{Thành phần} & \textbf{Trách nhiệm} & \textbf{Mã nguồn} \\ \midrule
+  \endhead
+  Frontier & hàng đợi việc crawl có lịch, lease, retry, circuit breaker & \code{ingestion/frontier.py}, \code{scheduling.py} \\
+  crawl-worker & tải trang, ghi raw, tách record, publish Kafka, ghi audit & \code{ingestion/service.py}, \code{pipeline.py}, \code{worker.py} \\
+  Bronze & lưu nguyên byte và record nguyên văn & \code{ingestion/raw_store.py}, \code{domain/records.py} \\
+  Normalizer & chuẩn hoá mỗi nguồn về observation canonical (dùng chung batch/speed) & \code{processing/normalize/} \\
+  Batch runner & 7 stage có state machine, lock, resume & \code{processing/batch/runner.py}, \code{stages/} \\
+  Speed service & 2 streaming query, phát hiện thay đổi có trạng thái & \code{processing/speed/service.py} \\
+  Quality gate & 22 luật, quyết định publish, RESTORE star & \code{domain/quality_rules.py}, \code{processing/batch/quality.py} \\
+  Serving & cache PostgreSQL, ES, Redis, Superset, Kibana & \code{processing/batch/repositories.py}, \code{serving/} \\
+  Orchestration & 4 DAG Airflow (DockerOperator) & \code{orchestration/dags/}, \code{tasks.py} \\
+  Ops & backup, restore, prune, drill, bench, evidence & \code{ops/}, \code{scripts/mp.ps1} \\
+  Observability & Alloy, Prometheus, Loki, Grafana & \code{observability/} \\
+  \bottomrule
+\end{xltabular}
+
+\section{Các tầng dữ liệu}\label{sec:data-layers}
+\begin{xltabular}{\linewidth}{@{}L{35mm}L{33mm}L{19mm}L{20mm}Y@{}}
+  \caption{Các tầng dữ liệu, nơi lưu và chính sách ghi}\label{tab:layers}\\
+  \toprule
+  \textbf{Tầng} & \textbf{Nơi lưu} & \textbf{Định dạng} & \textbf{Ai ghi} & \textbf{Chính sách ghi / vai trò} \\
+  \midrule
+  \endfirsthead
+  \toprule \textbf{Tầng} & \textbf{Nơi lưu} & \textbf{Định dạng} & \textbf{Ai ghi} & \textbf{Chính sách ghi / vai trò} \\ \midrule
+  \endhead
+  Frontier, audit vận hành & PostgreSQL schema \code{audit} & bảng & worker, batch, speed & upsert trong transaction; hàng đợi crawl, trạng thái run, kết quả quality, số đo vận hành \\
+  \textbf{Bronze/raw} & \code{ecommerce-bronze}, \code{marketplace/raw/...} & gzip + \code{metadata.json} & worker & append-only, không ghi đè; phản hồi HTTP nguyên vẹn có SHA-256 \\
+  \textbf{Bronze/records} & \code{marketplace/records/source=/observed_date=/hour=/} & JSONL.gz & worker & idempotent theo đường dẫn; từng dòng nguồn đủ trường (trừ PII) \\
+  \textbf{Bronze/crawl\_audit} & \code{marketplace/crawl_audit/...} & JSONL.gz & worker & một file mỗi crawl run (ADR-0008) \\
+  Kafka & 5 topic, 3 partition & JSON canonical & worker, speed & at-least-once; đường nhanh, không phải bản lưu \\
+  \textbf{Silver} & \code{ecommerce-silver}, \code{marketplace/<bảng>/} & Delta & stage \code{silver} & thay nguyên partition ngày; observation chuẩn hoá, bảng rộng, page context, quarantine \\
+  \textbf{Gold \code{dw}} & \code{ecommerce-gold}, \code{marketplace/dw/<bảng>/} & Delta (bắt buộc) & \code{dimensions}, \code{facts} & \code{MERGE} theo khoá, giữ mọi version; star dùng chung \\
+  \textbf{Gold runs} & \code{marketplace/runs/run_id=<run>/<mart>/} & Delta & \code{marts} & một thư mục mỗi run, không ghi đè run khác \\
+  Manifest, pointer & \code{manifests/run_id=<run>/manifest.json}, \code{current.json} & JSON canonical & \code{quality}, \code{promote} & pointer thay nguyên file bằng compare-and-swap \\
+  \textbf{Cache} & PostgreSQL \code{cache.marketplace_*} (12) & bảng & \code{publish} & TRUNCATE + INSERT trong một transaction; Superset đọc \\
+  Speed serving & ES \code{marketplace-*-v1}, Redis \code{rt:*} & document, hash/zset & speed, es-projector & upsert theo id; Kibana, tra cứu thời gian thực \\
+  \bottomrule
+\end{xltabular}
+
+\begin{notebox}[Nguyên tắc lưu trữ]
+\textbf{Lake là bản lưu, PostgreSQL chỉ là cache.} Xoá sạch \code{cache.*} thì dựng lại được từ Gold;
+xoá Gold thì dựng lại được từ Bronze. Kafka, Elasticsearch, Redis và checkpoint speed không cần sao lưu.
+\end{notebox}
+
+\section{Kiến trúc mã nguồn}
+Mã nằm trong một package \code{ecomdata} (\code{src/ecomdata/}), chia theo Ports \& Adapters (ADR-0003).
+\code{import-linter} kiểm luật import trong CI: tầng trên chỉ import tầng dưới; \code{ingestion} và
+\code{processing} cùng tầng nhưng không import nhau.
+
+\begin{xltabular}{\linewidth}{@{}L{10mm}L{48mm}Y@{}}
+  \caption{Năm tầng module}\label{tab:modules}\\
+  \toprule
+  \textbf{Tầng} & \textbf{Package} & \textbf{Nội dung} \\
+  \midrule
+  1 & \code{orchestration}, \code{ops}, \code{serving} & DAG Airflow và \code{tasks.py}; CLI vận hành, backup, drill, bench; es-projector, Kibana, Superset \\
+  2 & \code{ingestion} | \code{processing} & fetcher, extractor, pipeline, frontier, worker | normalize, batch, speed (độc lập nhau) \\
+  3 & \code{infra} & adapter Spark, PostgreSQL, Kafka, object store, HTTP, Playwright \\
+  4 & \code{settings} & dataclass frozen, \code{load_settings()} \\
+  5 & \code{domain} & thuần, không I/O: \code{sources}, \code{records}, \code{observations}, \code{change_rules}, \code{quality_rules}, \code{discount_rules}, \code{datasets}, \code{batch_run} \\
+  \bottomrule
+\end{xltabular}
+
+\diagramslot{fig-1-2-tang-module}
+  {Tầng module trong mã nguồn}
+  {Tầng trên chỉ import tầng dưới; \texttt{ingestion} và \texttt{processing} nằm cùng tầng nhưng không import nhau.}
+  {Hình 1.2 — \texttt{docs/system/01-tong-quan.md} §1.4}
+  {Năm tầng module của package \texttt{ecomdata}. \texttt{ingestion} và \texttt{processing} chỉ gặp nhau qua hợp đồng dữ liệu trong \texttt{domain} (envelope \texttt{marketplace-record.v1}) và qua Bronze.}
+
+Hai điểm khiến batch và speed cho cùng một kết quả:
+\begin{itemize}
+  \item \textbf{Một normalizer theo nguồn} (\code{processing/normalize/sources/tiki.py}, \code{lazada.py} và \code{common.py}) dùng cho cả stage \code{silver} lẫn query normalizer của speed.
+  \item \textbf{Một registry}: \code{domain/sources.py} (mã nguồn \ra\ \code{SourceSpec}), \code{domain/datasets.py} (bảng Gold, khoá, khoá ngoại),
+        \code{domain/quality_rules.py}, \code{domain/change_rules.py}, \code{domain/discount_rules.py}.
+\end{itemize}
+
+\section{Nguyên tắc thiết kế}\label{sec:principles}
+\begin{xltabular}{\linewidth}{@{}L{36mm}L{44mm}Y@{}}
+  \caption{Nguyên tắc thiết kế và hệ quả}\label{tab:principles}\\
+  \toprule
+  \textbf{Nguyên tắc} & \textbf{Thực hiện ở đâu} & \textbf{Hệ quả} \\
+  \midrule
+  \endfirsthead
+  \toprule \textbf{Nguyên tắc} & \textbf{Thực hiện ở đâu} & \textbf{Hệ quả} \\ \midrule
+  \endhead
+  Bronze là sự thật, raw-first & \code{ingestion/pipeline.py}: ghi raw trước khi kiểm HTTP status, trước khi parse & trang lỗi 4xx/5xx vẫn còn bằng chứng; parser đổi thì \code{reparse} dựng lại records \\
+  ID tất định & \code{domain/identity.py} (\code{deterministic_id} = SHA-256 các phần nối bằng ký tự phân cách \code{0x1F}) & ghi lại, replay Kafka, chạy lại batch đều ra cùng byte; không cần exactly-once \\
+  Publish Kafka sau khi file đã ghi & \code{ingestion/service.py:388-411} & Kafka không bao giờ có record mà Bronze không có \\
+  Một normalizer cho batch và speed & \code{processing/normalize/} & hai đường không lệch định nghĩa \\
+  Cổng chất lượng chặn publish & \code{processing/batch/quality.py::decide} & run lỗi không tới Superset; cache giữ bản tốt cuối cùng \\
+  Star đã chứng nhận (ADR-0007) & stage \code{quality}: \code{RESTORE TABLE ... VERSION AS OF} & run bị từ chối không để lại star bẩn cho run sau \\
+  Publish trước promote (ADR-0005) & stage \code{publish} \ra\ \code{promote} & \code{current.json} không trỏ vào Gold mà cache chưa có \\
+  Luật trước, ML chỉ xếp hạng (ADR-0009) & \code{processing/batch/discount.py} & phán quyết đọc được lý do; Isolation Forest chỉ sắp thứ tự xem tay \\
+  \bottomrule
+\end{xltabular}
+
+\section{Công nghệ}\label{sec:tech}
+\begin{xltabular}{\linewidth}{@{}L{30mm}Y L{52mm}@{}}
+  \caption{Công nghệ và phiên bản}\label{tab:tech}\\
+  \toprule
+  \textbf{Mảng} & \textbf{Công nghệ} & \textbf{Phiên bản} \\
+  \midrule
+  \endfirsthead
+  \toprule \textbf{Mảng} & \textbf{Công nghệ} & \textbf{Phiên bản} \\ \midrule
+  \endhead
+  Ngôn ngữ & Python & 3.12 \\
+  Xử lý & Apache Spark (PySpark), Structured Streaming, Delta Lake & Spark 4.0.1, image \code{ecommerce/spark-marketplace:4.0.1-r4} \\
+  Thu thập & \code{requests} (Tiki), Playwright Chromium (Lazada) & image \code{ecommerce/crawler-browser:1} (Playwright 1.55.0) \\
+  Message bus & Apache Kafka, KRaft & 4.2.0 \\
+  Object store & MinIO (local), Amazon S3 (Databricks) & \\
+  Cơ sở dữ liệu & PostgreSQL & 18.3 \\
+  Speed serving & Elasticsearch, Kibana; Redis & 8.18.1; 8.6.2 \\
+  BI & Apache Superset & 4.1.1 \\
+  Điều phối & Apache Airflow (LocalExecutor, DockerOperator) & 3.3.2 \\
+  Giám sát & Grafana Alloy, Prometheus, Loki, Grafana & 1.10.0; 3.2.1; 3.4.2; 11.5.2 \\
+  ML & scikit-learn Isolation Forest (chỉ xếp hạng) & \\
+  Cloud & Databricks Asset Bundle & DBR 17.3 (Spark 4.0) \\
+  \bottomrule
+\end{xltabular}
+
+\section{Quyết định kiến trúc}
+Chín ADR trong \code{docs/adr/} ghi lý do của các lựa chọn trên. Bảng tóm tắt ở Phụ lục~\ref{app:adr}.
+Ba quyết định định hình hệ thống nhiều nhất:
+
+\begin{enumerate}
+  \item \textbf{ELT với envelope \code{marketplace-record.v1}} (ADR-0001): pipeline cũ chuẩn hoá lúc crawl và chỉ giữ khoảng 17 trên 133 trường lá
+        của mỗi sản phẩm Tiki; trường đã bỏ không khôi phục được nếu không crawl lại. Nay crawler chỉ tìm mảng dòng; mọi chuẩn hoá ở Spark.
+  \item \textbf{Batch theo stage có state machine} (ADR-0005): mỗi stage đọc/ghi storage, không truyền DataFrame; chạy lại idempotent; Airflow
+        lập lịch từng stage (ADR-0002).
+  \item \textbf{Run sở hữu cửa sổ ngày, star chỉ giữ khi qua cổng} (ADR-0007): sửa bốn lỗi khiến chạy lại hoặc chạy bù làm sai Silver và star.
+\end{enumerate}

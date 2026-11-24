@@ -1,0 +1,105 @@
+% =====================================================================
+\chapter{Bối cảnh nghiệp vụ và yêu cầu}\label{chap:req}
+% =====================================================================
+
+\section{Bài toán}
+Hệ thống quan sát \textbf{trạng thái công khai của catalog và giá} trên sàn thương mại điện tử Việt Nam.
+Tiki là nguồn chính; Lazada là nguồn minh hoạ khả năng đa nguồn. Dữ liệu có được là những gì sàn hiển thị
+cho một khách vãng lai trên trang danh mục: tiêu đề, giá, giá niêm yết, mức giảm, tình trạng còn hàng,
+điểm đánh giá, các bộ đếm công khai (đã bán, số đánh giá) và vị trí xếp hạng.
+
+Hệ thống \textbf{không} có đơn hàng, thanh toán, giỏ hàng hay người dùng, và không mô hình nào giả lập chúng.
+Bộ đếm \code{sold_count} tăng không có nghĩa là một đơn hàng; mọi bảng chạm tới counter đều giữ cả delta thô
+lẫn phán quyết hợp lệ của từng bước chuyển.
+
+\section{Câu hỏi nghiệp vụ}
+\begin{xltabular}{\linewidth}{@{}L{8mm}Y L{58mm}@{}}
+  \caption{Câu hỏi nghiệp vụ và nơi trả lời}\label{tab:bq}\\
+  \toprule
+  \textbf{\#} & \textbf{Câu hỏi} & \textbf{Trả lời ở} \\
+  \midrule
+  BQ1 & Giá của một offer thay đổi thế nào theo thời gian? Thay đổi nào bất thường so với lịch sử của chính nó? &
+        mart \code{offer_price_history_daily}, \code{price_anomaly_daily} \\
+  BQ2 & Mức giảm giá sàn hiển thị có đáng tin không, so với giá trước đó của chính offer? &
+        mart \code{discount_credibility_daily}, \code{discount_daily} (ADR-0009) \\
+  BQ3 & Khi một listing thay đổi (giá, tồn kho, đánh giá), bao lâu thì thấy được? Độ phủ và độ tươi của mỗi nguồn ra sao? &
+        speed layer; mart \code{source_coverage_daily}, \code{offer_freshness}, \code{crawl_reliability_daily} \\
+  \bottomrule
+\end{xltabular}
+
+\section{Bên liên quan và người dùng}
+\begin{xltabular}{\linewidth}{@{}L{38mm}Y L{40mm}@{}}
+  \toprule
+  \textbf{Vai trò} & \textbf{Nhu cầu} & \textbf{Giao diện} \\
+  \midrule
+  Nhà phân tích giá & lịch sử giá, giá bất thường, độ tin cậy khuyến mãi theo offer và danh mục & Superset (dashboard \code{marketplace-batch-gold}) \\
+  Người theo dõi thời gian thực & thay đổi giá, tồn kho, giảm giá lớn ngay khi crawler thấy & Kibana, Redis \code{rt:*}, topic \code{marketplace.changes.v1} \\
+  Người vận hành & crawl có chạy không, batch có promote không, quality có chặn không & Grafana, Airflow UI, \code{scripts/mp.ps1 status} \\
+  Kỹ sư dữ liệu & thêm nguồn, sửa normalizer, chạy lại lịch sử & CLI \code{ecomdata}, DAG \code{marketplace_reprocess} \\
+  \bottomrule
+\end{xltabular}
+
+\section{Yêu cầu chức năng}
+\begin{xltabular}{\linewidth}{@{}L{12mm}Y L{44mm}@{}}
+  \caption{Yêu cầu chức năng}\label{tab:fr}\\
+  \toprule
+  \textbf{Mã} & \textbf{Yêu cầu} & \textbf{Hiện thực} \\
+  \midrule
+  \endfirsthead
+  \toprule \textbf{Mã} & \textbf{Yêu cầu} & \textbf{Hiện thực} \\ \midrule
+  \endhead
+  FR-01 & Thu thập trang danh mục theo lịch, có ưu tiên (tier), tôn trọng robots.txt và giới hạn tốc độ theo host. & frontier, \code{infra/http.py} (Chương~\ref{chap:ingest}) \\
+  FR-02 & Lưu nguyên byte mọi phản hồi, kể cả phản hồi lỗi, kèm checksum. & Bronze/raw \\
+  FR-03 & Giữ mọi trường của nguồn (trừ PII khai báo), không chọn trường lúc crawl (ELT). & Bronze/records, ADR-0001 \\
+  FR-04 & Chuẩn hoá mọi nguồn về một mô hình observation chung; tách dòng lỗi vào quarantine có lý do. & stage \code{silver} \\
+  FR-05 & Dựng star schema có SCD2 cho listing, dùng chung cho mọi run. & stage \code{dimensions}, \code{facts} \\
+  FR-06 & Dựng 12 mart theo run, cắt tại \code{as_of}, chỉ xét dòng organic. & stage \code{marts} \\
+  FR-07 & Chặn publish khi một luật chất lượng bắt buộc không đạt; phục vụ bản tốt cuối cùng. & stage \code{quality}, \code{publish}, \code{promote} \\
+  FR-08 & Phát hiện 7 loại thay đổi theo offer trong thời gian gần thực. & speed layer (Mục~\ref{sec:speed}) \\
+  FR-09 & Truy ngược từ một con số trên dashboard về byte HTTP gốc. & lineage (Mục~\ref{sec:lineage}) \\
+  FR-10 & Chạy lại một khoảng lịch sử hoặc dựng lại toàn bộ từ Bronze khi parser/normalizer đổi. & \code{reparse}, DAG \code{marketplace_reprocess} \\
+  FR-11 & Thêm một nguồn mới mà không sửa batch, speed hay ops. & \code{SourceSpec}, ADR-0004 \\
+  FR-12 & Sao lưu và khôi phục nhất quán giữa lake và cache. & \code{ops backup}/\code{restore} \\
+  \bottomrule
+\end{xltabular}
+
+\section{Yêu cầu phi chức năng}
+\begin{xltabular}{\linewidth}{@{}L{14mm}L{28mm}Y L{36mm}@{}}
+  \caption{Yêu cầu phi chức năng và mức đo được}\label{tab:nfr}\\
+  \toprule
+  \textbf{Mã} & \textbf{Thuộc tính} & \textbf{Mục tiêu} & \textbf{Đo được} \\
+  \midrule
+  \endfirsthead
+  \toprule \textbf{Mã} & \textbf{Thuộc tính} & \textbf{Mục tiêu} & \textbf{Đo được} \\ \midrule
+  \endhead
+  NFR-01 & Độ tươi batch & mart được promote mỗi giờ; cảnh báo khi run promote mới nhất cũ hơn 2,5 giờ & 10/10 run PROMOTED trong 9 giờ 16 phút (13--14/11) \\
+  NFR-02 & Độ trễ speed & thay đổi xuất hiện trên Kibana trong khoảng 1 phút sau khi crawl (trigger 30 s) & p95 khoảng 59--62 s sau khi đuổi kịp tồn đọng \\
+  NFR-03 & Độ đúng & batch và speed cùng định nghĩa observation; chạy lại không sinh bản trùng & một normalizer dùng chung; ID tất định \\
+  NFR-04 & Khả năng phục hồi & mất Kafka, ES, Redis hoặc PostgreSQL không mất dữ liệu gốc & Bronze là nguồn sự thật; ma trận lỗi Mục~\ref{sec:failure-matrix} \\
+  NFR-05 & Tái lập & một run tái lập được trên đúng star mà nó đã đọc & manifest ghi \code{dw_versions} \\
+  NFR-06 & Lịch sự với site & $\ge$ 2 s/request/host (Tiki), $\ge$ 5 s (Lazada); không vượt anti-bot & \code{Throttle}, robots, circuit breaker \\
+  NFR-07 & Quan sát được & mọi tầng có metrics, log, cảnh báo & 5 dashboard, 19 luật cảnh báo \\
+  NFR-08 & Tài nguyên & chạy được trên một laptop, mỗi lượt $\le$ 5--6 giờ & stack local một bản mỗi service \\
+  NFR-09 & Khả chuyển & cùng mã chạy được trên cloud & job Databricks (DBR 17.3) \\
+  NFR-10 & Bảo trì được & luật import giữa các tầng được kiểm trong CI & \code{import-linter}, \code{tests/architecture/} \\
+  \bottomrule
+\end{xltabular}
+
+\section{Ràng buộc và giả định}
+\begin{itemize}
+  \item \textbf{Pháp lý, đạo đức thu thập}: chỉ dữ liệu công khai; tôn trọng robots.txt (không tải được robots thì coi như cấm toàn bộ);
+        user-agent tự khai danh tính (\code{EcommercePriceResearchBot/0.1}); không vượt captcha hay chặn traffic.
+        Vì vậy Shopee không được crawl (ADR-0006).
+  \item \textbf{Phần cứng}: stack chạy trên một laptop/PC cá nhân; Docker Desktop; mỗi lượt chạy liên tục tối đa khoảng 5--6 giờ.
+  \item \textbf{Phạm vi dữ liệu}: Tiki chỉ trang 1 của mỗi danh mục (40 sản phẩm); Lazada có phân trang nhưng bị chặn nhanh.
+  \item \textbf{Lưu trữ}: lake (Delta trên MinIO/S3) là bản lưu; PostgreSQL chỉ là cache phục vụ và kho trạng thái vận hành (quyết định 26/10/2026, ADR-0008).
+  \item \textbf{Thời gian}: mọi mốc thời gian dữ liệu là UTC; \code{run_id} và \code{as_of} theo UTC.
+\end{itemize}
+
+\section{Ngoài phạm vi}
+\begin{itemize}
+  \item Đơn hàng, doanh thu thật, hành vi người dùng.
+  \item Dự báo nhu cầu theo danh mục: hoãn tới khi có ít nhất ba tuần dữ liệu liên tục (ADR-0009).
+  \item Ghép cùng một sản phẩm giữa các sàn (product matching).
+  \item Chạy 24/7 có tính sẵn sàng cao: mọi service chạy một bản.
+\end{itemize}

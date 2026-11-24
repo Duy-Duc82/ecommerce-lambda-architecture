@@ -1,0 +1,94 @@
+% =====================================================================
+%  weekly-preamble.tex — khung cho báo cáo kỹ thuật
+%  Biên dịch bằng XeLaTeX (hoặc tectonic). Không dùng pdfLaTeX.
+% =====================================================================
+\usepackage[a4paper,margin=20mm,headheight=14pt]{geometry}
+\usepackage{fontspec}
+\setmainfont{texgyrepagella}[Extension=.otf, UprightFont=*-regular, BoldFont=*-bold,
+  ItalicFont=*-italic, BoldItalicFont=*-bolditalic]
+\setsansfont{texgyreheros}[Extension=.otf, UprightFont=*-regular, BoldFont=*-bold,
+  ItalicFont=*-italic, BoldItalicFont=*-bolditalic]
+\setmonofont{lmmono10}[Extension=.otf, UprightFont=*-regular, ItalicFont=*-italic,
+  BoldFont=lmmonolt10-bold, Scale=0.92]
+\usepackage{polyglossia}
+\setdefaultlanguage{vietnamese}
+
+\usepackage{amsmath,amssymb}
+\usepackage{xcolor}
+\usepackage{booktabs,array,xltabular}
+\usepackage{enumitem}
+\usepackage{fancyvrb}
+\usepackage{titlesec}
+\usepackage{fancyhdr}
+\usepackage{tcolorbox}
+\tcbuselibrary{skins,breakable}
+\usepackage[hidelinks,unicode]{hyperref}
+
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{4pt plus 1pt}
+\setlength{\emergencystretch}{3em}
+\tolerance=2000
+\renewcommand{\arraystretch}{1.15}
+\setlist{itemsep=1pt,topsep=3pt,parsep=0pt}
+
+\definecolor{brand}{HTML}{1E3A8A}
+\definecolor{muted}{HTML}{6B7280}
+
+\titleformat{\section}{\sffamily\Large\bfseries\color{brand}}{\thesection}{0.6em}{}
+\titleformat{\subsection}{\sffamily\large\bfseries}{\thesubsection}{0.6em}{}
+\titleformat{\subsubsection}{\sffamily\normalsize\bfseries}{\thesubsubsection}{0.5em}{}
+\titlespacing*{\section}{0pt}{12pt}{6pt}
+\titlespacing*{\subsection}{0pt}{8pt}{4pt}
+
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[L]{\small\sffamily\color{muted}\ReportTitle}
+\fancyhead[R]{\small\sffamily\color{muted}\ReportPeriod}
+\fancyfoot[R]{\small\sffamily\thepage}
+\renewcommand{\headrulewidth}{0.4pt}
+
+% \code{...}: định danh trong mã, giữ khoảng trắng, ngắt dòng tại / . _ - : , = |
+\ExplSyntaxOn
+\NewDocumentCommand \code { m }
+  {
+    \texttt
+      {
+        \str_map_inline:nn {#1}
+          {
+            ##1
+            \str_case:nnF {##1}
+              { {/}{\allowbreak} {.}{\allowbreak} {_}{\allowbreak}
+                {-}{\allowbreak} {:}{\allowbreak} {,}{\allowbreak}
+                {=}{\allowbreak} {|}{\allowbreak} }
+              { }
+          }
+      }
+  }
+\ExplSyntaxOff
+
+\newcommand{\ra}{\ensuremath{\rightarrow}}
+\newcommand{\src}[1]{{\small\color{muted}Mã nguồn: \code{#1}}\par}
+
+\newcolumntype{L}[1]{>{\raggedright\arraybackslash}p{#1}}
+\newcolumntype{Y}{>{\raggedright\arraybackslash}X}
+
+% Code block nhỏ
+\DefineVerbatimEnvironment{codeblock}{Verbatim}{fontsize=\small,frame=leftline,
+  framerule=1.2pt,rulecolor=\color{muted},xleftmargin=6pt,framesep=6pt}
+
+% \figslot{tên-file}{chiều cao ô}{chú thích}
+%   Có figures/<tên-file>.pdf|png|jpg thì chèn hình; chưa có thì để ô trắng.
+%   Tham chiếu: \ref{fig:<tên-file>}
+\usepackage{graphicx,float,caption}
+\captionsetup{font=small,labelfont=bf}
+\graphicspath{{figures/}}
+\newcommand{\figimg}[1]{\includegraphics[width=\linewidth,height=0.45\textheight,keepaspectratio]{#1}}
+\newcommand{\figslot}[3]{%
+  \begin{figure}[H]\centering
+    \IfFileExists{figures/#1.pdf}{\figimg{#1.pdf}}{%
+    \IfFileExists{figures/#1.png}{\figimg{#1.png}}{%
+    \IfFileExists{figures/#1.jpg}{\figimg{#1.jpg}}{%
+      {\setlength{\fboxsep}{0pt}\color{muted!60}\fbox{\parbox[b][#2][b]{\dimexpr\linewidth-0.8pt}{%
+        \hfill{\scriptsize\ttfamily\color{muted!80}figures/#1\ }\par\vspace{2pt}}}}}}}
+    \caption{#3}\label{fig:#1}
+  \end{figure}}

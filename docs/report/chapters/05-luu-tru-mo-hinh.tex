@@ -1,0 +1,248 @@
+% =====================================================================
+\chapter{Lưu trữ và mô hình dữ liệu}\label{chap:storage}
+% =====================================================================
+\src{src/ecomdata/domain/ (records, observations, identity, datasets), processing/normalize/, processing/batch/, docs/model/}
+
+\section{Bronze}\label{sec:bronze}
+\subsection{Bố cục và quy tắc ghi}
+\begin{verbatim}
+ecommerce-bronze/marketplace/raw/marketplace=tiki/observed_date=2026-11-14/hour=03/
+    crawl_run_id=crawl_run_.../raw_artifact_id=raw_.../
+        part-0.bin.gz
+        metadata.json          # marketplace-raw-artifact-metadata.v2
+ecommerce-bronze/marketplace/records/source=tiki/observed_date=2026-11-14/hour=03/
+    raw_....jsonl.gz           # một file mỗi raw artifact
+ecommerce-bronze/marketplace/crawl_audit/observed_date=.../hour=.../
+    crawl_run_id=....jsonl.gz  # một file mỗi crawl run
+\end{verbatim}
+
+\begin{xltabular}{\linewidth}{@{}L{30mm}Y@{}}
+  \caption{Quy tắc của tầng Bronze}\label{tab:bronze-rules}\\
+  \toprule
+  \textbf{Quy tắc} & \textbf{Chi tiết} \\
+  \midrule
+  Thứ tự ghi & các part trước, \code{metadata.json} sau; records sau raw; Kafka sau records \\
+  Toàn vẹn & SHA-256 của từng part (body chưa nén) và của cả danh sách part (\code{body_sha256}) \\
+  Tất định & JSON canonical, gzip mức 6 với \code{mtime=0}: ghi lại một artifact cho ra cùng byte \\
+  Partition & raw: \code{marketplace/observed_date/hour/crawl_run_id/raw_artifact_id}; records: \code{source/observed_date/hour}; crawl audit: theo ngày bắt đầu run \\
+  Tương thích & đọc được raw v1 (\code{body.bin}), chỉ ghi v2 \\
+  Lưu giữ & \code{ops prune-raw} (hằng tuần) xoá raw cũ hơn \code{MARKETPLACE_RAW_RETENTION_DAYS} = 30 ngày; records, Silver, Gold không bị xoá \\
+  Reparse & \code{python -m ecomdata.ingestion.reparse}: kiểm checksum, extract lại, so từng record; chỉ đọc \\
+  \bottomrule
+\end{xltabular}
+
+\subsection{Hợp đồng \texttt{marketplace-record.v1}}
+\begin{xltabular}{\linewidth}{@{}L{55mm}Y@{}}
+  \caption{Trường của envelope record}\label{tab:record-envelope}\\
+  \toprule
+  \textbf{Trường} & \textbf{Ý nghĩa} \\
+  \midrule
+  \code{schema_version} & \code{marketplace-record.v1} \\
+  \code{record_id} & \code{deterministic_id("rec", raw_artifact_id, kind, index)} \\
+  \code{source_code}, \code{marketplace_id} & \code{tiki} / \code{marketplace-tiki} \\
+  \code{record_kind}, \code{record_index} & \code{listing_row} hoặc \code{page_context}; vị trí trên trang \\
+  \code{raw_artifact_id}, \code{raw_uri}, \code{body_sha256} & lineage về raw \\
+  \code{crawl_run_id}, \code{adapter_version}, \code{extractor_version} & phiên bản mã đã sinh record \\
+  \code{request_target}, \code{request_page}, \code{fetched_at}, \code{http_status} & ngữ cảnh lần tải \\
+  \code{payload} & \textbf{nguyên văn JSON của nguồn}, trừ PII \\
+  \code{dropped_fields} & các trường PII thực sự đã bỏ \\
+  \bottomrule
+\end{xltabular}
+
+Payload Tiki giữ hơn 50 trường (\code{id}, \code{sku}, \code{name}, \code{price}, \code{original_price}, \code{list_price},
+\code{discount_rate}, \code{rating_average}, \code{review_count}, \code{quantity_sold.value}, \code{seller_id}, \code{brand_name},
+\code{primary_category_path}, \code{availability}, \code{advertisement}, \code{badges_v3}, \ldots). Chưa trường nào được đổi tên hay ép kiểu.
+
+\section{Kafka}\label{sec:kafka}
+\begin{xltabular}{\linewidth}{@{}L{40mm}L{24mm}L{26mm}L{22mm}Y@{}}
+  \caption{Danh mục topic Kafka}\label{tab:topics}\\
+  \toprule
+  \textbf{Topic} & \textbf{Producer} & \textbf{Consumer} & \textbf{Key} & \textbf{Value} \\
+  \midrule
+  \endfirsthead
+  \toprule \textbf{Topic} & \textbf{Producer} & \textbf{Consumer} & \textbf{Key} & \textbf{Value} \\ \midrule
+  \endhead
+  \code{marketplace.records.v1} & crawl-worker & speed normalizer & \code{<source>|<target>} & \code{marketplace-record.v1} (chỉ \code{listing_row}) \\
+  \code{marketplace.records.v1.dlq} & speed normalizer & xem tay & \code{record_id} & \code{reason}, \code{record} \\
+  \code{marketplace.observations.v1} & speed normalizer & speed stateful & \code{<code>:<listing_id>} & \code{marketplace-observation.v1} \\
+  \code{marketplace.observations.v1.dlq} & speed stateful & es-projector & \code{dlq_id} & \code{marketplace-observation-dlq.v1} \\
+  \code{marketplace.changes.v1} & speed stateful & hạ nguồn & \code{offer_id} & \code{marketplace-change.v1} \\
+  \bottomrule
+\end{xltabular}
+
+Mỗi topic có 3 partition, replication factor 1, retention mặc định của broker (7 ngày); topic do \code{kafka-init} tạo.
+Producer dùng \code{kafka-python-ng} với \code{acks=all}, \code{retries=5}, \code{max_in_flight=1}: giao \textbf{ít nhất một lần}.
+Độ đúng không dựa vào exactly-once mà dựa vào ID tất định và ghi idempotent ở phía nhận.
+Kafka \textbf{không phải bản lưu}: mất toàn bộ Kafka thì batch không ảnh hưởng, còn speed dựng lại state bằng replay từ Bronze.
+
+\section{Silver}\label{sec:silver}
+\begin{xltabular}{\linewidth}{@{}L{42mm}Y@{}}
+  \caption{Bảng Silver (Delta, partition \texttt{source\_code, observed\_date})}\label{tab:silver-tables}\\
+  \toprule
+  \textbf{Bảng} & \textbf{Nội dung} \\
+  \midrule
+  \code{offer_observations_v2} & observation hợp lệ, 53 cột canonical, gồm cả quảng cáo (cờ \code{is_advertisement}) \\
+  \code{tiki_listing_wide}, \code{lazada_listing_wide} & mọi trường đã khai báo của nguồn, cột struct \code{p} và \code{payload_json} \\
+  \code{page_context} & ngữ cảnh trang danh mục (filter, paging, breadcrumb\ldots) \\
+  \code{quarantine} & dòng không hợp lệ kèm lý do \\
+  \bottomrule
+\end{xltabular}
+
+\begin{xltabular}{\linewidth}{@{}L{40mm}L{46mm}Y@{}}
+  \caption{Ánh xạ trường Tiki sang cột canonical (\texttt{normalize/sources/tiki.py:229-258})}\label{tab:tiki-mapping}\\
+  \toprule
+  \textbf{Cột canonical} & \textbf{Từ payload Tiki} & \textbf{Quy tắc} \\
+  \midrule
+  \endfirsthead
+  \toprule \textbf{Cột canonical} & \textbf{Từ payload} & \textbf{Quy tắc} \\ \midrule
+  \endhead
+  \code{platform_listing_id} & \code{id} & \\
+  \code{product_title} & \code{name} & \\
+  \code{current_price} & \code{price} & \code{try_cast decimal(38,6)}; giữ nếu $\ge 0$ \\
+  \code{list_price} & \code{list_price}, nếu không có thì \code{original_price} & chỉ giữ nếu $> 0$ \\
+  \code{discount_amount}, \code{discount_percent} & \code{discount}, \code{discount_rate} & ngoài miền (âm, $> 100\,\%$) \ra\ null \\
+  \code{rating_value}, \code{rating_scale} & \code{rating_average}, hằng \code{5} & thang chỉ đặt khi có điểm \\
+  \code{review_count}, \code{sold_count} & \code{review_count}, \code{quantity_sold.value} & số nguyên $\ge 0$, nếu không \ra\ null \\
+  \code{availability} & \code{availability} + \code{shippable} & \code{IN_STOCK} / \code{OUT_OF_STOCK} / \code{UNKNOWN} \\
+  \code{seller_id} & hash(code, \code{seller_id}) & \\
+  \code{brand}, \code{brand_id}, \code{category_path}, \code{category_ids} & \code{brand_name}, \code{brand_id}, \code{primary_category_path}, \code{category_ids} & \\
+  \code{source_url} & \code{https://tiki.vn/} + \code{url_key} + \code{.html} & \\
+  \code{is_advertisement} & \code{advertisement} không rỗng & \\
+  \code{ranking_position} / \code{search_rank} & vị trí trong dòng organic / mọi dòng & $(\text{page}-1)\cdot 40 + \text{rank}$ \\
+  \code{observed_at}, \code{fetched_at} & \code{fetched_at} của record & hai cột bằng nhau \\
+  \code{offer_id} & sha256(\code{offer}, code, listing\_id) & \\
+  \code{observation_id} & sha256(\code{obs}, code, listing\_id, observed\_at, body\_sha256) & quảng cáo thêm \code{ad}, \code{record_index} \\
+  \bottomrule
+\end{xltabular}
+
+Lý do quarantine, lấy lý do \textbf{đầu tiên} khớp (\code{common.py:436-447}): \code{missing_listing_id},
+\code{duplicate_listing_on_page} (một offer organic xuất hiện hai lần trên cùng trang), \code{missing_title},
+\code{missing_or_invalid_price}, \code{missing_fetched_at}, \code{missing_lineage}. Ngoài ra envelope sai phiên bản hoặc nguồn chưa
+đăng ký vào quarantine với lý do \code{unsupported_envelope}, \code{unknown_source}.
+
+\section{Gold: star schema \texttt{dw}}\label{sec:star}
+Star nằm ở \code{gold/marketplace/dw/<bảng>/}, ngoài thư mục run, gồm 7 dimension, 1 bridge và 6 fact (14 bảng Delta).
+Fact partition theo \code{date_key}. Surrogate key = \code{xxhash64(natural key)}; bất kỳ phần nào NULL thì khoá là $-1$,
+và mọi dimension có dòng ``unknown member'' khoá $-1$. \code{date_key} = \code{yyyyMMdd}. Cột đầy đủ ở \code{docs/model/star-schema.dbml}.
+
+\diagramslot{fig-2-3-star-schema}
+  {Star schema rút gọn (\texttt{gold/marketplace/dw})}
+  {\texttt{fact\_offer\_observation} ở giữa nối với cả 7 dimension; các fact còn lại chỉ nối với vài dimension; \texttt{dim\_category} có bridge tổ tiên/hậu duệ riêng. (Có thể dựa trên \texttt{docs/model/marketplace\_star\_schema.png}.)}
+  {Hình 2.3 — \texttt{docs/system/02-luong-du-lieu.md} §H7 (ER, 14 thực thể)}
+  {Star schema rút gọn. Mọi quan hệ là một-nhiều, đầu ``một'' ở dimension. Cột đầy đủ ở \texttt{docs/model/star-schema.dbml}.}
+
+\subsection{Dimension}
+\begin{xltabular}{\linewidth}{@{}L{38mm}L{32mm}L{20mm}Y@{}}
+  \caption{Dimension và bridge}\label{tab:dims}\\
+  \toprule
+  \textbf{Bảng} & \textbf{Khoá tự nhiên} & \textbf{Lịch sử} & \textbf{Cách dựng} \\
+  \midrule
+  \endfirsthead
+  \toprule \textbf{Bảng} & \textbf{Khoá tự nhiên} & \textbf{Lịch sử} & \textbf{Cách dựng} \\ \midrule
+  \endhead
+  \code{dim_date} & \code{full_date} & tĩnh & 2019-01-01 đến 2030-12-31; ngày đôi (\code{day == month}), ngày lễ Việt Nam gồm Tết âm lịch, Giỗ Tổ \\
+  \code{dim_marketplace} & \code{marketplace_code} & SCD1 & mã đã thấy $\times$ thuộc tính registry \\
+  \code{dim_seller} & \code{seller_id} & SCD1 & giá trị mới nhất có mặt (\code{max_by}) \\
+  \code{dim_brand} & (\code{marketplace_code}, \code{brand_id}) & SCD1 & không có id thì không có dòng \\
+  \code{dim_category} & (\code{marketplace_code}, \code{category_id}) & SCD1, dựng lại & \code{posexplode} đường dẫn; tranh chấp cha giải theo page context $>$ lần thấy mới nhất $>$ path lớn hơn; danh mục chỉ được request mà chưa thấy sản phẩm thành ``inferred member'' \\
+  \code{bridge_category_ancestry} & (\code{ancestor_key}, \code{descendant_key}) & dựng lại & bao đóng bắc cầu theo \code{parent_key}, gồm chính nó ở depth 0 \\
+  \code{dim_product_listing} & (\code{offer_id}, \code{valid_from}) & \textbf{SCD2} & Mục~\ref{sec:scd2} \\
+  \code{dim_listing_flags} & 9 cờ & tĩnh & sinh đủ mọi tổ hợp (junk dimension) \\
+  \bottomrule
+\end{xltabular}
+
+\subsection{SCD2 của \texttt{dim\_product\_listing}}\label{sec:scd2}
+Bốn thuộc tính SCD2: \code{product_title}, \code{brand_key}, \code{category_key}, \code{seller_key}. Thuộc tính SCD1
+(\code{sku}, \code{origin}, \code{is_authentic}\ldots) lấy giá trị mới nhất và ghi lên mọi version.
+
+\diagramslot{fig-3-3-scd2-listing}
+  {Dựng SCD2 cho \texttt{dim\_product\_listing}}
+  {Version mới chỉ mở khi một trong bốn thuộc tính SCD2 đổi; thuộc tính SCD1 được ghi đè lên mọi version; khoá thay thế tất định theo (\texttt{offer\_id}, \texttt{valid\_from}).}
+  {Hình 3.3 — \texttt{docs/system/03-xu-ly-trong-tang.md} §3.6}
+  {Dựng SCD2 của \texttt{dim\_product\_listing} (\texttt{dimensions.py:556-640}).}
+
+Ví dụ: một offer đổi tiêu đề ngày 12/11 sẽ có hai version. Fact ngày 10/11 trỏ tới version 1, fact ngày 13/11 trỏ tới version 2.
+\code{valid_to} = \code{valid_from} của version sau, hoặc 9999-12-31; \code{listing_key} = \code{xxhash64(offer_id, valid_from)}.
+Quality kiểm mỗi offer có đúng một version \code{is_current} và các khoảng hiệu lực nối liền.
+
+\subsection{Fact và bus matrix}
+\begin{xltabular}{\linewidth}{@{}Y C{9mm}C{13mm}C{12mm}C{10mm}C{11mm}C{16mm}C{9mm}@{}}
+  \caption{Bus matrix (fact $\times$ dimension)}\label{tab:bus-matrix}\\
+  \toprule
+  \textbf{Fact (grain)} & \textbf{date} & \textbf{market} & \textbf{listing} & \textbf{seller} & \textbf{brand} & \textbf{category} & \textbf{flags} \\
+  \midrule
+  \code{fact_offer_observation} (một sighting) & \cmark & \cmark & \cmark & \cmark & \cmark & listing + trang & \cmark \\
+  \code{fact_price_snapshot_daily} (offer $\times$ ngày $\times$ tiền tệ, organic) & \cmark & \cmark & \cmark & \cmark & \cmark & \cmark & \cmark \\
+  \code{fact_price_change} (sighting có giá khác lần trước) & \cmark & \cmark & \cmark & \cmark & \cmark & \cmark & \\
+  \code{fact_counter_daily} (offer $\times$ ngày $\times$ counter) & \cmark & \cmark & \cmark & & & & \\
+  \code{fact_category_page_daily} (trang danh mục $\times$ ngày $\times$ tiền tệ) & \cmark & \cmark & & & & trang & \\
+  \code{fact_crawl_attempt} (một HTTP attempt) & \cmark & \cmark & & & & trang & \\
+  \bottomrule
+\end{xltabular}
+
+Logic đặc biệt của fact:
+\begin{itemize}
+  \item \code{fact_price_snapshot_daily}: \code{open_price}/\code{close_price} bằng \code{min_by}/\code{max_by} theo thứ tự (\code{observed_at}, \code{fetched_at}, \code{observation_id}); \code{in_stock_ratio}; chỉ organic.
+  \item \code{fact_price_change}: \code{lag} theo offer; \code{is_large_drop} cùng ngưỡng với speed ($\ge$ 100.000 hoặc $\ge 20\,\%$, cùng tiền tệ).
+  \item \code{fact_counter_daily}: dùng lại bộ phân loại bước chuyển của mart counter (Mục~\ref{sec:counter-rules}).
+  \item \code{fact_category_page_daily}: đếm theo \textbf{trang} chứa sản phẩm (\code{page_category_key}); \code{listed_product_count} lấy từ page context.
+  \item \code{fact_crawl_attempt}: \code{attempt_id} = \code{xxhash64(crawl_run_id, task_id, attempt_number)}, giống nhau dù dựng từ PostgreSQL hay lake.
+\end{itemize}
+
+\section{Gold: mart theo run}\label{sec:marts}
+Mart ghi vào \code{gold/marketplace/runs/run_id=<run>/<mart>/}. Mart theo ngày quan sát partition theo
+(\code{marketplace}, \code{observed_date}); \code{crawl_reliability_daily} theo (\code{marketplace}, \code{request_date});
+\code{offer_current}, \code{seller_current}, \code{offer_freshness} không partition. Cả 12 mart được publish sang PostgreSQL
+\code{cache.marketplace_<mart>}.
+
+\begin{xltabular}{\linewidth}{@{}C{6mm}L{44mm}L{34mm}Y@{}}
+  \caption{Danh mục 12 mart}\label{tab:marts}\\
+  \toprule
+  \textbf{\#} & \textbf{Mart} & \textbf{Grain} & \textbf{Biến đổi} \\
+  \midrule
+  \endfirsthead
+  \toprule \textbf{\#} & \textbf{Mart} & \textbf{Grain} & \textbf{Biến đổi} \\ \midrule
+  \endhead
+  1 & \code{offer_current} & offer & sighting mới nhất; \code{first_seen_at} = min(\code{observed_at}) \\
+  2 & \code{seller_current} & seller $\times$ sàn & first/last seen, số offer khác nhau \\
+  3 & \code{offer_price_history_daily} & offer $\times$ ngày $\times$ tiền tệ & giá đầu/cuối ngày, min/max/avg, số observation, số giá khác nhau \\
+  4 & \code{offer_change_daily} & offer $\times$ ngày $\times$ tiền tệ & \code{lag} theo offer: đếm đổi giá, giảm, tăng, đổi rating, counter, availability \\
+  5 & \code{offer_freshness} & offer & tuổi = \code{as_of} $-$ \code{last_observed_at} \ra\ \code{FRESH} ($\le$ 6 h) / \code{STALE} / \code{FUTURE} \\
+  6 & \code{category_price_daily} & đường dẫn danh mục $\times$ ngày $\times$ tiền tệ & min, p25, median, p75, max, avg; path NULL \ra\ \code{__UNKNOWN__} \\
+  7 & \code{source_coverage_daily} & sàn $\times$ ngày & lịch đủ điều kiện của từng offer so với số thực thấy; ghép audit parsed/rejected \\
+  8 & \code{crawl_reliability_daily} & sàn $\times$ ngày request & chỉ từ crawl audit: tỉ lệ thành công, p95 latency, đếm 5 loại lỗi \\
+  9 & \code{counter_delta_daily} & offer $\times$ ngày $\times$ counter & phân loại bước chuyển; delta thô và delta hợp lệ; \code{velocity_proxy_per_hour} \\
+  10 & \code{price_anomaly_daily} & offer $\times$ ngày $\times$ tiền tệ & từ mart 3: robust z (MAD) hoặc rào IQR so với 14 ngày trước \\
+  11 & \code{discount_credibility_daily} & offer $\times$ ngày $\times$ tiền tệ & từ mart 3: 5 luật so với 30 ngày trước, điểm, trạng thái, hạng Isolation Forest \\
+  12 & \code{discount_daily} & danh mục $\times$ ngày $\times$ tiền tệ & tỉ lệ có giảm, phân vị mức giảm, số vượt trần, số QUESTIONABLE/SUSPECT \\
+  \bottomrule
+\end{xltabular}
+
+\section{Hạt dữ liệu qua từng tầng}
+\begin{xltabular}{\linewidth}{@{}L{48mm}L{50mm}Y@{}}
+  \caption{Grain qua các tầng}\label{tab:grain}\\
+  \toprule
+  \textbf{Tầng} & \textbf{Một dòng là} & \textbf{Số dòng tương đối} \\
+  \midrule
+  Bronze/raw & một phản hồi của một trang (1 + số XHR part) & 1 mỗi task \\
+  Bronze/records & một dòng nguồn hoặc một page context & tối đa 40 + 1 mỗi trang Tiki \\
+  Kafka \code{records.v1} & một \code{listing_row} & như trên trừ context \\
+  Silver \code{offer_observations_v2} & một observation hợp lệ (gồm quảng cáo) & $\le$ số \code{listing_row} \\
+  \code{fact_offer_observation} & một sighting đã dedup & = Silver sau dedup \\
+  \code{fact_price_snapshot_daily} & offer $\times$ ngày $\times$ tiền tệ (organic) & giảm theo số lần thấy mỗi ngày \\
+  mart \code{offer_current} & một offer & số offer khác nhau \\
+  \code{marketplace.changes.v1} & một thay đổi đã phát hiện & chỉ khi khác lần trước \\
+  \bottomrule
+\end{xltabular}
+
+\section{PostgreSQL: các schema}
+\begin{xltabular}{\linewidth}{@{}L{22mm}Y@{}}
+  \toprule
+  \textbf{Schema} & \textbf{Vai trò} \\
+  \midrule
+  \code{audit} & trạng thái vận hành: frontier, crawl run/attempt, circuit, batch run, kết quả quality, cache version, speed batch, stream progress (Phụ lục~\ref{app:audit}) \\
+  \code{cache} & 12 bảng \code{marketplace_*}: đúng một run, run mà \code{current.json} trỏ tới \\
+  \code{staging} & bảng tạm \code{mp_<mart>_<hash>} của lần publish đang chạy \\
+  \bottomrule
+\end{xltabular}
+DDL ở \code{scripts/init_postgres.sql}; metadata DB của Airflow là database \code{airflow} trên cùng instance \code{postgres-dw}.

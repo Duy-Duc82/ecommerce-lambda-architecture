@@ -1,0 +1,92 @@
+% =====================================================================
+\chapter{Triển khai và hạ tầng}\label{chap:deploy}
+% =====================================================================
+\src{compose/docker-compose.yml, env/, scripts/mp.ps1, databricks.yml, databricks/resources/jobs.yml}
+
+\section{Môi trường}
+\begin{xltabular}{\linewidth}{@{}L{30mm}Y L{44mm}@{}}
+  \toprule
+  \textbf{Môi trường} & \textbf{Mô tả} & \textbf{Dùng cho} \\
+  \midrule
+  Local (Docker Compose) & mọi tầng trên một máy; mỗi stack là một compose project riêng (\code{env/base.env} + \code{env/ports.<stack>.env} + \code{env/<stack>.env}) & phát triển, chạy toàn luồng, demo \\
+  Smoke & profile \code{smoke}: \code{stub-source} (site giả, cổng 8000) & kiểm thử offline, CI \\
+  Hybrid Databricks & batch và speed lakehouse trên Databricks (S3, ap-southeast-1), phần dính mạng nội bộ ở local & chứng minh khả chuyển lên cloud \\
+  \bottomrule
+\end{xltabular}
+
+\section{Local: Docker Compose theo profile}
+\diagramslot{fig-1-3-trien-khai-local}
+  {Triển khai local: Docker Compose theo profile}
+  {Lõi luôn chạy (kafka, minio, postgres-dw, redis, elasticsearch); mỗi profile bật thêm một nhóm service; batch được Airflow gọi bằng DockerOperator.}
+  {Hình 1.3 — \texttt{docs/system/01-tong-quan.md} §1.6 (14 node)}
+  {Mỗi stack là một compose project riêng, điều khiển bằng \texttt{scripts/mp.ps1}.}
+
+\begin{xltabular}{\linewidth}{@{}L{32mm}Y L{30mm}@{}}
+  \caption{Profile Docker Compose}\label{tab:profiles}\\
+  \toprule
+  \textbf{Profile} & \textbf{Service} & \textbf{Kiểu} \\
+  \midrule
+  \endfirsthead
+  \toprule \textbf{Profile} & \textbf{Service} & \textbf{Kiểu} \\ \midrule
+  \endhead
+  {}(lõi) & \code{kafka} (4.2.0, KRaft), \code{kafka-init}, \code{minio}, \code{minio-init} (bucket \code{ecommerce-bronze/silver/gold}), \code{redis} 8.6.2, \code{postgres-dw} 18.3 (chạy \code{init_postgres.sql}), \code{elasticsearch} 8.18.1 (heap 1 GB) & dịch vụ, \code{unless-stopped} \\
+  \code{crawl} / \code{crawl-browser} & \code{crawl-worker}, \code{crawl-worker-lazada} & dài hạn \\
+  \code{speed} & \code{speed} & dài hạn \\
+  \code{batch} & \code{batch-once} & công cụ một lần (\code{run --rm}) \\
+  \code{orchestration} & \code{airflow-init}, \code{airflow-api-server} (:8084), \code{airflow-scheduler}, \code{airflow-dag-processor} & dịch vụ \\
+  \code{serve} & \code{kibana}, \code{kibana-marketplace-setup}, \code{superset}, \code{superset-init} & dịch vụ, khởi tạo một lần \\
+  \code{ops} & \code{ops} (\code{python -m ecomdata.ops}), \code{es-projector} & công cụ, dài hạn \\
+  \code{smoke} & \code{stub-source} & kiểm thử offline \\
+  \code{legacy-scheduler} & \code{batch-scheduler} (vòng lặp cũ trước Airflow) & không dùng nữa \\
+  file observability & \code{loki}, \code{prometheus}, \code{alloy}, \code{grafana} (:3001), bind 127.0.0.1 & dịch vụ \\
+  \bottomrule
+\end{xltabular}
+
+Mọi service chạy \textbf{một bản}. Tham số chung được truyền vào container theo tiền tố (\code{KAFKA_}, \code{POSTGRES_}, \code{MINIO_},
+\code{DATA_LAKE_}, \code{CRAWL_}, \code{MARKETPLACE_}, \code{SPARK_}\ldots). Container gắn nhãn \code{ecomdata.project/layer/service} để Alloy nhận diện.
+
+\section{CLI vận hành \texttt{mp.ps1}}
+Điều khiển hằng ngày: \code{scripts/mp.ps1 -EnvFile env/<stack>.env <verb>}.
+\begin{xltabular}{\linewidth}{@{}L{62mm}Y@{}}
+  \caption{Lệnh vận hành}\label{tab:mp-verbs}\\
+  \toprule
+  \textbf{Verb} & \textbf{Việc} \\
+  \midrule
+  \code{up [-With speed,serve,...]} & bật lõi + các profile \\
+  \code{status}, \code{validate} & trạng thái crawl/speed/batch/pointer; kiểm tra tính đúng \\
+  \code{seed}, \code{migrate} & thêm task frontier; áp lại DDL \\
+  \code{batch -AsOf ... [-AllowBackfill] [-QualityOnly]} & chạy batch \code{--all} ngoài Airflow \\
+  \code{dags list|pause|unpause} & điều khiển DAG \\
+  \code{backup}, \code{restore -BackupId} & sao lưu, khôi phục \\
+  \code{smoke}, \code{drill d1..d11}, \code{bench}, \code{evaluate}, \code{evidence}, \code{demo} & kiểm thử, diễn tập sự cố, đo, gom bằng chứng \\
+  \bottomrule
+\end{xltabular}
+
+\section{Hybrid: batch và speed lakehouse trên Databricks}
+Từ 05/11/2026 (nhánh \code{phase-11/databricks}) phần tính toán chạy được trên Databricks; phần dính tới mạng nội bộ ở lại máy local.
+
+\diagramslot{fig-1-4-trien-khai-hybrid}
+  {Triển khai hybrid trên Databricks}
+  {Ba khung theo nơi chạy (máy local, AWS S3, Databricks). Bronze lên S3 bằng \texttt{mc mirror} chạy tay; Databricks tính trên S3; kết quả chưa tự động quay về PostgreSQL local.}
+  {Hình 1.4 — \texttt{docs/system/01-tong-quan.md} §1.6 (10 node)}
+  {Job batch trên Databricks dừng ở \texttt{quality} vì \texttt{publish} và \texttt{promote} cần PostgreSQL. Job speed chạy available-now hoặc trong một cửa sổ demo, không chạy 24/7.}
+
+\begin{xltabular}{\linewidth}{@{}L{34mm}Y@{}}
+  \toprule
+  \textbf{Thành phần} & \textbf{Cấu hình} \\
+  \midrule
+  Bundle & \code{databricks.yml}, target \code{dev}; job định nghĩa ở \code{databricks/resources/jobs.yml} \\
+  Gói mã & wheel \code{ecomdata}, entry point \code{ecomdata-batch}, \code{ecomdata-speed-lakehouse} \\
+  Lưu trữ & S3: \code{bronze} (records, crawl\_audit), \code{silver} Delta, \code{gold} (dw, runs, manifests, speed) \\
+  Đồng bộ & \code{mc mirror} MinIO \ra\ S3, chạy tay \\
+  Rủi ro chưa kiểm & \code{ProcessingTimeTimeout} có thể không bắn dưới \code{availableNow}; pyarrow bị wheel ghi đè; S3A trên DBR 17.3 (\code{docs/DATABRICKS_READINESS.md} §8) \\
+  \bottomrule
+\end{xltabular}
+
+\section{CI và kiểm thử}
+\begin{itemize}
+  \item Bộ test chia theo \code{tests/unit}, \code{tests/architecture} (luật import, registry duy nhất), test Spark và E2E.
+  \item CI chạy test Spark song song trên bốn runner cho pull request vào \code{master} hoặc \code{develop}; test Kaggle cũ ở job riêng với torch CPU.
+  \item \code{import-linter} kiểm hợp đồng tầng (ADR-0003); \code{ruff} cho kiểu mã.
+  \item Profile \code{smoke} chạy toàn luồng trên site giả để kiểm thử không cần mạng.
+\end{itemize}

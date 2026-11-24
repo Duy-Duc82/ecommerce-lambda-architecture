@@ -1,0 +1,88 @@
+% =====================================================================
+\chapter{Giới thiệu}\label{chap:intro}
+% =====================================================================
+
+\section{Mục đích tài liệu}
+Tài liệu này là \textbf{tài liệu thiết kế hệ thống} (System Design Document) cho nền tảng dữ liệu
+\emph{Marketplace Price Intelligence}. Nó trả lời năm nhóm câu hỏi mà một kỹ sư dữ liệu mới tham gia,
+một người vận hành hoặc một người duyệt kỹ thuật cần biết:
+
+\begin{enumerate}
+  \item Hệ thống giải quyết bài toán gì, phạm vi tới đâu, yêu cầu nào là bắt buộc (Chương~\ref{chap:req}).
+  \item Kiến trúc gồm những tầng nào, chạy ở đâu, vì sao chọn như vậy (Chương~\ref{chap:arch}, Phụ lục~\ref{app:adr}).
+  \item Dữ liệu được thu thập, lưu trữ, mô hình hoá và biến đổi thế nào qua từng tầng (Chương~\ref{chap:ingest}--\ref{chap:processing}).
+  \item Có những pipeline nào, lịch chạy, đầu vào/ra, cách chạy lại khi lỗi; cổng chất lượng chặn gì (Chương~\ref{chap:pipeline}--\ref{chap:serving}).
+  \item Hệ thống được triển khai, giám sát, sao lưu và khôi phục ra sao; đã đo được gì; còn rủi ro gì (Chương~\ref{chap:deploy}--\ref{chap:risk}).
+\end{enumerate}
+
+\section{Phạm vi tài liệu}
+Tài liệu mô tả trạng thái mã nguồn tại \DocBaseline, tức nhánh \code{feat/discount-credibility}
+đã merge thêm \code{phase-11/databricks}. Phạm vi gồm toàn bộ package \code{ecomdata}, cấu hình Docker Compose,
+DAG Airflow, job Databricks, DDL PostgreSQL và cấu hình giám sát.
+
+Ngoài phạm vi: mã thử nghiệm cũ trên dữ liệu Kaggle (thư mục \code{batch_layer/}, \code{speed_layer/},
+\code{serving_layer/} ở gốc repository, giữ lại làm di sản), kế hoạch các phase đã lưu trữ trong \code{docs/archive/}.
+
+\section{Đối tượng đọc}
+\begin{xltabular}{\linewidth}{@{}L{40mm}Y@{}}
+  \toprule
+  \textbf{Đối tượng} & \textbf{Nên đọc} \\
+  \midrule
+  Người hướng dẫn, hội đồng & Chương~\ref{chap:req}, \ref{chap:arch}, \ref{chap:perf}, \ref{chap:risk} \\
+  Kỹ sư dữ liệu phát triển & toàn bộ, đặc biệt Chương~\ref{chap:storage}--\ref{chap:quality} \\
+  Người vận hành (on-call) & Chương~\ref{chap:pipeline}, \ref{chap:deploy}, \ref{chap:ops}; \code{docs/RUNBOOK.md} \\
+  Người dùng dữ liệu (analyst) & Mục~\ref{sec:marts} (danh mục mart), Chương~\ref{chap:serving} \\
+  \bottomrule
+\end{xltabular}
+
+\section{Cách đọc tài liệu}
+Các chương đi theo đường đi của dữ liệu: từ trang của sàn (thu thập), qua lake (Bronze, Silver, Gold),
+qua hai đường xử lý (batch và speed), tới nơi phục vụ (PostgreSQL, Elasticsearch, Redis) và người dùng
+(Superset, Kibana). Mỗi chương ghi rõ \emph{nguồn chân lý} là file nào trong mã nguồn.
+Thuật ngữ riêng của hệ thống được định nghĩa ở Mục~\ref{sec:glossary}; nên đọc trước khi vào Chương~\ref{chap:storage}.
+
+\section{Thuật ngữ}\label{sec:glossary}
+\begin{xltabular}{\linewidth}{@{}L{38mm}Y@{}}
+  \caption{Thuật ngữ dùng trong hệ thống}\label{tab:glossary}\\
+  \toprule
+  \textbf{Thuật ngữ} & \textbf{Nghĩa trong hệ thống này} \\
+  \midrule
+  \endfirsthead
+  \toprule \textbf{Thuật ngữ} & \textbf{Nghĩa} \\ \midrule
+  \endhead
+  offer & một listing của một sàn: (\code{source_code}, \code{platform_listing_id}) \ra\ \code{offer_id} \\
+  observation (sighting) & một lần crawler thấy một offer trên một trang, ở một thời điểm \\
+  record & một dòng nguồn nguyên vẹn (envelope \code{marketplace-record.v1}), chưa chuẩn hoá \\
+  raw artifact & toàn bộ phản hồi của một lần tải trang (HTML và các XHR), lưu nguyên byte trong Bronze/raw \\
+  run & một lượt batch, khoá bởi \code{run_id} (\code{mp-YYYYMMDDTHHMMZ}) và \code{as_of} \\
+  \code{as_of} & mốc thời gian dữ liệu mà run được phép thấy; mart và quality cắt tại đây \\
+  cửa sổ ngày & tập partition \code{observed_date} mà một run được dựng lại ở Silver (ngày của \code{as_of} và \code{late_days} ngày trước) \\
+  star / \code{dw} & 7 dimension, 1 bridge và 6 fact (Delta) dùng chung cho mọi run \\
+  mart & bảng phục vụ theo run (12 bảng); bản được promote được sao vào PostgreSQL \code{cache.*} \\
+  manifest & file JSON mô tả một run: dataset, kết quả quality, version Delta của từng bảng star \\
+  pointer & \code{current.json}: bản sao byte của manifest của run đang được phục vụ \\
+  promote & thay pointer bằng compare-and-swap để run mới trở thành run được phục vụ \\
+  counter & số mà sàn hiển thị (đã bán, số đánh giá). Thay đổi của counter \textbf{không phải} đơn hàng \\
+  frontier & hàng đợi việc crawl trong \code{audit.crawl_frontier} \\
+  tier & mức độ ưu tiên/chu kỳ crawl của một target: \code{ACTIVE}, \code{HOT}, \code{NORMAL}, \code{COLD}, \code{SWEEP} \\
+  quarantine & bảng Silver giữ các dòng không hợp lệ kèm lý do, thay vì bỏ \\
+  DLQ & dead-letter queue: topic Kafka nhận các bản tin không xử lý được của speed \\
+  organic & dòng sản phẩm không phải quảng cáo; mart và speed chỉ xét dòng organic \\
+  \bottomrule
+\end{xltabular}
+
+\section{Tài liệu liên quan}
+\begin{xltabular}{\linewidth}{@{}L{62mm}Y@{}}
+  \toprule
+  \textbf{Tài liệu} & \textbf{Nội dung} \\
+  \midrule
+  \code{docs/system/README.md}, \code{01}--\code{05} & bản Markdown của tài liệu này, kèm spec đầy đủ (bảng node, cạnh) của từng sơ đồ \\
+  \code{docs/adr/0001}--\code{0009} & các quyết định kiến trúc \\
+  \code{docs/model/star-schema.dbml} & cột đầy đủ của star schema (sinh ra \code{.mmd}, \code{.puml}, \code{.sql}, PNG) \\
+  \code{docs/RUNBOOK.md} & quy trình vận hành và xử lý sự cố \\
+  \code{docs/OBSERVABILITY.md} & giám sát: metrics, log, dashboard, cảnh báo \\
+  \code{docs/DATABRICKS_READINESS.md} & mức sẵn sàng của phần chạy trên Databricks \\
+  \code{docs/DANH_GIA_HE_THONG_20261113.md} & đánh giá hệ thống ngày 13/11/2026 \\
+  \code{docs/evidence/fullrun-20261114/KET-QUA.md} & kết quả lượt chạy toàn luồng 13--14/11/2026 \\
+  \bottomrule
+\end{xltabular}

@@ -1,0 +1,152 @@
+% =====================================================================
+%  preamble.tex — gói, phông, màu, macro dùng chung cho báo cáo hệ thống
+%  Biên dịch bằng XeLaTeX hoặc LuaLaTeX (Overleaf: Menu > Compiler > XeLaTeX).
+% =====================================================================
+\usepackage{iftex}
+\ifPDFTeX
+  \PackageError{report}{Hay bien dich bang XeLaTeX hoac LuaLaTeX}%
+    {Tai lieu dung fontspec de hien thi tieng Viet.}
+\fi
+
+% ---------- Trang, phông, ngôn ngữ ----------
+\usepackage[a4paper,top=25mm,bottom=25mm,left=25mm,right=22mm,headheight=14pt]{geometry}
+\usepackage{fontspec}
+\setmainfont{texgyrepagella}[
+  Extension=.otf, UprightFont=*-regular, BoldFont=*-bold,
+  ItalicFont=*-italic, BoldItalicFont=*-bolditalic]
+\setsansfont{texgyreheros}[
+  Extension=.otf, UprightFont=*-regular, BoldFont=*-bold,
+  ItalicFont=*-italic, BoldItalicFont=*-bolditalic]
+\setmonofont{lmmono10}[
+  Extension=.otf, UprightFont=*-regular, ItalicFont=*-italic,
+  BoldFont=lmmonolt10-bold, Scale=0.92]
+\usepackage{polyglossia}
+\setdefaultlanguage{vietnamese}
+
+% ---------- Gói nội dung ----------
+\usepackage{amsmath,amssymb}
+\usepackage{graphicx}
+\usepackage{xcolor}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{xltabular}
+\usepackage{multirow}
+\usepackage{enumitem}
+\usepackage{tikz}
+\usepackage{caption}
+\usepackage{fancyhdr}
+\usepackage{titlesec}
+\usepackage{tcolorbox}
+\tcbuselibrary{skins,breakable}
+\usepackage{url}
+\usepackage[hidelinks,unicode,bookmarksnumbered]{hyperref}
+
+\setlist{itemsep=2pt,topsep=4pt,parsep=0pt}
+\setlength{\parindent}{0pt}
+\setlength{\emergencystretch}{3em}
+\tolerance=2000
+\setlength{\parskip}{5pt plus 1pt}
+\renewcommand{\arraystretch}{1.18}
+\captionsetup{font=small,labelfont=bf,labelsep=period,justification=centering}
+\captionsetup[table]{position=top,skip=4pt}
+\graphicspath{{figures/}}
+
+% ---------- Màu theo tầng (giống quy ước trong docs/system/README.md) ----------
+\definecolor{brand}{HTML}{1E3A8A}
+\definecolor{muted}{HTML}{6B7280}
+\colorlet{CoverFrame}{brand}   % màu khung viền đôi của bìa
+\colorlet{CoverTitle}{brand}   % màu tên đề tài trên bìa
+\definecolor{layerSource}{HTML}{E5E7EB}
+\definecolor{layerIngest}{HTML}{DBEAFE}
+\definecolor{layerLake}{HTML}{FEF3C7}
+\definecolor{layerBatch}{HTML}{FFEDD5}
+\definecolor{layerSpeed}{HTML}{EDE9FE}
+\definecolor{layerKafka}{HTML}{FEE2E2}
+\definecolor{layerServe}{HTML}{DCFCE7}
+\definecolor{layerOps}{HTML}{CCFBF1}
+
+% ---------- Tiêu đề chương, đầu trang ----------
+\titleformat{\chapter}[display]
+  {\sffamily\bfseries\color{brand}}{\large\MakeUppercase{\chaptertitlename}\ \thechapter}
+  {4pt}{\Huge}[\vspace{2pt}{\color{brand}\titlerule[1pt]}]
+\titlespacing*{\chapter}{0pt}{-10pt}{18pt}
+\titleformat{\section}{\sffamily\Large\bfseries\color{brand}}{\thesection}{0.6em}{}
+\titleformat{\subsection}{\sffamily\large\bfseries}{\thesubsection}{0.6em}{}
+\titleformat{\subsubsection}{\sffamily\normalsize\bfseries}{\thesubsubsection}{0.6em}{}
+\setcounter{secnumdepth}{3}
+\setcounter{tocdepth}{2}
+
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[L]{\small\sffamily\color{muted}\DocShortTitle}
+\fancyhead[R]{\small\sffamily\color{muted}\leftmark}
+\fancyfoot[L]{\small\sffamily\color{muted}\DocId\ · v\DocVersion}
+\fancyfoot[R]{\small\sffamily\thepage}
+\renewcommand{\headrulewidth}{0.4pt}
+\fancypagestyle{plain}{\fancyhf{}\fancyfoot[R]{\small\sffamily\thepage}\renewcommand{\headrulewidth}{0pt}}
+
+% ---------- Macro ----------
+% \code{...}: định danh trong code, tự xuống dòng tại / . _ - :
+%   Giữ nguyên khoảng trắng; không dùng được ký tự # và % bên trong.
+\ExplSyntaxOn
+\NewDocumentCommand \code { m }
+  {
+    \texttt
+      {
+        \str_map_inline:nn {#1}
+          {
+            ##1
+            \str_case:nnF {##1}
+              { {/}{\allowbreak} {.}{\allowbreak} {_}{\allowbreak}
+                {-}{\allowbreak} {:}{\allowbreak} {,}{\allowbreak}
+                {=}{\allowbreak} {|}{\allowbreak} }
+              { }
+          }
+      }
+  }
+\ExplSyntaxOff
+\newcommand{\ra}{\ensuremath{\rightarrow}}
+\newcommand{\cmark}{\ensuremath{\checkmark}}
+\newcommand{\src}[1]{{\small\color{muted}(nguồn: \code{#1})}}
+
+% Cột bảng
+\newcolumntype{L}[1]{>{\raggedright\arraybackslash}p{#1}}
+\newcolumntype{C}[1]{>{\centering\arraybackslash}p{#1}}
+\newcolumntype{Y}{>{\raggedright\arraybackslash}X}
+\newcolumntype{Z}{>{\centering\arraybackslash}X}
+
+% Hộp ghi chú
+\newtcolorbox{notebox}[1][Ghi chú]{enhanced,breakable,colback=layerIngest!45,colframe=brand!70,
+  boxrule=0.5pt,arc=2pt,left=6pt,right=6pt,top=4pt,bottom=4pt,
+  fonttitle=\sffamily\bfseries\small,title=#1}
+\newtcolorbox{riskbox}[1][Rủi ro]{enhanced,breakable,colback=layerKafka!50,colframe=red!55!black,
+  boxrule=0.5pt,arc=2pt,left=6pt,right=6pt,top=4pt,bottom=4pt,
+  fonttitle=\sffamily\bfseries\small,title=#1}
+
+% ---------------------------------------------------------------------
+% \diagramslot{<tên file>}{<tiêu đề ngắn>}{<ý chính>}{<spec>}{<chú thích>}
+%   Nếu figures/<tên file>.pdf|.png|.jpg tồn tại thì chèn hình,
+%   nếu không thì vẽ một ô trống có khung để vẽ và điền vào sau.
+%   Nhãn tham chiếu: fig:<tên file>
+% ---------------------------------------------------------------------
+\newcommand{\slotbox}[4]{%
+  \begin{tikzpicture}
+    \node[draw=muted!60,line width=0.4pt,
+          minimum width=\linewidth-1pt,minimum height=#4,inner sep=0pt] {};
+    \node[anchor=south east,font=\scriptsize\ttfamily,text=muted!70]
+      at (current bounding box.south east) {figures/\detokenize\expandafter{\SlotFile}};
+  \end{tikzpicture}}
+\newcommand{\SlotFile}{}
+\newcommand{\diagramslotH}[6]{% #1 chiều cao ô trống
+  \begin{figure}[htbp]
+    \centering
+    \renewcommand{\SlotFile}{#2}%
+    \IfFileExists{figures/#2.pdf}{\includegraphics[width=\linewidth,height=0.5\textheight,keepaspectratio]{#2.pdf}}{%
+    \IfFileExists{figures/#2.png}{\includegraphics[width=\linewidth,height=0.5\textheight,keepaspectratio]{#2.png}}{%
+    \IfFileExists{figures/#2.jpg}{\includegraphics[width=\linewidth,height=0.5\textheight,keepaspectratio]{#2.jpg}}{%
+      \slotbox{#3}{#4}{#5}{#1}}}}
+    \caption[#3]{#6}
+    \label{fig:#2}
+  \end{figure}}
+\newcommand{\diagramslot}{\diagramslotH{7cm}}
+\newcommand{\chartslot}{\diagramslotH{6cm}}

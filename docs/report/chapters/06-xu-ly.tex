@@ -1,0 +1,223 @@
+% =====================================================================
+\chapter{Xử lý dữ liệu}\label{chap:processing}
+% =====================================================================
+\src{src/ecomdata/ingestion/, processing/normalize/, processing/batch/, processing/speed/, domain/}
+
+\section{Luồng dữ liệu đầu--cuối}
+Chương này theo \textbf{một dữ liệu} đi từ trang của sàn tới dashboard. Mỗi chặng (hop) H1--H9 trả lời: đầu vào, ai biến đổi,
+biến đổi thế nào, đầu ra, khoá và cách ghi lại an toàn.
+
+\diagramslot{fig-2-1-luong-du-lieu}
+  {Luồng dữ liệu chi tiết H1--H9}
+  {Ba làn ngang (speed trên, thu thập và Bronze giữa, batch dưới). Bronze/records là điểm rẽ nhánh duy nhất: speed đọc bản sao trên Kafka, batch đọc lại chính file. Ghi số chặng H1--H9 trên cạnh.}
+  {Hình 2.1 — \texttt{docs/system/02-luong-du-lieu.md} §2.1 (29 node, 28 cạnh)}
+  {Đường đi của dữ liệu qua chín chặng. Hai đường batch và speed dùng chung normalizer nên định nghĩa một observation giống nhau.}
+
+\begin{xltabular}{\linewidth}{@{}L{7mm}L{25mm}L{25mm}Y L{24mm}L{32mm}@{}}
+  \caption{Tóm tắt các chặng biến đổi}\label{tab:hops}\\
+  \toprule
+  \textbf{\#} & \textbf{Từ \ra\ Tới} & \textbf{Thành phần} & \textbf{Biến đổi chính} & \textbf{Grain đầu ra} & \textbf{Khoá, ghi lại an toàn} \\
+  \midrule
+  \endfirsthead
+  \toprule \textbf{\#} & \textbf{Từ \ra\ Tới} & \textbf{Thành phần} & \textbf{Biến đổi chính} & \textbf{Grain} & \textbf{Khoá, idempotency} \\ \midrule
+  \endhead
+  H1 & trang sàn \ra\ Bronze/raw & crawl-worker & không biến đổi; gzip, SHA-256 từng part & một phản hồi & \code{raw_artifact_id} = hash(code, URL, \code{fetched_at}, \code{body_sha256}); không ghi đè \\
+  H2 & raw \ra\ Bronze/\allowbreak records & extractor, \code{build_records} & tách mảng dòng và page context; bỏ PII; bọc envelope & một dòng nguồn & \code{record_id} = hash(\code{raw_artifact_id}, kind, index); gzip \code{mtime=0} \\
+  H3 & records \ra\ \code{records.v1} & \code{publishing_executor} & chỉ \code{listing_row}, JSON canonical & một record & at-least-once, chỉ publish sau khi file đã ghi \\
+  H4 & \code{records.v1} \ra\ \code{observations.v1} & speed normalizer & chuẩn hoá; bỏ quảng cáo; lỗi \ra\ DLQ & một observation & \code{event_id} = \code{observation_id} \\
+  H5 & \code{observations.v1} \ra\ changes, ES, Redis & speed stateful & so với state của offer \ra\ 0..n thay đổi & một thay đổi / trạng thái offer & \code{change_id} = hash(offer, obs, type, rule\_version) \\
+  H6 & Bronze/\allowbreak records \ra\ Silver & stage \code{silver} & dedup \code{record_id}; chuẩn hoá; quarantine; bảng rộng có kiểu & observation (giữ quảng cáo, có cờ) & thay nguyên partition ngày \\
+  H7 & Silver \ra\ star \code{dw} & \code{dimensions}, \code{facts} & surrogate key xxhash64; SCD2; tổng hợp ngày & theo bus matrix & Delta \code{MERGE} theo khoá; mỗi run một version \\
+  H8 & star \ra\ 12 mart & \code{marts} & đọc star tại version vừa dựng, cắt \code{as_of}, bỏ quảng cáo; tổng hợp, chấm điểm & 12 grain & thư mục \code{run_id=} mới \\
+  H9 & mart \ra\ manifest \ra\ cache \ra\ pointer & \code{quality}, \code{publish}, \code{promote} & kiểm 22 luật; sao 12 mart sang PostgreSQL; CAS pointer & không đổi & TRUNCATE + INSERT trong một transaction \\
+  \bottomrule
+\end{xltabular}
+
+\section{Đường thu thập (H1--H3)}
+\textbf{H1.} Không biến đổi. Mọi part được ghi \emph{trước} khi kiểm HTTP status, nên trang 429 hay 503 vẫn để lại bằng chứng.
+\code{metadata.json} giữ \code{parts[]} (index, url, \code{http_status}, \code{content_type}, role, sha256 của body chưa nén, bytes),
+\code{request}, \code{response} (\code{retry_after}, \code{elapsed_ms}).
+
+\textbf{H2.} Extract chỉ \emph{tìm} mảng dòng và ngữ cảnh trang, không ép kiểu, không chọn trường.
+Tiki: \code{__NEXT_DATA__} \ra\ \code{props.initialState.catalog.data}. Lazada: XHR đầu tiên có \code{mods.listItems}.
+Sau đó bỏ PII theo \code{SourceSpec}, bọc envelope: một record \code{page_context} (index 0) và $n$ record \code{listing_row}.
+
+\textbf{H3.} \code{publishing_executor} gửi \emph{từng} \code{listing_row} với \code{acks=all}, chờ ack từng record (timeout 30 s); key
+\code{<source_code>|<request_target>}. Lỗi ở record thứ $k$ thì task retry (\code{PUBLISH_ERROR}); lần retry ghi lại cùng file, cùng byte, rồi gửi
+lại từ đầu; speed loại bản trùng bằng \code{observation_id}.
+
+\section{Batch layer (H6--H9)}\label{sec:batch}
+\subsection{H6 — Bronze/records \ra\ Silver}
+\textbf{Cửa sổ ngày} (ADR-0007): ngày của \code{as_of} và \code{late_days} ngày trước (mặc định 1), hoặc từ \code{--silver-since},
+hoặc toàn bộ khi \code{--rebuild}. Silver \textbf{không} cắt tại \code{as_of}; chỉ các stage sau mới cắt, nên hai run khác \code{as_of}
+dùng chung được Silver.
+
+\diagramslot{fig-2-2-stage-silver}
+  {Xử lý trong stage \texttt{silver} (H6)}
+  {Record đi qua hai cổng kiểm (envelope, rồi \texttt{split\_quarantine}); lỗi ở cả hai cổng đổ về cùng bảng \texttt{quarantine}; \texttt{listing\_row} hợp lệ tách thành hai đầu ra song song (bảng canonical và bảng rộng).}
+  {Hình 2.2 — \texttt{docs/system/02-luong-du-lieu.md} §H6 (11 node)}
+  {Stage \texttt{silver}: dedup, kiểm envelope, chuẩn hoá theo nguồn, quarantine, bảng rộng và báo cáo drift.}
+
+Stage ghi tóm tắt \code{_runs/run_id=<run>/silver.json}: \code{silver_rows}, \code{quarantine_by_reason}, \code{page_contexts},
+\code{payload_drift} (khoá payload mới chưa khai báo trong \code{PAYLOAD_SCHEMA}, kèm số lần), \code{window}, \code{rebuild},
+\code{duplicates_before_dedup}. \textbf{Drift không chặn run}: trường mới vẫn nằm trong \code{payload_json}, chỉ chưa có cột có kiểu.
+Ghi: ghi đè động theo partition của cửa sổ; \code{--rebuild} ghi đè tĩnh kèm \code{overwriteSchema}; partition lệch layout \ra\ \code{SilverLayoutMismatch}.
+
+\subsection{H7 — Silver \ra\ star \texttt{dw}}
+\begin{enumerate}
+  \item \code{deduplicate_observations}: một dòng mỗi \code{observation_id}; cùng id mà nội dung khác thì dừng với \code{ConflictingObservationError}.
+  \item Ghép thuộc tính bảng rộng theo \code{record_id} (\code{star_inputs.py}).
+  \item Surrogate key \code{xxhash64}; unknown member $-1$.
+  \item Dimension lấy giá trị mới nhất (\code{max_by}); \code{dim_product_listing} là SCD2 (Mục~\ref{sec:scd2}).
+  \item Fact gắn khoá ngoại; \code{listing_key} lấy bằng range join \code{valid_from} $\le$ \code{observed_at} $<$ \code{valid_to}.
+  \item Ghi bằng \code{MERGE ... WHEN MATCHED AND (cột khác) UPDATE / NOT MATCHED INSERT / NOT MATCHED BY SOURCE DELETE}:
+        mỗi bảng bằng đúng kết quả dựng lại, dòng không đổi thì không bị ghi lại.
+\end{enumerate}
+Đầu vào là \emph{toàn bộ} Silver (gồm quảng cáo, không cắt \code{as_of}); vì vậy \code{MERGE} có xoá là đúng. Số dòng, version Delta và chế độ ghi
+được ghi vào \code{_runs/run_id=<run>/dimensions.json}, \code{facts.json}.
+
+\subsection{H8 — star \ra\ 12 mart}
+Đọc \code{fact_offer_observation} và 6 dimension tại \textbf{đúng version Delta mà run này vừa dựng} (\code{versionAsOf}), cắt
+\code{observed_at} $\le$ \code{as_of}; \code{sightings_from_facts} đưa về lại cột canonical; \code{organic_only} bỏ quảng cáo;
+crawl audit cắt \code{completed_at} $\le$ \code{as_of}. Danh mục mart ở Bảng~\ref{tab:marts}.
+
+\subsection{H9 — quality, publish, promote}
+Chặng này không đổi dữ liệu, chỉ đổi \textbf{nơi phục vụ}. Chi tiết ở Chương~\ref{chap:quality} (cổng) và Chương~\ref{chap:serving} (publish).
+
+\diagramslot{fig-2-4-quality-publish-promote}
+  {Quality, publish, promote (H9)}
+  {Manifest luôn được ghi; chỉ run PASS mới đi tới cache; cache được thay trong một transaction, sau đó pointer mới được promote bằng compare-and-swap.}
+  {Hình 2.4 — \texttt{docs/system/02-luong-du-lieu.md} §H9 (10 node)}
+  {Từ mart tới pointer. Lake giữ mọi run; PostgreSQL chỉ giữ đúng run mà \texttt{current.json} trỏ tới.}
+
+\section{Speed layer (H4--H5)}\label{sec:speed}
+\diagramslot{fig-3-2-speed-queries}
+  {Hai query của speed layer}
+  {Query normalizer biến \texttt{records.v1} thành \texttt{observations.v1} (lỗi vào DLQ, quảng cáo bị bỏ); query có trạng thái kiểm hợp đồng, so với \texttt{OfferState} theo \texttt{offer\_id} rồi ghi các sink theo thứ tự Kafka \ra\ ES \ra\ Redis \ra\ audit.}
+  {Hình 3.2 — \texttt{docs/system/03-xu-ly-trong-tang.md} §3.4 (17 node)}
+  {Hai query trong một tiến trình speed, nối nhau qua topic \texttt{observations.v1}; chỉ query thứ hai giữ state.}
+
+\begin{xltabular}{\linewidth}{@{}L{24mm}YY@{}}
+  \caption{Cấu hình hai streaming query}\label{tab:speed-queries}\\
+  \toprule
+  & \textbf{Normalizer} & \textbf{Stateful} \\
+  \midrule
+  Tên query & \code{marketplace-speed-v1-normalizer} & \code{marketplace-speed-v1} \\
+  Nguồn & Kafka \code{records.v1}, \code{startingOffsets=earliest} & Kafka \code{observations.v1}, có thể giới hạn \code{maxOffsetsPerTrigger} \\
+  Trigger & \code{processingTime} 30 s (\code{MARKETPLACE_STREAM_TRIGGER}) & như bên trái \\
+  Checkpoint & \code{<root>/v1-normalizer} & \code{<root>/v1} (volume \code{speed_checkpoints}) \\
+  State & không & theo \code{offer_id}: \code{OfferState} JSON + \code{observed_at} + \code{observation_id} \\
+  Timeout & & \code{ProcessingTimeTimeout}, đặt lại mỗi lần thành \code{observed_at} + 21600 s $-$ now; không dùng watermark \\
+  \bottomrule
+\end{xltabular}
+
+\textbf{H4.} Dùng \emph{cùng} normalizer của H6; bỏ dòng quảng cáo; dòng hợp lệ \ra\ \code{observation_event_json} (envelope +
+\code{payload.offer} + \code{payload.observation}), key \code{<code>:<platform_listing_id>}; dòng lỗi \ra\ \code{records.v1.dlq}.
+
+\textbf{H5.} Giải mã và kiểm hợp đồng từng event; sai hợp đồng \ra\ \code{INVALID} vào \code{observations.v1.dlq}. Event đúng được nhóm theo
+\code{offer_id} (\code{applyInPandasWithState}) và so với state bằng \code{domain/change_rules.py}: trùng \code{observation_id} \ra\ \code{DUPLICATE};
+cũ hơn state \ra\ \code{LATE}; mới \ra\ cập nhật state và sinh 0..$n$ thay đổi.
+
+\begin{xltabular}{\linewidth}{@{}L{40mm}Y L{30mm}@{}}
+  \caption{Luật phát hiện thay đổi (\texttt{rule\_version = speed-rules.v1})}\label{tab:change-rules}\\
+  \toprule
+  \textbf{Loại} & \textbf{Điều kiện} & \textbf{\code{field_name}} \\
+  \midrule
+  \endfirsthead
+  \toprule \textbf{Loại} & \textbf{Điều kiện} & \textbf{field\_name} \\ \midrule
+  \endhead
+  \code{NEW_OFFER} & chưa có state & null \\
+  \code{PRICE_CHANGED} & \code{current_price} khác & \code{current_price} \\
+  \code{LARGE_PRICE_DROP} & giá giảm \textbf{và} (giảm $\ge$ 100.000 \textbf{hoặc} giảm/giá cũ $\ge 20\,\%$) & \code{current_price} \\
+  \code{RATING_CHANGED} & (\code{rating_value}, \code{rating_count}) khác & \code{rating} \\
+  \code{COUNTER_CHANGED} & \code{review_count} hoặc \code{sold_count} khác & \code{public_counters} \\
+  \code{AVAILABILITY_CHANGED} & khác, và không bên nào là \code{UNKNOWN} & \code{availability} \\
+  \code{OFFER_STALE} & timeout: 6 giờ không thấy offer, chưa phát lần nào & null \\
+  \bottomrule
+\end{xltabular}
+
+Một observation có thể sinh nhiều thay đổi (giảm giá lớn sinh cả \code{PRICE_CHANGED} lẫn \code{LARGE_PRICE_DROP}).
+\code{OFFER_STALE} nghĩa là crawler chưa nhìn lại offer, \textbf{không} có nghĩa là offer ngừng bán.
+
+\begin{xltabular}{\linewidth}{@{}L{48mm}Y L{24mm}@{}}
+  \caption{Đích ghi của speed}\label{tab:speed-sinks}\\
+  \toprule
+  \textbf{Đích} & \textbf{Nội dung} & \textbf{Khoá} \\
+  \midrule
+  Kafka \code{marketplace.changes.v1} & \code{marketplace-change.v1}: \code{event_id}, \code{change_type}, \code{detected_at}, \code{offer_id}, giá trị trước/sau, \code{rule_version} & \code{offer_id} \\
+  ES \code{marketplace-changes-v1} & từng thay đổi & \code{_id} = \code{event_id} \\
+  ES \code{marketplace-offers-current-v1} & trạng thái mới nhất của offer & \code{_id} = \code{offer_id} \\
+  Redis & \code{rt:changes:recent} (ZSET 5000 mới nhất), \code{rt:change:<id>} và \code{rt:offer:<offer_id>} (TTL 24 h), \code{rt:source:<m>:last_observation} & \\
+  PostgreSQL & \code{audit.marketplace_speed_batch}, \code{audit.marketplace_stream_progress} & (query, id, batch) \\
+  \bottomrule
+\end{xltabular}
+
+\textbf{Lỗi và chạy lại.} \code{BatchWriter} ghi dòng audit trước (\code{begin_batch}); batch đã \code{SUCCEEDED} thì bỏ qua vì là replay.
+Có ngoại lệ thì đánh dấu FAILED và ném lại; Spark chạy lại micro-batch từ checkpoint. \code{change_id}, \code{_id} ES và khoá Redis đều tất định,
+nên chạy lại không sinh bản trùng. Một dòng sai hợp đồng thành \code{INVALID} thay vì làm sập query.
+
+\subsection{Biến thể lakehouse (Databricks)}
+\code{processing/speed/lakehouse.py} thay Kafka bằng file. Query 1 đọc Bronze/records (text hoặc Auto Loader \code{cloudFiles}) và chạy
+\code{normalize_micro_batch} để ghi Delta \code{observations}. Query 2 đọc stream Delta đó, giả lập cột Kafka và gọi lại đúng
+\code{service.start_query}, nên dùng cùng luật thay đổi. Đầu ra dưới \code{gold/speed/}: \code{observations}, \code{records_dlq},
+\code{outputs}, \code{offer_state} (MERGE chỉ tiến), \code{price_changes} (cả 7 loại; MERGE insert-once theo \code{change_id}), \code{stream_progress}.
+
+\diagramslot{fig-4-4-speed-lakehouse}
+  {Speed lakehouse trên Databricks (P4)}
+  {Hai query nối nhau qua bảng Delta \texttt{gold/speed/observations} thay cho Kafka; query 2 dùng cùng luật với speed local.}
+  {Hình 4.4 — \texttt{docs/system/04-pipeline.md} §4.5 (9 node)}
+  {Speed lakehouse: Auto Loader đọc Bronze/records trên S3, query 2 chạy lại đúng luật của speed local trên Delta.}
+
+\section{Luật phân tích trong mart}\label{sec:analytics}
+\subsection{Giá bất thường (\texttt{anomaly.py})}
+Mỗi offer chỉ được so với \textbf{lịch sử của chính nó} trong 14 ngày quan sát trước. Ưu tiên robust z-score theo MAD:
+\[
+  z = \frac{0{,}6745\,(x - \tilde{x})}{\mathrm{MAD}}, \qquad |z| > 3{,}5 \Rightarrow \text{\code{ANOMALOUS_HIGH}/\code{ANOMALOUS_LOW}}
+\]
+MAD $= 0$ thì lùi về rào IQR: $x \notin [\,p_{25} - 1{,}5\,\mathrm{IQR},\ p_{75} + 1{,}5\,\mathrm{IQR}\,]$.
+Ít hơn 7 ngày quan sát \ra\ \code{INSUFFICIENT_HISTORY}; IQR $= 0$ \ra\ \code{INSUFFICIENT_DISPERSION}.
+Tham số (\code{window_days}, \code{min_samples}, \code{mad_threshold}, \code{iqr_multiplier}, \code{anomaly_rule_version}) được ghi trên từng dòng.
+
+\diagramslot{fig-3-4-cay-quyet-dinh-anomaly}
+  {Cây quyết định giá bất thường}
+  {Mỗi giá được so với lịch sử 14 ngày của chính offer; ưu tiên MAD, MAD = 0 thì lùi về IQR; thiếu lịch sử hoặc thiếu độ phân tán thì không phán xét.}
+  {Hình 3.4 — \texttt{docs/system/03-xu-ly-trong-tang.md} §3.7 (10 node)}
+  {Phân loại giá bất thường theo lịch sử của chính offer.}
+
+\subsection{Độ tin cậy của khuyến mãi (ADR-0009)}
+Các đại lượng: $\text{displayed} = (\text{list} - \text{price})/\text{list}$; giá tham chiếu \code{reference_min_price} là giá thấp nhất trong
+\textbf{30 ngày lịch trước} (không tính ngày đang xét, theo quy tắc Omnibus của EU); $\text{effective} = (\text{ref\_min} - \text{price})/\text{ref\_min}$;
+$\text{claim\_gap} = \text{displayed} - \text{effective}$.
+
+\begin{xltabular}{\linewidth}{@{}L{48mm}Y C{16mm}C{22mm}@{}}
+  \caption{Luật độ tin cậy khuyến mãi (\texttt{domain/discount\_rules.py})}\label{tab:discount-rules}\\
+  \toprule
+  \textbf{Lý do} & \textbf{Bật khi} & \textbf{Trọng số} & \textbf{Cần lịch sử ($\ge$ 3 ngày)} \\
+  \midrule
+  \code{PRICE_ABOVE_LIST} & displayed $< 0$ & 40 & \\
+  \code{DISCOUNT_OVER_CAP} & displayed $> 50\,\%$ (trần theo Nghị định 81/2018/NĐ-CP) & 30 & \\
+  \code{LIST_PRICE_RAISED} & giá niêm yết $>$ mọi giá niêm yết trong cửa sổ & 30 & \cmark \\
+  \code{CLAIM_EXCEEDS_HISTORY} & claim\_gap $>$ 20 điểm phần trăm & 50 & \cmark \\
+  \code{NOT_BELOW_REFERENCE} & có hiển thị giảm nhưng effective $\le 0$ & 20 & \cmark \\
+  \bottomrule
+\end{xltabular}
+
+\code{rule_score} là tổng trọng số (trần 100). Trạng thái: \code{SUSPECT} khi điểm $\ge 50$; \code{QUESTIONABLE} khi $\ge 20$;
+\code{CREDIBLE} khi không có lý do và đủ lịch sử; \code{INSUFFICIENT_HISTORY} khi không có lý do nhưng thiếu lịch sử;
+\code{NO_DISCOUNT} khi không hiển thị giảm và điểm 0.
+
+\textbf{Isolation Forest chỉ xếp hạng}: chạy trên dòng có displayed $> 0$, cần $\ge 50$ dòng, lấy mẫu tất định tối đa 200.000 dòng
+(seed 20261113), \code{n_estimators} = 100; đặc trưng: displayed, effective, claim\_gap, list\_raised, distinct\_price\_count (cố ý không đưa mức giá).
+\code{ml_rank_percent} là \code{percent_rank} trong từng sàn-ngày; thiếu scikit-learn thì \code{ml_method = NONE}.
+
+\subsection{Counter: phân loại bước chuyển}\label{sec:counter-rules}
+Mỗi cặp observation liên tiếp của một counter được gán \textbf{một} nhãn: \code{MISSING_VALUE}, \code{SEMANTICS_UNREGISTERED},
+\code{SEMANTICS_VERSION_CHANGED}, \code{NON_POSITIVE_INTERVAL}, \code{GAP_TOO_LONG} (cách nhau $>$ 172.800 s = 48 h, khớp cadence SWEEP),
+\code{COUNTER_DECREASED} hoặc \code{VALID}. Delta âm \textbf{không bị cắt}: dòng đó được đánh dấu \code{counter_reset_or_invalid}.
+\code{velocity_proxy_per_hour} chỉ đo tốc độ con số hiển thị thay đổi, không phải doanh số.
+
+\subsection{Độ phủ và độ tươi}
+\begin{itemize}
+  \item \code{offer_freshness} chấm tại \code{as_of} của run: \code{FRESH} khi tuổi $\le$ 21.600 s, \code{STALE} khi lớn hơn, \code{FUTURE} khi \code{observed_at} $>$ \code{as_of}.
+  \item \code{source_coverage_daily} trải lịch của mỗi offer từ ngày đầu thấy tới min(ngày cuối, \code{as_of}); offer không \code{INACTIVE} là đủ điều kiện; so với số thực thấy trong ngày, ghép \code{parsed}/\code{rejected} từ crawl audit.
+\end{itemize}

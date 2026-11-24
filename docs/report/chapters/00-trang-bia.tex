@@ -1,0 +1,118 @@
+% ---------------------------------------------------------------------
+%  Trang bìa và kiểm soát tài liệu
+% ---------------------------------------------------------------------
+%  Bìa theo kiểu đồ án Bách khoa: khung viền đôi, tên trường, logo,
+%  loại báo cáo, tên đề tài, sinh viên, GVHD kèm ô chữ ký, địa danh/thời gian.
+%  Mọi trường sửa trong main.tex (\University, \School, \StudentName, ...).
+%  Logo: đặt file figures/logo-hust.png (hoặc .pdf); thiếu thì hiện ô trống.
+\newgeometry{top=24mm,bottom=24mm,left=26mm,right=26mm}
+\begin{titlepage}
+  \thispagestyle{empty}
+  \begin{tikzpicture}[remember picture,overlay]
+    \draw[line width=2.2pt,color=CoverFrame]
+      ([xshift=14mm,yshift=-14mm]current page.north west) rectangle
+      ([xshift=-14mm,yshift=14mm]current page.south east);
+    \draw[line width=0.6pt,color=CoverFrame]
+      ([xshift=16.5mm,yshift=-16.5mm]current page.north west) rectangle
+      ([xshift=-16.5mm,yshift=16.5mm]current page.south east);
+  \end{tikzpicture}%
+  \centering\fontsize{13}{16}\selectfont
+
+  {\bfseries\fontsize{15}{18}\selectfont \University}\\[3pt]
+  {\bfseries \School}\\[2pt]
+  \rule{55mm}{0.6pt}\\[12mm]
+
+  \IfFileExists{figures/logo-hust.pdf}{\includegraphics[height=32mm]{logo-hust.pdf}}{%
+  \IfFileExists{figures/logo-hust.png}{\includegraphics[height=32mm]{logo-hust.png}}{%
+    \tikz\node[draw=muted,dashed,minimum width=26mm,minimum height=32mm,align=center,
+               font=\small\color{muted}]{LOGO\\[2pt]\texttt{figures/}\\\texttt{logo-hust.png}};}}\\[12mm]
+
+  {\bfseries\fontsize{24}{30}\selectfont \ReportType}\\[14mm]
+
+  {\bfseries\fontsize{20}{26}\selectfont\color{CoverTitle} \MakeUppercase{\DocTitle}}\\[5mm]
+  {\fontsize{14}{18}\selectfont \DocSubtitle}\\[16mm]
+
+  \begin{minipage}{0.86\linewidth}
+    \raggedright\fontsize{13}{17}\selectfont
+    {\bfseries\MakeUppercase{\StudentName}}\\
+    MSSV: \StudentId\\
+    \StudentEmail\\[6mm]
+    {\bfseries Ngành} \Major\\[6mm]
+    \begin{tabular}{@{}p{62mm}@{\hspace{6mm}}p{62mm}@{}}
+      {\bfseries Giảng viên hướng dẫn:} & \centering{\bfseries Chữ ký của GVHD} \tabularnewline
+      \Supervisor & \tabularnewline[22mm]
+    \end{tabular}\\[4mm]
+    {\bfseries Khoa:} \Department\\
+    {\bfseries Trường:} \SchoolShort
+  \end{minipage}
+
+  \vfill
+  {\bfseries \PlaceDate}
+\end{titlepage}
+\restoregeometry
+
+\chapter*{Kiểm soát tài liệu}
+\addcontentsline{toc}{chapter}{Kiểm soát tài liệu}
+\markboth{Kiểm soát tài liệu}{}
+
+\section*{Lịch sử phiên bản}
+\begin{xltabular}{\linewidth}{@{}L{16mm}L{24mm}L{30mm}Y@{}}
+  \toprule
+  \textbf{Phiên bản} & \textbf{Ngày} & \textbf{Người viết} & \textbf{Thay đổi} \\
+  \midrule
+  0.1 & 16/11/2026 & \DocAuthor & Bộ tài liệu Markdown \code{docs/system/} (01--05), đúng với commit \code{9c73660}. \\
+  0.2 & 16/11/2026 & \DocAuthor & Thay sơ đồ Mermaid bằng spec để vẽ lại (commit \code{93d7ea3}). \\
+  1.0 & \DocDate   & \DocAuthor & Bản LaTeX theo cấu trúc tài liệu thiết kế hệ thống dữ liệu; sơ đồ để ô trống chờ vẽ. \\
+  \bottomrule
+\end{xltabular}
+
+\section*{Phê duyệt}
+\begin{xltabular}{\linewidth}{@{}L{40mm}L{45mm}L{30mm}Y@{}}
+  \toprule
+  \textbf{Vai trò} & \textbf{Họ tên} & \textbf{Ngày} & \textbf{Chữ ký / ghi chú} \\
+  \midrule
+  Tác giả            & \DocAuthor & \DocDate & \\
+  Người hướng dẫn    & & & \\
+  Người duyệt kỹ thuật & & & \\
+  \bottomrule
+\end{xltabular}
+
+\section*{Nguồn chân lý}
+\begin{xltabular}{\linewidth}{@{}L{55mm}Y@{}}
+  \toprule
+  \textbf{Đường dẫn} & \textbf{Nội dung} \\
+  \midrule
+  \code{src/ecomdata/} & toàn bộ mã nguồn: \code{domain}, \code{settings}, \code{infra}, \code{ingestion}, \code{processing}, \code{serving}, \code{orchestration}, \code{ops} \\
+  \code{compose/}, \code{env/}, \code{scripts/mp.ps1} & triển khai Docker Compose theo profile, biến môi trường, CLI vận hành \\
+  \code{databricks.yml}, \code{databricks/} & Databricks Asset Bundle, định nghĩa job \\
+  \code{scripts/init_postgres.sql} & DDL schema \code{audit}, \code{cache}, \code{staging} \\
+  \code{docs/adr/0001}--\code{0009} & quyết định kiến trúc (tóm tắt ở Phụ lục~\ref{app:adr}) \\
+  \code{docs/model/star-schema.dbml} & danh sách cột đầy đủ của star schema \\
+  \code{docs/system/} & bộ tài liệu hệ thống dạng Markdown kèm spec của từng sơ đồ \\
+  \code{docs/evidence/} & bằng chứng đo (log, báo cáo chỉ số, snapshot) \\
+  \bottomrule
+\end{xltabular}
+
+\section*{Quy ước trình bày}
+\begin{itemize}
+  \item Tên trong mã nguồn giữ nguyên và in \code{đơn cách} (ví dụ \code{offer_observations_v2}, \code{marketplace.records.v1}); phần giải thích viết tiếng Việt.
+  \item \textbf{Sơ đồ}: mỗi sơ đồ là một ô trống có khung ghi \emph{ý chính} và vị trí \emph{spec} (bảng node, cạnh, màu) trong \code{docs/system/}. Vẽ xong, lưu vào \code{docs/report/figures/} đúng tên file ghi trong ô; lần biên dịch sau hình tự thay ô trống. Danh mục đầy đủ ở Phụ lục~\ref{app:figures}.
+  \item \textbf{Màu theo tầng} dùng chung cho mọi sơ đồ:
+\end{itemize}
+
+\begin{xltabular}{\linewidth}{@{}L{8mm}L{40mm}L{24mm}Y@{}}
+  \toprule
+  & \textbf{Tầng} & \textbf{Mã màu} & \textbf{Gồm} \\
+  \midrule
+  \tikz\fill[layerSource,draw=muted] (0,0) rectangle (4mm,3mm); & Nguồn ngoài & \texttt{\#E5E7EB} & Tiki, Lazada \\
+  \tikz\fill[layerIngest,draw=muted] (0,0) rectangle (4mm,3mm); & Thu thập & \texttt{\#DBEAFE} & crawl-worker, frontier \\
+  \tikz\fill[layerLake,draw=muted] (0,0) rectangle (4mm,3mm); & Lưu trữ lake & \texttt{\#FEF3C7} & Bronze, Silver, Gold, \code{dw} \\
+  \tikz\fill[layerBatch,draw=muted] (0,0) rectangle (4mm,3mm); & Batch & \texttt{\#FFEDD5} & stage Spark \\
+  \tikz\fill[layerSpeed,draw=muted] (0,0) rectangle (4mm,3mm); & Speed & \texttt{\#EDE9FE} & Spark Structured Streaming \\
+  \tikz\fill[layerKafka,draw=muted] (0,0) rectangle (4mm,3mm); & Kafka & \texttt{\#FEE2E2} & topic \\
+  \tikz\fill[layerServe,draw=muted] (0,0) rectangle (4mm,3mm); & Phục vụ & \texttt{\#DCFCE7} & PostgreSQL \code{cache}, Elasticsearch, Redis, Superset, Kibana \\
+  \tikz\fill[layerOps,draw=muted] (0,0) rectangle (4mm,3mm); & Điều phối, giám sát & \texttt{\#CCFBF1} & Airflow, Grafana, Databricks Jobs \\
+  \bottomrule
+\end{xltabular}
+
+Hình dạng: \emph{hình trụ} là nơi lưu dữ liệu; \emph{lục giác} là topic Kafka; \emph{chữ nhật bo góc} là tiến trình; \emph{hình thoi} là quyết định; \emph{chữ nhật thường} là hệ thống ngoài hoặc công cụ người dùng. Nét liền là dữ liệu chảy, nét đứt là điều khiển (lập lịch, lease, đọc trạng thái), nét đậm là đường chính của hình.

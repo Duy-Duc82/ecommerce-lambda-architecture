@@ -1,0 +1,65 @@
+% =====================================================================
+\chapter{Phục vụ dữ liệu}\label{chap:serving}
+% =====================================================================
+\src{src/ecomdata/processing/batch/repositories.py, serving/, observability/build_superset_batch_dashboard.py}
+
+\section{Kho phục vụ}
+\begin{xltabular}{\linewidth}{@{}L{48mm}L{24mm}Y L{34mm}@{}}
+  \caption{Kho phục vụ và người đọc}\label{tab:serving}\\
+  \toprule
+  \textbf{Kho} & \textbf{Ghi bởi} & \textbf{Nội dung} & \textbf{Ai đọc} \\
+  \midrule
+  \endfirsthead
+  \toprule \textbf{Kho} & \textbf{Ghi bởi} & \textbf{Nội dung} & \textbf{Ai đọc} \\ \midrule
+  \endhead
+  PostgreSQL \code{cache.marketplace_*} (12 bảng) & stage \code{publish} & đúng một run, run mà \code{current.json} trỏ tới & Superset dashboard \code{marketplace-batch-gold} (13 chart), ops \\
+  \code{audit.marketplace_cache_version} & stage \code{publish} & dòng duy nhất: \code{run_id}, số dòng, \code{manifest_uri} & backup (kiểm khớp pointer), Grafana \\
+  ES \code{marketplace-changes-v1}, \code{marketplace-offers-current-v1} & speed & thay đổi, trạng thái offer & Kibana \code{marketplace-realtime-changes-v1} \\
+  ES \code{marketplace-speed-batches-v1}, \code{-dlq-v1}, \code{-source-health-v1}, \code{-crawl-attempts-v1} & es-projector & chiếu từ \code{audit.*}, topic DLQ, Redis & Kibana \code{marketplace-source-health-v1}, \code{marketplace-live-demo} \\
+  Redis \code{rt:*} & speed & thay đổi gần nhất, trạng thái offer (TTL 24 h) & tra cứu thời gian thực \\
+  Kafka \code{marketplace.changes.v1} & speed & luồng thay đổi & hệ thống hạ nguồn \\
+  \bottomrule
+\end{xltabular}
+
+\section{Publish nguyên tử}
+\code{repositories.py:311-384}:
+\begin{enumerate}
+  \item Mỗi mart được ghi JDBC vào \code{staging.mp_<mart>_<sha256(run_id)[:16]>}.
+  \item Trong \textbf{một} transaction có \code{pg_advisory_xact_lock}: kiểm lại số dòng, \code{TRUNCATE} cả 12 bảng \code{cache.*},
+        \code{INSERT ... SELECT} từ staging, upsert \code{audit.marketplace_cache_version}.
+  \item Người đọc chỉ thấy toàn bộ run cũ hoặc toàn bộ run mới.
+\end{enumerate}
+
+\section{Promote}
+Stage \code{promote} so \code{run_id} trong \code{current.json} với \code{expected_current_run_id} đã ghi lúc tạo run (compare-and-swap).
+Khớp thì ghi \code{current.json} = byte của manifest; lệch thì run thành \code{HELD} với \code{PROMOTION_CONFLICT}.
+Một run có \code{as_of} cũ hơn run đang current chỉ được promote khi có \code{--allow-backfill}.
+Thứ tự publish trước promote (ADR-0005) bảo đảm pointer không trỏ vào Gold mà cache chưa có.
+
+\section{Giao diện người dùng}
+\begin{xltabular}{\linewidth}{@{}L{30mm}L{50mm}Y@{}}
+  \toprule
+  \textbf{Công cụ} & \textbf{Dashboard} & \textbf{Phục vụ câu hỏi} \\
+  \midrule
+  Superset :8088 & \code{marketplace-batch-gold} (13 chart) & BQ1, BQ2, độ phủ (BQ3 phần batch) \\
+  Kibana :5601 & \code{marketplace-realtime-changes-v1}, \code{marketplace-source-health-v1}, \code{marketplace-live-demo} & BQ3: thay đổi thời gian thực, sức khoẻ nguồn \\
+  Grafana :3001 & 5 dashboard \code{lambda-*} & vận hành (Chương~\ref{chap:ops}) \\
+  \bottomrule
+\end{xltabular}
+
+\diagramslot{fig-9-1-dashboard-superset}
+  {Ảnh chụp dashboard Superset \texttt{marketplace-batch-gold}}
+  {Ảnh chụp màn hình dashboard batch: lịch sử giá, giá bất thường, độ tin cậy khuyến mãi, độ phủ nguồn.}
+  {chụp từ Superset sau một run PROMOTED}
+  {Dashboard Superset đọc PostgreSQL \texttt{cache.*} của run đang được phục vụ.}
+
+\diagramslot{fig-9-2-dashboard-kibana}
+  {Ảnh chụp dashboard Kibana thời gian thực}
+  {Ảnh chụp màn hình \texttt{marketplace-realtime-changes-v1}: luồng thay đổi theo loại, theo thời gian.}
+  {chụp từ Kibana khi speed đang chạy}
+  {Dashboard Kibana đọc Elasticsearch do speed layer và es-projector ghi.}
+
+\begin{riskbox}[Lưu ý]
+Spec 3 dashboard trong \code{serving/superset/*.py} không được mã provisioning nào gọi tới; dashboard thật do
+\code{observability/build_superset_batch_dashboard.py} dựng và chưa có chart cho mart discount (Bảng~\ref{tab:drift}, mục 15).
+\end{riskbox}

@@ -1,0 +1,166 @@
+% =====================================================================
+\chapter{Pipeline và điều phối}\label{chap:pipeline}
+% =====================================================================
+\src{src/ecomdata/orchestration/, ingestion/service.py, processing/batch/, processing/speed/, databricks/resources/jobs.yml, scripts/mp.ps1}
+
+\section{Danh mục pipeline}
+\begin{xltabular}{\linewidth}{@{}L{7mm}L{24mm}L{22mm}L{30mm}Y@{}}
+  \caption{Danh mục pipeline P1--P9}\label{tab:pipelines}\\
+  \toprule
+  \textbf{Mã} & \textbf{Pipeline} & \textbf{Kiểu} & \textbf{Kích hoạt / nơi chạy} & \textbf{Đầu vào \ra\ đầu ra; entrypoint} \\
+  \midrule
+  \endfirsthead
+  \toprule \textbf{Mã} & \textbf{Pipeline} & \textbf{Kiểu} & \textbf{Kích hoạt / nơi chạy} & \textbf{Đầu vào \ra\ đầu ra; entrypoint} \\ \midrule
+  \endhead
+  P1 & Thu thập & tiến trình dài hạn & liên tục theo \code{scheduled_for}; container \code{crawl-worker}, \code{crawl-worker-lazada} & site \ra\ Bronze, Kafka \code{records.v1}, \code{audit.crawl_*}; \code{python -m ecomdata.ingestion.service --sources tiki} \\
+  P2 & Discovery, seed & theo lịch & DAG \code{source_discovery}, \code{@daily}; DockerOperator & sitemap / \code{categories.json} \ra\ frontier (tier SWEEP); \code{python -m ecomdata.ingestion.seed --from-discovery} \\
+  P3 & Speed (Kafka) & streaming & trigger 30 s; container \code{speed} & \code{records.v1} \ra\ \code{observations.v1} \ra\ changes, ES, Redis; \code{python -m ecomdata.processing.speed.service} \\
+  P4 & Speed lakehouse & streaming, available-now & job Databricks (lịch 15 phút, đang PAUSED) hoặc chạy tay & Bronze/records \ra\ Delta \code{gold/speed/*}; \code{ecomdata-speed-lakehouse --available-now --auto-loader} \\
+  P5 & Batch theo giờ & theo lịch & DAG \code{marketplace_batch}, \code{@hourly}; DockerOperator (image Spark), 8 task & Bronze \ra\ Silver \ra\ \code{dw} \ra\ mart \ra\ \code{cache.*} \ra\ \code{current.json}; \code{python -m ecomdata.processing.batch run --stage ...} \\
+  P6 & Reprocess & chạy tay & DAG \code{marketplace_reprocess} (không lịch) & như P5, cửa sổ \code{--silver-since} hoặc \code{--rebuild} \\
+  P7 & Batch Databricks & chạy tay, có tham số & job \code{ecomdata-marketplace-batch} & S3 Bronze \ra\ Silver, \code{dw}, mart, quality (không publish); \code{ecomdata-batch run ... --skip-postgres} \\
+  P8 & Bảo trì & theo lịch & DAG \code{marketplace_maintenance}, \code{@weekly} & prune raw, backup, đo dung lượng; \code{python -m ecomdata.ops ...} \\
+  P9 & Chiếu audit sang ES & tiến trình dài hạn & vòng lặp 30 s; container \code{es-projector} & \code{audit.*}, DLQ, Redis \ra\ ES \code{marketplace-*-v1}; \code{python -m ecomdata.serving.es_projector} \\
+  \bottomrule
+\end{xltabular}
+
+\diagramslot{fig-4-1-ban-do-pipeline}
+  {Bản đồ pipeline}
+  {9 pipeline P1--P9 đọc/ghi những kho nào, và ai khởi động chúng (Airflow, Databricks Jobs hoặc tự chạy liên tục).}
+  {Hình 4.1 — \texttt{docs/system/04-pipeline.md} §4.1 (18 node)}
+  {Bản đồ pipeline. Nét đứt là điều khiển (lập lịch). P1, P3, P9 là tiến trình dài hạn; P2, P5, P6, P8 do Airflow khởi động; P4, P7 do Databricks khởi động.}
+
+\chartslot{fig-4-2-gantt-mot-gio}
+  {Biểu đồ Gantt: một giờ vận hành điển hình}
+  {Trục ngang 10:00--11:00 UTC. P1, P3, P9 chạy suốt giờ; run \texttt{mp-...T1000Z} chờ 10 phút (sensor) rồi chạy tuần tự silver (2'), dimensions (4'), facts (2'), marts (2'), quality \ra\ publish \ra\ promote (3').}
+  {Hình 4.2 — \texttt{docs/system/04-pipeline.md} §4.1 (bảng làn và bước)}
+  {Một giờ vận hành điển hình. Thời lượng stage là minh hoạ theo bậc độ lớn đo ngày 13--14/11; \texttt{max\_active\_runs = 1} nên các run không chồng nhau.}
+
+\section{P2 — Discovery và seed}
+DAG \code{source_discovery} (\code{@daily}, \code{catchup=False}) có \textbf{một task cho mỗi nguồn khai báo discovery}, chạy song song:
+\code{python -m ecomdata.ingestion.seed --source <code> --from-discovery --tier SWEEP}. Seed chèn một task READY cho mỗi danh mục $\times$ trang,
+\code{scheduled_for} neo ở \code{1970-01-01Z}, \code{ON CONFLICT DO NOTHING}, nên seed lại nhiều lần cũng vô hại. Tier \code{ACTIVE} được seed tay bằng \code{mp.ps1 seed}.
+
+\section{P3 — Speed qua Kafka}
+\begin{xltabular}{\linewidth}{@{}L{34mm}Y@{}}
+  \toprule
+  \textbf{Hạng mục} & \textbf{Giá trị} \\
+  \midrule
+  Tiến trình & 1 container \code{speed}, 2 query Spark; watchdog dừng tiến trình nếu query normalizer chết \\
+  Trigger & 30 s; \code{spark.sql.shuffle.partitions} = 4 \\
+  Checkpoint & volume \code{speed_checkpoints} \ra\ \code{/data/checkpoints/v1} và \code{/v1-normalizer} \\
+  Khởi động lại & \code{restart: unless-stopped}; tiếp tục từ checkpoint; ID tất định nên replay không sinh trùng \\
+  Reset & đổi \code{MARKETPLACE_STREAM_CHECKPOINT_VERSION} thì đọc lại từ \code{earliest} với state rỗng: mọi offer phát lại \code{NEW_OFFER} \\
+  \bottomrule
+\end{xltabular}
+
+\section{P5 — Batch theo giờ}\label{sec:p5}
+\subsection{DAG \texttt{marketplace\_batch}}
+\diagramslot{fig-4-5-dag-marketplace-batch}
+  {DAG \texttt{marketplace\_batch}}
+  {Chuỗi thẳng 8 task: window\_settled \ra\ silver \ra\ dimensions \ra\ facts \ra\ marts \ra\ quality \ra\ publish \ra\ promote; \texttt{quality} là cổng chặn (không retry) đứng trước publish và promote.}
+  {Hình 4.5 — \texttt{docs/system/04-pipeline.md} §4.6}
+  {DAG theo giờ: sensor chờ cửa sổ dữ liệu ổn định 10 phút rồi chạy 7 stage tuần tự.}
+
+\begin{xltabular}{\linewidth}{@{}L{24mm}Y@{}}
+  \caption{Thuộc tính DAG \texttt{marketplace\_batch}}\label{tab:dag-batch}\\
+  \toprule
+  \textbf{Thuộc tính} & \textbf{Giá trị} \\
+  \midrule
+  Lịch & \code{@hourly}, bắt đầu 2026-10-25 UTC, \code{catchup=False}, \code{max_active_runs=1}, \code{dagrun_timeout} 3 h \\
+  Sensor & \code{window_settled}: \code{TimeDeltaSensor} 10 phút \\
+  Task & \code{DockerOperator}, image \code{ecommerce/spark-marketplace:4.0.1-r4}, \code{auto_remove=success}, timeout 45 phút mỗi stage \\
+  Lệnh & \code{python3 -m ecomdata.processing.batch run --stage <s> --run-id mp-<YYYYMMDDTHHMMZ> --as-of <data_interval_end> [--resume] [--allow-backfill]} \\
+  Retry & 2 lần, cách 2 phút; từ lần thử thứ 2 tự thêm \code{--resume}; \code{quality} không retry \\
+  Tham số & \code{allow_backfill} (mặc định False) \\
+  Khoá & advisory lock \code{pg_try_advisory_lock(820801)} trên kết nối riêng, giữ suốt lệnh; bị chiếm thì thoát mã 75 \\
+  \bottomrule
+\end{xltabular}
+
+\subsection{State machine của một run (ADR-0005)}
+\diagramslot{fig-4-6-state-machine-run}
+  {State machine của một run batch}
+  {Đường chính trái \ra\ phải CREATED \ra\ SILVER\_BUILT \ra\ DIMENSIONS\_BUILT \ra\ FACTS\_BUILT \ra\ GOLD\_WRITTEN \ra\ QUALITY\_PASSED \ra\ PUBLISHED \ra\ PROMOTED; FAILED, QUALITY\_FAILED, HELD đặt bên dưới; \texttt{--resume} mở lại từ mốc cuối.}
+  {Hình 4.6 — \texttt{docs/system/04-pipeline.md} §4.6 (12 trạng thái, 19 chuyển)}
+  {Trạng thái của run trong \texttt{audit.marketplace\_batch\_run}. FAILED, QUALITY\_FAILED, PROMOTED là trạng thái cuối; stage đã đạt mốc thì bị bỏ qua khi resume.}
+
+\begin{xltabular}{\linewidth}{@{}L{34mm}L{34mm}Y@{}}
+  \caption{Chuyển trạng thái ngoài đường chính}\label{tab:run-transitions}\\
+  \toprule
+  \textbf{Từ} & \textbf{Tới} & \textbf{Điều kiện} \\
+  \midrule
+  \code{GOLD_WRITTEN} & \code{QUALITY_FAILED} & quality FAIL (RESTORE star) \\
+  \code{QUALITY_PASSED} & \code{HELD} & \code{--quality-only} / scratch run / backfill bị từ chối / pointer conflict \\
+  \code{PUBLISHED} & \code{HELD} & \code{PROMOTION_CONFLICT} \\
+  \code{HELD} & \code{PUBLISHED}, \code{PROMOTED} & chạy lại (ví dụ \code{--allow-backfill}) \\
+  bất kỳ stage trước quality & \code{FAILED} & ngoại lệ trong stage \\
+  \code{QUALITY_FAILED} & \code{GOLD_WRITTEN} & \code{--resume} (chạy lại quality) \\
+  \code{FAILED} & mốc \code{last_completed_status} & \code{--resume} \\
+  \bottomrule
+\end{xltabular}
+
+\subsection{Đầu vào, đầu ra từng stage}
+\begin{xltabular}{\linewidth}{@{}L{21mm}Y Y L{28mm}@{}}
+  \caption{Đầu vào/đầu ra của 7 stage}\label{tab:stage-io}\\
+  \toprule
+  \textbf{Stage} & \textbf{Đọc} & \textbf{Ghi} & \textbf{Trạng thái sau} \\
+  \midrule
+  \endfirsthead
+  \toprule \textbf{Stage} & \textbf{Đọc} & \textbf{Ghi} & \textbf{Trạng thái sau} \\ \midrule
+  \endhead
+  \code{silver} & Bronze/records của cửa sổ ngày (không cắt \code{as_of}) & 4 bảng Silver, \code{silver.json} & \code{SILVER_BUILT} \\
+  \code{dimensions} & toàn bộ Silver, bảng rộng, page context, crawl attempts & 7 dim + 1 bridge (\code{MERGE}), \code{dimensions.json} & \code{DIMENSIONS_BUILT} \\
+  \code{facts} & Silver, \code{dim_product_listing}, crawl audit & 6 fact (\code{MERGE}, partition \code{date_key}), \code{facts.json} & \code{FACTS_BUILT} \\
+  \code{marts} & star tại version vừa dựng, cắt \code{as_of}, bỏ quảng cáo & 12 mart vào \code{runs/run_id=<run>/}, \code{marts.json} & \code{GOLD_WRITTEN} \\
+  \code{quality} & Silver cắt \code{as_of}, mart, star, audit & \code{audit.marketplace_quality_result}, \code{quality.json}, manifest & \code{QUALITY_PASSED} / \code{QUALITY_FAILED} / \code{HELD} \\
+  \code{publish} & mart, manifest & \code{staging.*} \ra\ \code{cache.marketplace_*}, \code{audit.marketplace_cache_version} & \code{PUBLISHED} / \code{HELD} \\
+  \code{promote} & manifest, \code{current.json} & \code{current.json} (CAS) & \code{PROMOTED} / \code{HELD} \\
+  \bottomrule
+\end{xltabular}
+
+Sau mỗi stage, runner ghi \code{timings/<stage>.json} và chép dòng audit ra \code{_runs/run_id=<run>/run.json}, để lake tự mô tả lịch sử run.
+
+\subsection{Tham số dòng lệnh}
+\begin{xltabular}{\linewidth}{@{}L{55mm}Y@{}}
+  \caption{Cờ của \texttt{ecomdata.processing.batch run}}\label{tab:cli-flags}\\
+  \toprule
+  \textbf{Cờ} & \textbf{Tác dụng} \\
+  \midrule
+  \code{--stage <s>} (lặp được) / \code{--all} & chọn stage \\
+  \code{--resume} & mở lại run FAILED / QUALITY\_FAILED \\
+  \code{--force} & chạy lại một stage đã đạt mốc, không đổi trạng thái \\
+  \code{--allow-backfill} & cho promote run có \code{as_of} cũ hơn run đang current \\
+  \code{--quality-only} & dừng ở HELD sau quality, không publish \\
+  \code{--silver-since D}, \code{--late-days N}, \code{--rebuild} & cửa sổ của stage \code{silver} \\
+  \code{--silver-uri}, \code{--gold-root-uri} & đổi gốc lưu; gold root khác mặc định \ra\ scratch run (không manifest, HELD) \\
+  \code{--skip-postgres} & audit và quality trong bộ nhớ, không lock, không publish (dùng cho Databricks) \\
+  \bottomrule
+\end{xltabular}
+
+\section{P6 — Reprocess}
+DAG \code{marketplace_reprocess} (không lịch, chạy bằng \emph{Trigger DAG w/ config}) có 7 stage như P5 nhưng không có sensor,
+timeout 4 giờ mỗi task, 1 retry; \code{run_id} = \code{mp-reprocess-<ts>}. Tham số \code{since} (thêm \code{--silver-since}) hoặc
+\code{rebuild} (dựng lại Silver từ toàn bộ Bronze). Dùng khi normalizer đổi, khi Bronze được bổ sung ngày cũ hoặc sau sự cố.
+Kết hợp với \code{ingestion/reparse.py}: parser đổi thì reparse dựng lại records từ raw, rồi reprocess dựng lại mọi tầng sau.
+
+\section{P7 — Batch trên Databricks}
+\begin{xltabular}{\linewidth}{@{}L{26mm}Y@{}}
+  \toprule
+  \textbf{Hạng mục} & \textbf{Giá trị} \\
+  \midrule
+  Job & \code{ecomdata-marketplace-batch}, một \code{python_wheel_task}, entry point \code{ecomdata-batch} \\
+  Lệnh & \code{run --run-id dbx-<job.run_id> --as-of <job.parameters.as_of> --stage silver ... --stage quality --skip-postgres} \\
+  Cluster & single node (\code{num_workers: 0}), \code{SINGLE_USER}, \code{local[*,4]}, \code{m5d.large}, DBR \code{17.3.x-scala2.13} \\
+  Cấu hình & \code{DATA_LAKE_PROFILE=s3}, \code{DATA_LAKE_TABLE_FORMAT=delta}, \code{MARKETPLACE_CRAWL_AUDIT_SOURCE=lake}; khoá S3 từ secret scope \code{ecomdata} \\
+  Đồng thời & \code{max_concurrent_runs: 1}, thay cho advisory lock \\
+  Không gồm & \code{publish}, \code{promote} (cần PostgreSQL \code{cache.*} ở local) \\
+  Triển khai & \code{databricks bundle deploy -t dev}; \code{databricks bundle run -t dev marketplace_batch --params as_of=...} \\
+  \bottomrule
+\end{xltabular}
+
+P4 (speed lakehouse): job \code{ecomdata-marketplace-speed}, timeout 6 giờ, lịch quartz \code{0 0/15 * * * ?} (Asia/Ho\_Chi\_Minh), \textbf{đang PAUSED};
+với \code{--available-now}, query 2 chỉ bắt đầu khi query 1 đã xử lý hết file hiện có, sau đó cả hai dừng.
+
+\section{P9 — es-projector}
+\code{serving/es_projector.py} chạy vòng 30 s, chồng lấn 900 s, chiếu \code{audit.*}, topic DLQ và Redis sang các index
+\code{marketplace-speed-batches-v1}, \code{marketplace-dlq-v1}, \code{marketplace-source-health-v1}, \code{marketplace-crawl-attempts-v1} cho Kibana.

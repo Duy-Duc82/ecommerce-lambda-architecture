@@ -1,0 +1,106 @@
+% =====================================================================
+\chapter{Chất lượng dữ liệu và quản trị dữ liệu}\label{chap:quality}
+% =====================================================================
+\src{src/ecomdata/domain/quality_rules.py, processing/batch/quality.py, processing/batch/stages/quality.py, ingestion/reparse.py}
+
+\section{Cổng chất lượng}
+22 luật trong \code{domain/quality_rules.py} (16 bắt buộc, 6 khuyến nghị), cài đặt trong \code{processing/batch/quality.py}.
+Luật chạy trong stage \code{quality}, sau \code{marts} và trước \code{publish}.
+
+\begin{xltabular}{\linewidth}{@{}L{22mm}Y L{48mm}@{}}
+  \caption{22 luật chất lượng}\label{tab:quality-rules}\\
+  \toprule
+  \textbf{Nhóm} & \textbf{Luật bắt buộc} & \textbf{Luật khuyến nghị} \\
+  \midrule
+  \endfirsthead
+  \toprule \textbf{Nhóm} & \textbf{Luật bắt buộc} & \textbf{Luật khuyến nghị} \\ \midrule
+  \endhead
+  Lineage & \code{raw_artifact_checksum_and_uri_present}, \code{silver_observation_raw_lineage_complete} & \\
+  Khoá, duy nhất & \code{observation_id_unique} (tính cả bản trùng trước dedup), \code{offer_listing_key_unique}, \code{offer_current_single_row_per_offer} & \\
+  Miền giá trị & \code{offer_key_and_price_complete}, \code{price_non_negative}, \code{currency_valid} (USD, VND), \code{observed_at_within_future_tolerance} ($\le$ 300 s) & \\
+  Đối soát & \code{silver_parse_attempt_reconciliation} (Silver + quarantine = \code{parsed_count} của audit, với crawl run đã ổn định), \code{gold_daily_row_count_reconciles}, \code{gold_daily_price_aggregates_reconcile} & \\
+  Phiên bản luật & \code{freshness_rule_version_and_as_of_applied} & \\
+  Star & \code{star_foreign_keys_resolve}, \code{star_surrogate_keys_unique}, \code{star_listing_versions_consistent} & \code{star_unknown_member_rate} ($\le 50\,\%$) \\
+  Phân tích & & \code{counter_invalid_transition_rate} ($\le 50\,\%$), \code{price_anomaly_evaluation_coverage}, \code{discount_credibility_evaluation_coverage}, \code{source_coverage_rate_denominator_present}, \code{crawl_reliability_evidence_present} \\
+  \bottomrule
+\end{xltabular}
+
+\diagramslot{fig-3-5-quyet-dinh-quality}
+  {Quyết định của cổng chất lượng}
+  {Manifest luôn được ghi; chỉ khi mọi luật bắt buộc PASS (không thiếu, không FAIL, không SKIPPED) run mới đi tiếp sang publish; FAIL thì star bị RESTORE.}
+  {Hình 3.5 — \texttt{docs/system/03-xu-ly-trong-tang.md} §3.8 (7 node)}
+  {Quyết định của cổng. Một luật bắt buộc bị SKIPPED cũng chặn run như FAIL; luật khuyến nghị không bao giờ chặn.}
+
+\begin{enumerate}
+  \item Chạy 22 luật; upsert \code{audit.marketplace_quality_result}; ghi \code{_runs/run_id=<run>/quality.json}.
+  \item Luôn ghi manifest (trừ scratch run): datasets, kết quả quality, \code{dw_versions}.
+  \item Có luật bắt buộc thiếu, FAIL hoặc SKIPPED \ra\ \code{QUALITY_FAILED} và \textbf{RESTORE} star về \code{dw_versions} của manifest đang current
+        (\code{RESTORE TABLE ... VERSION AS OF}, ADR-0007).
+  \item Ngược lại: \code{--quality-only} hoặc gold root scratch \ra\ \code{HELD}; còn lại \ra\ \code{QUALITY_PASSED} và đi tiếp sang publish.
+\end{enumerate}
+
+\begin{notebox}[Bằng chứng]
+Run 11:00 ngày 07/11/2026 bị \code{QUALITY_FAILED}; Superset vẫn giữ bản ngày 31/10
+(\code{docs/DANH_GIA_HE_THONG_20261113.md}, \code{docs/evidence/run-20261107/NHAT-KY-LOI.md}).
+\end{notebox}
+
+\section{Lineage}\label{sec:lineage}
+Mọi tầng giữ khoá của tầng trước, nên từ một con số trên Superset đi ngược được tới byte HTTP mà crawler đã nhận.
+
+\diagramslot{fig-2-5-truy-nguoc-lineage}
+  {Truy ngược lineage từ mart về byte gốc}
+  {Flowchart phải \ra\ trái: \texttt{cache.marketplace\_offer\_current} \ra\ \texttt{fact\_offer\_observation} \ra\ Silver \ra\ Bronze/records \ra\ Bronze/raw qua chuỗi \texttt{observation\_id} \ra\ \texttt{record\_id} \ra\ \texttt{raw\_artifact\_id}; \texttt{crawl\_run\_id} rẽ sang audit.}
+  {Hình 2.5 — \texttt{docs/system/02-luong-du-lieu.md} §2.7 (6 node)}
+  {Truy ngược lineage. \texttt{reparse} kiểm SHA-256 của từng part trước khi parse lại; một artifact hỏng không bao giờ được đưa vào parser.}
+
+\begin{xltabular}{\linewidth}{@{}L{48mm}L{34mm}Y@{}}
+  \caption{Khoá lineage giữa các tầng}\label{tab:lineage}\\
+  \toprule
+  \textbf{Tầng} & \textbf{Khoá trỏ về tầng trước} & \textbf{Cột lineage khác} \\
+  \midrule
+  \code{cache.marketplace_offer_current} & \code{current_observation_id} & \code{offer_id}, \code{raw_uri} \\
+  \code{dw.fact_offer_observation} & \code{observation_id} & \code{raw_uri}, \code{raw_sha256}, \code{crawl_run_id} \\
+  \code{silver.offer_observations_v2} & \code{record_id} & \code{raw_artifact_id}, \code{adapter_version} \\
+  Bronze/records & \code{raw_artifact_id} & \code{body_sha256}, \code{extractor_version} \\
+  Bronze/raw & --- & \code{metadata.json}: sha256 từng part \\
+  \code{audit.crawl_request_attempt} & \code{crawl_run_id}, \code{task_id} & \code{http_status}, latency \\
+  \bottomrule
+\end{xltabular}
+
+Kết quả của \code{reparse}: \code{IDENTICAL}, \code{DIVERGED}, \code{RECORDS_MISSING}, \code{CHECKSUM_MISMATCH}, \code{PARSE_FAILED}, \code{ADAPTER_VERSION_CHANGED}.
+
+\section{Tính tất định và idempotency}
+\begin{xltabular}{\linewidth}{@{}L{36mm}L{50mm}Y@{}}
+  \caption{Cơ chế ghi lại an toàn theo tầng}\label{tab:idempotency}\\
+  \toprule
+  \textbf{Tầng} & \textbf{Khoá} & \textbf{Cơ chế} \\
+  \midrule
+  Bronze & \code{raw_artifact_id}, \code{record_id} & ID tất định, gzip \code{mtime=0}: ghi lại ra cùng byte \\
+  Kafka & key theo nguồn/offer & at-least-once; phía nhận loại trùng bằng ID \\
+  Silver & partition (\code{source_code}, \code{observed_date}) & thay nguyên partition của cửa sổ \\
+  Star \code{dw} & khoá registry (\code{domain/datasets.py}) & \code{MERGE} có xoá; dòng không đổi không bị ghi \\
+  Mart & \code{run_id} & thư mục riêng mỗi run, ghi đè tĩnh \\
+  Cache & cả 12 bảng & TRUNCATE + INSERT trong một transaction có advisory lock \\
+  Pointer & \code{expected_current_run_id} & compare-and-swap \\
+  Speed & \code{change_id}, ES \code{_id}, khoá Redis & checkpoint + audit \code{begin_batch}: batch đã SUCCEEDED thì bỏ qua \\
+  Lakehouse speed & \code{txnAppId}, \code{txnVersion} & append idempotent; \code{MERGE} insert-once \\
+  \bottomrule
+\end{xltabular}
+
+\section{Quản lý schema và hợp đồng dữ liệu}
+\begin{itemize}
+  \item \textbf{Hợp đồng có phiên bản trong tên}: \code{marketplace-record.v1}, \code{marketplace-observation.v1}, \code{marketplace-change.v1},
+        \code{marketplace-crawl-audit.v1}, \code{marketplace-raw-artifact-metadata.v2}; topic kèm hậu tố \code{.v1}.
+  \item \textbf{Schema theo nguồn}: \code{PAYLOAD_SCHEMA} trong normalizer. Khoá mới của sàn được báo trong \code{payload_drift} mà không chặn run.
+  \item \textbf{Phiên bản luật} ghi trên từng dòng kết quả: \code{rule_version} (speed), \code{anomaly_rule_version}, \code{discount-rules.v1}, phiên bản luật freshness.
+  \item \textbf{Phiên bản mã} ghi trên từng record: \code{adapter_version}, \code{extractor_version}.
+\end{itemize}
+
+\section{Bảo mật và quyền riêng tư}
+\begin{itemize}
+  \item \textbf{PII}: trường PII khai báo trong \code{SourceSpec.pii_row_fields}/\code{pii_context_fields} bị bỏ trước khi ghi records; tên trường đã bỏ được ghi vào \code{dropped_fields}.
+        Raw vẫn giữ nguyên byte và bị xoá sau 30 ngày (\code{prune-raw}).
+  \item \textbf{Bí mật}: biến môi trường theo stack (\code{env/<stack>.env}, không commit); Databricks lấy khoá S3 từ secret scope \code{ecomdata}.
+  \item \textbf{Mạng}: cổng giám sát bind \code{127.0.0.1}; các service chỉ chạy trên máy cá nhân.
+  \item \textbf{Thu thập có trách nhiệm}: robots.txt, throttle, user-agent tự khai, không vượt anti-bot (Chương~\ref{chap:ingest}).
+\end{itemize}

@@ -1,0 +1,137 @@
+% =====================================================================
+\chapter{Nguồn dữ liệu và thu thập}\label{chap:ingest}
+% =====================================================================
+\src{src/ecomdata/ingestion/, src/ecomdata/domain/sources.py, src/ecomdata/infra/http.py}
+
+\section{Danh mục nguồn}
+\begin{xltabular}{\linewidth}{@{}L{32mm}YY@{}}
+  \caption{Khai báo nguồn trong \texttt{SourceSpec}}\label{tab:sources}\\
+  \toprule
+  & \textbf{Tiki} & \textbf{Lazada} \\
+  \midrule
+  \code{marketplace_id} & \code{marketplace-tiki} & \code{marketplace-lazada} \\
+  Vai trò & nguồn chính & nguồn minh hoạ đa nguồn \\
+  Fetcher & \code{http} (\code{requests}) & \code{browser} (Playwright Chromium) \\
+  Discovery & \code{TikiSitemapDiscovery}: sitemap\_index \ra\ \code{sitemap_categories} \ra\ \code{<slug>/c<id>} & \code{LazadaConfiguredDiscovery}: 20 danh mục trong \code{categories.json} \\
+  Dữ liệu trong trang & JSON \code{__NEXT_DATA__} trong HTML & XHR JSON (\code{mods.listItems}) \\
+  Phân trang & chỉ trang 1 (40 sản phẩm) & có, tối đa 102 trang \\
+  Delay tối thiểu & 2,0 s & 5,0 s \\
+  Counter & \code{rating_count}, \code{review_count}, \code{sold_count} & \code{review_count} \\
+  PII bỏ & không & \code{mainInfo.userId}, \code{mainInfo.anonUid} \\
+  Nhận diện bị chặn & trang không có \code{__NEXT_DATA__} & URL/HTML khớp \code{punish}, \code{captcha}, \code{slide to verify}... \\
+  \bottomrule
+\end{xltabular}
+
+Toàn bộ khai báo của một nguồn nằm trong một \code{SourceSpec} ở \code{domain/sources.py}. Thêm một nguồn mới
+không phải sửa batch, speed hay ops (ADR-0004). Checklist: extractor và discovery trong \code{ingestion/sources/<site>/};
+normalizer trong \code{processing/normalize/sources/<site>.py} (\code{PAYLOAD_SCHEMA}, \code{to_wide}, \code{to_offer_observation});
+một \code{SourceSpec} đăng ký vào \code{SOURCES}; fixture tối đa 5 sản phẩm không có PII.
+
+Shopee không được crawl: probe ngày 24/10 cho thấy trang bị chuyển tới \code{/verify/traffic/error}.
+Đường hợp lệ duy nhất là Shopee Affiliate Open API khi có tài khoản được duyệt (ADR-0006).
+
+\section{Lịch sự với site}
+\code{infra/http.py}: \code{Throttle} chờ $\max(\text{\code{CRAWL_REQUEST_DELAY_SECONDS}},\ \text{min\_delay của nguồn})$
+cộng jitter 0--1 s, tính theo host. robots.txt được cache 1 giờ; không tải được robots, hoặc robots trả 401/403,
+thì coi như cấm toàn bộ. User-agent tự khai danh tính: \code{EcommercePriceResearchBot/0.1 (+thesis project; rate-limited)}.
+
+\section{Frontier: hàng đợi việc crawl}
+Mỗi dòng của \code{audit.crawl_frontier} là \textbf{một lần xuất hiện} của một target.
+\code{task_id} = hash(\code{code}, \code{resource_type}, \code{target}, \code{scheduled_for}), duy nhất trên
+(\code{marketplace_code}, \code{resource_type}, \code{target}, \code{scheduled_for}).
+
+\diagramslot{fig-3-1-vong-doi-task}
+  {Vòng đời một task trong frontier}
+  {Task đi READY \ra\ LEASED rồi kết thúc ở SUCCEEDED hoặc FAILED, có vòng lặp qua RETRY\_WAIT; SUCCEEDED tự sinh lần xuất hiện kế tiếp.}
+  {Hình 3.1 — \texttt{docs/system/03-xu-ly-trong-tang.md} §3.1 (state diagram)}
+  {Vòng đời task trong \texttt{audit.crawl\_frontier}. Thành công thì sinh lần xuất hiện kế tiếp trong cùng transaction, nên frontier tự duy trì lịch; FAILED chấm dứt chuỗi của target đó cho tới lần seed sau.}
+
+\begin{xltabular}{\linewidth}{@{}L{30mm}L{30mm}Y@{}}
+  \caption{Chuyển trạng thái của task}\label{tab:frontier-transitions}\\
+  \toprule
+  \textbf{Từ} & \textbf{Tới} & \textbf{Điều kiện / hành động} \\
+  \midrule
+  {}(seed) & \code{READY} & \code{INSERT ... ON CONFLICT DO NOTHING} \\
+  \code{READY}, \code{RETRY_WAIT} & \code{LEASED} & \code{lease_due}: \code{FOR UPDATE SKIP LOCKED}, \code{attempts+1}, khi \code{scheduled_for} $\le$ now \\
+  \code{LEASED} & \code{SUCCEEDED} & \code{mark_succeeded}; cùng transaction chèn dòng \code{READY} mới, \code{scheduled_for} = \code{completed_at} + cadence của tier \\
+  \code{LEASED} & \code{RETRY_WAIT} & \code{mark_retry} (lỗi tạm thời hoặc circuit đang mở); hoặc \code{recover_expired_leases} khi lease 300 s hết hạn \\
+  \code{LEASED} & \code{FAILED} & \code{mark_failed} (lỗi vĩnh viễn hoặc hết 5 lần thử) \\
+  \bottomrule
+\end{xltabular}
+
+\begin{xltabular}{\linewidth}{@{}L{24mm}L{24mm}Y@{}}
+  \caption{Tier và chu kỳ crawl}\label{tab:tiers}\\
+  \toprule
+  \textbf{Tier} & \textbf{Cadence} & \textbf{Dùng cho} \\
+  \midrule
+  \code{ACTIVE} & 60 phút & tập nhỏ danh mục theo dõi sát (25 trang mỗi giờ trong lượt 14/11) \\
+  \code{HOT} & 120 phút & đã khai báo, chưa có mã seed \\
+  \code{NORMAL} & 240 phút & mặc định của lệnh \code{seed} \\
+  \code{COLD} & 720 phút & \\
+  \code{SWEEP} & 1440 phút & toàn bộ danh mục từ discovery; DAG \code{source_discovery} seed mỗi ngày \\
+  \bottomrule
+\end{xltabular}
+
+Cadence chỉnh được qua \code{CRAWL_<TIER>_CADENCE_MINUTES}. Worker lấy 10 task mỗi lần, poll 5 s, nghỉ 30 s khi rảnh;
+\code{worker_id} = \code{hostname:pid}.
+
+\section{Phân loại lỗi, retry và circuit breaker}
+\begin{xltabular}{\linewidth}{@{}L{42mm}Y C{12mm}C{16mm}@{}}
+  \caption{Phân loại lỗi thu thập (\texttt{FailureKind})}\label{tab:failure-kind}\\
+  \toprule
+  \textbf{\code{FailureKind}} & \textbf{Nguyên nhân} & \textbf{Retry} & \textbf{Mở circuit} \\
+  \midrule
+  \code{RATE_LIMITED} & HTTP 429 & \cmark & \cmark \\
+  \code{TRANSIENT_NETWORK} & lỗi transport, timeout, 408/425 & \cmark & \cmark \\
+  \code{SERVER_ERROR} & HTTP 5xx & \cmark & \cmark \\
+  \code{BLOCKED} & khớp mẫu chặn; Tiki thiếu \code{__NEXT_DATA__} & \cmark & \cmark \\
+  \code{STORAGE_ERROR} & ghi MinIO lỗi & \cmark & \cmark \\
+  \code{PUBLISH_ERROR} & gửi Kafka lỗi & \cmark & \\
+  \code{ROBOTS_DENIED} & robots cấm & & \\
+  \code{PARSE_ERROR}, \code{VALIDATION_ERROR} & extractor hoặc envelope lỗi & & \\
+  \code{CLIENT_ERROR} & 4xx khác & & \\
+  \code{UNKNOWN} & còn lại & & \\
+  \bottomrule
+\end{xltabular}
+
+\textbf{Backoff} (\code{scheduling.py:304-339}): có \code{Retry-After} thì dùng nó (có trần); nếu không thì chờ
+$30 \cdot 2^{\,n-1}$ giây, trần 1800 s, $\pm 20\,\%$ jitter. Hết \code{max_attempts} = 5 thì chuyển \code{FAILED}.
+
+\textbf{Circuit breaker theo nguồn} (\code{audit.crawl_source_state}): 5 lỗi liên tiếp thuộc nhóm ``mở circuit'' thì mở
+circuit 900 s. Trong lúc mở, task vừa lease bị trả về \code{RETRY_WAIT} mà không gọi site. Một lần thành công thì reset chuỗi lỗi.
+
+\section{Một lượt thu thập}\label{sec:acquire}
+\code{ingestion/pipeline.py::acquire_listing_page} cài đặt các bước cố định theo mẫu Template Method:
+dựng URL \ra\ kiểm robots \ra\ throttle \ra\ fetch \ra\ \textbf{ghi raw} \ra\ kiểm HTTP status \ra\ extract \ra\
+\code{build_records} \ra\ \textbf{ghi records} \ra\ trả \code{AcquisitionReport}. Sau đó decorator \code{publishing_executor}
+publish Kafka và worker ghi audit.
+
+\diagramslot{fig-4-3-sequence-thu-thap}
+  {Sequence một lượt thu thập (P1)}
+  {Raw được lưu trước khi kiểm HTTP status, rồi tới records, rồi mới gửi Kafka; kết quả cuối cùng quyết định trạng thái task trong frontier.}
+  {Hình 4.3 — \texttt{docs/system/04-pipeline.md} §4.2 (7 lifeline, 17 thông điệp, khối alt/loop)}
+  {Một lượt thu thập. Thứ tự raw \ra\ records \ra\ Kafka bảo đảm không tầng sau nào có dữ liệu mà tầng trước không có.}
+
+Fetcher theo nguồn (mẫu Strategy, cùng interface \code{Fetcher}):
+\begin{itemize}
+  \item Tiki (\code{HttpFetcher}): một GET \ra\ một part (HTML có \code{__NEXT_DATA__}).
+  \item Lazada (\code{BrowserFetcher}, Playwright): mở trang, ghi lại mọi phản hồi khớp \code{[?&]ajax=true}; part 0 là HTML, các part sau là XHR JSON.
+\end{itemize}
+
+\section{Audit thu thập}
+Mỗi lần thử ghi một dòng \code{audit.crawl_request_attempt} (status, \code{http_status}, \code{latency_ms}, \code{raw_bytes},
+\code{parsed_count}, \code{error_kind}). Mỗi lần lease mở một \code{audit.crawl_run}
+(\code{crawl_run_id} = hash(\code{task_id}, \code{attempts}, \code{lease_expires_at})). Khi run kết thúc, toàn bộ run và các attempt
+được ghi thêm một bản vào lake (\code{bronze/marketplace/crawl_audit/}, schema \code{marketplace-crawl-audit.v1}).
+Ghi lake lỗi chỉ để lại cảnh báo; \code{ops audit-export} dựng lại được bản này từ PostgreSQL (ADR-0008).
+
+\begin{xltabular}{\linewidth}{@{}L{40mm}Y@{}}
+  \toprule
+  \textbf{Hạng mục} & \textbf{Giá trị} \\
+  \midrule
+  Tài nguyên & 1 container mỗi nguồn; Lazada \code{shm_size} 1 GB, batch 1 \\
+  Healthcheck & heartbeat file, tuổi tối đa 600 s; dừng êm trong 120 s \\
+  Đo được & 14.023 task SWEEP thành công trong một lượt quét khoảng 4 giờ (13/11); Lazada bị chặn sau 76 trang (31/10), nên chỉ dùng để minh hoạ đa nguồn \\
+  Khi worker khởi động lại & phải chờ lease cũ hết hạn (tối đa 5 phút) \\
+  \bottomrule
+\end{xltabular}

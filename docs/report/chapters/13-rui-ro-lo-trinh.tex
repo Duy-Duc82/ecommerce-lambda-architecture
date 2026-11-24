@@ -1,0 +1,80 @@
+% =====================================================================
+\chapter{Rủi ro, nợ kỹ thuật và lộ trình}\label{chap:risk}
+% =====================================================================
+
+\section{Tài liệu cũ lệch mã nguồn}\label{sec:drift}
+Khi viết tài liệu này, mã nguồn được đọc trực tiếp và đối chiếu với tài liệu cũ. Tài liệu này đã theo mã nguồn; bảng dưới là việc cần sửa ở tài liệu cũ hoặc comment.
+
+\begin{xltabular}{\linewidth}{@{}C{6mm}L{36mm}Y Y@{}}
+  \caption{Sai lệch giữa tài liệu/comment và mã nguồn}\label{tab:drift}\\
+  \toprule
+  \textbf{\#} & \textbf{Ở đâu} & \textbf{Tài liệu nói} & \textbf{Mã nguồn làm / đề xuất} \\
+  \midrule
+  \endfirsthead
+  \toprule \textbf{\#} & \textbf{Ở đâu} & \textbf{Tài liệu nói} & \textbf{Mã nguồn làm / đề xuất} \\ \midrule
+  \endhead
+  1 & \code{ARCHITECTURE.md} §2 & Silver, Gold là Parquet; mart dựng thẳng từ Silver & mặc định Delta; star bắt buộc Delta; mart dựng từ star \\
+  2 & \code{ARCHITECTURE.md} §5 & \code{silver} đọc Bronze ``đến \code{as_of}''; \code{dimensions}/\code{facts} cắt tại \code{as_of} & \code{silver} đọc cửa sổ ngày; \code{dimensions}/\code{facts} cố ý không cắt \\
+  3 & \code{ARCHITECTURE.md} §5, \code{stages/marts.py:1}, \code{quality_rules.py:27}\ldots & ``10 mart'' & 12 mart, cả 12 được publish \\
+  4 & \code{ARCHITECTURE.md} §5 & ``7 dimension và bridge'' & 7 dimension + 1 bridge = 8 bảng \\
+  5 & \code{ARCHITECTURE.md} §5 & không nhắc RESTORE star; CLI thiếu \code{--late-days}, \code{--rebuild}, \code{--silver-uri}, \code{--gold-root-uri} & có; bổ sung \\
+  6 & \code{ARCHITECTURE.md} §3, §4 & decorator ở \code{ingestion/publisher.py}; thiếu \code{speed/lakehouse.py} & \code{publishing_executor} trong \code{ingestion/service.py}; \code{lakehouse.py} từ phase 11 \\
+  7 & \code{ARCHITECTURE.md} §2 & đường dẫn \code{bronze/raw} & key thật \code{marketplace/raw/...} trong bucket \code{ecommerce-bronze} \\
+  8 & \code{DATA_MODEL.md} §1--2 & hợp đồng ở \code{config/marketplace_schema.py}; Silver là JSON & hợp đồng ở \code{domain/observations.py}, \code{wire.py}; Silver là Delta \\
+  9 & \code{DATA_MODEL.md} §1.1 & Kafka key là (marketplace, listing\_id) & một chuỗi \code{<code>:<listing_id>} \\
+  10 & \code{DATA_MODEL.md} §1.3 & DLQ do Silver sink ghi, stage DECODE & chỉ speed ghi, chỉ CONTRACT\_VALIDATION; có thêm \code{records.v1.dlq}; xoá mã chết \code{infra/dlq.py} \\
+  11 & \code{DATA_MODEL.md} §6 & projector ở \code{ops/es_projector.py} & \code{serving/es_projector.py} \\
+  12 & \code{domain/topics.py:29}, compose, \code{service.py:1-6} & \code{observations.v1} ``không còn producer/consumer'' & normalizer speed sinh, query stateful đọc; sửa comment \\
+  13 & \code{domain/ordering.py:6-9} & LATE theo \code{order_key} (gồm \code{fetched_at}) & \code{change_rules.py} chỉ dùng (\code{observed_at}, \code{observation_id}); thống nhất \\
+  14 & \code{build_kibana_demo_dashboard.py} & trigger 5 s & mặc định 30 s \\
+  15 & \code{serving/superset/*.py} & spec 3 dashboard & không được gọi; dashboard thật chưa có chart discount \\
+  16 & \code{init_postgres.sql:475-491} & CHECK \code{error_kind} thiếu \code{BLOCKED} & bổ sung bằng \code{ALTER} phía sau; gộp vào DDL \\
+  17 & \code{docker-compose.yml:14-16, 422} & thiếu DAG \code{marketplace_reprocess}; projector có ``daily storage snapshot'' & có 4 DAG; projector không có snapshot \\
+  18 & Delta \code{gold/speed/price_changes} & tên gợi ý chỉ chứa thay đổi giá & chứa cả 7 loại; đổi tên thành \code{changes} \\
+  \bottomrule
+\end{xltabular}
+
+\section{Rủi ro trong mã nguồn}\label{sec:risks}
+Các rủi ro dưới đây \textbf{suy ra từ đọc mã}, chưa chạy để xác nhận.
+
+\begin{xltabular}{\linewidth}{@{}C{7mm}L{34mm}Y L{34mm}C{14mm}@{}}
+  \caption{Sổ rủi ro}\label{tab:risks}\\
+  \toprule
+  \textbf{\#} & \textbf{Rủi ro} & \textbf{Cơ chế} & \textbf{Hệ quả} & \textbf{Mức} \\
+  \midrule
+  \endfirsthead
+  \toprule \textbf{\#} & \textbf{Rủi ro} & \textbf{Cơ chế} & \textbf{Hệ quả} & \textbf{Mức} \\ \midrule
+  \endhead
+  R1 & Frontier vượt \code{max_attempts} & \code{lease_due} tăng \code{attempts}; khi circuit mở \code{mark_retry} trả task về \code{RETRY_WAIT} mà không hoàn lượt; \code{recover_expired_leases} cũng vậy. Lần lease sau đưa \code{attempts} lên \code{max+1}, vi phạm CHECK & câu lệnh lease lỗi cho cả lô 10 task; worker có thể kẹt lặp. Dễ xảy ra khi bị chặn lâu & cao \\
+  R2 & \code{BLOCKED} không chờ lâu & comment \code{scheduling.py:69-70} nói chờ lâu, mã dùng backoff thường & gõ lại site đang chặn sớm hơn dự kiến & trung bình \\
+  R3 & Lỗi MinIO mở circuit của sàn & \code{STORAGE_ERROR} tính vào chuỗi lỗi của nguồn & sự cố nội bộ dừng crawl 15 phút như bị chặn & thấp \\
+  R4 & Không bảo trì Delta & không \code{OPTIMIZE}/\code{VACUUM}; không xoá run Gold cũ & file nhỏ, version cũ tích luỹ; Bronze ước tăng 1,5--2 GB/ngày & trung bình ($\ge$ 30 ngày) \\
+  R5 & Speed sập khi sink lỗi tạm thời & ES/Kafka lỗi thì ném ngoại lệ, Docker restart thay vì retry có backoff & dữ liệu vẫn đúng; log nhiễu, cảnh báo giả & thấp \\
+  R6 & Worker restart chờ lease cũ & lease 300 s gắn \code{hostname:pid} cũ & mất tới 5 phút mỗi lần restart & thấp \\
+  R7 & Lakehouse speed thiếu \code{OFFER_STALE} & \code{ProcessingTimeTimeout} có thể không bắn dưới \code{availableNow} & bảng Databricks thiếu một loại thay đổi & thấp \\
+  R8 & Hybrid chưa khép vòng & job Databricks không publish; \code{mc mirror} chạy tay & dashboard local không thấy kết quả Databricks & theo thiết kế \\
+  R9 & Mã định nghĩa mà không dùng & trạng thái \code{DISABLED}, tier \code{HOT}, fetcher \code{api}, attempt status \code{PARTIAL} & dễ hiểu nhầm năng lực hệ thống & thấp \\
+  \bottomrule
+\end{xltabular}
+
+\begin{riskbox}[Ưu tiên xử lý]
+Nên xử lý R1 trước: thêm điều kiện \code{attempts < max_attempts} vào \code{lease_due}, hoặc cho \code{mark_retry} của nhánh circuit hoàn lại lượt đã tính,
+kèm một test tái hiện.
+\end{riskbox}
+
+\section{Lộ trình}
+\begin{xltabular}{\linewidth}{@{}L{20mm}Y L{40mm}@{}}
+  \caption{Hạng mục đề xuất}\label{tab:roadmap}\\
+  \toprule
+  \textbf{Ưu tiên} & \textbf{Hạng mục} & \textbf{Liên quan} \\
+  \midrule
+  Cao & Sửa R1 (frontier vượt \code{max_attempts}) kèm test tái hiện & R1 \\
+  Cao & Gán nhãn tay mẫu discount để quyết định luật quá chặt hay dữ liệu thật & Bảng~\ref{tab:ml-criteria} (flag\_share) \\
+  Trung bình & Bảo trì Delta (\code{OPTIMIZE}, \code{VACUUM}) và chính sách giữ run Gold & R4 \\
+  Trung bình & Khép vòng hybrid: publish từ Gold trên S3 về \code{cache.*}; tự động hoá đồng bộ Bronze & R8 \\
+  Trung bình & Sửa tài liệu cũ theo Bảng~\ref{tab:drift}; thêm chart discount vào Superset & Mục~\ref{sec:drift} \\
+  Thấp & Retry có backoff cho sink speed; tách \code{STORAGE_ERROR} khỏi circuit của nguồn & R3, R5 \\
+  Sau & Dự báo nhu cầu theo danh mục khi có $\ge$ 3 tuần dữ liệu liên tục & ADR-0009 \\
+  Sau & Shopee qua Affiliate Open API khi có AppID & ADR-0006 \\
+  \bottomrule
+\end{xltabular}
