@@ -4,12 +4,16 @@ Ghi ngày 25/11/2026. Báo cáo: `bao-cao-ky-thuat.tex`; biên dịch `xelatex -
 
 ## Cần bật stack
 
-1. **Ảnh Superset và Kibana.** Chụp dashboard lịch sử giá (Superset) và thay đổi giá (Kibana), lưu vào `figures/`
+1. ~~**Ảnh Superset và Kibana.**~~ Xong 25/11: `out-1-superset.png`, `out-2-kibana.png`, mục 10 "Kết quả trên dashboard"; đã bỏ dòng Phục vụ trong Hạn chế.
+   Chụp lại: `xem-lai-bi.sh` + `docker start rf-redis` (Superset cần Redis), Playwright headless 1600×1000, Kibana 17:00Z 13/11 → 06:00Z 14/11.
+   Việc cũ: Chụp dashboard lịch sử giá (Superset) và thay đổi giá (Kibana), lưu vào `figures/`
    (ví dụ `out-1-superset.png`, `out-2-kibana.png`), thêm `\figslot{...}` vào mục 9 hoặc một mục "Kết quả" riêng.
    Xong thì bỏ dòng "Phục vụ: chưa kiểm tra giao diện Superset/Kibana" trong bảng Hạn chế (mục 10).
-2. **Số dòng quarantine theo lý do.** Đọc `_runs/run_id=<run>/silver.json` của một run (khoá `quarantine_by_reason`,
+2. ~~**Số dòng quarantine theo lý do.**~~ Xong 25/11: bảng trong mục 5.1 (run `mp-20261114T0500Z`).
+   Việc cũ: Đọc `_runs/run_id=<run>/silver.json` của một run (khoá `quarantine_by_reason`,
    `silver_rows`, `duplicates_before_dedup`), thêm một bảng nhỏ vào mục 5.1 sau danh sách các bước làm sạch.
-3. **Một ví dụ cụ thể.** Một sản phẩm bị gắn cờ giá bất thường hoặc khuyến mãi SUSPECT, kèm lịch sử giá theo ngày
+3. ~~**Một ví dụ cụ thể.**~~ Xong 25/11: nồi áp suất Elmich PCE-1805, `chart-3-vi-du-khuyen-mai.pdf` (`charts.py`, dữ liệu `src/data/vi-du-gia.csv`), mục 5.3.
+   Việc cũ: Một sản phẩm bị gắn cờ giá bất thường hoặc khuyến mãi SUSPECT, kèm lịch sử giá theo ngày
    (lấy từ `docs/evidence/fullrun-20261114/nhan-tay-lich-su-gia.csv` hoặc mart `offer_price_history_daily`).
    Nên vẽ thành biểu đồ đường giá, đặt ở mục 5.2/5.3.
 

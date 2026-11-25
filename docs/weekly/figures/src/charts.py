@@ -3,6 +3,8 @@
 Dữ liệu: lượt chạy 13-14/11/2026, stack mp-refactor.
   crawl.csv  : giờ VN, số lượt tải thành công, số lượt lỗi, số bản ghi parse được (audit.crawl_request_attempt)
   stages.csv : run_id, task_id, số giây, trạng thái (bảng task_instance của Airflow, DAG marketplace_batch)
+  vi-du-gia.csv : ngày, giá bán, giá niêm yết, % giảm hiển thị, giá thấp nhất trước đó, trạng thái, điểm luật, hạng ML
+                  (cache.marketplace_discount_credibility_daily, offer nồi áp suất Elmich PCE-1805)
 Chạy: python charts.py <thư mục csv> <thư mục figures>
 """
 import csv, sys
@@ -61,3 +63,23 @@ ax.legend(ncol=7, loc="upper center", bbox_to_anchor=(0.5, 1.13), frameon=False,
           handlelength=1.2, columnspacing=0.9)
 fig.tight_layout(); fig.savefig(f"{out}/chart-2-thoi-gian-stage.pdf"); plt.close(fig)
 print("runs:", len(runs))
+
+# chart-3: một khuyến mãi bị gắn SUSPECT
+rows = list(csv.reader(open(f"{src}/vi-du-gia.csv", encoding="utf-8")))
+days = [r[0][8:10] + "/" + r[0][5:7] for r in rows]
+price = [int(r[1]) / 1000 for r in rows]
+listp = [int(r[2]) / 1000 for r in rows]
+fig, ax = plt.subplots(figsize=(7.2, 2.9))
+ax.plot(days, listp, color="#9ca3af", ls="--", lw=1.4, marker="s", ms=3.5, label="Giá niêm yết (giá gạch)")
+ax.plot(days, price, color=BLUE, lw=1.8, marker="o", ms=4, label="Giá bán")
+ax.axhline(1008, color=ORANGE, lw=1, ls=":", label="Giá thấp nhất trước 13/11 (1.008 nghìn)")
+for d, p, r in zip(days, price, rows):
+    ax.annotate(f"{p:,.0f}".replace(",", ".") + f"\n-{r[3].replace('.', ',')}% ·{r[6]} điểm", (d, p), textcoords="offset points",
+                xytext=(0, -26), ha="center", fontsize=7.5)
+    ax.annotate(r[5], (d, listp[0]), textcoords="offset points", xytext=(0, 7), ha="center", fontsize=7,
+                color="#b91c1c" if r[5] == "SUSPECT" else "#6b7280", fontweight="bold" if r[5] == "SUSPECT" else "normal")
+ax.set_ylim(0, 2400)
+ax.set_ylabel("nghìn đồng")
+ax.set_xlabel("ngày crawl (2026)")
+ax.legend(loc="lower center", ncol=3, frameon=False, fontsize=7.5)
+fig.tight_layout(); fig.savefig(f"{out}/chart-3-vi-du-khuyen-mai.pdf"); plt.close(fig)
