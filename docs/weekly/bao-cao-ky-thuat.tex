@@ -450,30 +450,4 @@ Số đo từ lượt chạy 13--14/11/2026 trên một laptop (\code{docs/evide
 
 \figslot{out-2-kibana}{90mm}{Dashboard Kibana (thay đổi giá, 14/11).}
 
-% =====================================================================
-\section{Hạn chế và việc tiếp theo}
-% =====================================================================
-\begin{shorttable}{\linewidth}{@{}L{20mm}YY@{}}
-  \toprule
-  \textbf{Phần} & \textbf{Hạn chế} & \textbf{Hướng xử lý} \\
-  \midrule
-  Thu thập & Tiki chỉ lấy trang 1, tức nhóm sản phẩm sàn đẩy lên đầu & ghi rõ phạm vi khi kết luận \\
-  Thu thập & Lượt SWEEP dồn vào 4 giờ rồi nghỉ 20 giờ & rải đều lịch trong ngày \\
-  Thu thập & Tier gán tay và giữ cố định; HOT, NORMAL, COLD chưa dùng & tự nâng/hạ tier theo mức thay đổi giá của danh mục \\
-  Lưu trữ & Mỗi trang một file nhỏ (khoảng 10 KB) & gộp file theo giờ \\
-  Lưu trữ & Chưa dọn bản Delta cũ (\code{OPTIMIZE}/\code{VACUUM}) & thêm vào DAG bảo trì \\
-  Xử lý & Ngày tính theo UTC, lệch 7 giờ so với Việt Nam & tính ngày theo giờ Việt Nam \\
-  Gold & Mỗi giờ dựng lại từ toàn bộ lịch sử, càng nhiều ngày càng chậm & dựng tăng dần theo ngày \\
-  Phân tích & Luật khuyến mãi gắn cờ 34,9\% (ngưỡng mong muốn 1--10\%) khi mới có 4 ngày lịch sử; mô hình chưa được kiểm chứng bằng nhãn & chỉ bật khi đủ ngày; gán nhãn tay 60 dòng đã xuất để đo độ chính xác \\
-  Speed & State của sản phẩm không bao giờ bị xoá & xoá sau thời gian dài không thấy \\
-  Speed & 83\% sự kiện là OFFER\_STALE, lấn át sự kiện đổi giá & lọc bớt trên dashboard \\
-  \bottomrule
-\end{shorttable}
-
-\textbf{Cần thầy góp ý:}
-\begin{itemize}
-  \item Phạm vi chỉ trang 1 của danh mục Tiki đã đủ cho đồ án chưa, hay cần lấy thêm trang?
-  \item Thứ tự ưu tiên tuần tới: chạy thu thập dài ngày để có đủ lịch sử giá, hay sửa các hạn chế ở bảng trên trước?
-\end{itemize}
-
 \end{document}
