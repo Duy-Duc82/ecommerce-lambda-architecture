@@ -38,32 +38,32 @@ with Diagram("", filename="fig-0a-pipeline", outformat=["png", "pdf"], show=Fals
              graph_attr=graph_attr, node_attr=node_attr, edge_attr=edge_attr):
 
     with Cluster("Nguồn", graph_attr=box("#eceff1", "#455a64")):
-        tiki = Internet("Tiki\nHTML + JSON")
-        lazada = Internet("Lazada\nXHR JSON")
+        tiki = Internet("Tiki")
+        lazada = Internet("Lazada")
 
     with Cluster("Thu thập", graph_attr=box("#e0f7fa", "#00838f")):
         frontier = Postgresql("frontier\nhàng đợi crawl")
-        crawler = Python("crawl-worker\nrequests, Playwright")
+        crawler = Python("crawl-worker")
 
     with Cluster("Bronze (MinIO S3)", graph_attr=box("#e3f2fd", "#1565c0")):
-        bronze = Custom("raw + records\nJSONL.gz", "icons/minio.png")
+        bronze = Custom("raw + records", "icons/minio.png")
 
     with Cluster("Speed layer (gần thời gian thực)", graph_attr=box("#f3e5f5", "#6a1b9a")):
-        kafka = Kafka("Kafka\n5 topic")
-        stream = Spark("Structured Streaming\ntrigger 30 s")
+        kafka = Kafka("Kafka")
+        stream = Spark("Structured Streaming")
 
     with Cluster("Batch layer (mỗi giờ)", graph_attr=box("#e8f5e9", "#2e7d32")):
-        airflow = Airflow("Airflow 3\n4 DAG")
-        spark = Spark("Spark batch\n7 stage")
+        airflow = Airflow("Airflow")
+        spark = Spark("Spark batch")
         with Cluster("Lakehouse: Delta Lake trên MinIO", graph_attr=box("#ffffff", "#1565c0")):
-            silver = Custom("Silver\nchuẩn hoá", "icons/delta.png")
-            gold = Custom("Gold\nstar dw + 12 mart", "icons/delta.png")
+            silver = Custom("Silver", "icons/delta.png")
+            gold = Custom("Gold", "icons/delta.png")
 
     with Cluster("Phục vụ", graph_attr=box("#fff3e0", "#e65100")):
         es = Elasticsearch("Elasticsearch")
         redis = Redis("Redis")
         kibana = Kibana("Kibana\nthay đổi giá")
-        pg = Postgresql("PostgreSQL\ncache.*")
+        pg = Postgresql("PostgreSQL")
         superset = Superset("Superset\nlịch sử giá")
 
     # thu thập
@@ -97,7 +97,7 @@ with Diagram("", filename="fig-0b-giam-sat", outformat=["png", "pdf"], show=Fals
         alloy = Grafana("Grafana Alloy")
         prom = Prometheus("Prometheus")
         loki = Loki("Loki")
-        grafana = Grafana("Grafana\n19 cảnh báo")
+        grafana = Grafana("Grafana")
 
     # giám sát
     docker >> Edge(**OBS) >> alloy

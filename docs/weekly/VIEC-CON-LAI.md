@@ -15,7 +15,7 @@ Ghi ngày 25/11/2026. Báo cáo: `bao-cao-ky-thuat.tex`; biên dịch `xelatex -
 
 ## Không cần stack
 
-4. **Hình 1 còn chữ phụ** ("Kafka 5 topic", "trigger 30 s", "Spark batch 7 stage", "Grafana 19 cảnh báo").
-   Bỏ trong `figures/src/fig-0-cong-nghe.py`, chạy lại (cần Graphviz `dot` trong PATH và `pip install diagrams==0.24.4`).
-   Quy ước: trong hình chỉ để tên thành phần và luồng, thông số để trong chữ.
+4. ~~Hình 1 còn chữ phụ~~: đã xong 25/11. Quy ước: trong hình chỉ để tên thành phần và luồng, thông số để trong chữ.
+   Vẽ lại: Graphviz `dot` trong PATH, `pip install diagrams==0.24.4`, chạy `python fig-0-cong-nghe.py` trong `figures/src`
+   rồi chuyển `fig-0a-pipeline.pdf`, `fig-0b-giam-sat.pdf` lên `figures/`.
 5. Khoảng trắng cuối trang 6 và 11: nếu muốn bỏ thì thu nhỏ Hình 3 (luồng crawl) và Hình 6 (speed).
