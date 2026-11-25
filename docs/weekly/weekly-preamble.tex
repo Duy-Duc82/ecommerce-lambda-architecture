@@ -97,7 +97,9 @@
 \usepackage{graphicx,float,caption}
 \captionsetup{font=small,labelfont=bf,justification=centering,skip=6pt}
 \graphicspath{{figures/}}
-\newcommand{\figimg}[1]{\includegraphics[width=\linewidth,height=0.6\textheight,keepaspectratio]{#1}}
+% \figw: chiều rộng tối đa của hình; sơ đồ rộng dùng {\setlength{\figw}{1.25\linewidth}\figslot{...}} để tràn lề
+\newlength{\figw}\setlength{\figw}{\linewidth}
+\newcommand{\figimg}[1]{\makebox[\linewidth][c]{\includegraphics[width=\figw,height=0.85\textheight,keepaspectratio]{#1}}}
 \newcommand{\figslot}[3]{%
   \begin{figure}[!htbp]\centering
     \IfFileExists{figures/#1.pdf}{\figimg{#1.pdf}}{%

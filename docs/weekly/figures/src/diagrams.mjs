@@ -1,6 +1,7 @@
 // Vẽ các sơ đồ Hình 1, 2, 3, 5, 6, 7 của báo cáo tuần bằng Graphviz (viz-js), ra SVG.
 // Nội dung theo bản đặc tả trong docs/system (Hình 1.1, 4.3, 2.6, 3.2, 4.5, 4.6) và observability/alloy/config.alloy.
-// Chạy: npm i @viz-js/viz@3.11.0 && node diagrams.mjs <thư mục ra>
+// Chạy: npm i @viz-js/viz@3.11.0 && node diagrams.mjs <thư mục ra>  (ra .svg và .dot)
+// PDF cho LaTeX: dot -Tpdf <tên>.dot -o ../<tên>.pdf  (Graphviz; bỏ file .dot sau khi xuất)
 import { instance } from "@viz-js/viz";
 import { writeFileSync } from "node:fs";
 
@@ -15,9 +16,9 @@ const C = {
 const SHAPE = { store: "cylinder", topic: "hexagon", proc: "box", ext: "box", dec: "diamond" };
 
 const HEAD = `
-  graph [fontname="Helvetica", fontsize=11, bgcolor="white", pad=0.2, nodesep=0.3, ranksep=0.45, newrank=true];
-  node  [fontname="Helvetica", fontsize=10, penwidth=1.3, margin="0.12,0.06"];
-  edge  [fontname="Helvetica", fontsize=9, color="#546e7a", fontcolor="#37474f", penwidth=1.1, arrowsize=0.7];`;
+  graph [fontname="Helvetica", fontsize=15, bgcolor="white", pad=0.2, nodesep=0.3, ranksep=0.45, newrank=true];
+  node  [fontname="Helvetica", fontsize=14, penwidth=1.6, margin="0.12,0.06", fontcolor="#212121"];
+  edge  [fontname="Helvetica", fontsize=13, color="#37474f", fontcolor="#212121", penwidth=1.6, arrowsize=0.8];`;
 
 const lab = (s) => s.includes("<") ? `<${s}>` : `"${s}"`;
 function n(id, label, kind, layer, extra = "") {
@@ -28,14 +29,14 @@ function n(id, label, kind, layer, extra = "") {
 }
 function cluster(id, title, layer, body, extra = "") {
   const [line] = C[layer];
-  return `subgraph cluster_${id} { label=<<B>${title}</B>>; fontcolor="${line}"; color="${line}"; style="rounded,dashed"; penwidth=1.0; margin=10; ${extra}
+  return `subgraph cluster_${id} { label=<<B>${title}</B>>; fontcolor="${line}"; color="${line}"; style="rounded,dashed"; penwidth=1.8; margin=10; ${extra}
     ${body.join("\n    ")}
   }`;
 }
 const e = (a, b, attrs = "") => `${a} -> ${b}${attrs ? ` [${attrs}]` : ""};`;
-const BOLD = 'penwidth=2.2, color="#263238"';
+const BOLD = 'penwidth=2.6, color="#263238"';
 const DASH = 'style=dashed';
-const t = (s) => `<FONT FACE="Courier" POINT-SIZE="9">${s}</FONT>`;
+const t = (s) => `<FONT FACE="Courier" POINT-SIZE="13"><B>${s}</B></FONT>`;
 
 const figs = {};
 
@@ -128,8 +129,8 @@ figs["fig-2-luong-crawl"] = `digraph G { rankdir=TB; ${HEAD}
 const layer = (id, title, fmt, grain, ly) =>
   `${id} [shape=box, style="rounded,filled", color="${C[ly][0]}", fillcolor="${C[ly][1]}", label=<<TABLE BORDER="0" CELLPADDING="2" CELLSPACING="0">
     <TR><TD><B>${title}</B></TD></TR>
-    <TR><TD><FONT POINT-SIZE='8' COLOR="#37474f">${fmt}</FONT></TD></TR>
-    <TR><TD><FONT POINT-SIZE='8' COLOR="#607d8b"><I>${grain}</I></FONT></TD></TR></TABLE>>];`;
+    <TR><TD><FONT POINT-SIZE='12' COLOR="#212121">${fmt}</FONT></TD></TR>
+    <TR><TD><FONT POINT-SIZE='12' COLOR="#455a64"><I>${grain}</I></FONT></TD></TR></TABLE>>];`;
 figs["fig-3-du-lieu-qua-cac-tang"] = `digraph G { rankdir=TB; ${HEAD}
   graph [nodesep=0.7, ranksep=0.6];
   ${layer("raw", "Bronze · raw", "bin.gz + metadata.json", "1 phản hồi / trang", "lake")}
@@ -177,7 +178,7 @@ figs["fig-5-speed"] = `digraph G { rankdir=TB; ${HEAD}
 }`;
 
 // ---------------------------------------------------------------- Hình 6: DAG + state machine
-const st = (id, label, ly, extra = "") => `${id} [label="${label}", shape=box, style="rounded,filled", color="${C[ly][0]}", fillcolor="${C[ly][1]}", fontsize=9${extra}];`;
+const st = (id, label, ly, extra = "") => `${id} [label="${label}", shape=box, style="rounded,filled", color="${C[ly][0]}", fillcolor="${C[ly][1]}", fontsize=13${extra}];`;
 figs["fig-6-dag-batch"] = `digraph G { rankdir=TB; ${HEAD}
   graph [nodesep=0.3, ranksep=0.3, compound=true];
   ${cluster("dag", "DAG marketplace_batch", "orch", [
@@ -239,5 +240,6 @@ figs["fig-7-giam-sat"] = `digraph G { rankdir=LR; ${HEAD}
 const viz = await instance();
 for (const [name, dot] of Object.entries(figs)) {
   writeFileSync(`${out}/${name}.svg`, viz.renderString(dot, { format: "svg", engine: "dot" }));
+  writeFileSync(`${out}/${name}.dot`, dot);
   console.log(name);
 }

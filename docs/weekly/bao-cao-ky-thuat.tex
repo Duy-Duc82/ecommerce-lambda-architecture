@@ -79,7 +79,7 @@ Crawler ghi vào Bronze trước, sau đó gửi sang Kafka. Từ đó tách hai
   \label{fig:fig-0-cong-nghe}
 \end{figure}
 
-\figslot{fig-1-kien-truc-tong-the}{80mm}{Kiến trúc chi tiết.}
+{\setlength{\figw}{1.25\linewidth}\figslot{fig-1-kien-truc-tong-the}{80mm}{Kiến trúc chi tiết.}}
 
 % =====================================================================
 \section{Dữ liệu đầu vào}
@@ -181,7 +181,7 @@ lỗi ghi Kafka không tính vào ngưỡng này vì site vẫn bình thường.
 % =====================================================================
 \section{Lưu trữ và xử lý qua các tầng}
 % =====================================================================
-\figslot{fig-3-du-lieu-qua-cac-tang}{40mm}{Dữ liệu qua các tầng.}
+{\setlength{\figw}{1.25\linewidth}\figslot{fig-3-du-lieu-qua-cac-tang}{40mm}{Dữ liệu qua các tầng.}}
 
 \begin{shorttable}{\linewidth}{@{}L{24mm}L{34mm}Y@{}}
   \toprule
@@ -353,7 +353,7 @@ Một job Spark Structured Streaming, chạy mỗi 30 giây:
   \item \textbf{Bản ghi lỗi} (thiếu khoá, giá âm, không đọc được): chuyển sang topic DLQ để xem lại.
 \end{itemize}
 
-\figslot{fig-5-speed}{60mm}{Speed layer.}
+{\setlength{\figw}{1.25\linewidth}\figslot{fig-5-speed}{60mm}{Speed layer.}}
 
 % =====================================================================
 \section{Airflow}
@@ -398,7 +398,7 @@ Kafka, Redis, Elasticsearch, Airflow, và số liệu nghiệp vụ lấy bằng
 (số trang crawl, lỗi, run batch, luật chất lượng, độ trễ speed). Grafana có 5 dashboard và 19 cảnh báo
 (máy hết RAM/đĩa, crawl ngừng, bị chặn $> 20\%$, batch không chạy quá 2,5 giờ, luật chất lượng FAIL, DLQ tăng\ldots).
 
-\figslot{fig-7-giam-sat}{55mm}{Luồng giám sát.}
+{\setlength{\figw}{1.25\linewidth}\figslot{fig-7-giam-sat}{55mm}{Luồng giám sát.}}
 
 Ảnh chụp Grafana trong lượt chạy 13--14/11 (giờ Việt Nam):
 
@@ -411,6 +411,8 @@ Kafka, Redis, Elasticsearch, Airflow, và số liệu nghiệp vụ lấy bằng
 \section{Thông số vận hành}
 % =====================================================================
 Số đo từ lượt chạy 13--14/11/2026 trên một laptop (\code{docs/evidence/fullrun-20261114/}).
+
+\figslot{chart-1-crawl-theo-gio}{55mm}{Số trang và bản ghi crawl theo giờ (14/11).}
 
 \begin{xltabular}{\linewidth}{@{}L{52mm}Y@{}}
   \toprule
@@ -440,7 +442,6 @@ Số đo từ lượt chạy 13--14/11/2026 trên một laptop (\code{docs/evide
   \bottomrule
 \end{xltabular}
 
-\figslot{chart-1-crawl-theo-gio}{55mm}{Số trang và bản ghi crawl theo giờ (14/11).}
 \figslot{chart-2-thoi-gian-stage}{55mm}{Thời gian từng bước của 11 run batch.}
 
 % =====================================================================
