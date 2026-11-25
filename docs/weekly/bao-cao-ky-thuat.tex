@@ -14,17 +14,19 @@
 
 \begin{document}
 
-{\sffamily
-{\Large\bfseries\color{brand} Báo cáo tuần}\\[2pt]
-{\large Hệ thống Marketplace Price Intelligence}\\[6pt]
-\small
-\begin{tabular}{@{}ll@{}}
-Sinh viên: & \StudentName\ (MSSV \StudentId) \\
-GVHD: & \Supervisor \\
-Ngày: & 24/11/2026 \\
-\end{tabular}}
+\begin{center}\sffamily
+  {\LARGE\bfseries\color{brand} Báo cáo tuần}\\[4pt]
+  {\large Hệ thống Marketplace Price Intelligence}\\[8pt]
+  \begin{tabular}{@{}r@{\hspace{0.6em}}l@{}}
+    Sinh viên: & \StudentName\ (MSSV \StudentId) \\
+    GVHD: & \Supervisor \\
+    Ngày: & 25/11/2026 \\
+  \end{tabular}
+\end{center}
+\vspace{-4pt}\noindent{\color{brand}\rule{\linewidth}{0.6pt}}
 
 \tableofcontents
+\clearpage
 
 % =====================================================================
 \section{Tóm tắt}
@@ -32,9 +34,11 @@ Ngày: & 24/11/2026 \\
 \begin{itemize}
   \item Hệ thống thu thập giá sản phẩm trên trang danh mục Tiki (Lazada để thử thêm nguồn), lưu nguyên bản vào data lake,
         rồi dựng kho dữ liệu để xem lịch sử giá, phát hiện giá bất thường và khuyến mãi đáng ngờ.
-  \item Đã chạy toàn luồng 13--14/11 trên laptop: 9 giờ 16 phút, 10/10 run batch thành công, speed layer không lỗi.
+  \item Đã chạy toàn luồng 13--14/11 trên laptop: 9 giờ 16 phút, thêm 1 run chạy bù; 11/11 run batch thành công, speed layer không lỗi.
   \item Tốc độ thu thập lúc cao nhất: \textbf{khoảng 1.270 trang/giờ, 580 bản ghi/phút}. Dữ liệu cho dashboard làm mới \textbf{mỗi giờ};
         cảnh báo thay đổi giá có sau \textbf{khoảng 1 phút}.
+  \item Phân tích: phát hiện giá bất thường bằng thống kê, chấm độ tin cậy khuyến mãi bằng 5 luật kèm xếp hạng bằng Isolation Forest.
+        Luật đang gắn cờ 34,9\% dòng có giảm giá, \textbf{chưa đạt} mức mong muốn 1--10\%; cần gán nhãn tay để kiểm chứng.
   \item Tuần này: viết tài liệu hệ thống, báo cáo này, vẽ sơ đồ và chụp dashboard giám sát.
 \end{itemize}
 
@@ -48,19 +52,13 @@ Crawler ghi vào Bronze trước, sau đó gửi sang Kafka. Từ đó tách hai
   \item \textbf{Speed} (liên tục, Spark Streaming): Kafka → so với lần thấy trước của từng sản phẩm → sự kiện thay đổi giá → Elasticsearch/Kibana, Redis.
 \end{itemize}
 
-\begin{figure}[H]\centering
-  \includegraphics[width=\linewidth]{fig-0a-pipeline.pdf}\par\vspace{2mm}
-  \includegraphics[width=0.48\linewidth]{fig-0b-giam-sat.pdf}
-  \caption{Công nghệ ở từng tầng và luồng dữ liệu chính.}
-  \label{fig:fig-0-cong-nghe}
-\end{figure}
-
-\figslot{fig-1-kien-truc-tong-the}{80mm}{Kiến trúc chi tiết: từng thành phần và đường đi của dữ liệu.}
-
-\begin{xltabular}{\linewidth}{@{}L{30mm}L{52mm}Y@{}}
+\begin{xltabular}{\linewidth}{@{}L{26mm}L{56mm}Y@{}}
   \toprule
   \textbf{Việc} & \textbf{Công nghệ} & \textbf{Ghi chú} \\
   \midrule
+  \endfirsthead
+  \toprule \textbf{Việc} & \textbf{Công nghệ} & \textbf{Ghi chú} \\ \midrule
+  \endhead
   Thu thập & Python, requests, Playwright & hàng đợi việc trong PostgreSQL \\
   Data lake & MinIO (S3) & Bronze, Silver, Gold \\
   Định dạng bảng & Delta Lake & file Parquet + log giao dịch; xem lại được bản cũ \\
@@ -73,12 +71,21 @@ Crawler ghi vào Bronze trước, sau đó gửi sang Kafka. Từ đó tách hai
   \bottomrule
 \end{xltabular}
 
+\begin{figure}[!htbp]\centering
+  \includegraphics[width=\linewidth]{fig-0a-pipeline.pdf}\par\vspace{2mm}
+  \includegraphics[width=0.48\linewidth]{fig-0b-giam-sat.pdf}
+  \caption{Công nghệ ở từng tầng và luồng dữ liệu chính.}
+  \label{fig:fig-0-cong-nghe}
+\end{figure}
+
+\figslot{fig-1-kien-truc-tong-the}{80mm}{Kiến trúc chi tiết: từng thành phần và đường đi của dữ liệu.}
+
 % =====================================================================
 \section{Dữ liệu đầu vào}
 % =====================================================================
 \src{src/ecomdata/processing/normalize/sources/ (tiki.py, lazada.py)}
 
-\begin{xltabular}{\linewidth}{@{}L{30mm}YY@{}}
+\begin{shorttable}{\linewidth}{@{}L{36mm}YY@{}}
   \toprule
   & \textbf{Tiki (nguồn chính)} & \textbf{Lazada (thử nghiệm)} \\
   \midrule
@@ -89,13 +96,16 @@ Crawler ghi vào Bronze trước, sau đó gửi sang Kafka. Từ đó tách hai
   Số trường / sản phẩm & 45 & 44 \\
   Tình trạng & chạy ổn định & bị chặn sau 76 trang (31/10) \\
   \bottomrule
-\end{xltabular}
+\end{shorttable}
 
 \subsection{Các trường của Tiki (45 trường)}
-\begin{xltabular}{\linewidth}{@{}L{30mm}Y@{}}
+\begin{xltabular}{\linewidth}{@{}L{38mm}Y@{}}
   \toprule
   \textbf{Nhóm} & \textbf{Trường} \\
   \midrule
+  \endfirsthead
+  \toprule \textbf{Nhóm} & \textbf{Trường} \\ \midrule
+  \endhead
   Định danh & \code{id}, \code{sku}, \code{name}, \code{url_key}, \code{url_path}, \code{productset_id}, \code{seller_product_id}, \code{seller_product_sku}, \code{master_product_sku} \\
   Giá & \code{price}, \code{original_price}, \code{discount}, \code{discount_rate} \\
   Đánh giá, đã bán & \code{rating_average}, \code{review_count}, \code{quantity_sold} \\
@@ -110,7 +120,7 @@ Crawler ghi vào Bronze trước, sau đó gửi sang Kafka. Từ đó tách hai
 Mỗi trang còn có một bản ghi ngữ cảnh (\code{categoryData}): tên, đường dẫn danh mục và tổng số sản phẩm sàn công bố.
 
 \subsection{Các trường của Lazada (44 trường)}
-\begin{xltabular}{\linewidth}{@{}L{30mm}Y@{}}
+\begin{shorttable}{\linewidth}{@{}L{38mm}Y@{}}
   \toprule
   \textbf{Nhóm} & \textbf{Trường} \\
   \midrule
@@ -122,7 +132,7 @@ Mỗi trang còn có một bản ghi ngữ cảnh (\code{categoryData}): tên, �
   Quảng cáo, hiển thị & \code{isSponsored}, \code{adFlag}, \code{icons}, \code{clickTrace}, \code{tItemType}, \code{skuType}, \code{pClusterType}, \code{gridTitleLine} và 7 trường giao diện khác \\
   Ảnh & \code{image}, \code{thumbs}, \code{isSmartImage}, \code{longImageDisplayable} \\
   \bottomrule
-\end{xltabular}
+\end{shorttable}
 
 % =====================================================================
 \section{Thu thập và lập lịch crawl}
@@ -132,7 +142,7 @@ Mỗi trang còn có một bản ghi ngữ cảnh (\code{categoryData}): tên, �
 \textbf{Hàng đợi.} Mỗi việc crawl (một danh mục, một trang, một thời điểm) là một dòng trong bảng \code{audit.crawl_frontier} của PostgreSQL.
 Worker lấy 10 việc mỗi lần (\code{FOR UPDATE SKIP LOCKED}, giữ 5 phút). Làm xong thì tự chèn lần crawl kế tiếp theo tần suất của mức (tier):
 
-\begin{xltabular}{\linewidth}{@{}L{30mm}L{30mm}Y@{}}
+\begin{shorttable}{\linewidth}{@{}L{24mm}L{30mm}Y@{}}
   \toprule
   \textbf{Tier} & \textbf{Bao lâu crawl lại} & \textbf{Dùng cho} \\
   \midrule
@@ -142,12 +152,26 @@ Worker lấy 10 việc mỗi lần (\code{FOR UPDATE SKIP LOCKED}, giữ 5 phút
   COLD & 12 giờ & \\
   SWEEP & 24 giờ & quét toàn bộ danh mục; DAG \code{source_discovery} tạo mỗi ngày \\
   \bottomrule
-\end{xltabular}
+\end{shorttable}
 
 \textbf{Lịch sự với site.} Đọc robots.txt (cache 1 giờ), giãn cách tối thiểu 2 s (Tiki) / 5 s (Lazada) mỗi request, user-agent riêng.
 
-\textbf{Khi lỗi.} Lỗi tạm thời (429, 5xx, mạng, bị chặn) thử lại sau $30 \cdot 2^{n-1}$ giây, tối đa 5 lần.
-Nguồn lỗi liên tiếp 5 lần thì tạm dừng 15 phút (circuit breaker).
+\textbf{Khi lỗi.} Lỗi được chia hai loại:
+
+\begin{xltabular}{\linewidth}{@{}L{22mm}YL{48mm}@{}}
+  \toprule
+  \textbf{Loại lỗi} & \textbf{Ví dụ} & \textbf{Xử lý} \\
+  \midrule
+  Tạm thời & bị giới hạn tốc độ (429), lỗi server (5xx), mất mạng, timeout, bị chặn/captcha, lỗi ghi MinIO hoặc Kafka
+           & thử lại sau 30 s, 60 s, 120 s\ldots\ (tối đa 30 phút), tối đa 5 lần; hết 5 lần thì FAILED \\
+  Vĩnh viễn & trang không tồn tại hoặc bị từ chối (4xx khác), robots.txt cấm, không đọc được dữ liệu trong trang, bản ghi sai cấu trúc
+           & FAILED ngay, không thử lại \\
+  \bottomrule
+\end{xltabular}
+Nếu site gửi header \code{Retry-After} thì chờ theo đó. Một nguồn lỗi liên tiếp 5 lần thì tạm dừng cả nguồn 15 phút (circuit breaker);
+lỗi ghi Kafka không tính vào ngưỡng này vì site vẫn bình thường.
+
+\textbf{Dữ liệu cá nhân.} Trước khi ghi records, worker bỏ các trường định danh người dùng (Lazada: \code{userId}, \code{anonUid}).
 
 \figslot{fig-2-luong-crawl}{70mm}{Một lượt crawl: lấy việc, tải trang, lưu raw trước khi kiểm tra, ghi records, gửi Kafka, cập nhật trạng thái.}
 
@@ -156,7 +180,7 @@ Nguồn lỗi liên tiếp 5 lần thì tạm dừng 15 phút (circuit breaker).
 % =====================================================================
 \figslot{fig-3-du-lieu-qua-cac-tang}{40mm}{Dữ liệu qua các tầng: định dạng và ý nghĩa một dòng ở mỗi tầng.}
 
-\begin{xltabular}{\linewidth}{@{}L{22mm}L{30mm}Y@{}}
+\begin{shorttable}{\linewidth}{@{}L{24mm}L{34mm}Y@{}}
   \toprule
   \textbf{Tầng} & \textbf{Định dạng} & \textbf{Làm gì} \\
   \midrule
@@ -166,28 +190,69 @@ Nguồn lỗi liên tiếp 5 lần thì tạm dừng 15 phút (circuit breaker).
   Gold & Delta (Parquet) & star schema \code{dw} và 12 mart cho phân tích \\
   Cache & bảng PostgreSQL & bản sao 12 mart cho Superset, thay mới mỗi giờ \\
   \bottomrule
-\end{xltabular}
+\end{shorttable}
 
 \textbf{Về định dạng.} Silver và Gold lưu dạng \textbf{Delta Lake}: dữ liệu vẫn là các file \textbf{Parquet} (dạng cột, nén), Delta chỉ thêm thư mục \code{_delta_log} ghi lại từng lần ghi. Nhờ log này mới có \code{MERGE}, ghi đè đúng partition, đọc lại bản cũ theo version và quay về bản trước khi run lỗi. Code cho chọn \code{parquet} hoặc \code{delta} (\code{DATA_LAKE_TABLE_FORMAT}); hệ thống chạy với \code{delta}. \textbf{Warehouse} chính là Gold \code{dw} trên lake; PostgreSQL chỉ giữ bản sao mart để Superset đọc nhanh.
 
-\subsection{Bronze → Silver}
-Mỗi giờ dựng lại Silver cho hôm nay và hôm qua (để nhận dữ liệu đến muộn). Các bước: bỏ bản ghi trùng → kiểm tra cấu trúc →
-chuyển về dạng chung cho mọi nguồn → tách dòng lỗi (thiếu id, thiếu tên, giá sai…) vào quarantine.
-Kết quả chính là bảng \code{offer_observations_v2} (53 cột). Ví dụ ánh xạ:
+\subsection{Bronze → Silver: làm sạch và chuẩn hoá}
+\src{src/ecomdata/processing/batch/stages/silver.py, src/ecomdata/processing/normalize/}
 
-\begin{xltabular}{\linewidth}{@{}L{36mm}L{40mm}Y@{}}
+Mỗi giờ dựng lại Silver cho hôm nay và hôm qua (để nhận dữ liệu đến muộn). Hai ngày đó được ghi đè nguyên partition,
+nên chạy lại bao nhiêu lần cũng ra cùng kết quả.
+
+\textbf{Các bước làm sạch}, theo thứ tự:
+\begin{enumerate}[leftmargin=*]
+  \item \textbf{Bỏ bản ghi bị ghi lặp}: các bản ghi cùng \code{record_id} (cùng file, cùng vị trí) chỉ giữ một bản.
+  \item \textbf{Kiểm tra vỏ bản ghi}: phải đúng phiên bản schema và thuộc nguồn đã đăng ký, sai thì vào quarantine.
+        Dòng sản phẩm đi tiếp; bản ghi ngữ cảnh của trang (tên danh mục, tổng số sản phẩm) vào bảng \code{page_context}.
+  \item \textbf{Chuẩn hoá giá trị}: cắt khoảng trắng, chuỗi rỗng thành trống (null). Giá đổi sang số thập phân \code{decimal(38,6)};
+        chữ không phải số thành null thay vì làm hỏng cả job. Số đếm (đánh giá, đã bán) phải là số nguyên $\ge 0$.
+        Giá trị ngoài miền hợp lệ (giảm giá âm, phần trăm $> 100$, giá niêm yết $\le 0$) thành null.
+  \item \textbf{Bỏ trùng trên trang}: một sản phẩm (không phải quảng cáo) xuất hiện hai lần trên cùng trang thì chỉ giữ lần đầu.
+  \item \textbf{Tách dòng lỗi}: dòng thiếu trường bắt buộc không vào Silver mà vào bảng \code{quarantine}, kèm lý do đầu tiên gặp:
+        thiếu id, trùng trên trang, thiếu tên, thiếu hoặc sai giá, thiếu thời điểm tải, thiếu thông tin nguồn gốc.
+        Thiếu trường không bắt buộc (thương hiệu, đánh giá\ldots) thì vẫn giữ dòng, cột đó để trống.
+  \item \textbf{Quảng cáo}: giữ dòng nhưng gắn cờ \code{is_advertisement}; thứ hạng tự nhiên trên trang chỉ đếm dòng không phải quảng cáo.
+\end{enumerate}
+Quality gate kiểm tra số dòng Silver + quarantine bằng số dòng đã crawl, nên không dòng nào bị mất mà không rõ lý do.
+
+\textbf{Đưa tên cột của từng nguồn về tên chung.} Tiki và Lazada đặt tên và định dạng khác nhau.
+Mỗi nguồn có một file ánh xạ riêng (\code{tiki.py}, \code{lazada.py}), cùng đổ về một bảng \code{offer_observations_v2} (53 cột):
+
+\begin{xltabular}{\linewidth}{@{}L{30mm}L{34mm}L{34mm}Y@{}}
   \toprule
-  \textbf{Cột Silver} & \textbf{Trường Tiki} & \textbf{Quy tắc} \\
+  \textbf{Cột Silver} & \textbf{Tiki} & \textbf{Lazada} & \textbf{Quy tắc} \\
   \midrule
-  \code{current_price} & \code{price} & số thập phân, $\ge 0$ \\
-  \code{list_price} & \code{original_price} & giữ nếu $> 0$ \\
-  \code{discount_percent} & \code{discount_rate} & ngoài $[0,100]$ thì để trống \\
-  \code{sold_count} & \code{quantity_sold.value} & số nguyên $\ge 0$ \\
-  \code{availability} & \code{availability}, \code{shippable} & còn hàng / hết hàng / không rõ \\
-  \code{is_advertisement} & \code{advertisement} & giữ dòng, gắn cờ \\
-  \code{offer_id} & băm(nguồn, id) & không đổi qua các lần crawl \\
+  \endfirsthead
+  \toprule \textbf{Cột Silver} & \textbf{Tiki} & \textbf{Lazada} & \textbf{Quy tắc} \\ \midrule
+  \endhead
+  \code{platform_listing_id} & \code{id} & \code{itemId} & bắt buộc \\
+  \code{product_title} & \code{name} & \code{name} & bắt buộc \\
+  \code{current_price} & \code{price} & \code{price} & bắt buộc, $\ge 0$ \\
+  \code{list_price} & \code{list_price}, không có thì \code{original_price} & \code{originalPrice} & giữ nếu $> 0$ \\
+  \code{discount_percent} & \code{discount_rate} & \code{discount} (chuỗi ``-25\%'' $\to$ 25) & trong $[0, 100]$ \\
+  \code{rating_value} & \code{rating_average} & \code{ratingScore} & thang 5 \\
+  \code{review_count} & \code{review_count} & \code{review} & số nguyên $\ge 0$ \\
+  \code{sold_count} & \code{quantity_sold.value} & --- (chỉ có dạng chữ) & số nguyên $\ge 0$ \\
+  \code{availability} & \code{availability} + \code{shippable} & \code{inStock} & còn hàng / hết hàng / không rõ \\
+  \code{seller_id} & băm(nguồn, \code{seller_id}) & băm(nguồn, \code{sellerId}) & \\
+  \code{brand}, \code{brand_id} & \code{brand_name}, \code{brand_id} & \code{brandName}, \code{brandId} & \\
+  \code{category_path} & \code{primary_category_path} & danh mục đang crawl & \\
+  \code{source_url} & \code{tiki.vn/} + \code{url_key} + \code{.html} & \code{itemUrl}, thêm \code{https:} nếu thiếu & \\
+  \code{is_advertisement} & \code{advertisement} khác rỗng & \code{isSponsored} hoặc \code{adFlag} $\ne 0$ & giữ dòng, gắn cờ \\
+  \code{currency} & VND & VND & cố định theo nguồn \\
+  \code{offer_id} & băm(nguồn, \code{id}) & băm(nguồn, \code{itemId}) & không đổi qua các lần crawl \\
   \bottomrule
 \end{xltabular}
+
+\textbf{Giữ đủ trường gốc.} Ngoài bảng chung, mỗi nguồn có một bảng rộng (\code{tiki_listing_wide}, \code{lazada_listing_wide})
+giữ mọi trường đã khai báo, đúng kiểu, kèm JSON gốc. Star schema lấy thuộc tính riêng của từng sàn (cửa hàng chính hãng, xuất xứ, SKU\ldots)
+từ đây mà không phải đọc lại Bronze. Nếu sàn thêm trường mới chưa khai báo, run không bị lỗi: trường đó vẫn nằm trong JSON gốc
+và được đếm trong báo cáo của run để cập nhật schema sau.
+
+\textbf{Đổ vào warehouse.} Từ Silver, bước \texttt{dimensions} dựng các bảng người bán, thương hiệu, danh mục, sản phẩm theo khoá đã chuẩn hoá
+(khoá thay thế sinh bằng hàm băm nên ổn định giữa các run). Bước \texttt{facts} ghi mỗi dòng Silver thành một dòng \code{fact_offer_observation},
+bỏ trùng theo \code{observation_id}, rồi tổng hợp thành các bảng fact theo ngày.
 
 \subsection{Silver → Gold}
 \textbf{Star schema \code{dw}}: 7 bảng dimension (ngày, sàn, người bán, thương hiệu, danh mục, sản phẩm, cờ trạng thái), 1 bảng cây danh mục
@@ -196,13 +261,49 @@ Bảng sản phẩm lưu lịch sử thay đổi tên, thương hiệu, danh m�
 
 \figslot{fig-4-star-schema}{90mm}{Star schema \texttt{dw} (chỉ hiện khoá và cột chính).}
 
-\textbf{12 mart}: giá hiện tại, lịch sử giá theo ngày, thay đổi giá, giá theo danh mục, độ tươi dữ liệu, độ phủ nguồn, độ ổn định crawl,
-biến động bộ đếm, giá bất thường, độ tin cậy khuyến mãi, \ldots\ Hai luật phân tích chính:
+\textbf{12 mart} (bảng đã tính sẵn cho dashboard): giá hiện tại của sản phẩm, người bán hiện tại, lịch sử giá theo ngày, thay đổi giá theo ngày,
+độ tươi dữ liệu, giá theo danh mục, độ phủ nguồn, độ ổn định crawl, biến động số đánh giá/đã bán, giá bất thường,
+độ tin cậy khuyến mãi, khuyến mãi theo danh mục. Hai phần phân tích chính:
 \begin{itemize}
-  \item \textbf{Giá bất thường}: so giá hôm nay với 14 ngày trước của cùng sản phẩm (robust z-score, ngưỡng 3,5).
+  \item \textbf{Giá bất thường}: so giá hôm nay với 14 ngày trước của cùng sản phẩm. Lấy trung vị và độ lệch tuyệt đối trung vị (MAD);
+        giá lệch quá 3,5 lần độ phân tán đó (robust z-score) thì gắn cờ cao hoặc thấp bất thường. Cần ít nhất 7 ngày có giá,
+        thiếu thì ghi ``chưa đủ lịch sử'' thay vì kết luận.
   \item \textbf{Khuyến mãi đáng ngờ}: so với giá thấp nhất 30 ngày trước, 5 luật có trọng số (vd. giá niêm yết vừa bị nâng, mức giảm $> 50\%$);
-        $\ge 50$ điểm là SUSPECT.
+        20--49 điểm là QUESTIONABLE, $\ge 50$ điểm là SUSPECT.
 \end{itemize}
+
+\subsection{Xếp hạng khuyến mãi bằng Isolation Forest}
+\src{src/ecomdata/processing/batch/discount.py}
+
+Bên cạnh 5 luật, mart độ tin cậy khuyến mãi có thêm một mô hình học máy không giám sát (Isolation Forest, scikit-learn)
+để \textbf{xếp hạng} các dòng đang hiển thị giảm giá theo mức ``khác thường''. Mô hình chỉ thêm cột hạng bên cạnh kết quả của luật,
+không tự gắn cờ.
+\begin{itemize}
+  \item \textbf{Đầu vào} (5 đặc trưng, đều là cột của mart): \% giảm sàn hiển thị, \% giảm thật so với giá thấp nhất 30 ngày,
+        chênh lệch giữa hai số đó, giá niêm yết có vừa bị nâng không, số mức giá khác nhau trong 30 ngày.
+        Không dùng mức giá: hàng đắt không có nghĩa là giảm giá bất thường.
+  \item \textbf{Cách chạy}: mỗi run batch, huấn luyện trên một mẫu tối đa 200.000 dòng ở driver, rồi chấm điểm mọi dòng trên các executor;
+        kết quả là điểm \code{ml_score} và hạng phần trăm trong cùng sàn, cùng ngày. Không có nhãn nên không cần dữ liệu huấn luyện có sẵn.
+  \item \textbf{Ít dữ liệu} (dưới 50 dòng) hoặc thiếu scikit-learn thì bỏ qua mô hình, mart vẫn đầy đủ phần luật.
+\end{itemize}
+
+\textbf{Đánh giá trong lượt chạy 13--14/11.} Chưa có nhãn thật, nên dùng các phép đo thay thế, đặt ngưỡng trước khi chạy:
+
+\begin{shorttable}{\linewidth}{@{}L{42mm}YL{20mm}L{14mm}@{}}
+  \toprule
+  \textbf{Tiêu chí} & \textbf{Kết quả} & \textbf{Ngưỡng} & \textbf{Đạt?} \\
+  \midrule
+  Luật và mô hình có đồng thuận & dòng luật chấm $\ge 50$ điểm rơi vào top 5\% của mô hình nhiều gấp 2,17 lần ngẫu nhiên (ngày 13/11; ngày 14/11 gấp 4,1 lần nhưng chỉ 39 dòng) & $\ge 2$ lần & đạt \\
+  Ổn định giữa các run & 99,997\% dòng giữ nguyên kết luận khi dữ liệu không đổi & $\ge 99\%$ & đạt \\
+  Thời gian huấn luyện & khoảng 0,1 s trên mẫu 56--67 nghìn dòng & $< 60$ s & đạt \\
+  Thời gian bước \texttt{marts} & 88--105 s qua 10 run, tăng tối đa 19\% & tăng $\le 30\%$ & đạt \\
+  Tỷ lệ bị luật gắn cờ & 34,9\% dòng có giảm giá (ngày 13/11) & 1--10\% & \textbf{chưa đạt} \\
+  \bottomrule
+\end{shorttable}
+
+Tỷ lệ gắn cờ quá cao: hầu hết dòng bị gắn cờ do luật ``\% giảm hiển thị lớn hơn \% giảm thật so với giá thấp nhất trước đó''.
+Với chỉ 4 ngày lịch sử, chưa phân biệt được luật quá chặt hay sàn thật sự hiển thị giảm giá ảo; cần gán nhãn tay một mẫu
+(đã xuất sẵn 30 dòng top theo luật và 30 dòng top theo mô hình, kèm lịch sử giá) để kiểm chứng.
 
 \subsection{Kiểm tra chất lượng và phát hành}
 22 luật (16 bắt buộc): không trùng khoá, giá $\ge 0$, không có thời điểm ở tương lai, số dòng Silver + quarantine khớp số đã crawl, khoá ngoại hợp lệ\ldots
@@ -215,7 +316,11 @@ Sai một luật bắt buộc thì run dừng, Gold quay về bản cũ và Supe
 Một job Spark Structured Streaming chạy mỗi 30 giây, gồm 2 bước:
 (1) chuẩn hoá bản ghi từ Kafka giống batch, bỏ quảng cáo;
 (2) so với lần thấy trước của từng sản phẩm để sinh sự kiện: sản phẩm mới, đổi giá, giảm giá mạnh ($\ge 100.000$đ hoặc $\ge 20\%$),
-đổi đánh giá, đổi số đã bán, đổi tình trạng hàng, lâu không thấy (6 giờ). Sự kiện ghi ra Kafka, Elasticsearch và Redis; bản ghi lỗi vào hàng DLQ.
+đổi đánh giá, đổi số đã bán, đổi tình trạng hàng, lâu không thấy (6 giờ). Sự kiện ghi ra Kafka, Elasticsearch và Redis.
+``Lâu không thấy'' chỉ có nghĩa là crawler chưa quay lại sản phẩm đó, không có nghĩa sản phẩm đã ngừng bán.
+
+Bản ghi đã xử lý rồi (trùng) hoặc cũ hơn lần thấy gần nhất (đến muộn) bị bỏ qua để không sinh sự kiện sai.
+Bản ghi lỗi (thiếu khoá, giá âm, không đọc được) không bị mất mà chuyển sang topic riêng (DLQ, \emph{dead letter queue}) để xem lại.
 
 \figslot{fig-5-speed}{60mm}{Speed layer: hai bước xử lý, các topic Kafka và nơi ghi kết quả.}
 
@@ -232,7 +337,7 @@ Một job Spark Structured Streaming chạy mỗi 30 giây, gồm 2 bước:
   \item Mount \code{/var/run/docker.sock} để mỗi task chạy một container Spark riêng bằng \code{DockerOperator}.
 \end{itemize}
 
-\begin{xltabular}{\linewidth}{@{}L{46mm}L{20mm}Y@{}}
+\begin{shorttable}{\linewidth}{@{}L{46mm}L{17mm}Y@{}}
   \toprule
   \textbf{DAG} & \textbf{Lịch} & \textbf{Làm gì} \\
   \midrule
@@ -241,15 +346,21 @@ Một job Spark Structured Streaming chạy mỗi 30 giây, gồm 2 bước:
   \code{marketplace_maintenance} & mỗi tuần & dọn raw quá 30 ngày, sao lưu \\
   \code{marketplace_reprocess} & tay & chạy lại một khoảng thời gian \\
   \bottomrule
-\end{xltabular}
-Mỗi lần chỉ một run batch; mỗi bước tối đa 45 phút, thử lại 2 lần (trừ \code{quality}); chạy lại thì bỏ qua bước đã xong.
+\end{shorttable}
+Mỗi lần chỉ một run batch; mỗi bước tối đa 45 phút, thử lại 2 lần (trừ \code{quality}).
+
+\textbf{Trạng thái run.} Mỗi run ghi trạng thái vào bảng \code{audit.marketplace_batch_run} sau mỗi bước (Hình~\ref{fig:fig-6-dag-batch}, phải).
+Lỗi ở bước nào thì run chuyển FAILED; chạy lại thì tiếp tục từ bước đó, bỏ qua các bước đã xong.
+Luật chất lượng FAIL thì Gold được khôi phục về bản trước (QUALITY\_FAILED).
+Bước cuối đổi con trỏ \code{current.json} sang run mới; nếu con trỏ đã bị run khác đổi trước, hoặc đây là run chạy lại cho ngày cũ,
+run dừng ở HELD và dữ liệu đang hiển thị không bị thay.
 
 \figslot{fig-6-dag-batch}{45mm}{DAG \texttt{marketplace\_batch} và các trạng thái của một run.}
 
 % =====================================================================
 \section{Giám sát}
 % =====================================================================
-Grafana Alloy gom log của mọi container vào Loki và metrics vào Prometheus (giữ 7 ngày). Metrics gồm: tài nguyên container,
+Grafana Alloy gom log của mọi container vào Loki và metrics vào Prometheus (giữ tối đa 7 ngày hoặc 2 GB). Metrics gồm: tài nguyên container,
 Kafka, Redis, Elasticsearch, Airflow, và số liệu nghiệp vụ lấy bằng SQL từ các bảng \code{audit.*} mỗi phút
 (số trang crawl, lỗi, run batch, luật chất lượng, độ trễ speed). Grafana có 5 dashboard và 19 cảnh báo
 (máy hết RAM/đĩa, crawl ngừng, bị chặn $> 20\%$, batch không chạy quá 2,5 giờ, luật chất lượng FAIL, DLQ tăng\ldots).
@@ -268,51 +379,55 @@ Kafka, Redis, Elasticsearch, Airflow, và số liệu nghiệp vụ lấy bằng
 % =====================================================================
 Số đo từ lượt chạy 13--14/11/2026 trên một laptop (\code{docs/evidence/fullrun-20261114/}).
 
-\begin{xltabular}{\linewidth}{@{}L{58mm}Y@{}}
+\begin{xltabular}{\linewidth}{@{}L{52mm}Y@{}}
   \toprule
   \textbf{Chỉ số} & \textbf{Giá trị} \\
   \midrule
+  \endfirsthead
+  \toprule \textbf{Chỉ số} & \textbf{Giá trị} \\ \midrule
+  \endhead
   \multicolumn{2}{@{}l}{\textit{Thu thập}} \\
   Trang tải được & khoảng 1.270 trang/giờ khi quét SWEEP; 25 trang/giờ khi chỉ còn ACTIVE \\
   Bản ghi & cao nhất 35.016 bản ghi/giờ, \textbf{khoảng 580 bản ghi/phút}; trung bình 27 sản phẩm/trang \\
   Một lượt quét toàn bộ & 14.023 danh mục trong khoảng 4 giờ \\
-  Độ trễ tải trang & trung bình khoảng 2 s, p95 khoảng 3 s \\
+  Độ trễ tải trang & trung bình khoảng 2 s; 95\% trang tải xong trong khoảng 3 s (p95) \\
+  \addlinespace
   \multicolumn{2}{@{}l}{\textit{Làm mới dữ liệu}} \\
-  Speed (thay đổi giá) & micro-batch 30 s, độ trễ p95 59--62 s \\
-  Batch (Gold, Superset) & mỗi giờ; một run mất khoảng 10--13 phút \\
+  Speed (thay đổi giá) & micro-batch 30 s; 95\% sự kiện có sau 59--62 s kể từ lúc tải trang \\
+  Batch (Gold, Superset) & mỗi giờ; một run mất khoảng 10--13 phút (run chạy bù 19,6 phút do máy thiếu RAM) \\
   Một sản phẩm được crawl lại & 1--24 giờ tuỳ tier \\
+  \addlinespace
   \multicolumn{2}{@{}l}{\textit{Kết quả}} \\
-  Thời gian chạy & 9 giờ 16 phút (dừng khi RAM máy còn 2,6 GB) \\
-  Run batch & 10/10 thành công, quality PASS \\
+  Thời gian chạy & 9 giờ 16 phút (dừng khi RAM máy còn 2,6 GB), sau đó chạy bù thêm 1 run \\
+  Run batch & 11/11 thành công, quality PASS \\
   Số dòng Gold mỗi run & 1,43 triệu → 1,97 triệu \\
+  Lịch sử giá & 253.198 dòng (mỗi dòng là một sản phẩm trong một ngày) \\
   Speed & 0 lỗi, DLQ 0 \\
-  Khuyến mãi bị gắn cờ & 34,9\% dòng có giảm giá (ngày 13/11) \\
+  Khuyến mãi bị gắn cờ & 34,9\% dòng có giảm giá (ngày 13/11), \textbf{chưa đạt} ngưỡng 1--10\% đặt trước \\
   \bottomrule
 \end{xltabular}
 
 \figslot{chart-1-crawl-theo-gio}{55mm}{Số trang crawl thành công và số bản ghi mỗi phút, theo giờ (14/11).}
-\figslot{chart-2-thoi-gian-stage}{55mm}{Thời gian từng bước của các run batch.}
+\figslot{chart-2-thoi-gian-stage}{55mm}{Thời gian từng bước của 11 run batch. Run cuối (05:00 UTC) là run chạy bù khi máy chỉ còn 1,7 GB RAM nên chậm hơn.}
 
 % =====================================================================
 \section{Hạn chế và việc tiếp theo}
 % =====================================================================
-\begin{xltabular}{\linewidth}{@{}L{22mm}YY@{}}
+\begin{shorttable}{\linewidth}{@{}L{20mm}YY@{}}
   \toprule
   \textbf{Phần} & \textbf{Hạn chế} & \textbf{Hướng xử lý} \\
   \midrule
-  \endfirsthead
-  \toprule \textbf{Phần} & \textbf{Hạn chế} & \textbf{Hướng xử lý} \\ \midrule
-  \endhead
   Thu thập & Tiki chỉ lấy trang 1, tức nhóm sản phẩm sàn đẩy lên đầu & ghi rõ phạm vi khi kết luận \\
   Thu thập & Lượt SWEEP dồn vào 4 giờ rồi nghỉ 20 giờ & rải đều lịch trong ngày \\
   Lưu trữ & Mỗi trang một file nhỏ (khoảng 10 KB) & gộp file theo giờ \\
   Lưu trữ & Chưa dọn bản Delta cũ (\code{OPTIMIZE}/\code{VACUUM}) & thêm vào DAG bảo trì \\
   Xử lý & Ngày tính theo UTC, lệch 7 giờ so với Việt Nam & tính ngày theo giờ Việt Nam \\
   Gold & Mỗi giờ dựng lại từ toàn bộ lịch sử, càng nhiều ngày càng chậm & dựng tăng dần theo ngày \\
-  Phân tích & Luật khuyến mãi gắn cờ 34,9\% khi mới có 4 ngày lịch sử & chỉ bật khi đủ ngày; gán nhãn tay để đánh giá \\
+  Phân tích & Luật khuyến mãi gắn cờ 34,9\% (ngưỡng mong muốn 1--10\%) khi mới có 4 ngày lịch sử; mô hình chưa được kiểm chứng bằng nhãn & chỉ bật khi đủ ngày; gán nhãn tay 60 dòng đã xuất để đo độ chính xác \\
   Speed & State của sản phẩm không bao giờ bị xoá & xoá sau thời gian dài không thấy \\
+  Phục vụ & Chưa kiểm tra giao diện Superset/Kibana trong lượt chạy 13--14/11 & chạy lại, chụp dashboard lịch sử giá và thay đổi giá \\
   \bottomrule
-\end{xltabular}
+\end{shorttable}
 
 \textbf{Cần thầy góp ý:}
 \begin{itemize}

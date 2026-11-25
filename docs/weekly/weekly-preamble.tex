@@ -2,7 +2,9 @@
 %  weekly-preamble.tex — khung cho báo cáo kỹ thuật
 %  Biên dịch bằng XeLaTeX (hoặc tectonic). Không dùng pdfLaTeX.
 % =====================================================================
-\usepackage[a4paper,margin=20mm,headheight=14pt]{geometry}
+% Lề theo chuẩn văn bản: trên/dưới 25 mm, trái 30 mm (đóng gáy), phải 20 mm
+\usepackage[a4paper,top=25mm,bottom=25mm,left=30mm,right=20mm,
+  headheight=14pt,footskip=12mm]{geometry}
 \usepackage{fontspec}
 \setmainfont{texgyrepagella}[Extension=.otf, UprightFont=*-regular, BoldFont=*-bold,
   ItalicFont=*-italic, BoldItalicFont=*-bolditalic]
@@ -16,6 +18,8 @@
 \usepackage{amsmath,amssymb}
 \usepackage{xcolor}
 \usepackage{booktabs,array,xltabular}
+\usepackage{etoolbox,needspace}
+\usepackage[section]{placeins}  % hình không trôi sang mục sau
 \usepackage{enumitem}
 \usepackage{fancyvrb}
 \usepackage{titlesec}
@@ -28,24 +32,35 @@
 \setlength{\parskip}{4pt plus 1pt}
 \setlength{\emergencystretch}{3em}
 \tolerance=2000
-\renewcommand{\arraystretch}{1.15}
+\renewcommand{\arraystretch}{1.2}
+\setlength{\tabcolsep}{5pt}
+% Bảng: chữ nhỏ, sát lề trái, khoảng cách trên/dưới đều nhau
+\setlength{\LTleft}{0pt}\setlength{\LTright}{0pt}
+\setlength{\LTpre}{6pt}\setlength{\LTpost}{6pt}
+\AtBeginEnvironment{xltabular}{\small}
+% Bảng ngắn: không ngắt trang giữa bảng
+\newenvironment{shorttable}{\par\nopagebreak\vspace{6pt}\nopagebreak\noindent\small\tabularx}{\endtabularx\par\vspace{6pt}}
+% Vị trí hình: ưu tiên ngay tại chỗ, tránh khoảng trắng lớn
+\renewcommand{\topfraction}{0.9}
+\renewcommand{\bottomfraction}{0.8}
+\renewcommand{\textfraction}{0.07}
+\renewcommand{\floatpagefraction}{0.85}
+\setcounter{topnumber}{3}\setcounter{bottomnumber}{2}\setcounter{totalnumber}{4}
 \setlist{itemsep=1pt,topsep=3pt,parsep=0pt}
 
 \definecolor{brand}{HTML}{1E3A8A}
 \definecolor{muted}{HTML}{6B7280}
 
-\titleformat{\section}{\sffamily\Large\bfseries\color{brand}}{\thesection}{0.6em}{}
-\titleformat{\subsection}{\sffamily\large\bfseries}{\thesubsection}{0.6em}{}
+\titleformat{\section}{\needspace{8\baselineskip}\sffamily\Large\bfseries\color{brand}}{\thesection}{0.6em}{}
+\titleformat{\subsection}{\needspace{6\baselineskip}\sffamily\large\bfseries}{\thesubsection}{0.6em}{}
 \titleformat{\subsubsection}{\sffamily\normalsize\bfseries}{\thesubsubsection}{0.5em}{}
 \titlespacing*{\section}{0pt}{12pt}{6pt}
-\titlespacing*{\subsection}{0pt}{8pt}{4pt}
+\titlespacing*{\subsection}{0pt}{10pt}{4pt}
 
 \pagestyle{fancy}
 \fancyhf{}
-\fancyhead[L]{\small\sffamily\color{muted}\ReportTitle}
-\fancyhead[R]{\small\sffamily\color{muted}\ReportPeriod}
-\fancyfoot[R]{\small\sffamily\thepage}
-\renewcommand{\headrulewidth}{0.4pt}
+\fancyfoot[C]{\small\sffamily\thepage}
+\renewcommand{\headrulewidth}{0pt}
 
 % \code{...}: định danh trong mã, giữ khoảng trắng, ngắt dòng tại / . _ - : , = |
 \ExplSyntaxOn
@@ -80,11 +95,11 @@
 %   Có figures/<tên-file>.pdf|png|jpg thì chèn hình; chưa có thì để ô trắng.
 %   Tham chiếu: \ref{fig:<tên-file>}
 \usepackage{graphicx,float,caption}
-\captionsetup{font=small,labelfont=bf}
+\captionsetup{font=small,labelfont=bf,justification=centering,skip=6pt}
 \graphicspath{{figures/}}
-\newcommand{\figimg}[1]{\includegraphics[width=\linewidth,height=0.72\textheight,keepaspectratio]{#1}}
+\newcommand{\figimg}[1]{\includegraphics[width=\linewidth,height=0.6\textheight,keepaspectratio]{#1}}
 \newcommand{\figslot}[3]{%
-  \begin{figure}[H]\centering
+  \begin{figure}[!htbp]\centering
     \IfFileExists{figures/#1.pdf}{\figimg{#1.pdf}}{%
     \IfFileExists{figures/#1.png}{\figimg{#1.png}}{%
     \IfFileExists{figures/#1.jpg}{\figimg{#1.jpg}}{%

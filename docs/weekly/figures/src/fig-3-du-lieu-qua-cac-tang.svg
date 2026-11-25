@@ -12,20 +12,18 @@
 <!-- raw -->
 <g id="node1" class="node">
 <title>raw</title>
-<path fill="#e3f2fd" stroke="#1565c0" stroke-width="1.3" d="M90,-177.68C90,-177.68 12,-177.68 12,-177.68 6,-177.68 0,-171.68 0,-165.68 0,-165.68 0,-128.24 0,-128.24 0,-122.24 6,-116.24 12,-116.24 12,-116.24 90,-116.24 90,-116.24 96,-116.24 102,-122.24 102,-128.24 102,-128.24 102,-165.68 102,-165.68 102,-171.68 96,-177.68 90,-177.68"/>
-<text text-anchor="start" x="19.88" y="-163.36" font-family="Helvetica,sans-Serif" font-weight="bold" font-size="10.00">Bronze · raw</text>
-<text text-anchor="start" x="10.64" y="-148.16" font-family="Helvetica,sans-Serif" font-size="8.00" fill="#37474f">bin.gz + metadata.json</text>
-<text text-anchor="start" x="29.21" y="-138.56" font-family="Helvetica,sans-Serif" font-size="8.00" fill="#37474f">giữ 30 ngày</text>
-<text text-anchor="start" x="17.65" y="-125.96" font-family="Helvetica,sans-Serif" font-style="italic" font-size="8.00" fill="#607d8b">1 phản hồi / trang</text>
+<path fill="#e3f2fd" stroke="#1565c0" stroke-width="1.3" d="M90,-172.88C90,-172.88 12,-172.88 12,-172.88 6,-172.88 0,-166.88 0,-160.88 0,-160.88 0,-133.04 0,-133.04 0,-127.04 6,-121.04 12,-121.04 12,-121.04 90,-121.04 90,-121.04 96,-121.04 102,-127.04 102,-133.04 102,-133.04 102,-160.88 102,-160.88 102,-166.88 96,-172.88 90,-172.88"/>
+<text text-anchor="start" x="19.88" y="-158.56" font-family="Helvetica,sans-Serif" font-weight="bold" font-size="10.00">Bronze · raw</text>
+<text text-anchor="start" x="10.64" y="-143.36" font-family="Helvetica,sans-Serif" font-size="8.00" fill="#37474f">bin.gz + metadata.json</text>
+<text text-anchor="start" x="17.65" y="-130.76" font-family="Helvetica,sans-Serif" font-style="italic" font-size="8.00" fill="#607d8b">1 phản hồi / trang</text>
 </g>
 <!-- rec -->
 <g id="node2" class="node">
 <title>rec</title>
-<path fill="#e3f2fd" stroke="#1565c0" stroke-width="1.3" d="M334.78,-177.68C334.78,-177.68 213.21,-177.68 213.21,-177.68 207.21,-177.68 201.21,-171.68 201.21,-165.68 201.21,-165.68 201.21,-128.24 201.21,-128.24 201.21,-122.24 207.21,-116.24 213.21,-116.24 213.21,-116.24 334.78,-116.24 334.78,-116.24 340.78,-116.24 346.78,-122.24 346.78,-128.24 346.78,-128.24 346.78,-165.68 346.78,-165.68 346.78,-171.68 340.78,-177.68 334.78,-177.68"/>
-<text text-anchor="start" x="233.15" y="-163.36" font-family="Helvetica,sans-Serif" font-weight="bold" font-size="10.00">Bronze · records</text>
-<text text-anchor="start" x="230.87" y="-148.16" font-family="Helvetica,sans-Serif" font-size="8.00" fill="#37474f">JSONL.gz, payload gốc</text>
-<text text-anchor="start" x="248.21" y="-138.56" font-family="Helvetica,sans-Serif" font-size="8.00" fill="#37474f">giữ vĩnh viễn</text>
-<text text-anchor="start" x="211.85" y="-125.96" font-family="Helvetica,sans-Serif" font-style="italic" font-size="8.00" fill="#607d8b">≤ 40 listing_row + 1 context / trang</text>
+<path fill="#e3f2fd" stroke="#1565c0" stroke-width="1.3" d="M334.78,-172.88C334.78,-172.88 213.21,-172.88 213.21,-172.88 207.21,-172.88 201.21,-166.88 201.21,-160.88 201.21,-160.88 201.21,-133.04 201.21,-133.04 201.21,-127.04 207.21,-121.04 213.21,-121.04 213.21,-121.04 334.78,-121.04 334.78,-121.04 340.78,-121.04 346.78,-127.04 346.78,-133.04 346.78,-133.04 346.78,-160.88 346.78,-160.88 346.78,-166.88 340.78,-172.88 334.78,-172.88"/>
+<text text-anchor="start" x="233.15" y="-158.56" font-family="Helvetica,sans-Serif" font-weight="bold" font-size="10.00">Bronze · records</text>
+<text text-anchor="start" x="230.87" y="-143.36" font-family="Helvetica,sans-Serif" font-size="8.00" fill="#37474f">JSONL.gz, payload gốc</text>
+<text text-anchor="start" x="211.85" y="-130.76" font-family="Helvetica,sans-Serif" font-style="italic" font-size="8.00" fill="#607d8b">≤ 40 listing_row + 1 context / trang</text>
 </g>
 <!-- raw&#45;&gt;rec -->
 <g id="edge1" class="edge">

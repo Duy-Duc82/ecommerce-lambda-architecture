@@ -43,16 +43,16 @@ const figs = {};
 figs["fig-1-kien-truc-tong-the"] = `digraph G { rankdir=TB; ${HEAD}
   graph [nodesep=0.35, ranksep=0.4];
   ${cluster("src", "Nguồn ngoài", "src", [
-    n("tiki", `Tiki<BR/><FONT POINT-SIZE='8'>HTTP, ${t("__NEXT_DATA__")}</FONT>`, "ext", "src"),
-    n("laz", `Lazada<BR/><FONT POINT-SIZE='8'>Playwright, XHR JSON</FONT>`, "ext", "src")])}
+    n("tiki", `Tiki`, "ext", "src"),
+    n("laz", `Lazada`, "ext", "src")])}
   ${cluster("crawl", "Thu thập", "crawl", [
     n("frontier", `PostgreSQL<BR/>${t("audit.crawl_frontier")}`, "store", "crawl"),
     n("worker", "crawl-worker<BR/>Fetcher → Extractor", "proc", "crawl")])}
   ${cluster("bronze", "Bronze (MinIO/S3) – nguồn sự thật", "lake", [
-    n("raw", `raw<BR/><FONT POINT-SIZE='8'>part-N.bin.gz + metadata.json</FONT>`, "store", "lake"),
-    n("records", `records<BR/><FONT POINT-SIZE='8'>JSONL.gz, marketplace-record.v1</FONT>`, "store", "lake", ', penwidth=2.2'),
-    n("caudit", `crawl_audit<BR/><FONT POINT-SIZE='8'>JSONL.gz</FONT>`, "store", "lake")])}
-  ${cluster("speed", "Speed layer (Spark Structured Streaming, 30 s)", "speed", [
+    n("raw", `raw`, "store", "lake"),
+    n("records", `records`, "store", "lake", ', penwidth=2.2'),
+    n("caudit", `crawl_audit`, "store", "lake")])}
+  ${cluster("speed", "Speed layer (Spark Structured Streaming)", "speed", [
     n("k1", t("records.v1"), "topic", "kafka"),
     n("norm", "normalizer", "proc", "speed"),
     n("k2", t("observations.v1"), "topic", "kafka"),
@@ -60,7 +60,7 @@ figs["fig-1-kien-truc-tong-the"] = `digraph G { rankdir=TB; ${HEAD}
     n("k3", t("changes.v1"), "topic", "kafka")])}
   ${cluster("batch", "Batch layer (Airflow, mỗi giờ)", "batch", [
     n("silver", "Silver (Delta)", "store", "lake"),
-    n("dw", `Gold ${t("dw")}<BR/><FONT POINT-SIZE='8'>star: 7 dim + 1 bridge, 6 fact</FONT>`, "store", "lake"),
+    n("dw", `Gold ${t("dw")}`, "store", "lake"),
     n("runs", "Gold runs<BR/>12 mart theo run", "store", "lake"),
     n("gate", "quality gate<BR/>22 luật", "dec", "gate"),
     n("ptr", t("current.json"), "store", "lake")])}
@@ -91,23 +91,23 @@ figs["fig-1-kien-truc-tong-the"] = `digraph G { rankdir=TB; ${HEAD}
 // ---------------------------------------------------------------- Hình 2: một lượt crawl
 figs["fig-2-luong-crawl"] = `digraph G { rankdir=TB; ${HEAD}
   graph [nodesep=0.35, ranksep=0.32];
-  lease  [label=<Lấy task: ${t("lease_due(10)")}<BR/><FONT POINT-SIZE='8'>FOR UPDATE SKIP LOCKED, lease 300 s, attempts+1</FONT>>, shape=box, style="rounded,filled", color="${C.crawl[0]}", fillcolor="${C.crawl[1]}"];
+  lease  [label=<Lấy task: ${t("lease_due(10)")}>, shape=box, style="rounded,filled", color="${C.crawl[0]}", fillcolor="${C.crawl[1]}"];
   frontier [label=<PostgreSQL<BR/>${t("audit.crawl_frontier")}>, shape=cylinder, style=filled, color="${C.crawl[0]}", fillcolor="${C.crawl[1]}"];
   ${n("circuit", "Circuit của<BR/>nguồn đang mở?", "dec", "plain")}
-  ${n("robots", "robots.txt (cache 1 h)<BR/>throttle ≥ 2 s + jitter", "proc", "crawl")}
+  ${n("robots", "đọc robots.txt<BR/>giãn cách request", "proc", "crawl")}
   ${n("fetch", "GET trang<BR/>(Lazada: Playwright + bắt XHR)", "proc", "crawl")}
   ${n("site", "Tiki / Lazada", "ext", "src")}
-  ${n("raw", `Bronze/raw<BR/><FONT POINT-SIZE='8'>part-N.bin.gz + metadata.json</FONT>`, "store", "lake")}
+  ${n("raw", `Bronze/raw`, "store", "lake")}
   ${n("status", "HTTP status OK?", "dec", "plain")}
   ${n("extract", "extract → bỏ PII → build_records", "proc", "crawl")}
-  ${n("records", `Bronze/records<BR/><FONT POINT-SIZE='8'>{raw_artifact_id}.jsonl.gz</FONT>`, "store", "lake")}
-  ${n("kafka", `Kafka ${t("records.v1")}<BR/><FONT POINT-SIZE='8'>acks=all, từng listing_row</FONT>`, "topic", "kafka")}
+  ${n("records", `Bronze/records`, "store", "lake")}
+  ${n("kafka", `Kafka ${t("records.v1")}`, "topic", "kafka")}
   ${n("ok", "Kết quả?", "dec", "plain")}
-  ${n("succ", "SUCCEEDED<BR/>+ chèn task READY lần sau<BR/>(scheduled_for = now + cadence)", "proc", "batch")}
-  ${n("retry", "RETRY_WAIT<BR/>backoff 30·2^(n−1) s, trần 1800 s", "proc", "serve")}
-  ${n("fail", "FAILED<BR/>(lỗi vĩnh viễn / hết 5 lần)", "proc", "gate")}
+  ${n("succ", "SUCCEEDED<BR/>+ hẹn lần crawl sau", "proc", "batch")}
+  ${n("retry", "RETRY_WAIT<BR/>thử lại sau", "proc", "serve")}
+  ${n("fail", "FAILED", "proc", "gate")}
   ${n("audit", `${t("audit.crawl_*")} + lake crawl_audit`, "store", "crawl")}
-  ${n("wait", "trả task về hàng đợi<BR/>(RATE_LIMITED, 900 s)", "proc", "plain")}
+  ${n("wait", "trả task về hàng đợi", "proc", "plain")}
   frontier -> lease;
   ${e("lease", "circuit")}
   ${e("circuit", "wait", 'label="mở"')}
@@ -132,8 +132,8 @@ const layer = (id, title, fmt, grain, ly) =>
     <TR><TD><FONT POINT-SIZE='8' COLOR="#607d8b"><I>${grain}</I></FONT></TD></TR></TABLE>>];`;
 figs["fig-3-du-lieu-qua-cac-tang"] = `digraph G { rankdir=TB; ${HEAD}
   graph [nodesep=0.7, ranksep=0.6];
-  ${layer("raw", "Bronze · raw", "bin.gz + metadata.json<BR/>giữ 30 ngày", "1 phản hồi / trang", "lake")}
-  ${layer("rec", "Bronze · records", "JSONL.gz, payload gốc<BR/>giữ vĩnh viễn", "≤ 40 listing_row + 1 context / trang", "lake")}
+  ${layer("raw", "Bronze · raw", "bin.gz + metadata.json", "1 phản hồi / trang", "lake")}
+  ${layer("rec", "Bronze · records", "JSONL.gz, payload gốc", "≤ 40 listing_row + 1 context / trang", "lake")}
   ${layer("silver", "Silver · offer_observations_v2", "Delta, 53 cột<BR/>+ *_listing_wide, page_context, quarantine", "1 observation hợp lệ", "batch")}
   ${layer("star", "Gold · star dw", "Delta, MERGE<BR/>7 dim + 1 bridge + 6 fact", "1 sighting (fact chính)", "batch")}
   ${layer("mart", "Gold · 12 mart / run", "Delta, thư mục run_id=…", "vd. 1 offer (offer_current)", "batch")}
@@ -163,7 +163,7 @@ figs["fig-5-speed"] = `digraph G { rankdir=TB; ${HEAD}
     n("cmp", "so với<BR/>OfferState", "dec", "plain"),
     n("dup", "DUPLICATE (bỏ)", "proc", "plain"),
     n("late", "LATE (bỏ)", "proc", "plain"),
-    n("chg", "STATE + 0..n CHANGE<BR/><FONT POINT-SIZE='8'>NEW_OFFER, PRICE_CHANGED, LARGE_PRICE_DROP,<BR/>RATING/COUNTER/AVAILABILITY_CHANGED, OFFER_STALE</FONT>", "proc", "speed"),
+    n("chg", "STATE + 0..n CHANGE", "proc", "speed"),
     n("bw", "BatchWriter<BR/>Kafka → ES → Redis → audit", "proc", "speed")])}
   ${n("dlq2", t("observations.v1.dlq"), "topic", "kafka")}
   ${n("k3", t("changes.v1"), "topic", "kafka")}
@@ -180,14 +180,14 @@ figs["fig-5-speed"] = `digraph G { rankdir=TB; ${HEAD}
 const st = (id, label, ly, extra = "") => `${id} [label="${label}", shape=box, style="rounded,filled", color="${C[ly][0]}", fillcolor="${C[ly][1]}", fontsize=9${extra}];`;
 figs["fig-6-dag-batch"] = `digraph G { rankdir=TB; ${HEAD}
   graph [nodesep=0.3, ranksep=0.3, compound=true];
-  ${cluster("dag", "DAG marketplace_batch<BR/><FONT POINT-SIZE='8'>@hourly · max_active_runs=1<BR/>DockerOperator · 45 phút/stage<BR/>retry 2 lần (trừ quality)</FONT>", "orch", [
-    n("sensor", "window_settled<BR/><FONT POINT-SIZE='8'>sensor 10 phút</FONT>", "proc", "orch"),
+  ${cluster("dag", "DAG marketplace_batch", "orch", [
+    n("sensor", "window_settled", "proc", "orch"),
     n("s1", "silver", "proc", "batch"), n("s2", "dimensions", "proc", "batch"), n("s3", "facts", "proc", "batch"),
     n("s4", "marts", "proc", "batch"),
-    n("s5", "quality<BR/><FONT POINT-SIZE='8'>retries = 0</FONT>", "proc", "gate", ", penwidth=2.2"),
+    n("s5", "quality", "proc", "gate", ", penwidth=2.2"),
     n("s6", "publish", "proc", "batch"), n("s7", "promote", "proc", "batch"),
     e("sensor", "s1"), e("s1", "s2"), e("s2", "s3"), e("s3", "s4"), e("s4", "s5"), e("s5", "s6"), e("s6", "s7")])}
-  ${cluster("sm", "Trạng thái run<BR/><FONT POINT-SIZE='8'>audit.marketplace_batch_run</FONT>", "orch", [
+  ${cluster("sm", "Trạng thái run", "orch", [
     'start [shape=circle, label="", width=0.15, style=filled, fillcolor="#263238", color="#263238"];',
     'end [shape=doublecircle, label="", width=0.12, style=filled, fillcolor="#263238", color="#263238"];',
     st("CREATED", "CREATED", "plain"), st("SILVER_BUILT", "SILVER_BUILT", "plain"),
@@ -215,20 +215,20 @@ figs["fig-6-dag-batch"] = `digraph G { rankdir=TB; ${HEAD}
 figs["fig-7-giam-sat"] = `digraph G { rankdir=LR; ${HEAD}
   graph [nodesep=0.18, ranksep=0.45];
   ${cluster("srcm", "Nguồn metrics", "orch", [
-    n("cad", "cAdvisor<BR/><FONT POINT-SIZE='8'>CPU/RAM/IO container</FONT>", "ext", "plain"),
-    n("host", "node (unix)<BR/><FONT POINT-SIZE='8'>máy, đĩa, PSI</FONT>", "ext", "plain"),
+    n("cad", "cAdvisor", "ext", "plain"),
+    n("host", "node (unix)", "ext", "plain"),
     n("exp", "exporter Kafka · Redis ·<BR/>Elasticsearch", "ext", "plain"),
     n("statsd", "StatsD của Airflow", "ext", "plain"),
     n("probe", "blackbox HTTP probe", "ext", "plain"),
-    n("sql", `SQL trên ${t("audit.*")}&nbsp;mỗi phút<BR/><FONT POINT-SIZE='8'>mp_crawl_*, mp_batch_*, mp_quality_*, mp_speed_*</FONT>`, "store", "crawl")])}
+    n("sql", `SQL trên ${t("audit.*")}&nbsp;mỗi phút`, "store", "crawl")])}
   ${cluster("srcl", "Nguồn log", "orch", [
     n("dlog", "log container Docker", "ext", "plain"),
     n("alog", "log task Airflow (file)", "ext", "plain")])}
   ${n("alloy", "Grafana Alloy", "proc", "obs", ", penwidth=2.2")}
-  ${n("prom", "Prometheus<BR/><FONT POINT-SIZE='8'>giữ 7 ngày / 2 GB</FONT>", "store", "obs")}
+  ${n("prom", "Prometheus", "store", "obs")}
   ${n("loki", "Loki", "store", "obs")}
-  ${n("graf", "Grafana<BR/><FONT POINT-SIZE='8'>5 dashboard</FONT>", "ext", "obs", ", penwidth=2.2")}
-  ${n("alert", "19 luật cảnh báo<BR/><FONT POINT-SIZE='8'>hạ tầng · pipeline · điều phối</FONT>", "dec", "gate")}
+  ${n("graf", "Grafana", "ext", "obs", ", penwidth=2.2")}
+  ${n("alert", "19 luật cảnh báo", "dec", "gate")}
   ${["cad", "host", "exp", "statsd", "probe", "sql"].map((s) => e(s, "alloy")).join(" ")}
   ${e("dlog", "alloy")} ${e("alog", "alloy")}
   ${e("alloy", "prom", `${BOLD}, label="remote_write"`)} ${e("alloy", "loki", `${BOLD}, label="push"`)}
