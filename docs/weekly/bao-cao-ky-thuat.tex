@@ -266,9 +266,12 @@ giữ mọi trường đã khai báo, đúng kiểu, kèm JSON gốc. Star schem
 từ đây mà không phải đọc lại Bronze. Nếu sàn thêm trường mới chưa khai báo, run không bị lỗi: trường đó vẫn nằm trong JSON gốc
 và được đếm trong báo cáo của run để cập nhật schema sau.
 
-\textbf{Đổ vào warehouse.} Từ Silver, bước \texttt{dimensions} dựng các bảng người bán, thương hiệu, danh mục, sản phẩm theo khoá đã chuẩn hoá
-(khoá thay thế sinh bằng hàm băm nên ổn định giữa các run). Bước \texttt{facts} ghi mỗi dòng Silver thành một dòng \code{fact_offer_observation},
-bỏ trùng theo \code{observation_id}, rồi tổng hợp thành các bảng fact theo ngày.
+\textbf{Đổ vào warehouse}:
+\begin{itemize}
+  \item \texttt{dimensions}: dựng bảng người bán, thương hiệu, danh mục, sản phẩm; khoá sinh bằng hàm băm nên giữ nguyên giữa các run.
+  \item \texttt{facts}: mỗi dòng Silver thành một dòng \code{fact_offer_observation} (bỏ trùng theo \code{observation_id}),
+        rồi tổng hợp thành các bảng fact theo ngày.
+\end{itemize}
 
 \subsection{Silver → Gold}
 \textbf{Star schema \code{dw}}: 7 bảng dimension (ngày, sàn, người bán, thương hiệu, danh mục, sản phẩm, cờ trạng thái), 1 bảng cây danh mục
@@ -329,20 +332,26 @@ Giá bất thường chưa gắn cờ dòng nào vì chưa sản phẩm nào đ�
 
 \subsection{Kiểm tra chất lượng và phát hành}
 22 luật (16 bắt buộc): không trùng khoá, giá $\ge 0$, không có thời điểm ở tương lai, số dòng Silver + quarantine khớp số đã crawl, khoá ngoại hợp lệ\ldots
-Sai một luật bắt buộc thì run dừng, Gold quay về bản cũ và Superset vẫn hiện dữ liệu cũ (đã thử thật ngày 07/11).
-Đạt thì nạp 12 mart vào PostgreSQL trong một transaction rồi mới chuyển con trỏ sang run mới.
+\begin{itemize}
+  \item Sai một luật bắt buộc: run dừng, Gold quay về bản cũ, Superset vẫn hiện dữ liệu cũ (đã thử ngày 07/11).
+  \item Đạt: nạp 12 mart vào PostgreSQL trong một transaction, rồi chuyển con trỏ sang run mới.
+\end{itemize}
 
 % =====================================================================
 \section{Speed layer}
 % =====================================================================
-Một job Spark Structured Streaming chạy mỗi 30 giây, gồm 2 bước:
-(1) chuẩn hoá bản ghi từ Kafka giống batch, bỏ quảng cáo;
-(2) so với lần thấy trước của từng sản phẩm để sinh sự kiện: sản phẩm mới, đổi giá, giảm giá mạnh ($\ge 100.000$đ hoặc $\ge 20\%$),
-đổi đánh giá, đổi số đã bán, đổi tình trạng hàng, lâu không thấy (6 giờ). Sự kiện ghi ra Kafka, Elasticsearch và Redis.
-``Lâu không thấy'' chỉ có nghĩa là crawler chưa quay lại sản phẩm đó, không có nghĩa sản phẩm đã ngừng bán.
-
-Bản ghi đã xử lý rồi (trùng) hoặc cũ hơn lần thấy gần nhất (đến muộn) bị bỏ qua để không sinh sự kiện sai.
-Bản ghi lỗi (thiếu khoá, giá âm, không đọc được) không bị mất mà chuyển sang topic riêng (DLQ, \emph{dead letter queue}) để xem lại.
+Một job Spark Structured Streaming, chạy mỗi 30 giây:
+\begin{itemize}
+  \item \textbf{Bước 1 -- chuẩn hoá}: đọc bản ghi từ Kafka, chuẩn hoá giống batch.
+        Bỏ các ô quảng cáo (sản phẩm trả tiền để hiện trên trang danh mục, trường \code{advertisement} khác rỗng),
+        vì đó là chỗ hiển thị trả tiền, không phải vị trí thật của sản phẩm (batch vẫn giữ các dòng này nhưng gắn cờ).
+  \item \textbf{Bước 2 -- sinh sự kiện}: so với lần thấy trước của cùng sản phẩm. Các loại sự kiện:
+        sản phẩm mới, đổi giá, giảm giá mạnh ($\ge 100.000$đ hoặc $\ge 20\%$), đổi đánh giá, đổi số đã bán,
+        đổi tình trạng hàng, lâu không thấy (6 giờ chưa crawl lại).
+  \item \textbf{Ghi kết quả}: Kafka, Elasticsearch (Kibana) và Redis.
+  \item \textbf{Bỏ qua}: bản ghi trùng hoặc cũ hơn lần thấy gần nhất.
+  \item \textbf{Bản ghi lỗi} (thiếu khoá, giá âm, không đọc được): chuyển sang topic DLQ để xem lại.
+\end{itemize}
 
 \figslot{fig-5-speed}{60mm}{Speed layer.}
 
@@ -371,11 +380,13 @@ Bản ghi lỗi (thiếu khoá, giá âm, không đọc được) không bị m�
 \end{shorttable}
 Mỗi lần chỉ một run batch; mỗi bước tối đa 45 phút, thử lại 2 lần (trừ \code{quality}).
 
-\textbf{Trạng thái run.} Mỗi run ghi trạng thái vào bảng \code{audit.marketplace_batch_run} sau mỗi bước (Hình~\ref{fig:fig-6-dag-batch}, phải).
-Lỗi ở bước nào thì run chuyển FAILED; chạy lại thì tiếp tục từ bước đó, bỏ qua các bước đã xong.
-Luật chất lượng FAIL thì Gold được khôi phục về bản trước (QUALITY\_FAILED).
-Bước cuối đổi con trỏ \code{current.json} sang run mới; nếu con trỏ đã bị run khác đổi trước, hoặc đây là run chạy lại cho ngày cũ,
-run dừng ở HELD và dữ liệu đang hiển thị không bị thay.
+\textbf{Trạng thái run}, ghi vào bảng \code{audit.marketplace_batch_run} sau mỗi bước (Hình~\ref{fig:fig-6-dag-batch}, phải):
+\begin{itemize}
+  \item \textbf{FAILED}: lỗi ở một bước; chạy lại thì tiếp tục từ bước đó.
+  \item \textbf{QUALITY\_FAILED}: luật chất lượng FAIL, Gold quay về bản trước.
+  \item \textbf{HELD}: con trỏ \code{current.json} đã bị run khác đổi, hoặc đây là run chạy lại cho ngày cũ; dữ liệu đang hiển thị giữ nguyên.
+  \item \textbf{PROMOTED}: con trỏ đã chuyển sang run mới.
+\end{itemize}
 
 \figslot{fig-6-dag-batch}{45mm}{DAG \texttt{marketplace\_batch} và trạng thái run.}
 
