@@ -17,6 +17,12 @@ from diagrams.onprem.network import Internet
 from diagrams.onprem.queue import Kafka
 from diagrams.onprem.workflow import Airflow
 from diagrams.programming.language import Python
+from diagrams import Node
+
+# Chữ to hơn để đọc được khi thu nhỏ vào trang A4: node cao hơn để nhãn không đè lên logo,
+# nhãn trên mũi tên cùng cỡ với edge_attr (Edge mặc định ghi đè fontsize 13).
+Node._height = 2.5
+Edge._default_edge_attrs = {**Edge._default_edge_attrs, "fontsize": "20"}
 
 MAIN = dict(color="#263238", penwidth="2.4")
 DATA = dict(color="#546e7a", penwidth="1.5")
@@ -25,12 +31,12 @@ OBS = dict(color="#8d6e63", style="dashed", penwidth="1.5")
 
 graph_attr = {"fontname": "Helvetica", "pad": "0.4", "nodesep": "0.45", "ranksep": "0.75",
               "splines": "spline", "bgcolor": "white", "newrank": "true"}
-node_attr = {"fontname": "Helvetica", "fontsize": "14"}
-edge_attr = {"fontname": "Helvetica", "fontsize": "13", "fontcolor": "#37474f"}
+node_attr = {"fontname": "Helvetica", "fontsize": "22"}
+edge_attr = {"fontname": "Helvetica", "fontsize": "20", "fontcolor": "#37474f"}
 
 
 def box(bg, line):
-    return {"bgcolor": bg, "pencolor": line, "fontname": "Helvetica Bold", "fontsize": "17",
+    return {"bgcolor": bg, "pencolor": line, "fontname": "Helvetica Bold", "fontsize": "24",
             "fontcolor": line, "style": "rounded", "penwidth": "1.6", "margin": "18"}
 
 

@@ -14,19 +14,19 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 src, out = sys.argv[1], sys.argv[2]
-plt.rcParams.update({"font.family": "DejaVu Sans", "font.size": 9, "axes.spines.top": False,
+plt.rcParams.update({"font.family": "DejaVu Sans", "font.size": 10.5, "axes.spines.top": False,
                      "axes.spines.right": False, "axes.grid": True, "grid.color": "#e5e7eb",
                      "grid.linewidth": 0.6, "axes.axisbelow": True, "axes.edgecolor": "#9ca3af"})
 BLUE, ORANGE = "#1f4e79", "#e07b00"
 
 # chart-1
 rows = list(csv.reader(open(f"{src}/crawl.csv", encoding="utf-8")))
-hours = [r[0][11:16] for r in rows]
+hours = [r[0][11:13] + "h" for r in rows]
 ok = [int(r[1]) for r in rows]
 rec = [int(r[3]) for r in rows]
-fig, ax = plt.subplots(figsize=(7.2, 2.8))
+fig, ax = plt.subplots(figsize=(6.0, 2.6))
 bars = ax.bar(hours, ok, color=BLUE, width=0.6, label="Trang tải thành công / giờ")
-ax.bar_label(bars, fontsize=7.5, padding=2)
+ax.bar_label(bars, fontsize=9, padding=2)
 ax.set_ylabel("trang / giờ")
 ax.set_xlabel("giờ Việt Nam, 14/11/2026")
 ax2 = ax.twinx()
@@ -35,7 +35,8 @@ ax2.set_ylabel("bản ghi / phút")
 ax2.spines["right"].set_visible(True); ax2.grid(False)
 ax2.set_ylim(0, max(rec) / 60 * 1.2); ax.set_ylim(0, max(ok) * 1.2)
 h1, l1 = ax.get_legend_handles_labels(); h2, l2 = ax2.get_legend_handles_labels()
-ax.legend(h1 + h2, l1 + l2, loc="upper right", frameon=False, fontsize=8)
+ax.legend(h1 + h2, l1 + l2, loc="upper right", frameon=False, fontsize=9.5)
+ax.tick_params(axis="x", labelsize=9.5)
 fig.tight_layout(); fig.savefig(f"{out}/chart-1-crawl-theo-gio.pdf"); plt.close(fig)
 
 # chart-2
@@ -47,20 +48,20 @@ for run_id, task, sec, state in csv.reader(open(f"{src}/stages.csv", encoding="u
         runs.setdefault(run_id, {})[task] = int(sec)
 runs = OrderedDict((k, v) for k, v in runs.items() if all(s in v for s in STAGES))
 labels = [k.split("__")[1][5:16].replace("T", " ") for k in runs]  # "11-13 18:00" (UTC)
-fig, ax = plt.subplots(figsize=(7.2, 3.0))
+fig, ax = plt.subplots(figsize=(6.0, 2.9))
 bottom = [0] * len(runs)
 for s, c in zip(STAGES, COLORS):
     vals = [runs[k][s] / 60 for k in runs]
     ax.bar(labels, vals, bottom=bottom, color=c, width=0.65, label=s)
     bottom = [b + v for b, v in zip(bottom, vals)]
 for i, b in enumerate(bottom):
-    ax.text(i, b + 0.2, f"{b:.1f}", ha="center", fontsize=7.5)
+    ax.text(i, b + 0.2, f"{b:.1f}".replace(".", ","), ha="center", fontsize=9)
 ax.set_ylabel("phút")
 ax.set_xlabel("run batch (giờ as_of, UTC)")
-ax.tick_params(axis="x", labelrotation=30, labelsize=7.5)
+ax.tick_params(axis="x", labelrotation=35, labelsize=9)
 ax.set_ylim(0, max(bottom) * 1.15)
-ax.legend(ncol=7, loc="upper center", bbox_to_anchor=(0.5, 1.13), frameon=False, fontsize=7.5,
-          handlelength=1.2, columnspacing=0.9)
+ax.legend(ncol=4, loc="upper center", bbox_to_anchor=(0.5, 1.25), frameon=False, fontsize=9.5,
+          handlelength=1.2, columnspacing=1.0)
 fig.tight_layout(); fig.savefig(f"{out}/chart-2-thoi-gian-stage.pdf"); plt.close(fig)
 print("runs:", len(runs))
 
@@ -69,17 +70,18 @@ rows = list(csv.reader(open(f"{src}/vi-du-gia.csv", encoding="utf-8")))
 days = [r[0][8:10] + "/" + r[0][5:7] for r in rows]
 price = [int(r[1]) / 1000 for r in rows]
 listp = [int(r[2]) / 1000 for r in rows]
-fig, ax = plt.subplots(figsize=(7.2, 2.9))
+fig, ax = plt.subplots(figsize=(6.0, 3.3))
 ax.plot(days, listp, color="#9ca3af", ls="--", lw=1.4, marker="s", ms=3.5, label="Giá niêm yết (giá gạch)")
 ax.plot(days, price, color=BLUE, lw=1.8, marker="o", ms=4, label="Giá bán")
 ax.axhline(1008, color=ORANGE, lw=1, ls=":", label="Giá thấp nhất trước 13/11 (1.008 nghìn)")
 for d, p, r in zip(days, price, rows):
-    ax.annotate(f"{p:,.0f}".replace(",", ".") + f"\n-{r[3].replace('.', ',')}% ·{r[6]} điểm", (d, p), textcoords="offset points",
-                xytext=(0, -26), ha="center", fontsize=7.5)
-    ax.annotate(r[5], (d, listp[0]), textcoords="offset points", xytext=(0, 7), ha="center", fontsize=7,
+    ax.annotate(f"{p:,.0f}".replace(",", ".") + f"\n-{r[3].replace('.', ',')}% · {r[6]} điểm", (d, p), textcoords="offset points",
+                xytext=(0, -30), ha="center", fontsize=9)
+    ax.annotate(r[5].replace("_", "\n"), (d, listp[0]), textcoords="offset points", xytext=(0, 8), ha="center", fontsize=8.5,
                 color="#b91c1c" if r[5] == "SUSPECT" else "#6b7280", fontweight="bold" if r[5] == "SUSPECT" else "normal")
-ax.set_ylim(0, 2400)
+ax.set_ylim(0, 2750)
 ax.set_ylabel("nghìn đồng")
 ax.set_xlabel("ngày crawl (2026)")
-ax.legend(loc="lower center", ncol=3, frameon=False, fontsize=7.5)
+ax.margins(x=0.16)
+ax.legend(loc="upper center", bbox_to_anchor=(0.5, 1.27), ncol=2, frameon=False, fontsize=9.5)
 fig.tight_layout(); fig.savefig(f"{out}/chart-3-vi-du-khuyen-mai.pdf"); plt.close(fig)
