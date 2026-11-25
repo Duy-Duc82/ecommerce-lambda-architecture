@@ -75,11 +75,11 @@ Crawler ghi vào Bronze trước, sau đó gửi sang Kafka. Từ đó tách hai
 \begin{figure}[!htbp]\centering
   \includegraphics[width=\linewidth]{fig-0a-pipeline.pdf}\par\vspace{2mm}
   \includegraphics[width=0.48\linewidth]{fig-0b-giam-sat.pdf}
-  \caption{Công nghệ ở từng tầng và luồng dữ liệu chính.}
+  \caption{Công nghệ và luồng dữ liệu chính.}
   \label{fig:fig-0-cong-nghe}
 \end{figure}
 
-\figslot{fig-1-kien-truc-tong-the}{80mm}{Kiến trúc chi tiết: từng thành phần và đường đi của dữ liệu.}
+\figslot{fig-1-kien-truc-tong-the}{80mm}{Kiến trúc chi tiết.}
 
 % =====================================================================
 \section{Dữ liệu đầu vào}
@@ -176,12 +176,12 @@ lỗi ghi Kafka không tính vào ngưỡng này vì site vẫn bình thường.
 
 \textbf{Dữ liệu cá nhân.} Trước khi ghi records, worker bỏ các trường định danh người dùng (Lazada: \code{userId}, \code{anonUid}).
 
-\figslot{fig-2-luong-crawl}{70mm}{Một lượt crawl: lấy việc, tải trang, lưu raw trước khi kiểm tra, ghi records, gửi Kafka, cập nhật trạng thái.}
+\figslot{fig-2-luong-crawl}{70mm}{Luồng một lượt crawl.}
 
 % =====================================================================
 \section{Lưu trữ và xử lý qua các tầng}
 % =====================================================================
-\figslot{fig-3-du-lieu-qua-cac-tang}{40mm}{Dữ liệu qua các tầng: định dạng và ý nghĩa một dòng ở mỗi tầng.}
+\figslot{fig-3-du-lieu-qua-cac-tang}{40mm}{Dữ liệu qua các tầng.}
 
 \begin{shorttable}{\linewidth}{@{}L{24mm}L{34mm}Y@{}}
   \toprule
@@ -219,22 +219,18 @@ nên chạy lại bao nhiêu lần cũng ra cùng kết quả.
 \end{enumerate}
 Quality gate kiểm tra số dòng Silver + quarantine bằng số dòng đã crawl, nên không dòng nào bị mất mà không rõ lý do.
 
-\textbf{Kết quả làm sạch} của run cuối lượt chạy 13--14/11 (\code{mp-20261114T0500Z}, cửa sổ hai ngày 13--14/11,
-đọc từ \code{_runs/run_id=.../silver.json}):
+\textbf{Kết quả làm sạch} (run \code{mp-20261114T0500Z}, ngày 13--14/11):
 
 \begin{shorttable}{\linewidth}{@{}YL{30mm}@{}}
   \toprule
   \textbf{Mục} & \textbf{Số dòng} \\
   \midrule
   Dòng vào Silver & 118.357 \\
-  Bản ghi ghi lặp, bỏ ở bước 1 (cùng \code{record_id} / \code{observation_id} / cùng nội dung) & 0 / 0 / 0 \\
-  Quarantine: trùng trên trang (\code{duplicate_listing_on_page}) & 45 (0,04\%) \\
-  Quarantine: thiếu id, tên, giá, thời điểm tải, nguồn gốc & 0 \\
-  Trường mới chưa khai báo (\code{payload_drift}) & 0 \\
+  Bản ghi trùng & 0 \\
+  Quarantine: trùng trên trang & 45 (0,04\%) \\
+  Quarantine: lý do khác & 0 \\
   \bottomrule
 \end{shorttable}
-Lý do duy nhất là Tiki đôi khi trả cùng một sản phẩm hai lần trên một trang. Số này đứng yên ở 45 từ run 22:00 UTC trở đi,
-vì các trang đó không được crawl lại trong ngày; lượt chạy 07/11 cũng ra đúng 45 dòng.
 
 \textbf{Đưa tên cột của từng nguồn về tên chung.} Tiki và Lazada đặt tên và định dạng khác nhau.
 Mỗi nguồn có một file ánh xạ riêng (\code{tiki.py}, \code{lazada.py}), cùng đổ về một bảng \code{offer_observations_v2} (53 cột):
@@ -279,7 +275,7 @@ bỏ trùng theo \code{observation_id}, rồi tổng hợp thành các bảng fa
 và 6 bảng fact (mỗi lần thấy sản phẩm, giá theo ngày, thay đổi giá, bộ đếm đã bán/đánh giá theo ngày, danh mục theo ngày, lượt crawl).
 Bảng sản phẩm lưu lịch sử thay đổi tên, thương hiệu, danh mục, người bán (SCD2).
 
-\figslot{fig-4-star-schema}{90mm}{Star schema \texttt{dw} (chỉ hiện khoá và cột chính).}
+\figslot{fig-4-star-schema}{90mm}{Star schema \texttt{dw}.}
 
 \textbf{12 mart} (bảng đã tính sẵn cho dashboard): giá hiện tại của sản phẩm, người bán hiện tại, lịch sử giá theo ngày, thay đổi giá theo ngày,
 độ tươi dữ liệu, giá theo danh mục, độ phủ nguồn, độ ổn định crawl, biến động số đánh giá/đã bán, giá bất thường,
@@ -321,22 +317,15 @@ không tự gắn cờ.
   \bottomrule
 \end{shorttable}
 
-Tỷ lệ gắn cờ quá cao: hầu hết dòng bị gắn cờ do luật ``\% giảm hiển thị lớn hơn \% giảm thật so với giá thấp nhất trước đó''.
-Với chỉ 4 ngày lịch sử, chưa phân biệt được luật quá chặt hay sàn thật sự hiển thị giảm giá ảo; cần gán nhãn tay một mẫu
-(đã xuất sẵn 30 dòng top theo luật và 30 dòng top theo mô hình, kèm lịch sử giá) để kiểm chứng.
+Tỷ lệ gắn cờ còn quá cao, cần gán nhãn tay để kiểm tra lại luật.
 
-\textbf{Ví dụ một khuyến mãi bị gắn SUSPECT}: nồi áp suất Elmich PCE-1805 2,5L trên Tiki (Hình~\ref{fig:chart-3-vi-du-khuyen-mai}).
-Giá gạch giữ nguyên 2.090.000đ qua cả 4 ngày crawl, sàn luôn hiển thị giảm khoảng 50\%. Nhưng giá bán thật chỉ dao động
-1.008.000--1.080.000đ. Ngày 13/11 giá 1.020.000đ (hiển thị giảm 51,2\%) còn cao hơn giá thấp nhất trước đó (1.008.000đ ngày 31/10),
-tức so với lịch sử thì giá \emph{tăng} 1,2\%. Ba luật cùng khớp:
-giảm hiển thị vượt trần 50\% (30 điểm), mức giảm hiển thị lớn hơn mức giảm thật quá xa (50 điểm), giá không thấp hơn giá tham chiếu (20 điểm),
-tổng 100 điểm. Isolation Forest xếp dòng này khác thường hơn 93,3\% số dòng có giảm giá cùng ngày, khớp với kết luận của luật.
-Ngày 25/10 chưa có lịch sử nên chỉ ghi ``chưa đủ lịch sử''; hai ngày sau mới có 30 điểm (QUESTIONABLE).
+\textbf{Ví dụ}: nồi áp suất Elmich PCE-1805 trên Tiki (Hình~\ref{fig:chart-3-vi-du-khuyen-mai}).
+Sàn luôn ghi giảm khoảng 50\% so với giá gạch 2.090.000đ, nhưng giá bán ngày 13/11 (1.020.000đ) còn cao hơn giá thấp nhất trước đó (1.008.000đ),
+nên luật chấm 100 điểm (SUSPECT).
 
-\figslot{chart-3-vi-du-khuyen-mai}{55mm}{Lịch sử giá theo ngày của một sản phẩm bị gắn SUSPECT ngày 13/11 (mart \texttt{discount\_credibility\_daily}).
-Dưới mỗi điểm: giá bán (nghìn đồng), \% giảm sàn hiển thị, điểm luật; phía trên: kết luận của ngày đó.}
+\figslot{chart-3-vi-du-khuyen-mai}{55mm}{Lịch sử giá của một sản phẩm bị gắn SUSPECT.}
 
-Phần giá bất thường (robust z-score) chưa gắn cờ dòng nào: chưa sản phẩm nào có đủ 7 ngày giá, nên toàn bộ là ``chưa đủ lịch sử''.
+Giá bất thường chưa gắn cờ dòng nào vì chưa sản phẩm nào đủ 7 ngày giá.
 
 \subsection{Kiểm tra chất lượng và phát hành}
 22 luật (16 bắt buộc): không trùng khoá, giá $\ge 0$, không có thời điểm ở tương lai, số dòng Silver + quarantine khớp số đã crawl, khoá ngoại hợp lệ\ldots
@@ -355,7 +344,7 @@ Một job Spark Structured Streaming chạy mỗi 30 giây, gồm 2 bước:
 Bản ghi đã xử lý rồi (trùng) hoặc cũ hơn lần thấy gần nhất (đến muộn) bị bỏ qua để không sinh sự kiện sai.
 Bản ghi lỗi (thiếu khoá, giá âm, không đọc được) không bị mất mà chuyển sang topic riêng (DLQ, \emph{dead letter queue}) để xem lại.
 
-\figslot{fig-5-speed}{60mm}{Speed layer: hai bước xử lý, các topic Kafka và nơi ghi kết quả.}
+\figslot{fig-5-speed}{60mm}{Speed layer.}
 
 % =====================================================================
 \section{Airflow}
@@ -388,7 +377,7 @@ Luật chất lượng FAIL thì Gold được khôi phục về bản trước 
 Bước cuối đổi con trỏ \code{current.json} sang run mới; nếu con trỏ đã bị run khác đổi trước, hoặc đây là run chạy lại cho ngày cũ,
 run dừng ở HELD và dữ liệu đang hiển thị không bị thay.
 
-\figslot{fig-6-dag-batch}{45mm}{DAG \texttt{marketplace\_batch} và các trạng thái của một run.}
+\figslot{fig-6-dag-batch}{45mm}{DAG \texttt{marketplace\_batch} và trạng thái run.}
 
 % =====================================================================
 \section{Giám sát}
@@ -398,14 +387,14 @@ Kafka, Redis, Elasticsearch, Airflow, và số liệu nghiệp vụ lấy bằng
 (số trang crawl, lỗi, run batch, luật chất lượng, độ trễ speed). Grafana có 5 dashboard và 19 cảnh báo
 (máy hết RAM/đĩa, crawl ngừng, bị chặn $> 20\%$, batch không chạy quá 2,5 giờ, luật chất lượng FAIL, DLQ tăng\ldots).
 
-\figslot{fig-7-giam-sat}{55mm}{Luồng giám sát: nguồn metrics và log, Alloy, Prometheus, Loki, Grafana.}
+\figslot{fig-7-giam-sat}{55mm}{Luồng giám sát.}
 
 Ảnh chụp Grafana trong lượt chạy 13--14/11 (giờ Việt Nam):
 
-\figslot{mon-1-crawl}{60mm}{Crawl: bản ghi và lượt tải mỗi 5 phút, độ trễ tải trang, bản ghi mỗi giờ. 4 giờ đầu là lượt quét SWEEP, sau đó chỉ còn danh mục ACTIVE.}
-\figslot{mon-2-speed}{60mm}{Kafka và speed: message theo topic, tốc độ xử lý, thời gian mỗi micro-batch, số bản ghi ghi ra Elasticsearch/Redis.}
-\figslot{mon-3-batch}{40mm}{Batch: thời gian mỗi run và số dòng Silver/Gold.}
-\figslot{mon-4-tai-nguyen}{60mm}{Tài nguyên: CPU, RAM theo layer và theo container. Các đỉnh mỗi giờ là lúc batch Spark chạy.}
+\figslot{mon-1-crawl}{60mm}{Grafana: crawl.}
+\figslot{mon-2-speed}{60mm}{Grafana: Kafka và speed.}
+\figslot{mon-3-batch}{40mm}{Grafana: batch.}
+\figslot{mon-4-tai-nguyen}{60mm}{Grafana: CPU và RAM.}
 
 % =====================================================================
 \section{Thông số vận hành}
@@ -440,23 +429,15 @@ Số đo từ lượt chạy 13--14/11/2026 trên một laptop (\code{docs/evide
   \bottomrule
 \end{xltabular}
 
-\figslot{chart-1-crawl-theo-gio}{55mm}{Số trang crawl thành công và số bản ghi mỗi phút, theo giờ (14/11).}
-\figslot{chart-2-thoi-gian-stage}{55mm}{Thời gian từng bước của 11 run batch. Run cuối (05:00 UTC) là run chạy bù khi máy chỉ còn 1,7 GB RAM nên chậm hơn.}
+\figslot{chart-1-crawl-theo-gio}{55mm}{Số trang và bản ghi crawl theo giờ (14/11).}
+\figslot{chart-2-thoi-gian-stage}{55mm}{Thời gian từng bước của 11 run batch.}
 
 % =====================================================================
 \section{Kết quả trên dashboard}
 % =====================================================================
-Mở lại dữ liệu đã chốt của lượt chạy 13--14/11 (cùng volume, không crawl thêm) và chụp hai giao diện phục vụ.
+\figslot{out-1-superset}{90mm}{Dashboard Superset (lịch sử giá, Gold).}
 
-\figslot{out-1-superset}{90mm}{Superset, dashboard Gold (đọc bảng cache trong PostgreSQL) sau run 05:00 UTC 14/11: các run batch gần nhất đều PROMOTED và
-quality PASS, kết quả các luật chất lượng, độ phủ và độ tin cậy crawl theo ngày, độ tươi của offer, trạng thái giá bất thường, số lần tăng/giảm giá theo ngày.}
-
-\figslot{out-2-kibana}{90mm}{Kibana, dashboard thay đổi giá realtime (giờ Việt Nam, 00:00--13:00 ngày 14/11): 87.786 sự kiện từ speed layer,
-giảm giá mạnh theo 10 phút, sản phẩm mới và lâu không thấy, tỷ lệ theo loại sự kiện và tình trạng hàng.}
-
-Hai điểm đọc từ hình: giảm giá mạnh chỉ xuất hiện trong khoảng 01:30--05:00, đúng lúc lượt quét SWEEP đang chạy;
-còn 83\% sự kiện là ``lâu không thấy'' (OFFER\_STALE), dồn vào 07:00--10:00, tức 6 giờ sau khi lượt quét kết thúc
-và crawler chưa quay lại các danh mục đó. Đây là hệ quả của việc SWEEP dồn vào 4 giờ (bảng Hạn chế), không phải sản phẩm ngừng bán.
+\figslot{out-2-kibana}{90mm}{Dashboard Kibana (thay đổi giá, 14/11).}
 
 % =====================================================================
 \section{Hạn chế và việc tiếp theo}
@@ -474,7 +455,7 @@ và crawler chưa quay lại các danh mục đó. Đây là hệ quả của vi
   Gold & Mỗi giờ dựng lại từ toàn bộ lịch sử, càng nhiều ngày càng chậm & dựng tăng dần theo ngày \\
   Phân tích & Luật khuyến mãi gắn cờ 34,9\% (ngưỡng mong muốn 1--10\%) khi mới có 4 ngày lịch sử; mô hình chưa được kiểm chứng bằng nhãn & chỉ bật khi đủ ngày; gán nhãn tay 60 dòng đã xuất để đo độ chính xác \\
   Speed & State của sản phẩm không bao giờ bị xoá & xoá sau thời gian dài không thấy \\
-  Speed & 83\% sự kiện là ``lâu không thấy'', che mất sự kiện đổi giá trên Kibana & bỏ OFFER\_STALE khỏi dashboard chính, hoặc tính theo tần suất crawl của tier \\
+  Speed & 83\% sự kiện là OFFER\_STALE, lấn át sự kiện đổi giá & lọc bớt trên dashboard \\
   \bottomrule
 \end{shorttable}
 
