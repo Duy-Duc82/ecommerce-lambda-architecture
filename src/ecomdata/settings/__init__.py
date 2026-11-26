@@ -355,7 +355,11 @@ class BatchSettings:
     freshness_seconds: int = 21600
     freshness_rule_version: str = "freshness-rules.v1"
     counter_rule_version: str = "counter-rules.v1"
-    counter_max_gap_seconds: int = 86400
+    # Two sightings of a counter further apart than this make a delta that is not
+    # a rate (GAP_TOO_LONG). Twice the slowest crawl tier (SWEEP, one day): one
+    # missed sweep is tolerated, two are not. Run 2026-11-07: with the gap equal
+    # to the sweep cadence, every sweep-tier transition was GAP_TOO_LONG.
+    counter_max_gap_seconds: int = 172800
     percentile_accuracy: int = 10000
     # Scheduler loop (legacy-scheduler profile): windows close on interval
     # boundaries and are cut once the lag has passed.
@@ -647,6 +651,16 @@ def validate(settings: Settings) -> Settings:
         # No row could ever reach the minimum: the whole mart would read
         # INSUFFICIENT_HISTORY without anything looking broken.
         raise SettingsError("MARKETPLACE_ANOMALY_MIN_SAMPLES cannot exceed MARKETPLACE_ANOMALY_WINDOW_DAYS")
+    slowest_tier, slowest_minutes = max(crawl.cadence_minutes.items(), key=lambda item: item[1])
+    if batch.counter_max_gap_seconds < slowest_minutes * 60 * 3 // 2:
+        # A target in the slowest tier is seen once per cadence, plus the hours a
+        # sweep takes: with the gap at or under the cadence, its every counter
+        # transition is GAP_TOO_LONG and the counter marts hold no valid rate
+        # for that tier, while nothing looks broken (run 2026-11-07, item 4).
+        raise SettingsError(
+            "MARKETPLACE_COUNTER_MAX_GAP_SECONDS must be at least 1.5 times the slowest crawl cadence "
+            f"(CRAWL_{slowest_tier}_CADENCE_MINUTES={slowest_minutes}, so {slowest_minutes * 60 * 3 // 2} s)"
+        )
     if quality.reconciliation_lookback_seconds <= quality.reconciliation_settle_seconds:
         raise SettingsError(
             "MARKETPLACE_QUALITY_RECONCILIATION_LOOKBACK_SECONDS must exceed "

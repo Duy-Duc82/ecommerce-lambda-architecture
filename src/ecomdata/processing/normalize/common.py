@@ -243,6 +243,15 @@ def money(expr: Column) -> Column:
     return expr.try_cast(MONEY)
 
 
+def _bounded(expr: Column | None, *, upper: int | None = None) -> Column:
+    """Money that is >= 0 (and <= ``upper`` when given); anything else, or no field, is null."""
+    if expr is None:
+        return _null(MONEY)
+    value = money(expr)
+    ok = value >= 0 if upper is None else (value >= 0) & (value <= upper)
+    return F.when(ok, value)
+
+
 def whole(expr: Column) -> Column:
     """A non-negative integer; anything else is null."""
     value = expr.try_cast("bigint")
@@ -384,8 +393,11 @@ def canonical(records: DataFrame, spec: Any, fields: SourceFields) -> DataFrame:
         F.when(F.col("_price") >= 0, F.col("_price")).alias("current_price"),
         F.when(list_price > 0, list_price).alias("list_price"),
         _null(MONEY).alias("shipping_price"),
-        (money(fields.discount_amount) if fields.discount_amount is not None else _null(MONEY)).alias("discount_amount"),
-        (money(fields.discount_percent) if fields.discount_percent is not None else _null(MONEY)).alias("discount_percent"),
+        # The domain contract (MarketplaceObservation) allows only a non-negative discount and a
+        # percent within 0..100. A source value outside that (Tiki reports a negative ``discount``
+        # when the price sits above the list price) is not a discount: null, like a bad counter.
+        _bounded(fields.discount_amount).alias("discount_amount"),
+        _bounded(fields.discount_percent, upper=100).alias("discount_percent"),
         rating_value.alias("rating_value"),
         F.when(rating_value.isNotNull(), money(fields.rating_scale) if fields.rating_scale is not None else _null(MONEY)).alias(
             "rating_scale"

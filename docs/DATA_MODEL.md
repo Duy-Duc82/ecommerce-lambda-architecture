@@ -741,6 +741,14 @@ affected offer from the fact itself.
 **`fact_counter_daily`** keeps the counter rules unchanged: transitions are
 judged over the offer's whole ordered history, a negative delta is kept and
 flagged (`counter_reset_or_invalid`, `invalid_reasons_json`), never clamped.
+A transition longer than `MARKETPLACE_COUNTER_MAX_GAP_SECONDS` is
+`GAP_TOO_LONG`: its delta is not a rate. The gap defaults to 48 h, twice the
+slowest crawl tier (SWEEP, once a day), so one missed sweep is tolerated and
+two are not; the settings refuse a gap under 1.5 times the slowest cadence,
+because then every transition of that tier would be invalid by construction
+(run of 2026-11-07, item 4). A crawl outage longer than the gap still shows up
+as a wave of `GAP_TOO_LONG` on the first sightings after it; that is the rule
+doing its job, not a reason to widen it.
 
 **`fact_category_page_daily`** describes what a category page showed on a
 day, by the page's category (`page_category_key` of the sightings), not by the

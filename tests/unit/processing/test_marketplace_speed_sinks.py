@@ -650,6 +650,81 @@ def test_the_audit_writes_the_latency_columns_and_nulls_them_on_failure():
     assert failed_params[-6:-3] == (None, None, None)
 
 
+# ----------------------------------------------------------------------------
+# Incident 2026-11-07, item 5. An INVALID row was only a count in the audit;
+# what the event held was gone. It now goes to the observations DLQ with the
+# Kafka value, under an id deterministic in its coordinates, so a replayed
+# micro-batch dead-letters it once.
+# ----------------------------------------------------------------------------
+def _invalid(offset=7, payload='{"schema_version": "marketplace-observation.v1", "bad": true}'):
+    return SpeedOutput(
+        output_kind="INVALID",
+        marketplace="tiki",
+        source_topic="marketplace.observations.v1",
+        source_partition=0,
+        source_offset=offset,
+        error_type="OBSERVATION_CONTRACT",
+        error_message="event contract validation failed: discount_amount must be non-negative and finite",
+        payload_text=payload,
+    )
+
+
+def test_an_invalid_row_is_dead_lettered_with_its_payload_under_a_deterministic_id():
+    from ecomdata.domain.topics import MARKETPLACE_OBSERVATIONS_DLQ
+
+    sinks, parts = _sinks()
+
+    counts = sinks.write_batch([_invalid()], batch_id=1, query_id=QUERY_ID)
+
+    (sent,) = parts["producer"].sent
+    assert sent["topic"] == MARKETPLACE_OBSERVATIONS_DLQ.name
+    letter = sent["value"]
+    assert sent["key"] == letter["dlq_id"]
+    assert letter["schema_version"] == "marketplace-observation-dlq.v1"
+    assert letter["stage"] == "CONTRACT_VALIDATION"
+    assert (letter["source_topic"], letter["source_partition"], letter["source_offset"]) == (
+        "marketplace.observations.v1", 0, 7)
+    assert letter["error_type"] == "OBSERVATION_CONTRACT"
+    assert "discount_amount" in letter["error_message"]
+    assert letter["payload_text"] == _invalid().payload_text
+    assert letter["marketplace"] == "tiki"
+    assert parts["producer"].flushed == 1
+    assert counts.invalid_rows == 1 and counts.kafka_rows == 1 and counts.change_rows == 0
+    assert parts["audit"].kinds() == ["begin", "succeeded"]
+
+
+def test_replaying_an_invalid_row_dead_letters_it_under_the_same_id():
+    first, first_parts = _sinks()
+    second, second_parts = _sinks()
+
+    first.write_batch([_invalid()], batch_id=1, query_id=QUERY_ID)
+    second.write_batch([_invalid()], batch_id=1, query_id=QUERY_ID)
+
+    assert first_parts["producer"].sent[0]["key"] == second_parts["producer"].sent[0]["key"]
+    assert _invalid(offset=8).source_offset != 7
+    third, third_parts = _sinks()
+    third.write_batch([_invalid(offset=8)], batch_id=2, query_id=QUERY_ID)
+    assert third_parts["producer"].sent[0]["key"] != first_parts["producer"].sent[0]["key"]
+
+
+def test_an_invalid_row_without_its_payload_is_counted_but_not_dead_lettered():
+    sinks, parts = _sinks()
+
+    counts = sinks.write_batch([_invalid(payload=None)], batch_id=1, query_id=QUERY_ID)
+
+    assert parts["producer"].sent == []
+    assert counts.invalid_rows == 1 and counts.kafka_rows == 0
+
+
+def test_a_dead_letter_the_broker_refuses_fails_the_batch():
+    sinks, parts = _sinks(producer=FakeProducer(error=RuntimeError("broker down")))
+
+    with pytest.raises(RuntimeError, match="broker down"):
+        sinks.write_batch([_invalid()], batch_id=1, query_id=QUERY_ID)
+
+    assert parts["audit"].kinds() == ["begin", "failed"]
+
+
 def test_the_migration_adds_nullable_latency_columns_and_the_progress_table():
 
     sql = (REPO_ROOT / "scripts" / "init_postgres.sql").read_text(encoding="utf-8")

@@ -66,7 +66,7 @@ class FactRules:
     large_drop_absolute: Decimal = Decimal("100000")
     large_drop_relative: Decimal = Decimal("0.20")
     counter_rule_version: str = "counter-rules.v1"
-    counter_max_gap_seconds: int = 86400
+    counter_max_gap_seconds: int = 172800
     percentile_accuracy: int = 10000
 
     @classmethod

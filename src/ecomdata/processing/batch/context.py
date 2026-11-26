@@ -27,7 +27,7 @@ class MarketplaceBatchContext:
     freshness_seconds: int = 21600
     freshness_rule_version: str = "freshness-rules.v1"
     counter_rule_version: str = "counter-rules.v1"
-    counter_max_gap_seconds: int = 86400
+    counter_max_gap_seconds: int = 172800
     # The speed layer's change rules, which fact_price_change applies too.
     change_rule_version: str = "speed-rules.v1"
     large_drop_absolute: Decimal = Decimal("100000")

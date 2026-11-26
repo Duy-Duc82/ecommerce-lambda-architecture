@@ -182,6 +182,7 @@ def test_state_and_output_schemas_are_explicit_and_stable():
     assert [field.dataType.simpleString() for field in schema.fields] == [
         "string", "string", "string", "string", "string", "timestamp",
         "string", "string", "string", "bigint", "bigint", "string", "string",
+        "string",  # payload_text: the Kafka value of an INVALID row, for its DLQ record
     ]
 
 
@@ -267,7 +268,10 @@ def test_wrong_schema_version_key_or_lineage_is_excluded_and_counted_invalid(
 
     assert valid.count() == 0
     assert invalid.count() == 1
-    assert invalid.collect()[0].error_type == "OBSERVATION_CONTRACT"
+    (rejected,) = invalid.collect()
+    assert rejected.error_type == "OBSERVATION_CONTRACT"
+    # The Kafka value travels with the row, so the sink can dead-letter it with its evidence.
+    assert rejected.payload_text == json.dumps(wire)
 
 
 @requires_spark
@@ -407,3 +411,22 @@ def test_a_call_with_only_a_duplicate_keeps_the_stale_timeout_armed():
 
     assert list(out["output_kind"]) == ["DUPLICATE"]
     assert state.timeouts == [CONFIG.stale_after_seconds * 1000]
+
+
+def test_a_row_that_breaks_the_wire_contract_is_reported_invalid_and_does_not_stop_the_group():
+    # Incident 2026-11-07: a Tiki listing with a negative ``discount`` reached the
+    # observations topic; the strict contract raised inside foreachBatch, the
+    # query died and replayed the same row on every restart.
+    good = _event()
+    bad_event = json.loads(canonical_json(_later(1)))
+    bad_event["payload"]["observation"]["discount_amount"] = "-5000.000000"
+    bad = {**_row(_later(1), 7), "event_json": json.dumps(bad_event)}
+
+    outputs = _process_group([_row(good, 0), bad], config=CONFIG)
+
+    invalid = [o for o in outputs if o.output_kind == "INVALID"]
+    assert len(invalid) == 1
+    assert invalid[0].source_offset == 7 and invalid[0].error_type == "OBSERVATION_CONTRACT"
+    assert "discount_amount" in invalid[0].error_message
+    assert invalid[0].payload_text == bad["event_json"]
+    assert [o.observation_id for o in outputs if o.output_kind == "STATE"] == [good.payload.observation.observation_id]

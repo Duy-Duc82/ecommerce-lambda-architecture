@@ -70,9 +70,17 @@ def create_observation_dlq(
     crawl_run_id=None,
     raw_artifact_id=None,
     raw_uri=None,
+    error_type=None,
 ):
+    """``error`` is the exception, or its message when the failure was already
+    reduced to text (the speed query reports an INVALID row by ``error_type`` and
+    ``error_message``); ``error_type`` then names the kind, and otherwise defaults
+    to the exception's class."""
     if failed_at.tzinfo is None or failed_at.utcoffset() is None:
         raise ValueError("failed_at must be timezone-aware")
+    kind = error_type or (type(error).__name__ if isinstance(error, BaseException) else "")
+    if not str(kind).strip():
+        raise ValueError("error_type is required when error is not an exception")
     return MarketplaceObservationDlqV1(
         deterministic_id("dlq", source_topic, source_partition, source_offset, stage),
         MARKETPLACE_DLQ_SCHEMA_VERSION,
@@ -86,7 +94,7 @@ def create_observation_dlq(
         crawl_run_id,
         raw_artifact_id,
         raw_uri,
-        type(error).__name__,
+        str(kind),
         str(error)[:2000],
         payload_text,
     )

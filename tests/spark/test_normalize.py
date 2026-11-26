@@ -241,3 +241,16 @@ def test_the_registry_resolves_each_normaliser_module(spark):
         # What the star reads from each source (processing/batch/star_inputs.py).
         assert callable(module.listing_attributes) and callable(module.category_names)
         assert callable(module.category_paths)
+
+
+def test_a_discount_outside_the_domain_contract_is_null_not_a_contract_breach(spark):
+    # Tiki reports a negative ``discount`` when the price sits above the list price;
+    # MarketplaceObservation allows only discount_amount >= 0 and 0 <= discount_percent <= 100.
+    above = {"id": 9, "name": "price above list", "price": 130, "seller_id": 3, "discount": -30, "discount_rate": 150}
+    frame = records_frame(spark, tiki_records(extra_rows=[above]))
+
+    valid, quarantined = common.split_quarantine(tiki_norm.to_offer_observation(frame))
+    row = {r.platform_listing_id: r for r in valid.collect()}["9"]
+
+    assert quarantined.count() == 0
+    assert row.current_price == Decimal("130") and row.discount_amount is None and row.discount_percent is None

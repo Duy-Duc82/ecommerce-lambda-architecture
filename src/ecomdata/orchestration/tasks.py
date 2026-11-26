@@ -111,8 +111,14 @@ def python_image(environ: Mapping[str, str] | None = None) -> str:
 
 
 # Jinja, rendered by Airflow per run. ``data_interval_end`` is the run's instant: the window it closes.
-AS_OF_TEMPLATE = "{{ data_interval_end.strftime('%Y-%m-%dT%H:%M:%SZ') }}"
-RUN_ID_TEMPLATE = "mp-{{ data_interval_end.strftime('%Y%m%dT%H%MZ') }}"
+# A run triggered by hand without a logical date has no data interval (Airflow 3 leaves the
+# name undefined, and Airflow renders with StrictUndefined); the window then closes at the
+# instant the run was created, ``dag_run.run_after``, as a reprocessing run's does.
+# Incident 2026-11-07, item 2: such a run failed at render time and, retrying, blocked the
+# next scheduled window.
+RUN_INSTANT = "(data_interval_end if data_interval_end is defined and data_interval_end else dag_run.run_after)"
+AS_OF_TEMPLATE = "{{ " + RUN_INSTANT + ".strftime('%Y-%m-%dT%H:%M:%SZ') }}"
+RUN_ID_TEMPLATE = "mp-{{ " + RUN_INSTANT + ".strftime('%Y%m%dT%H%MZ') }}"
 ALLOW_BACKFILL_TEMPLATE = "{% if params.allow_backfill %}--allow-backfill{% endif %}"
 # Only a retry continues a run: a first try of a stage either starts the run or
 # follows the stage before it. A run the gate refused is not reopened by accident.
