@@ -16,7 +16,7 @@ from __future__ import annotations
 from pyspark.sql import DataFrame
 from pyspark.sql import functions as F
 
-from ecomdata.processing.batch.keys import UNKNOWN_KEY
+from ecomdata.processing.batch.keys import UNKNOWN_KEY, local_date
 
 
 def _lookup(dim: DataFrame, key: str, **renamed: str) -> DataFrame:
@@ -47,4 +47,4 @@ def sightings_from_facts(fact: DataFrame, dims: dict[str, DataFrame]) -> DataFra
     sightings = fact
     for key, lookup in lookups:
         sightings = sightings.join(lookup, sightings[key] == lookup[f"_{key}"], "left").drop(f"_{key}")
-    return sightings.withColumn("observed_date", F.to_date("observed_at"))
+    return sightings.withColumn("observed_date", local_date("observed_at"))

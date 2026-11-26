@@ -35,7 +35,7 @@ from ecomdata.processing.batch.dimensions import (
     page_category_key,
     seller_key,
 )
-from ecomdata.processing.batch.keys import UNKNOWN_KEY, date_key, key_or_unknown, surrogate_key
+from ecomdata.processing.batch.keys import UNKNOWN_KEY, date_key, key_or_unknown, local_date, surrogate_key
 from ecomdata.processing.batch.marts import build_counter_delta_daily, build_counter_transitions
 from ecomdata.processing.batch.star_inputs import with_listing_columns
 
@@ -120,7 +120,7 @@ def keyed_observations(observations: DataFrame, dim_listing: DataFrame) -> DataF
         .withColumn("category_key", category_key())
         .withColumn("page_category_key", page_category_key())
         .withColumn("listing_flags_key", listing_flags_key())
-        .withColumn("date_key", date_key("observed_at"))
+        .withColumn("date_key", date_key(local_date("observed_at")))
     )
     in_version = (
         (F.col("offer_key") == F.col("_v_offer"))
@@ -226,7 +226,7 @@ def build_fact_counter_daily(keyed: DataFrame, rules: FactRules) -> DataFrame:
     )
     # A counter row carries the keys of the offer's last sighting that day.
     offers = (
-        sightings.groupBy("marketplace", "offer_id", F.to_date("observed_at").alias("observed_date"))
+        sightings.groupBy("marketplace", "offer_id", local_date("observed_at").alias("observed_date"))
         .agg(
             _last("listing_key").alias("listing_key"),
             _last("offer_key").alias("offer_key"),
@@ -303,7 +303,7 @@ def build_fact_category_page_daily(
     else:
         listed = listed_counts.select(
             key_or_unknown("marketplace", "category_id").alias("category_key"),
-            date_key("observed_at").alias("date_key"),
+            date_key(local_date("observed_at")).alias("date_key"),
             "listed_product_count",
             "observed_at",
         )
@@ -338,7 +338,7 @@ def build_fact_crawl_attempt(attempts: DataFrame) -> DataFrame:
     return _registry(
         "fact_crawl_attempt",
         attempts.withColumn("attempt_id", surrogate_key("crawl_run_id", "task_id", F.col("attempt_number").cast("string")))
-        .withColumn("date_key", date_key("started_at"))
+        .withColumn("date_key", date_key(local_date("started_at")))
         .withColumn("marketplace_key", key_or_unknown("marketplace_code"))
         .withColumn("category_key", category),
     )
