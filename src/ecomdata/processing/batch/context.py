@@ -13,6 +13,8 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from urllib.parse import quote
 
+from ecomdata.domain.discount_rules import DiscountRuleConfig
+
 RUN_ID_RE = re.compile(r"[a-zA-Z0-9_-]{1,64}\Z")
 
 
@@ -37,6 +39,8 @@ class MarketplaceBatchContext:
     anomaly_mad_threshold: Decimal = Decimal("3.5")
     anomaly_iqr_multiplier: Decimal = Decimal("1.5")
     anomaly_rule_version: str = "anomaly-rules.v1"
+    # The discount-credibility rules (ADR-0009), one object: domain/discount_rules.py validates it.
+    discount_rules: DiscountRuleConfig = DiscountRuleConfig()
     quality_rule_version: str = "quality-rules.v3"
     future_tolerance_seconds: int = 300
     reconciliation_settle_seconds: int = 900

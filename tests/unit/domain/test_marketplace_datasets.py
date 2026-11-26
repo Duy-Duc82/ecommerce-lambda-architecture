@@ -77,8 +77,9 @@ def ddl_tables(path: Path) -> dict[str, tuple[list[str], tuple[str, ...]]]:
     return tables
 
 
-def test_registry_holds_ten_marts_and_the_fourteen_star_tables():
-    assert len(MARTS) == 10
+def test_registry_holds_twelve_marts_and_the_fourteen_star_tables():
+    # Ten temporal marts, plus the two discount marts of ADR-0009.
+    assert len(MARTS) == 12
     assert len(STAR) == 14
     assert {d.kind for d in STAR} == {DIM, BRIDGE, FACT}
     assert [d.name for d in datasets_of_kind(FACT)] == [
@@ -161,11 +162,13 @@ def test_every_cache_marketplace_table_named_in_code_is_registered():
 
 def test_superset_dashboards_name_registered_marts_only():
     from ecomdata.serving.superset.marketplace_batch_dashboard import DATASETS as batch
+    from ecomdata.serving.superset.marketplace_promotion_dashboard import DATASETS as promotion
     from ecomdata.serving.superset.marketplace_quality_dashboard import CACHE_DATASETS as quality
 
     tables = {d.postgres_table for d in MARTS}
     assert set(batch) <= tables
     assert set(quality) <= tables
+    assert set(promotion) <= tables
 
 
 def test_quality_registry_and_publisher_read_the_registry():
@@ -188,6 +191,8 @@ def test_daily_marts_partition_by_marketplace_and_their_day():
         "crawl_reliability_daily": ("marketplace", "request_date"),
         "counter_delta_daily": ("marketplace", "observed_date"),
         "price_anomaly_daily": ("marketplace", "observed_date"),
+        "discount_credibility_daily": ("marketplace", "observed_date"),
+        "discount_daily": ("marketplace", "observed_date"),
     }
 
 

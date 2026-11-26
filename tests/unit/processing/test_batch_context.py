@@ -212,7 +212,7 @@ def test_importing_the_batch_modules_opens_no_client_or_session():
         "assert 'minio' not in sys.modules;"
         "assert 'redis' not in sys.modules;"
         "assert 'elasticsearch' not in sys.modules;"
-        "assert len(publisher.DATASETS) == 10;"
+        "assert len(publisher.DATASETS) == 12;"
         "print('CLEAN')"
     )
 

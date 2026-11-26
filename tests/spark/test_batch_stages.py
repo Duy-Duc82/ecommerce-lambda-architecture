@@ -101,7 +101,7 @@ def test_the_six_stages_take_a_run_from_bronze_records_to_a_promoted_gold(spark)
     assert record.dataset_counts["offer_current"] == 4
     assert record.quality_status == "PASS" and record.mandatory_failure_count == 0
     assert record.cache_published and record.manifest_promoted
-    assert publisher.published == [("run-1", 10, True, record.manifest_uri)]
+    assert publisher.published == [("run-1", len(MART_NAMES), True, record.manifest_uri)]
     assert read_current_manifest(reader=store.get).run_id == "run-1"
     assert "quality" in [item.stage for item in report.stages]
 

@@ -302,6 +302,29 @@ CREATE TABLE IF NOT EXISTS cache.marketplace_price_anomaly_daily (
 ALTER TABLE cache.marketplace_price_anomaly_daily DROP CONSTRAINT IF EXISTS marketplace_price_anomaly_daily_pkey;
 ALTER TABLE cache.marketplace_price_anomaly_daily
     ADD CONSTRAINT marketplace_price_anomaly_daily_pkey PRIMARY KEY (marketplace,offer_id,observed_date,currency);
+-- ADR-0009: the displayed reduction judged against the offer's own prior prices
+-- (reference = lowest price of the window before the day). A verdict is a graded
+-- statement with its reasons, never a claim about the seller.
+CREATE TABLE IF NOT EXISTS cache.marketplace_discount_credibility_daily (
+    marketplace VARCHAR(64) NOT NULL, offer_id VARCHAR(128) NOT NULL, observed_date DATE NOT NULL, currency VARCHAR(8) NOT NULL,
+    evaluated_price NUMERIC(38,6) NOT NULL, list_price NUMERIC(38,6), displayed_discount_percent DOUBLE PRECISION,
+    reference_window_days BIGINT NOT NULL, reference_sample_size BIGINT NOT NULL CHECK (reference_sample_size >= 0),
+    reference_min_price NUMERIC(38,6), reference_median_price NUMERIC(38,6), reference_max_list_price NUMERIC(38,6),
+    effective_discount_percent DOUBLE PRECISION, claim_gap_percent DOUBLE PRECISION, distinct_price_count BIGINT NOT NULL,
+    credibility_status VARCHAR(24) NOT NULL CHECK (credibility_status IN ('NO_DISCOUNT','INSUFFICIENT_HISTORY','CREDIBLE','QUESTIONABLE','SUSPECT')),
+    credibility_reasons_json TEXT NOT NULL, rule_score INTEGER NOT NULL CHECK (rule_score BETWEEN 0 AND 100),
+    ml_method VARCHAR(24) NOT NULL CHECK (ml_method IN ('ISOLATION_FOREST','NONE')), ml_score DOUBLE PRECISION, ml_rank_percent DOUBLE PRECISION,
+    discount_rule_version VARCHAR(64) NOT NULL,
+    PRIMARY KEY (marketplace,offer_id,observed_date,currency)
+);
+CREATE TABLE IF NOT EXISTS cache.marketplace_discount_daily (
+    marketplace VARCHAR(64) NOT NULL, category_path TEXT NOT NULL, observed_date DATE NOT NULL, currency VARCHAR(8) NOT NULL,
+    observed_offer_count BIGINT NOT NULL, discounted_offer_count BIGINT NOT NULL, discounted_offer_ratio DOUBLE PRECISION,
+    p25_discount_percent DOUBLE PRECISION, median_discount_percent DOUBLE PRECISION, p75_discount_percent DOUBLE PRECISION,
+    max_discount_percent DOUBLE PRECISION, over_cap_offer_count BIGINT NOT NULL, questionable_offer_count BIGINT NOT NULL,
+    suspect_offer_count BIGINT NOT NULL, legal_cap_percent NUMERIC(38,6) NOT NULL, discount_rule_version VARCHAR(64) NOT NULL,
+    PRIMARY KEY (marketplace,category_path,observed_date,currency)
+);
 CREATE TABLE IF NOT EXISTS audit.marketplace_batch_run (
     run_id VARCHAR(64) PRIMARY KEY, as_of TIMESTAMPTZ NOT NULL, silver_uri TEXT NOT NULL, gold_run_uri TEXT,
     started_at TIMESTAMPTZ NOT NULL, completed_at TIMESTAMPTZ, status VARCHAR(16) NOT NULL CHECK (status IN ('RUNNING','GOLD_WRITTEN','SUCCEEDED','FAILED')),

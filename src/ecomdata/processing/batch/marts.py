@@ -11,6 +11,7 @@ from pyspark.sql import functions as F
 from ecomdata.domain.counter_semantics import counter_semantic
 from ecomdata.domain.ordering import ORDER_COLUMNS
 from ecomdata.processing.batch.anomaly import build_price_anomaly_daily
+from ecomdata.processing.batch.discount import build_discount_credibility_daily, build_discount_daily
 
 if TYPE_CHECKING:
     from ecomdata.processing.batch.context import MarketplaceBatchContext
@@ -619,9 +620,10 @@ def build_counter_delta_daily(transitions: DataFrame) -> DataFrame:
 def build_marketplace_marts(
     observations: DataFrame, attempts: DataFrame, runs: DataFrame, context: MarketplaceBatchContext
 ) -> dict[str, DataFrame]:
-    # The anomaly mart reads the price mart rather than the observations, so
-    # the two can never disagree about what a price was on a given day.
+    # The anomaly and discount marts read the price mart rather than the observations,
+    # so the three can never disagree about what a price was on a given day.
     price_history = build_offer_price_history_daily(observations)
+    credibility = build_discount_credibility_daily(price_history, config=context.discount_rules)
     return {
         "offer_current": build_offer_current(observations),
         "seller_current": build_seller_current(observations),
@@ -659,5 +661,9 @@ def build_marketplace_marts(
             mad_threshold=context.anomaly_mad_threshold,
             iqr_multiplier=context.anomaly_iqr_multiplier,
             rule_version=context.anomaly_rule_version,
+        ),
+        "discount_credibility_daily": credibility,
+        "discount_daily": build_discount_daily(
+            observations, credibility, config=context.discount_rules, percentile_accuracy=context.percentile_accuracy
         ),
     }

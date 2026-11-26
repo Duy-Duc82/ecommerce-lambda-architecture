@@ -1,0 +1,29 @@
+{
+  "rows": 106234,
+  "config": {
+    "rule_version": "discount-rules.v1",
+    "reference_window_days": "30",
+    "min_history_days": "3",
+    "legal_cap_percent": "50",
+    "claim_gap_percent": "20",
+    "ml_enabled": "True",
+    "ml_sample_rows": "200000",
+    "ml_seed": "20261113"
+  },
+  "status_counts": {
+    "INSUFFICIENT_HISTORY": 27468,
+    "NO_DISCOUNT": 78228,
+    "QUESTIONABLE": 538
+  },
+  "reason_counts": {
+    "DISCOUNT_OVER_CAP": 538
+  },
+  "ml_method_counts": {
+    "ISOLATION_FOREST": 28006,
+    "NONE": 78228
+  },
+  "days": [
+    "2026-10-25",
+    "2026-10-31"
+  ]
+}

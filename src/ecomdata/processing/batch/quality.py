@@ -418,6 +418,30 @@ def _evaluate_advisory(
         )
     )
 
+    # Same shape for the discount verdicts (ADR-0009): of the offer-days that
+    # display a reduction, how many had enough history for a verdict. Zero
+    # over a non-empty set means the window does not fit the data yet.
+    credibility = (
+        marts["discount_credibility_daily"]
+        .filter(F.col("displayed_discount_percent") > F.lit(0.0))
+        .agg(
+            F.count(F.lit(1)).alias("_rows"),
+            _violations(F.col("credibility_status") != F.lit("INSUFFICIENT_HISTORY")).alias("_judged"),
+        )
+        .collect()[0]
+    )
+    shown = int(credibility["_rows"])
+    judged_share = (int(credibility["_judged"]) / shown) if shown else 0.0
+    results.append(
+        _result(
+            "discount_credibility_evaluation_coverage",
+            context,
+            status=FAIL if shown and judged_share == 0.0 else PASS,
+            observed_value=judged_share,
+            keys=() if not (shown and judged_share == 0.0) else (f"discounted_offer_days={shown}",),
+        )
+    )
+
     coverage_mart = marts["source_coverage_daily"]
     missing_rate = coverage_mart.filter((F.col("eligible_offer_count") > 0) & F.col("coverage_rate").isNull())
     results.append(

@@ -104,11 +104,11 @@ def instants(document):
 
 
 # 32
-def test_the_manifest_lists_exactly_the_ten_datasets_sorted():
+def test_the_manifest_lists_exactly_the_twelve_datasets_sorted():
     document = manifest()
 
     assert [dataset.dataset_name for dataset in document.datasets] == sorted(DATASETS)
-    assert len(document.datasets) == 10
+    assert len(document.datasets) == 12
     anomaly = next(d for d in document.datasets if d.dataset_name == "price_anomaly_daily")
     assert anomaly.partition_columns == ("marketplace", "observed_date")
     assert anomaly.uri.endswith("/price_anomaly_daily")

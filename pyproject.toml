@@ -32,6 +32,11 @@ spark = [
 browser = [
     "playwright==1.55.0",
 ]
+# The Isolation Forest rank of the discount-credibility mart (ADR-0009). Optional:
+# without it the mart is built with ml_method NONE.
+ml = [
+    "scikit-learn>=1.5",
+]
 airflow = [
     "apache-airflow>=3.3,<3.4",
     "apache-airflow-providers-docker>=4.0",

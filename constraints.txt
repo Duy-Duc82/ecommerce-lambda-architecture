@@ -14,5 +14,10 @@ pyarrow==24.0.0
 pyspark==4.0.4
 pandas==2.3.3
 numpy==2.2.6
+# [ml]: the Spark image and the test suite; scipy, joblib and threadpoolctl are its dependencies.
+scikit-learn==1.7.2
+scipy==1.16.2
+joblib==1.5.2
+threadpoolctl==3.6.0
 # [browser]: must equal the Playwright base image tag (v1.55.0-noble).
 playwright==1.55.0

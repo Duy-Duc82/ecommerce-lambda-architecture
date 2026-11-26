@@ -1,0 +1,5 @@
+marketplace,ml_method,count
+lazada,ISOLATION_FOREST,985
+tiki,NONE,77558
+tiki,ISOLATION_FOREST,27021
+lazada,NONE,670

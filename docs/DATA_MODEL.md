@@ -851,8 +851,10 @@ only the source behind them moves from Silver to the star.
 | `marketplace_crawl_reliability_daily` | `(marketplace, request_date)` | requests, successes, failures, latency avg and p95, raw bytes, and a count for each of the five error kinds a crawl produces (rate limited, transport, server, parse, validation) |
 | `marketplace_counter_delta_daily` | `(marketplace, offer_id, observed_date, counter_name)` | raw and valid delta sums, a velocity proxy, and the invalid-transition evidence |
 | `marketplace_price_anomaly_daily` | `(marketplace, offer_id, observed_date, currency)` | a robust outlier verdict against this offer's own recent history |
+| `marketplace_discount_credibility_daily` | `(marketplace, offer_id, observed_date, currency)` | the displayed reduction judged against the offer's own prior prices (ADR-0009): reference prices, effective reduction, the reasons that fired, a graded verdict, and an optional Isolation Forest rank |
+| `marketplace_discount_daily` | `(marketplace, category_path, observed_date, currency)` | offers showing a reduction and their share, p25/median/p75/max of the displayed reduction, offers over the legal cap, and how many the rules graded QUESTIONABLE or SUSPECT |
 
-Four of them carry a rule version in every row — `freshness_rule_version` on
+Six of them carry a rule version in every row — `freshness_rule_version` on
 freshness and coverage, `counter_rule_version`, `anomaly_rule_version` — so a
 stored verdict stays checkable after the configuration moves on.
 
@@ -895,19 +897,49 @@ that a price is wrong, dishonest or a bargain.
 P4 accepts this rebuild only if, on the same `as_of`, every rebuilt mart
 matches the old one row for row; any difference is listed with its reason.
 
-#### Three new marts
+#### The discount marts (ADR-0009)
 
 | Mart | Grain | Built from | Answers |
 |---|---|---|---|
-| `category_price_index_daily` | marketplace × category node (any level) × day × currency | `fact_price_snapshot_daily` × `bridge_category_ancestry` | median close price of the offers under the node, as an index with the node's first day = 100 |
-| `listing_price_volatility` | offer × window (7 and 30 days) × day | `fact_price_snapshot_daily`, `fact_price_change` | standard deviation and coefficient of variation of the daily close price, number of price changes |
-| `discount_daily` | marketplace × category node × day | `fact_price_snapshot_daily` × `dim_listing_flags` × bridge | share of offers on discount, p25/median/p75 of the discount percentage |
+| `discount_credibility_daily` | offer × day × currency | `offer_price_history_daily` (the same numbers the anomaly mart reads) | can the reduction the page shows be taken at face value, judged against the offer's own prior prices |
+| `discount_daily` | marketplace × category path × day × currency | the sightings (last sighting of each offer-day) × `discount_credibility_daily` | how many offers show a reduction, how deep, how many over the legal cap, how many the rules graded QUESTIONABLE or SUSPECT |
 
-The category index compares price *levels* by category without matching
-products across marketplaces, which per-product comparison would require.
-It is a median over whichever offers were seen that day, so a change in the
-mix of offers moves it as well as a change in prices; the mart publishes the
-offer count next to the index so that can be read.
+**How a row of `discount_credibility_daily` is judged.** The *displayed*
+reduction is `(list_price - price) / list_price` of the day's last sighting,
+negative when the price sits above its list price. The *reference* is the
+offer's own history in the `reference_window_days` calendar days before the
+day, that day excluded: `reference_min_price` (the Omnibus "lowest prior
+price"), `reference_median_price`, `reference_max_list_price` and
+`reference_sample_size` (observed days in the window). The *effective*
+reduction is against `reference_min_price`; `claim_gap_percent` is displayed
+minus effective. Five reasons can fire, each readable from the row:
+
+| Reason | Fires when | Needs history |
+|---|---|---|
+| `PRICE_ABOVE_LIST` | the price is above the list price it is "reduced from" | no |
+| `DISCOUNT_OVER_CAP` | the displayed reduction exceeds `legal_cap_percent` (50 %) | no |
+| `LIST_PRICE_RAISED` | the list price is above every list price of the window | yes |
+| `CLAIM_EXCEEDS_HISTORY` | the claim gap exceeds `claim_gap_percent` (20 points) | yes |
+| `NOT_BELOW_REFERENCE` | a reduction is shown, yet the price is not below the prior lowest | yes |
+
+`rule_score` is the capped sum of the reasons' weights
+(`domain/discount_rules.py`); `credibility_status` is `NO_DISCOUNT` (nothing
+shown, nothing contradicting), `SUSPECT` (score ≥ 50), `QUESTIONABLE` (≥ 20),
+`CREDIBLE` (no reason, at least `min_history_days` observed days in the
+window) or `INSUFFICIENT_HISTORY` (no reason, but too little history to
+vouch). `ml_rank_percent` is the Isolation Forest's percent rank of the
+row's feature vector among the reductions shown that marketplace-day; it
+orders review and decides nothing, and is null with `ml_method = NONE` where
+scikit-learn is absent or fewer than 50 reductions were shown. The rule
+parameters travel with the row (`reference_window_days`,
+`discount_rule_version`); the status wording is contract: a verdict is a
+graded statement about a displayed figure, never a claim about the seller.
+
+Two marts the Phase 10 plan sketched are not built: `category_price_index_daily`
+(a median over whichever offers were seen that day moves with the mix of
+offers as much as with prices) and `listing_price_volatility` (its inputs,
+`distinct_price_count` and the reference statistics, are already columns of
+the credibility mart).
 
 ### 4.10 Storage and publication
 

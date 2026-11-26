@@ -171,6 +171,30 @@ MARTS: tuple[MarketplaceDataset, ...] = (
                  mad_threshold iqr_multiplier anomaly_rule_version"""),
         DAILY_BY_OBSERVED,
     ),
+    # ADR-0009: the displayed reduction judged against the offer's own prior prices.
+    MarketplaceDataset(
+        "discount_credibility_daily",
+        MART,
+        "one offer, one UTC day, one currency",
+        ("marketplace", "offer_id", "observed_date", "currency"),
+        _cols("""marketplace offer_id observed_date currency evaluated_price list_price displayed_discount_percent
+                 reference_window_days reference_sample_size reference_min_price reference_median_price
+                 reference_max_list_price effective_discount_percent claim_gap_percent distinct_price_count
+                 credibility_status credibility_reasons_json rule_score ml_method ml_score ml_rank_percent
+                 discount_rule_version"""),
+        DAILY_BY_OBSERVED,
+    ),
+    MarketplaceDataset(
+        "discount_daily",
+        MART,
+        "one category path, one UTC day, one currency",
+        ("marketplace", "category_path", "observed_date", "currency"),
+        _cols("""marketplace category_path observed_date currency observed_offer_count discounted_offer_count
+                 discounted_offer_ratio p25_discount_percent median_discount_percent p75_discount_percent
+                 max_discount_percent over_cap_offer_count questionable_offer_count suspect_offer_count
+                 legal_cap_percent discount_rule_version"""),
+        DAILY_BY_OBSERVED,
+    ),
 )
 
 STAR: tuple[MarketplaceDataset, ...] = (

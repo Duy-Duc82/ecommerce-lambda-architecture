@@ -19,6 +19,7 @@ from dataclasses import dataclass, field, fields
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
+from ecomdata.domain.discount_rules import DiscountRuleConfig
 from ecomdata.domain.sources import SOURCES
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -378,6 +379,8 @@ class BatchSettings:
     # Where the batch reads the crawl audit: "lake" (the copy of record the
     # crawler writes to Bronze) or "postgres" (the operational copy, over JDBC).
     crawl_audit_source: str = "lake"
+    # The discount-credibility rules (ADR-0009); the dataclass checks itself.
+    discount_rules: DiscountRuleConfig = DiscountRuleConfig()
 
 
 @dataclass(frozen=True)
@@ -462,6 +465,26 @@ class Settings:
     airflow: AirflowSettings = field(default_factory=AirflowSettings)
 
 
+def _discount_rules(env: _Env) -> DiscountRuleConfig:
+    defaults = DiscountRuleConfig()
+    enabled = env.text("MARKETPLACE_DISCOUNT_ML_ENABLED", "true" if defaults.ml_enabled else "false").strip().lower()
+    if enabled not in ("true", "false", "1", "0", "yes", "no"):
+        raise SettingsError(f"MARKETPLACE_DISCOUNT_ML_ENABLED must be true or false, got {enabled!r}")
+    try:
+        return DiscountRuleConfig(
+            rule_version=env.text("MARKETPLACE_DISCOUNT_RULE_VERSION", defaults.rule_version),
+            reference_window_days=env.integer("MARKETPLACE_DISCOUNT_REFERENCE_WINDOW_DAYS", defaults.reference_window_days),
+            min_history_days=env.integer("MARKETPLACE_DISCOUNT_MIN_HISTORY_DAYS", defaults.min_history_days),
+            legal_cap_percent=env.decimal("MARKETPLACE_DISCOUNT_LEGAL_CAP_PERCENT", str(defaults.legal_cap_percent)),
+            claim_gap_percent=env.decimal("MARKETPLACE_DISCOUNT_CLAIM_GAP_PERCENT", str(defaults.claim_gap_percent)),
+            ml_enabled=enabled in ("true", "1", "yes"),
+            ml_sample_rows=env.integer("MARKETPLACE_DISCOUNT_ML_SAMPLE_ROWS", defaults.ml_sample_rows),
+            ml_seed=env.integer("MARKETPLACE_DISCOUNT_ML_SEED", defaults.ml_seed),
+        )
+    except ValueError as exc:
+        raise SettingsError(f"MARKETPLACE_DISCOUNT_*: {exc}") from None
+
+
 def _read(env: _Env) -> Settings:
     batch_defaults, quality_defaults, speed_defaults = BatchSettings(), QualitySettings(), SpeedSettings()
     return Settings(
@@ -532,6 +555,7 @@ def _read(env: _Env) -> Settings:
             crawl_audit_source=env.text("MARKETPLACE_CRAWL_AUDIT_SOURCE", batch_defaults.crawl_audit_source)
             .strip()
             .lower(),
+            discount_rules=_discount_rules(env),
         ),
         quality=QualitySettings(
             rule_version=env.text("MARKETPLACE_QUALITY_RULE_VERSION", quality_defaults.rule_version),
