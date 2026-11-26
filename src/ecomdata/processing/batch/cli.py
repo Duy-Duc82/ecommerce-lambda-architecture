@@ -1,6 +1,7 @@
 """Command line of the marketplace batch: ``python -m ecomdata.processing.batch <command>``.
 
-``run`` runs one stage or all of them over one batch run; ``scheduler`` is the
+``run`` runs one stage or all of them over one batch run; ``compact`` runs
+Delta ``OPTIMIZE``/``VACUUM`` on every table; ``scheduler`` is the
 polling loop kept for the ``legacy-scheduler`` profile. This is a composition
 root: it is where the loaded settings meet the real adapters.
 """
@@ -45,6 +46,10 @@ def build_parser(silver_root: str, gold_root: str) -> argparse.ArgumentParser:
     )
     run.add_argument("--rebuild", action="store_true", help="rebuild Silver from every day Bronze holds")
 
+    compact = commands.add_parser("compact", help="OPTIMIZE then VACUUM every Silver and star Delta table")
+    compact.add_argument("--retain-hours", type=int, default=168, help="VACUUM keeps versions this recent (>= 168)")
+    compact.add_argument("--dry-run", action="store_true", help="list the tables, touch nothing")
+
     scheduler = commands.add_parser("scheduler", help="the polling loop (profile legacy-scheduler)")
     scheduler.add_argument("--max-ticks", type=int, default=None, help="stop after N ticks (tests and smoke only)")
     return parser
@@ -58,6 +63,9 @@ def main(argv: list[str] | None = None, *, settings: Settings | None = None) -> 
     args = build_parser(silver_root, gold_root).parse_args(argv)
     if args.command == "scheduler":
         scheduler_main(args, settings)
+        return
+    if args.command == "compact":
+        compact_main(args, settings, silver_root=silver_root, gold_root=gold_root)
         return
     run_main(args, settings, serving_gold_root_uri=gold_root)
 
@@ -137,6 +145,38 @@ def run_main(args: argparse.Namespace, settings: Settings, *, serving_gold_root_
             sort_keys=True,
         )
     )
+
+
+def compact_main(args: argparse.Namespace, settings: Settings, *, silver_root: str, gold_root: str) -> None:
+    from ecomdata.processing.batch.compaction import compact_all, table_uris
+
+    uris = table_uris(silver_root, gold_root)
+    if args.dry_run:
+        print(json.dumps({"tables": uris}, sort_keys=True))
+        return
+    if settings.storage.table_format != "delta":
+        print(json.dumps({"status": "SKIPPED", "reason": "the lake is not Delta"}, sort_keys=True))
+        return
+    from ecomdata.infra.postgres import connection_factory
+    from ecomdata.processing.batch.bootstrap import spark_factory
+    from ecomdata.processing.batch.lock import ALREADY_RUNNING_EXIT_CODE, BatchAlreadyRunning, exclusive_batch
+
+    spark = spark_factory(settings, app_name="delta-compact").create()
+    try:
+        results = compact_all(
+            spark,
+            uris,
+            retain_hours=args.retain_hours,
+            lock=lambda: exclusive_batch(connection_factory(settings.postgres), key=settings.batch.lock_key),
+        )
+    except BatchAlreadyRunning as refusal:
+        print(json.dumps({"status": "ALREADY_RUNNING", "lock_key": refusal.key}, sort_keys=True))
+        raise SystemExit(ALREADY_RUNNING_EXIT_CODE) from None
+    finally:
+        spark.stop()
+    print(json.dumps({"tables": results}, sort_keys=True))
+    if any(item["status"] == "FAILED" for item in results):
+        raise SystemExit(1)
 
 
 def scheduler_main(args: argparse.Namespace, settings: Settings) -> None:

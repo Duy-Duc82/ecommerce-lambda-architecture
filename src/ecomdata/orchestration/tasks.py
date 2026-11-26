@@ -186,12 +186,17 @@ def discovery_commands() -> dict[str, str]:
     }
 
 
+# Maintenance tasks that need Spark (and Delta) run on the batch image.
+SPARK_MAINTENANCE_TASKS = frozenset({"compact_delta"})
+
+
 def maintenance_commands(retention_days: int | None = None) -> dict[str, str]:
     prune = "python -m ecomdata.ops prune-raw"
     if retention_days is not None:
         prune += f" --older-than-days {retention_days}"
     return {
         "prune_raw": prune,
+        "compact_delta": "python3 -m ecomdata.processing.batch compact",
         "backup": "python -m ecomdata.ops backup",
         "storage_snapshot": "python -m ecomdata.ops storage-snapshot",
     }
