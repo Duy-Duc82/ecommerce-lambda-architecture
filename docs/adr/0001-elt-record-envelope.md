@@ -1,6 +1,6 @@
 # ADR-0001: ELT và envelope `marketplace-record.v1`
 
-Trạng thái: chấp nhận (2026-10-24). Nguồn quyết định: `docs/PLAN_REFACTOR_ARCHITECTURE.md` mục 3.1, 3.3.
+Trạng thái: chấp nhận (2026-10-24). Nguồn quyết định: `docs/archive/PLAN_REFACTOR_ARCHITECTURE.md` mục 3.1, 3.3.
 
 ## Bối cảnh
 

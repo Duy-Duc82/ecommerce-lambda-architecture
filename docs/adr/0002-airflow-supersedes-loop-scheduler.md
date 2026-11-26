@@ -18,5 +18,5 @@ Phase 8 quyết định D2: batch chạy bằng một vòng lặp (`processing/b
 ## Hệ quả
 
 - Retry, lịch sử chạy và đồ thị phụ thuộc nằm ở Airflow thay vì trong code vòng lặp.
-- Task chạy trong container riêng nên cần `/var/run/docker.sock`. Trên Docker Desktop, nếu socket không dùng được thì dùng `BashOperator` gọi `docker` CLI (rủi ro K3 của plan); kết quả thử ghi trong `docs/REFACTOR_REPORT.md`.
+- Task chạy trong container riêng nên cần `/var/run/docker.sock`. Trên Docker Desktop, nếu socket không dùng được thì dùng `BashOperator` gọi `docker` CLI (rủi ro K3 của plan); kết quả thử ghi trong `docs/archive/REFACTOR_REPORT.md`.
 - Thêm tài nguyên cho Airflow (API server, scheduler, dag-processor) trên máy 14 GB; stack E2E đặt `--driver-memory 3g` và không chạy speed cùng lúc với batch nếu thiếu RAM (rủi ro K4).

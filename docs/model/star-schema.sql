@@ -5,7 +5,6 @@
 
 CREATE SCHEMA IF NOT EXISTS dw;
 
--- Conformed with the Kaggle behavior star: one builder for both.
 CREATE TABLE dw.dim_date (
     date_key            integer PRIMARY KEY,            -- yyyymmdd; -1 unknown
     full_date           date UNIQUE,                    -- NULL only on the unknown row

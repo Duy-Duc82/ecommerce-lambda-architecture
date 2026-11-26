@@ -1,6 +1,6 @@
 """The canonical sightings, read back out of the star.
 
-``docs/PLAN_PHASE10_ON_REFACTOR.md`` D4. The ten marts are built from the
+``docs/archive/PLAN_PHASE10_ON_REFACTOR.md`` D4. The ten marts are built from the
 facts: :func:`sightings_from_facts` joins ``fact_offer_observation`` to the
 dimensions its keys name and gives back the canonical columns the mart builders
 (``processing/batch/marts.py``) read, so each mart keeps its name, columns and

@@ -16,12 +16,10 @@ docker compose up -d                         # core only
 docker compose --profile crawl --profile speed up -d     # crawl needs a seeded frontier
 docker compose --profile orchestration up -d # Airflow runs the batch (ADR-0002)
 docker compose --profile serve up -d         # Kibana, Superset
-.\legacy\kaggle\scripts\start_all.ps1         # the legacy Kaggle demo
 ```
 
 `docker-compose.yml` at the root only includes `compose/docker-compose.yml`.
-Add `-f compose/docker-compose.legacy.yml` or
-`-f compose/docker-compose.observability.yml` for those layers.
+Add `-f compose/docker-compose.observability.yml` for the monitoring layer.
 Observability (Alloy, Prometheus, Loki, Grafana, alerts): docs/OBSERVABILITY.md.
 
 | Profile | Services |
@@ -37,7 +35,6 @@ Observability (Alloy, Prometheus, Loki, Grafana, alerts): docs/OBSERVABILITY.md.
 | `ops` | ops (a `run --rm` tool container; `backup`, `restore`, `validate`), es-projector (a loop service) |
 | `smoke` | stub-source, the offline Tiki stub |
 | `bench`, `demo` | the services those stacks need, listed in `compose/docker-compose.yml` |
-| `legacy`, `jobs` | in `compose/docker-compose.legacy.yml`: spark, spark-worker, kibana-setup, warehouse-job |
 
 Operator batch run, for example a resume or a backfill:
 
@@ -236,7 +233,7 @@ is checked.
 publish but not the promotion, so the pointer ends up naming a run whose rows
 never reached `cache`, and `validate`'s `pointer_matches_cache` fails. Use it
 only to inspect Gold, never on a stack anyone is serving from
-(`PROGRESS.md` section 10.6). The offline smoke that Phase 6 section 16 and
+(`archive/PROGRESS.md` section 10.6). The offline smoke that Phase 6 section 16 and
 Phase 7 section 18 once described around this flag does not exist: the crawl
 audit is read over JDBC unconditionally, so `mp smoke` replaced it.
 
@@ -281,7 +278,7 @@ docker compose -f docker-compose.yml up -d                      # the dev stack 
 
 On a stack that also holds host-run crawls with a `local` lake,
 `bronze_present` fails: those attempts recorded `file:///D:/...` raw URIs that
-no container can read (`PROGRESS.md` §16.4).
+no container can read (`archive/PROGRESS.md` §16.4).
 
 ### Drills D1-D11 (plan section 10)
 
@@ -421,7 +418,7 @@ That `.ndjson` is **generated**, not hand-edited. Change
 python -m display.kibana.marketplace_dashboards
 ```
 
-`tests/test_kibana_marketplace.py` fails if the committed file and the
+`tests/unit/serving/test_kibana_marketplace.py` fails if the committed file and the
 builder disagree.
 
 ### The projector
@@ -654,7 +651,7 @@ docker load -i minio-images.tar
 
 Elasticsearch and Kibana are on 8.18.1 rather than 8.18.0 because the 8.18.0
 image on the development machine was pulled while the disk was full and
-stayed corrupt across re-pulls (`PROGRESS.md` §13.4).
+stayed corrupt across re-pulls (`archive/PROGRESS.md` §13.4).
 
 The jar versions in `docker/spark/Dockerfile` and their sources
 are listed in that file.

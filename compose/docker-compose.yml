@@ -18,11 +18,9 @@
 #   serve          kibana, superset, kibana-marketplace-setup
 #   ops            ops (run --rm tool), es-projector
 #   smoke          stub-source, the offline Tiki stub
-#   legacy         the Kaggle demo (Spark 3.5.1): compose/docker-compose.legacy.yml
 #
 # Files (all relative to the repository root, which is mounted at /app):
 #   compose/docker-compose.yml                this file
-#   compose/docker-compose.legacy.yml         Kaggle demo, add it with -f
 #   compose/docker-compose.observability.yml  Alloy, Prometheus, Loki, Grafana, add it with -f
 # Every service carries the label ecomdata.layer (crawl, ingest, speed, batch,
 # serving, storage, ops, orchestration); logs and metrics are grouped by it.
@@ -200,7 +198,7 @@ services:
 
   # The marketplace topics, created idempotently: source records (+ DLQ) and
   # changes. marketplace.observations.v1 has no producer and no consumer any
-  # more. The legacy ecommerce_events topic stays with the Kaggle scripts.
+  # more.
   kafka-init:
     labels:
       ecomdata.layer: ingest
@@ -560,7 +558,7 @@ services:
       ecomdata.layer: storage
     # 8.18.1, not 8.18.0: on the development machine the 8.18.0 image was
     # pulled while the disk was full and its snapshot stayed corrupt across
-    # re-pulls (PROGRESS.md section 13.4). Kibana is pinned to the same patch.
+    # re-pulls (docs/archive/PROGRESS.md section 13.4). Kibana is pinned to the same patch.
     image: docker.elastic.co/elasticsearch/elasticsearch:8.18.1
     container_name: ${MP_CONTAINER_PREFIX:-}elasticsearch
     restart: unless-stopped
@@ -586,8 +584,7 @@ services:
   kibana:
     labels:
       ecomdata.layer: serving
-    # Also under `legacy`, whose dashboard importer depends on it.
-    profiles: ["serve", "legacy", "demo"]
+    profiles: ["serve", "demo"]
     image: docker.elastic.co/kibana/kibana:8.18.1
     container_name: ${MP_CONTAINER_PREFIX:-}kibana
     environment:

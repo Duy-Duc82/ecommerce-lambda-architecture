@@ -1,6 +1,6 @@
 # ADR-0008: Bản lưu của audit nằm trong lake; PostgreSQL giữ bản vận hành
 
-Trạng thái: chấp nhận (2026-11-02). Kế hoạch: `docs/PLAN_PIPELINE_HARDENING.md` (H5), `docs/PLAN_PHASE10_ON_REFACTOR.md` (D7).
+Trạng thái: chấp nhận (2026-11-02). Kế hoạch: `docs/archive/PLAN_PIPELINE_HARDENING.md` (H5), `docs/archive/PLAN_PHASE10_ON_REFACTOR.md` (D7).
 
 ## Bối cảnh
 

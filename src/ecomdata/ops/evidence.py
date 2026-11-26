@@ -48,7 +48,7 @@ ITEMS: tuple[Item, ...] = (
         "Source feasibility matrix",
         ("docs/SOURCE_FEASIBILITY.md",),
         "repository",
-        note="Brief §3/P0-01; the evidence so far is spread over PROGRESS.md §4a",
+        note="Brief §3/P0-01; the evidence so far is spread over docs/archive/PROGRESS.md §4a",
     ),
     Item(
         "Monitored-universe definition and volume projection", ("universe/live.env", "evaluation/storage.json"), "live"
@@ -77,7 +77,7 @@ ITEMS: tuple[Item, ...] = (
         (),
         "manual",
         manual=True,
-        note="report prose; PROGRESS.md records each failed run and production bug",
+        note="report prose; docs/archive/PROGRESS.md records each failed run and production bug",
     ),
     Item("Recorded fallback demo", (), "manual", manual=True, note="docs/DEMO_SCRIPT.md; the video stays outside git"),
 )

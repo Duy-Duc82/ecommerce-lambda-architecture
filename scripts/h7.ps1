@@ -1,5 +1,5 @@
 # ============================================================
-# h7.ps1 - the H7 end-to-end check (docs/PLAN_PIPELINE_HARDENING.md, section 7)
+# h7.ps1 - the H7 end-to-end check (docs/archive/PLAN_PIPELINE_HARDENING.md, section 7)
 # ============================================================
 # One command, on the machine that has the refactor stack's Bronze:
 #

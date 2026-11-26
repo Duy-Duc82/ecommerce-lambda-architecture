@@ -1,6 +1,6 @@
 # Runbook: stack demo `mp-tikihtml` (full stack + giám sát log)
 
-Stack dùng cho buổi demo với giáo viên: crawl HTML Tiki, Kafka, Silver, speed (Spark Structured Streaming), batch (Spark, mỗi giờ), Elasticsearch/Kibana, Postgres/Superset, Alloy/Prometheus/Loki/Grafana (thiết kế: `docs/OBSERVABILITY.md`). Số đo của lượt chạy 8 giờ ngày 24/10: `docs/evidence/fullstack-run-20261024/bao-cao-chay-thu.html` (nằm ở worktree `C:\code\data`, chưa commit).
+Stack dùng cho buổi demo với giáo viên: crawl HTML Tiki, Kafka, Silver, speed (Spark Structured Streaming), batch (Spark, mỗi giờ), Elasticsearch/Kibana, Postgres/Superset, Alloy/Prometheus/Loki/Grafana (thiết kế: `docs/OBSERVABILITY.md`). Số đo của lượt chạy 8 giờ ngày 24/10: `docs/evidence/fullstack-run-20261024/bao-cao-chay-thu.html` trên nhánh `data/source-hunt-20261011`.
 
 ## Địa chỉ
 
@@ -14,12 +14,12 @@ Stack dùng cho buổi demo với giáo viên: crawl HTML Tiki, Kafka, Silver, s
 
 ## Bật, dừng, kiểm tra
 
-Chạy từ thư mục gốc của repo (Git Bash). Lệnh dùng `env/base.env` + `env/ports.tiki-html.env` + `env/tiki-html.env` + `compose/docker-compose.observability.yml` (qua `run-fullstack.sh`):
+Chạy từ thư mục gốc của repo (Git Bash). Lệnh dùng `env/base.env` + `env/ports.tiki-html.env` + `env/tiki-html.env` + `compose/docker-compose.observability.yml` (qua `scripts/run-fullstack.sh`):
 
 ```sh
-sh run-fullstack.sh up -d loki prometheus alloy grafana   # giám sát trước
-sh run-fullstack.sh up -d                                  # toàn bộ stack
-sh run-fullstack.sh ps
+sh scripts/run-fullstack.sh up -d loki prometheus alloy grafana   # giám sát trước
+sh scripts/run-fullstack.sh up -d                                  # toàn bộ stack
+sh scripts/run-fullstack.sh ps
 sh observability/healthcheck.sh env/tiki-html.env           # in dòng PROBLEM nếu có vấn đề (stack khác: env/<stack>.env)
 docker compose -p mp-tikihtml --profile "*" stop           # dừng, dữ liệu trong volume vẫn giữ
 docker compose -p mp-tikihtml --profile "*" start          # bật lại đúng các container cũ
@@ -36,7 +36,7 @@ docker compose --profile ops run --rm ops python -m ops seed --marketplace tiki 
 
 ## Cấu hình riêng của demo
 
-`run-fullstack.sh` chỉ dùng cho demo, không thay đổi mặc định của repo:
+`scripts/run-fullstack.sh` chỉ dùng cho demo, không thay đổi mặc định của repo:
 
 - `CRAWL_REQUEST_DELAY_SECONDS=3.5`: crawl khoảng 10 trang/phút, đều theo thời gian.
 - `MARKETPLACE_STREAM_TRIGGER=5 seconds`: dữ liệu vào Elasticsearch khoảng 3 giây sau khi crawl xong (trung vị).
@@ -57,6 +57,5 @@ python observability/run_report_metrics.py out.json      # đo số liệu cho b
 
 ## Lưu ý
 
-- Stack này là bản demo. Phase 10 (`docs/PLAN_PHASE10_DIMENSIONAL_MODEL.md`) phải dùng project và port riêng, không đụng `mp-tikihtml`.
-- Các container đang chạy hiện mount file từ một worktree tạm (scratchpad của session ngày 24/10). Lần tới chạy `sh run-fullstack.sh up -d` từ thư mục này, compose sẽ tạo lại container với file mount từ đây; dữ liệu trong volume vẫn giữ nguyên.
-- Docker Desktop dùng `C:\Users\Admin\.wslconfig` (`memory=14GB`, `swap=8GB`, `autoMemoryReclaim=gradual`). Đóng các ứng dụng nặng (Epic Games launcher) trước khi demo.
+- Stack demo có project và cổng riêng (`mp-tikihtml`); các stack khác (`env/<stack>.env`) không được dùng chung project hay cổng với nó.
+- Full stack cần khoảng 14 GB RAM cho Docker. Trên Windows, đặt giới hạn trong `%UserProfile%\.wslconfig` (ví dụ `memory=14GB`, `swap=8GB`, `autoMemoryReclaim=gradual`) và đóng các ứng dụng nặng trước khi demo.

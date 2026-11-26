@@ -1,22 +1,31 @@
+# Python
 .venv/
 __pycache__/
-demo_phase1/data_kaggle/
-data_kaggle/
-checkpoints/
-logs/
-data_lake_raw/
-lakehouse/
-data/crawl/
-data.zip
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.import_linter_cache/
+
+# Local configuration and secrets
 .env
 docker-compose.override.yml
+
+# Local data: lake, crawl output, checkpoints, ops reports
+data/crawl/
+data/ops/
+data_kaggle/
+data_lake_raw/
+lakehouse/
+checkpoints/
+logs/
+*.zip
 
 # Local JDBC driver used for container runs; not part of the project.
 .localjars/
 
-# ops validate/smoke reports (scripts/mp.ps1)
-data/ops/
-*.egg-info/
-.ruff_cache/
-.import_linter_cache/
-.import_linter_cache/
+# Editors and OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db

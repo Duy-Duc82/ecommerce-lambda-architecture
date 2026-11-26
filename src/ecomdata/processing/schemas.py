@@ -1,9 +1,4 @@
-"""Spark schema for the canonical behavioral-event contract.
-
-Mirrors `legacy.kaggle.schema` (the row-level contract) for use by Spark Structured
-Streaming and batch. There is exactly one event shape across the platform:
-view / cart / purchase behavioral events from the Kaggle store dataset.
-"""
+"""Spark schemas for the marketplace observation and change messages on Kafka."""
 
 from __future__ import annotations
 
