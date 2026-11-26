@@ -136,6 +136,23 @@ def test_the_next_occurrence_is_one_cadence_later():
     )
 
 
+
+def test_a_slotted_target_keeps_one_place_in_its_cadence():
+    day = timedelta(days=1)
+    first = next_scheduled_for(CrawlTier.SWEEP, NOW, slot_key="tiki:category=1789:page=1")
+    second = next_scheduled_for(CrawlTier.SWEEP, first + timedelta(minutes=7), slot_key="tiki:category=1789:page=1")
+
+    assert NOW + day / 2 <= first < NOW + day * 3 / 2
+    assert second == first + day
+
+
+def test_targets_seeded_together_spread_over_the_day():
+    hours = {
+        next_scheduled_for(CrawlTier.SWEEP, NOW, slot_key=f"tiki:category={n}:page=1").hour for n in range(200)
+    }
+
+    assert len(hours) >= 20
+
 # 6
 @pytest.mark.parametrize(
     "error, http_status, expected",
