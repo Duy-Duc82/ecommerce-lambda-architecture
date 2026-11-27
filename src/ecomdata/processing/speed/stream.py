@@ -229,21 +229,30 @@ def make_state_function(config: ChangeRuleConfig):
     or Spark drops it. It is re-armed whenever the key holds a state, from
     the latest observed instant, so an offer whose last call brought only a
     duplicate or a late row can still go stale.
+
+    The first timeout marks the offer stale. With ``evict_after_seconds`` a
+    second one is armed from the same instant, and when it fires the key's
+    state is removed; an offer seen again after that starts a new state.
     """
     import pandas as pd
 
     from ecomdata.domain.change_rules import offer_state_from_json
     from ecomdata.domain.wire import canonical_json
 
-    def arm_timeout(state, observed_at) -> None:
-        due_ms = int((observed_at.timestamp() + config.stale_after_seconds) * 1000)
+    def arm_timeout(state, observed_at, after_seconds: int = config.stale_after_seconds) -> None:
+        due_ms = int((observed_at.timestamp() + after_seconds) * 1000)
         state.setTimeoutDuration(max(1, due_ms - state.getCurrentProcessingTimeMs()))
 
     def state_fn(key, frames, state):
         prior = offer_state_from_json(state.get[0]) if state.exists else None
         if state.hasTimedOut and prior is not None:
+            if prior.stale_emitted and config.evict_after_seconds is not None:
+                state.remove()
+                return
             stale_state, stale_change = detect_stale_change(prior, config)
             state.update((offer_state_to_json(stale_state), stale_state.observed_at, stale_state.observation_id))
+            if config.evict_after_seconds is not None:
+                arm_timeout(state, stale_state.observed_at, config.evict_after_seconds)
             if stale_change is not None:
                 yield pd.DataFrame(
                     [

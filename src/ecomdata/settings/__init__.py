@@ -403,7 +403,13 @@ class SpeedSettings:
     change_rule_version: str = "speed-rules.v1"
     large_drop_absolute: Decimal = Decimal("100000")
     large_drop_relative: Decimal = Decimal("0.20")
-    stale_after_seconds: int = 21600
+    # An offer is stale when no sighting came for twice the slowest crawl tier
+    # (SWEEP, one day): one missed sweep is not news. At 6 h every SWEEP offer went
+    # stale between two sweeps, and OFFER_STALE was 83% of all change events.
+    stale_after_seconds: int = 172800
+    # A stale offer's state is dropped this long after its last sighting, so the
+    # state store holds the offers still being seen, not every offer ever seen.
+    evict_after_seconds: int = 1209600
     trigger: str = "30 seconds"
     # Upper bound on Kafka records one micro-batch reads; 0 means no bound
     # (Spark's default). The speed-cost benchmark sets it to hold the batch
@@ -578,6 +584,7 @@ def _read(env: _Env) -> Settings:
             large_drop_absolute=env.decimal("MARKETPLACE_LARGE_DROP_ABSOLUTE", "100000"),
             large_drop_relative=env.decimal("MARKETPLACE_LARGE_DROP_RELATIVE", "0.20"),
             stale_after_seconds=env.integer("MARKETPLACE_STALE_AFTER_SECONDS", speed_defaults.stale_after_seconds),
+            evict_after_seconds=env.integer("MARKETPLACE_EVICT_AFTER_SECONDS", speed_defaults.evict_after_seconds),
             trigger=env.text("MARKETPLACE_STREAM_TRIGGER", speed_defaults.trigger),
             max_offsets_per_trigger=env.integer(
                 "MARKETPLACE_SPEED_MAX_OFFSETS_PER_TRIGGER", speed_defaults.max_offsets_per_trigger
@@ -638,6 +645,7 @@ def validate(settings: Settings) -> Settings:
         "MARKETPLACE_SILVER_RETRY_BASE_SECONDS": service.silver_retry_base_seconds,
         "MARKETPLACE_SILVER_RETRY_MAX_SECONDS": service.silver_retry_max_seconds,
         "MARKETPLACE_STALE_AFTER_SECONDS": speed.stale_after_seconds,
+        "MARKETPLACE_EVICT_AFTER_SECONDS": speed.evict_after_seconds,
         "KAFKA_CHANGE_ACK_TIMEOUT_SECONDS": settings.kafka.change_ack_timeout_seconds,
         "KAFKA_PRODUCER_ACK_TIMEOUT_SECONDS": settings.kafka.producer_ack_timeout_seconds,
         "KAFKA_MARKETPLACE_PARTITIONS": settings.kafka.partitions,

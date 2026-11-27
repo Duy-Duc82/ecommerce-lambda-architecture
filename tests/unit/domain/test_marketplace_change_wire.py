@@ -187,3 +187,5 @@ def test_change_rule_config_rejects_invalid_bounds():
         ChangeRuleConfig("v1", Decimal("1"), Decimal("1.5"), 1)
     with pytest.raises(ValueError, match="stale_after_seconds"):
         ChangeRuleConfig("v1", Decimal("1"), Decimal("0.1"), 0)
+    with pytest.raises(ValueError, match="evict_after_seconds"):
+        ChangeRuleConfig("v1", Decimal("1"), Decimal("0.1"), 10, 10)
