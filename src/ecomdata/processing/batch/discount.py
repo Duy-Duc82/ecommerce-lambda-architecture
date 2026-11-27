@@ -127,6 +127,8 @@ def build_discount_credibility_daily(
         .withColumn("reference_min_price", F.min(price).over(reference))
         .withColumn("_reference_prices", F.array_sort(F.collect_list(price).over(reference)))
         .withColumn("reference_max_list_price", F.max(list_price).over(reference))
+        .withColumn("_reference_max_price", F.max(price).over(reference))
+        .withColumn("_reference_min_list_price", F.min(list_price).over(reference))
     )
     size = F.col("reference_sample_size")
     # The median of an even count is the mean of the two middle values, as the anomaly mart defines it.
@@ -152,6 +154,14 @@ def build_discount_credibility_daily(
     displayed = F.col("displayed_discount_percent")
     shows_reduction = displayed.isNotNull() & (displayed > F.lit(0.0))
     enough_history = size >= F.lit(config.min_history_days)
+    standing = (
+        shows_reduction
+        & enough_history
+        & (F.col("reference_min_price") == F.col("_reference_max_price"))
+        & (F.col("evaluated_price") == F.col("reference_min_price"))
+        & (F.col("_reference_min_list_price") == F.col("reference_max_list_price"))
+        & (F.col("list_price") == F.col("reference_max_list_price"))
+    )
     fired = {
         rules.PRICE_ABOVE_LIST: displayed.isNotNull() & (displayed < F.lit(0.0)),
         rules.DISCOUNT_OVER_CAP: shows_reduction & (displayed > F.lit(float(config.legal_cap_percent))),
@@ -161,10 +171,13 @@ def build_discount_credibility_daily(
         & (F.col("list_price") > F.col("reference_max_list_price")),
         rules.CLAIM_EXCEEDS_HISTORY: shows_reduction
         & enough_history
+        & ~standing
         & (F.col("claim_gap_percent") > F.lit(float(config.claim_gap_percent))),
         rules.NOT_BELOW_REFERENCE: shows_reduction
         & enough_history
+        & ~standing
         & (F.col("effective_discount_percent") <= F.lit(0.0)),
+        rules.STANDING_DISCOUNT: standing,
     }
     # The reasons in the module's order, so the JSON is deterministic and
     # readable back as evidence; the score is the domain's weights and cap.

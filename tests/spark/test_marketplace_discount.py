@@ -160,6 +160,24 @@ def test_a_claim_the_history_contradicts_is_suspect(spark):
     assert last["rule_score"] == 100 and last["credibility_status"] == d.STATUS_SUSPECT
 
 
+def test_a_reduction_that_never_moved_is_a_standing_discount_not_a_suspect(spark):
+    # 100 at list 150 every day: "33 % off" a list price that was never charged.
+    rows = by_date(build(history(spark, series([("100", "150")] * 4))))
+    last = rows[DAY_ONE + timedelta(days=3)]
+
+    assert reasons(last) == [d.STANDING_DISCOUNT]
+    assert last["rule_score"] == 20 and last["credibility_status"] == d.STATUS_QUESTIONABLE
+
+
+def test_a_standing_discount_whose_price_moved_today_is_judged_by_the_history_rules(spark):
+    # Three days at 100 / list 150, then the price goes up to 110 under the same list price.
+    rows = by_date(build(history(spark, series([("100", "150")] * 3 + [("110", "150")]))))
+    last = rows[DAY_ONE + timedelta(days=3)]
+
+    assert d.STANDING_DISCOUNT not in reasons(last)
+    assert d.NOT_BELOW_REFERENCE in reasons(last)
+
+
 def test_the_history_rules_wait_for_the_minimum_history(spark):
     # Same contradiction after only two prior days: no history rule fires, the
     # displayed 50 % is at the cap, not above it, so no verdict is given.
