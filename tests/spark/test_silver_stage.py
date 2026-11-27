@@ -192,6 +192,31 @@ def test_a_run_owns_its_day_and_the_late_days_before_it():
         silver_stage.silver_days(as_of, RunOptions(silver_since=date(2026, 10, 26)))
 
 
+def test_a_run_after_17h_utc_owns_the_next_vietnam_day():
+    as_of = datetime(2026, 10, 24, 18, 0, tzinfo=UTC)  # 01:00 on 25/10 in Vietnam
+
+    assert silver_stage.silver_days(as_of, RunOptions(late_days=0)) == (date(2026, 10, 25),)
+
+
+def test_bronze_is_read_from_the_utc_day_before_the_first_vietnam_day():
+    days = (date(2026, 10, 24), date(2026, 10, 25))
+
+    assert silver_stage.bronze_days(days) == (date(2026, 10, 23), *days)
+    assert silver_stage.bronze_days(()) == ()
+    assert silver_stage.bronze_days(None) is None
+
+
+def test_local_date_counts_a_sighting_after_17h_utc_on_the_next_day(spark):
+    from ecomdata.processing.batch.keys import date_key, local_date
+
+    frame = spark.createDataFrame(
+        [(datetime(2026, 11, 14, 16, 59, tzinfo=UTC),), (datetime(2026, 11, 14, 17, 0, tzinfo=UTC),)], "at timestamp"
+    )
+    rows = frame.select(local_date("at").alias("d"), date_key(local_date("at")).alias("k")).collect()
+
+    assert [(r.d, r.k) for r in rows] == [(date(2026, 11, 14), 20261114), (date(2026, 11, 15), 20261115)]
+
+
 def test_silver_since_rebuilds_only_the_days_from_that_date_on(spark):
     lines = lines_of(tiki_records())
     as_of = datetime(2026, 10, 27, 10, tzinfo=UTC)

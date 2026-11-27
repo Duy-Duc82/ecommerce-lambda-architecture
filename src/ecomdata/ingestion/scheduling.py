@@ -7,6 +7,7 @@ and asserted exactly.
 """
 from __future__ import annotations
 
+import hashlib
 import socket
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -221,11 +222,38 @@ def cadence_minutes(tier: CrawlTier, cadences: Mapping[str, int] = DEFAULT_CADEN
     return int(cadences.get(tier.value, DEFAULT_CADENCE_MINUTES[tier.value]))
 
 
+def slot_offset_seconds(slot_key: str, period_seconds: int) -> int:
+    """A target's fixed place inside its cadence, from a stable hash of the target."""
+    digest = hashlib.sha256(slot_key.encode("utf-8")).digest()
+    return int.from_bytes(digest[:8], "big") % period_seconds
+
+
 def next_scheduled_for(
-    tier: CrawlTier, after: datetime, cadences: Mapping[str, int] = DEFAULT_CADENCE_MINUTES
+    tier: CrawlTier,
+    after: datetime,
+    cadences: Mapping[str, int] = DEFAULT_CADENCE_MINUTES,
+    *,
+    slot_key: str | None = None,
 ) -> datetime:
-    """The next occurrence of a target one cadence after the given time."""
-    return v.aware_utc(after, "after", error=TypeError) + timedelta(minutes=cadence_minutes(tier, cadences))
+    """The next occurrence of a target after the given time.
+
+    Without ``slot_key`` it is one cadence after ``after``. With one, every
+    target owns a fixed slot inside the cadence (hash of the key), and the next
+    occurrence is the first slot at least half a cadence after ``after``. Targets
+    seeded together, which would otherwise run together forever (all SWEEP pages
+    in one burst, then a day of silence), spread over the whole cadence after
+    their first pass; from then on each runs exactly one cadence apart.
+    """
+    after = v.aware_utc(after, "after", error=TypeError)
+    period = cadence_minutes(tier, cadences) * 60
+    if slot_key is None:
+        return after + timedelta(seconds=period)
+    earliest = int(after.timestamp()) + period // 2
+    offset = slot_offset_seconds(slot_key, period)
+    slot = earliest - (earliest - offset) % period
+    if slot < earliest:
+        slot += period
+    return datetime.fromtimestamp(slot, tz=UTC)
 
 
 def classify_failure(error: Exception, http_status: int | None = None) -> FailureKind:

@@ -36,6 +36,7 @@ from ecomdata.domain.quality_rules import (
     mandatory_rule_names,
     quality_rule,
 )
+from ecomdata.processing.batch.keys import local_date
 
 if TYPE_CHECKING:
     from ecomdata.processing.batch.context import MarketplaceBatchContext
@@ -323,7 +324,7 @@ def _evaluate_gold(
     # Recomputed from Silver on purpose. Comparing the mart against itself would
     # pass no matter what the aggregation did.
     recomputed = (
-        observations.withColumn("observed_date", F.to_date("observed_at"))
+        observations.withColumn("observed_date", local_date("observed_at"))
         .groupBy("marketplace", "offer_id", "observed_date", "currency")
         .agg(F.min("current_price").alias("_min"), F.max("current_price").alias("_max"))
     )

@@ -44,6 +44,7 @@ from pyspark.sql.types import DoubleType, StructField, StructType
 
 from ecomdata.domain import discount_rules as rules
 from ecomdata.domain.discount_rules import DiscountRuleConfig
+from ecomdata.processing.batch.keys import local_date
 
 MONEY = "decimal(38,6)"
 UNKNOWN_CATEGORY = "__UNKNOWN__"
@@ -307,7 +308,7 @@ def build_discount_daily(
     key = ["marketplace", "offer_id", "observed_date", "currency"]
     # The last sighting of each offer-day, as the price mart takes it: the
     # category of the day's last sighting goes with it.
-    ordered = observations.withColumn("observed_date", F.to_date("observed_at")).withColumn(
+    ordered = observations.withColumn("observed_date", local_date("observed_at")).withColumn(
         "category_path", F.coalesce("category_path", F.lit(UNKNOWN_CATEGORY))
     )
     last = Window.partitionBy(*key).orderBy(F.col("observed_at").desc(), F.col("observation_id").desc())

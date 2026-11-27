@@ -8,10 +8,12 @@ from typing import TYPE_CHECKING
 from pyspark.sql import DataFrame, Window
 from pyspark.sql import functions as F
 
+from ecomdata.domain.business_day import BUSINESS_TZ_NAME, business_date
 from ecomdata.domain.counter_semantics import counter_semantic
 from ecomdata.domain.ordering import ORDER_COLUMNS
 from ecomdata.processing.batch.anomaly import build_price_anomaly_daily
 from ecomdata.processing.batch.discount import build_discount_credibility_daily, build_discount_daily
+from ecomdata.processing.batch.keys import local_date
 
 if TYPE_CHECKING:
     from ecomdata.processing.batch.context import MarketplaceBatchContext
@@ -97,7 +99,7 @@ def build_seller_current(observations: DataFrame) -> DataFrame:
 
 
 def build_offer_price_history_daily(observations: DataFrame) -> DataFrame:
-    ordered = observations.withColumn("observed_date", F.to_date("observed_at"))
+    ordered = observations.withColumn("observed_date", local_date("observed_at"))
     w = _ordered(ordered, ["marketplace", "offer_id", "observed_date", "currency"])
     marked = ordered.withColumn("_first", F.row_number().over(w)).withColumn(
         "_last",
@@ -148,7 +150,7 @@ def build_offer_change_daily(observations: DataFrame) -> DataFrame:
         | F.col("prev_sold_count").isNotNull()
         | F.col("prev_availability").isNotNull()
     )
-    day = prior.withColumn("observed_date", F.to_date("observed_at"))
+    day = prior.withColumn("observed_date", local_date("observed_at"))
     return day.groupBy("marketplace", "offer_id", "observed_date", "currency").agg(
         F.sum(F.when(real, 1).otherwise(0)).alias("transition_count"),
         F.sum(F.when(real & changed_price, 1).otherwise(0)).alias("price_change_count"),
@@ -229,7 +231,7 @@ def build_offer_freshness(
 def build_category_price_daily(observations: DataFrame, *, percentile_accuracy: int = 10000) -> DataFrame:
     return (
         observations.withColumn("category_path", F.coalesce("category_path", F.lit(UNKNOWN_CATEGORY)))
-        .withColumn("observed_date", F.to_date("observed_at"))
+        .withColumn("observed_date", local_date("observed_at"))
         .groupBy("marketplace", "category_path", "observed_date", "currency")
         .agg(
             F.countDistinct("offer_id").alias("observed_offer_count"),
@@ -323,9 +325,9 @@ def build_source_coverage_daily(
         raise ValueError("as_of must be timezone-aware")
     if stale_after_seconds <= 0:
         raise ValueError("stale_after_seconds must be positive")
-    max_date = observations.select(F.max(F.to_date("observed_at")).alias("d")).collect()[0]["d"]
-    end_date = min(max_date, as_of.astimezone(UTC).date()) if max_date else as_of.date()
-    first = observations.groupBy("marketplace", "offer_id").agg(F.min(F.to_date("observed_at")).alias("first_date"))
+    max_date = observations.select(F.max(local_date("observed_at")).alias("d")).collect()[0]["d"]
+    end_date = min(max_date, business_date(as_of)) if max_date else business_date(as_of)
+    first = observations.groupBy("marketplace", "offer_id").agg(F.min(local_date("observed_at")).alias("first_date"))
     calendar = first.withColumn("observed_date", F.explode(F.sequence("first_date", F.lit(end_date)))).withColumn(
         "eligible", F.lit(1)
     )
@@ -336,15 +338,14 @@ def build_source_coverage_daily(
         observations.select(
             F.col("marketplace").alias("_obs_marketplace"),
             F.col("offer_id").alias("_obs_offer_id"),
-            F.to_date("observed_at").alias("_obs_date"),
+            local_date("observed_at").alias("_obs_date"),
         )
         .distinct()
         .withColumn("observed", F.lit(1))
     )
-    # Evaluate freshness at day end, except for the current partial UTC day.
-    eval_time = F.least(
-        F.to_timestamp(F.date_add(calendar.observed_date, 1)), F.lit(as_of.astimezone(UTC)).cast("timestamp")
-    )
+    # Evaluate freshness at day end (Vietnam midnight), except for the current partial day.
+    day_end = F.to_utc_timestamp(F.to_timestamp(F.date_add(calendar.observed_date, 1)), BUSINESS_TZ_NAME)
+    eval_time = F.least(day_end, F.lit(as_of.astimezone(UTC)).cast("timestamp"))
     snapshots = (
         calendar.join(
             observations,
@@ -386,14 +387,14 @@ def build_source_coverage_daily(
         F.sum(F.when(F.col("_age") > stale_after_seconds, 1).otherwise(0)).alias("stale_offer_count"),
     )
     obs_counts = (
-        observations.withColumn("observed_date", F.to_date("observed_at"))
+        observations.withColumn("observed_date", local_date("observed_at"))
         .groupBy("marketplace", "observed_date")
         .agg(F.count("observation_id").alias("observation_count"))
     )
     audit_input = _with_marketplace(attempts, runs)
     audit = audit_input.groupBy(
         F.col("_marketplace").alias("marketplace"),
-        F.to_date(_audit_col(audit_input, "request_date", _audit_col(audit_input, "started_at"))).alias(
+        local_date(_audit_col(audit_input, "request_date", _audit_col(audit_input, "started_at"))).alias(
             "observed_date"
         ),
     ).agg(
@@ -453,7 +454,7 @@ def build_crawl_reliability_daily(
 ) -> DataFrame:
     attempts = _with_marketplace(attempts, runs)
     marketplace = F.col("_marketplace")
-    date = F.to_date(_audit_col(attempts, "request_date", _audit_col(attempts, "started_at")))
+    date = local_date(_audit_col(attempts, "request_date", _audit_col(attempts, "started_at")))
     status = F.upper(_audit_col(attempts, "status", "UNKNOWN"))
     latency = _audit_col(attempts, "latency_ms", 0)
     error_kind = F.upper(_audit_col(attempts, "error_kind", ""))
@@ -571,7 +572,7 @@ def build_counter_transitions(observations: DataFrame, *, max_gap_seconds: int, 
 def build_counter_delta_daily(transitions: DataFrame) -> DataFrame:
     order = Window.partitionBy("marketplace", "offer_id", "observed_date", "counter_name").orderBy(*_ascending())
     marked = (
-        transitions.withColumn("observed_date", F.to_date("observed_at"))
+        transitions.withColumn("observed_date", local_date("observed_at"))
         .withColumn("_first", F.row_number().over(order))
         .withColumn(
             "_last",

@@ -224,7 +224,9 @@ class CrawlWorker:
             task_id=task.task_id,
             worker_id=self.worker_id,
             completed_at=completed_at,
-            next_scheduled_for=next_scheduled_for(task.tier, completed_at, self.cadence_minutes),
+            next_scheduled_for=next_scheduled_for(
+                task.tier, completed_at, self.cadence_minutes, slot_key=task.target
+            ),
         )
         self.audit.record_source_success(task.marketplace_code, completed_at)
         self._finish(run, completed_at, CrawlRunStatus.COMPLETED, succeeded=1, failed=0, task=task, attempt=attempt)

@@ -28,6 +28,7 @@ from ecomdata.ingestion.scheduling import (
     RetryPolicy,
     cadence_minutes,
     make_crawl_task_id,
+    next_scheduled_for,
 )
 from ecomdata.ingestion.worker import CrawlWorker
 
@@ -214,14 +215,17 @@ def test_a_successful_execution_writes_counts_and_completes_the_run():
     assert "source_success" in audit.kinds()
 
 
-def test_success_schedules_the_next_occurrence_one_cadence_later():
-    frontier = FakeFrontier(tasks=[_task()])
+def test_success_schedules_the_next_occurrence_in_the_targets_slot():
+    task = _task()
+    frontier = FakeFrontier(tasks=[task])
 
     _run(frontier, FakeAudit(), lambda *, task, crawl_run_id: FakeReport())
 
     call = next(c for c in frontier.calls if c[0] == "succeeded")
     completed_at = NOW + timedelta(seconds=2)
-    assert call[2] == completed_at + timedelta(minutes=cadence_minutes(CrawlTier.NORMAL))
+    assert call[2] == next_scheduled_for(CrawlTier.NORMAL, completed_at, slot_key=task.target)
+    cadence = timedelta(minutes=cadence_minutes(CrawlTier.NORMAL))
+    assert completed_at + cadence / 2 <= call[2] < completed_at + cadence * 3 / 2
 
 
 # 24

@@ -29,7 +29,7 @@ record without a readable ``fetched_at`` keeps that partition's date). It writes
 from __future__ import annotations
 
 import json
-from datetime import UTC, date, datetime, timedelta
+from datetime import date, datetime, timedelta
 from functools import partial
 from typing import Any
 
@@ -37,8 +37,10 @@ from pyspark.sql import DataFrame
 from pyspark.sql import functions as F
 
 from ecomdata.domain.batch_run import BatchRunStatus as S
+from ecomdata.domain.business_day import business_date
 from ecomdata.domain.sources import SOURCES, SourceRegistry
 from ecomdata.processing.batch.inputs import duplicate_counts
+from ecomdata.processing.batch.keys import local_date
 from ecomdata.processing.batch.stages.base import Outcome, RunOptions, Stage, StageContext
 from ecomdata.processing.normalize import common
 
@@ -66,16 +68,27 @@ def silver_days(as_of: datetime, options: RunOptions) -> tuple[date, ...] | None
     """The days a run rebuilds, oldest first; ``None`` for every day Bronze holds (``--rebuild``)."""
     if options.rebuild:
         return None
-    last = as_of.astimezone(UTC).date()
+    last = business_date(as_of)
     first = options.silver_since if options.silver_since is not None else last - timedelta(days=options.late_days)
     if first > last:
         raise ValueError(f"silver_since {first} is after the run's day {last}")
     return tuple(first + timedelta(days=n) for n in range((last - first).days + 1))
 
 
+def bronze_days(days: tuple[date, ...] | None) -> tuple[date, ...] | None:
+    """The Bronze partitions holding the records of the Vietnam ``days``.
+
+    Bronze is partitioned by the UTC date of ``fetched_at``; a Vietnam day starts
+    at 17:00 UTC of the day before, so that UTC day is read as well.
+    """
+    if not days:
+        return days
+    return (days[0] - timedelta(days=1), *days)
+
+
 def record_day():
-    """The Silver day of a record: the date of ``fetched_at``, else its Bronze partition's date."""
-    return F.coalesce(F.to_date("fetched_at"), F.col("bronze_date"))
+    """The Silver day of a record: the Vietnam date of ``fetched_at``, else its Bronze partition's date."""
+    return F.coalesce(local_date("fetched_at"), F.col("bronze_date"))
 
 
 def wide_name(source_code: str) -> str:
@@ -105,7 +118,7 @@ class SilverStage(Stage):
     def execute(self, ctx: StageContext) -> Outcome:
         run, options = ctx.run, ctx.options
         days = silver_days(run.as_of, options)
-        records = ctx.io.read_records(days=days)
+        records = ctx.io.read_records(days=bronze_days(days))
         if days is not None:
             # The lake reads only these days' Bronze partitions; the filter keeps
             # any reader to the window.

@@ -160,8 +160,9 @@ def test_every_source_with_discovery_gets_a_seed_command_into_the_sweep_tier():
         assert command == f"python -m ecomdata.ingestion.seed --source {code} --from-discovery --tier SWEEP"
 
 
-def test_maintenance_prunes_raw_before_the_backup_and_the_snapshot():
-    assert list(tasks.maintenance_commands()) == ["prune_raw", "backup", "storage_snapshot"]
+def test_maintenance_prunes_raw_and_compacts_before_the_backup_and_the_snapshot():
+    assert list(tasks.maintenance_commands()) == ["prune_raw", "compact_delta", "backup", "storage_snapshot"]
+    assert tasks.SPARK_MAINTENANCE_TASKS <= set(tasks.maintenance_commands())
     assert tasks.maintenance_commands(45)["prune_raw"].endswith("--older-than-days 45")
 
 

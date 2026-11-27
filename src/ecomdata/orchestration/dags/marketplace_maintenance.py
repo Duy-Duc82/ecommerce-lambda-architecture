@@ -1,8 +1,9 @@
 """DAG ``marketplace_maintenance``: weekly housekeeping.
 
 Prunes Bronze/raw older than the retention window (``MARKETPLACE_RAW_RETENTION_DAYS``),
-takes a backup under the batch lock, and records what each store holds. Nothing
-inside the retention window is deleted.
+compacts and vacuums the Delta tables (Silver and the star), takes a backup under
+the batch lock, and records what each store holds. Nothing inside the retention
+window is deleted.
 """
 from __future__ import annotations
 
@@ -12,7 +13,13 @@ import pendulum
 from airflow.providers.docker.operators.docker import DockerOperator
 from airflow.sdk import DAG
 
-from ecomdata.orchestration.tasks import docker_settings, maintenance_commands, python_image
+from ecomdata.orchestration.tasks import (
+    SPARK_MAINTENANCE_TASKS,
+    docker_settings,
+    maintenance_commands,
+    python_image,
+    spark_image,
+)
 
 with DAG(
     dag_id="marketplace_maintenance",
@@ -28,11 +35,11 @@ with DAG(
     tasks = [
         DockerOperator(
             task_id=name,
-            image=python_image(),
+            image=spark_image() if name in SPARK_MAINTENANCE_TASKS else python_image(),
             command=command,
             # The snapshot sizes Kafka's partition logs from the broker's volume.
             **docker_settings(
-                layer="ops",
+                layer="batch" if name in SPARK_MAINTENANCE_TASKS else "ops",
                 service=f"maintenance-{name}",
                 kafka_data=name == "storage_snapshot",
                 reports=name == "backup",
@@ -40,6 +47,6 @@ with DAG(
         )
         for name, command in commands.items()
     ]
-    # Prune first, then back up what remains, then measure.
+    # Prune first, compact, then back up what remains, then measure.
     for upstream, downstream in zip(tasks, tasks[1:], strict=False):
         upstream >> downstream

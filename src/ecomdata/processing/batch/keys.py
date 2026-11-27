@@ -19,6 +19,8 @@ from pyspark.sql import Column, DataFrame
 from pyspark.sql import functions as F
 from pyspark.sql.types import StructField, StructType
 
+from ecomdata.domain.business_day import BUSINESS_TZ_NAME
+
 UNKNOWN_KEY = -1
 # The natural-key spelling of the unknown member. The same string the marts
 # already use for an offer without a category path.
@@ -74,3 +76,12 @@ def with_unknown_member(frame: DataFrame, values: Mapping[str, Any]) -> DataFram
     schema = StructType([StructField(f.name, f.dataType, True) for f in frame.schema.fields])
     member = frame.sparkSession.createDataFrame([row], schema=schema)
     return frame.unionByName(member)
+
+
+def local_date(value: str | Column) -> Column:
+    """The Vietnam calendar date of a UTC timestamp column (see ``domain.business_day``).
+
+    The Spark session runs in UTC, so ``from_utc_timestamp`` shifts the value to
+    Vietnam wall-clock time before the date is taken.
+    """
+    return F.to_date(F.from_utc_timestamp(_column(value), BUSINESS_TZ_NAME))
