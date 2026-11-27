@@ -39,6 +39,7 @@ def change_config(speed: Any) -> ChangeRuleConfig:
         speed.large_drop_absolute,
         speed.large_drop_relative,
         speed.stale_after_seconds,
+        getattr(speed, "evict_after_seconds", None),
     )
 
 

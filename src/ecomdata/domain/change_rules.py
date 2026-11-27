@@ -27,6 +27,9 @@ class ChangeRuleConfig:
     large_drop_absolute: Decimal
     large_drop_relative: Decimal
     stale_after_seconds: int
+    # None: a state is kept for ever. Otherwise it is dropped this long after the
+    # offer's last sighting (the offer was marked stale before that).
+    evict_after_seconds: int | None = None
 
     def __post_init__(self) -> None:
         if not self.rule_version.strip():
@@ -37,6 +40,8 @@ class ChangeRuleConfig:
             raise ValueError("large_drop_relative must be between 0 and 1")
         if self.stale_after_seconds <= 0:
             raise ValueError("stale_after_seconds must be positive")
+        if self.evict_after_seconds is not None and self.evict_after_seconds <= self.stale_after_seconds:
+            raise ValueError("evict_after_seconds must be longer than stale_after_seconds")
 
 
 @dataclass(frozen=True)

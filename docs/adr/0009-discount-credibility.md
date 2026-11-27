@@ -23,3 +23,9 @@ Ngày 07/11 (`docs/evidence/run-20261107/NHAT-KY-LOI.md` mục 7) đã thấy ba
 - Đánh giá không có nhãn thật: gán nhãn tay khoảng 100 offer-ngày top theo `rule_score` rồi theo `ml_rank_percent` để đo precision@k, so với tầng anomaly MAD/IQR làm baseline (kế hoạch 03/11 §3.1).
 - Image Spark cần scikit-learn (`[ml]` trong `pyproject.toml`, pin trong `constraints.txt`); dựng lại image khi lên stack.
 - Kiểu "đổi biến thể hoặc người bán" chưa tách được vì `offer_id` chưa mang biến thể; cả hai giá cùng đổi sẽ hiện ra như `LIST_PRICE_RAISED` kèm `CLAIM_EXCEEDS_HISTORY`. Ghi vào giới hạn, để lại cho pha sau.
+
+## Bổ sung 2026-11-27: lý do `STANDING_DISCOUNT` (discount-rules.v2)
+
+Phân tích dữ liệu 14/11 cho thấy 44 % offer đang hiển thị giảm giá (thấy ≥ 3 ngày) chưa từng đổi giá bán, và 96 % chưa từng đổi giá gốc. Với v1, những offer này dính cùng lúc `CLAIM_EXCEEDS_HISTORY` và `NOT_BELOW_REFERENCE` nên thành SUSPECT, đẩy tỷ lệ gắn cờ lên 34,9 %.
+
+v2 thêm lý do `STANDING_DISCOUNT` (20 điểm, tức QUESTIONABLE): có giảm giá hiển thị, đủ lịch sử, và cả giá bán lẫn giá gốc không đổi trong toàn cửa sổ tham chiếu. Khi lý do này bật, hai lý do kia không tính nữa. SUSPECT chỉ còn dành cho các mức giảm mà lịch sử mâu thuẫn theo cách khác (nâng giá gốc, giá cao hơn giá gốc...).

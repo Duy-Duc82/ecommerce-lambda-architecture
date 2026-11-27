@@ -357,6 +357,9 @@ class FakeGroupState:
     def update(self, value):
         self.stored = value
 
+    def remove(self):
+        self.stored = None
+
     def setTimeoutDuration(self, duration_ms):
         self.timeouts.append(duration_ms)
 
@@ -396,6 +399,36 @@ def test_a_timed_out_key_yields_its_stale_change_as_a_frame():
 
     assert list(out["output_kind"]) == ["CHANGE"]
     assert json.loads(out["change_json"][0])["change_type"] == "OFFER_STALE"
+
+
+def test_a_stale_offer_arms_the_eviction_timeout_and_its_state_is_then_removed():
+    from dataclasses import replace as dc_replace
+
+    config = dc_replace(CONFIG, evict_after_seconds=CONFIG.stale_after_seconds * 2)
+    prior = detect_observation_changes(None, _event(), config).next_state
+    stored = (offer_state_to_json(prior), prior.observed_at, prior.observation_id)
+    now_ms = int(prior.observed_at.timestamp() * 1000) + config.stale_after_seconds * 1000
+    state = FakeGroupState(stored, timed_out=True, now_ms=now_ms)
+
+    first = _collect(make_state_function(config)(("offer",), iter([]), state))
+
+    assert json.loads(first["change_json"][0])["change_type"] == "OFFER_STALE"
+    assert state.exists and state.timeouts == [config.stale_after_seconds * 1000]
+
+    second = _collect(make_state_function(config)(("offer",), iter([]), state))
+
+    assert second.empty and not state.exists
+
+
+def test_without_an_eviction_window_a_stale_state_is_kept():
+    prior = detect_observation_changes(None, _event(), CONFIG).next_state
+    stored = (offer_state_to_json(prior), prior.observed_at, prior.observation_id)
+    state = FakeGroupState(stored, timed_out=True)
+
+    list(make_state_function(CONFIG)(("offer",), iter([]), state))
+    list(make_state_function(CONFIG)(("offer",), iter([]), state))
+
+    assert state.exists and state.timeouts == []
 
 
 def test_a_call_with_only_a_duplicate_keeps_the_stale_timeout_armed():

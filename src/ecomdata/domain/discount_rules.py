@@ -23,7 +23,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from decimal import Decimal
 
-DISCOUNT_RULE_VERSION = "discount-rules.v1"
+DISCOUNT_RULE_VERSION = "discount-rules.v2"
 
 # Reason codes, each one observable from the mart's own columns.
 PRICE_ABOVE_LIST = "PRICE_ABOVE_LIST"  # the price is higher than the list price it is "reduced from"
@@ -31,8 +31,24 @@ DISCOUNT_OVER_CAP = "DISCOUNT_OVER_CAP"  # the displayed reduction exceeds the l
 LIST_PRICE_RAISED = "LIST_PRICE_RAISED"  # the list price is above every list price of the reference window
 CLAIM_EXCEEDS_HISTORY = "CLAIM_EXCEEDS_HISTORY"  # displayed reduction minus the real one, against the reference price, is large
 NOT_BELOW_REFERENCE = "NOT_BELOW_REFERENCE"  # a reduction is displayed, yet the price is not below the prior lowest
+# A reduction is displayed, but neither the price nor the list price moved over
+# the whole reference window: a list price that was never charged, shown beside
+# a shelf price that never changed. On Tiki this is common (data analysis
+# 2026-11-14: 44% of discounted offers seen 3+ days), so it is its own,
+# QUESTIONABLE reason, and SUSPECT is kept for reductions the history contradicts
+# in some other way (a raised list price, a price above the list, ...). When it
+# fires, CLAIM_EXCEEDS_HISTORY and NOT_BELOW_REFERENCE, which state the same
+# fact, do not.
+STANDING_DISCOUNT = "STANDING_DISCOUNT"
 
-REASONS = (PRICE_ABOVE_LIST, DISCOUNT_OVER_CAP, LIST_PRICE_RAISED, CLAIM_EXCEEDS_HISTORY, NOT_BELOW_REFERENCE)
+REASONS = (
+    PRICE_ABOVE_LIST,
+    DISCOUNT_OVER_CAP,
+    LIST_PRICE_RAISED,
+    CLAIM_EXCEEDS_HISTORY,
+    NOT_BELOW_REFERENCE,
+    STANDING_DISCOUNT,
+)
 
 # The weight each reason adds to the rule score (0..100, capped). The two
 # reasons that need no history are weighted so that either alone is
@@ -44,6 +60,7 @@ REASON_WEIGHTS: dict[str, int] = {
     LIST_PRICE_RAISED: 30,
     CLAIM_EXCEEDS_HISTORY: 50,
     NOT_BELOW_REFERENCE: 20,
+    STANDING_DISCOUNT: 20,
 }
 SCORE_CAP = 100
 
